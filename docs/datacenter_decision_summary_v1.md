@@ -7,8 +7,11 @@ as the primary manual analysis input for ChatGPT. It is generated from existing
 Datacenter markdown reports and keeps the full daily and rolling reports
 available for debugging and drill-down.
 
-V1 is intentionally markdown-in / markdown-out only. It does not read or write
-production databases, change source reports, or create new analytics.
+V1 is intentionally markdown-in and report-artifact-out only. It does not read
+or write production databases, change source reports, or create new analytics.
+The primary output is Markdown. It can also write an optional semicolon-delimited
+CSV companion intended for Excel-compatible tabular review. The CSV is not an
+`.xlsx` workbook.
 
 The standalone CLI remains available for manual use. The Datacenter scheduler
 report workflow also attempts to generate this summary automatically after the
@@ -32,6 +35,12 @@ The CLI requires all source reports explicitly:
 --output
 ```
 
+The optional CSV output is:
+
+```text
+--output-csv
+```
+
 ## Example
 
 ```bash
@@ -41,8 +50,11 @@ python3 -m rawcandle.cli.build_datacenter_decision_summary \
   --current-rolling2 reports/datacenter_rolling_2_YYYY-MM-DD_HHMM_full.md \
   --current-rolling5 reports/datacenter_rolling_5_YYYY-MM-DD_HHMM_full.md \
   --current-rolling30 reports/datacenter_rolling_30_YYYY-MM-DD_HHMM_full.md \
-  --output reports/datacenter_decision_summary_YYYY-MM-DD_HHMM_full.md
+  --output reports/datacenter_decision_summary_YYYY-MM-DD_HHMM_full.md \
+  --output-csv reports/datacenter_decision_summary_YYYY-MM-DD_HHMM_full.csv
 ```
+
+Omit `--output-csv` when only the Markdown summary is needed.
 
 ## Comparison Logic
 
@@ -55,11 +67,29 @@ The summary uses deterministic fields parsed from the source markdown:
 
 The output labels are report-derived states, not investment advice.
 
+The CSV uses a stable generic row schema:
+
+```text
+section;subsection;row_type;field;value;previous_value;current_value;change;ticker;group_name;metric;notes
+```
+
+Each section is represented as filterable rows rather than preserving Markdown
+formatting. This keeps the CSV useful in spreadsheet tools while leaving the
+Markdown report unchanged.
+
 In the scheduler/report workflow, `previous_daily` is auto-discovered from the
 same output directory by selecting the latest `datacenter_daily_*_full.md` report
 with a signal date earlier than the current report. If no previous daily report
 is available, automatic summary generation is skipped non-fatally and the source
 reports remain usable.
+
+When automatic summary generation succeeds, the scheduler/report workflow
+attempts to create both sibling artifacts:
+
+```text
+datacenter_decision_summary_YYYY-MM-DD_HHMM_full.md
+datacenter_decision_summary_YYYY-MM-DD_HHMM_full.csv
+```
 
 ## Limitations
 
@@ -69,6 +99,8 @@ reports remain usable.
 - Scheduler integration is non-fatal: missing source markdown reports or a
   missing previous daily report skip the summary without failing the completed
   daily and rolling reports.
+- The CSV companion is generated from the same parsed source markdown as the
+  Markdown summary. It does not add separate analytics.
 - If source report formatting changes, parser tests may need updates.
 
 ## Recommended Daily Workflow

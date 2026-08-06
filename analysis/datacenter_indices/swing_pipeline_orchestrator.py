@@ -94,6 +94,7 @@ FINAL_PIPELINE_SUMMARY_ORDER = (
     "rolling_2_report_path",
     "rolling_2_report_csv_path",
     "decision_summary_report_path",
+    "decision_summary_csv_path",
     "decision_summary.status",
     "decision_summary.execution_status",
     "decision_summary.skip_reason",
@@ -237,6 +238,7 @@ def _generate_decision_summary_report(
     current_rolling5_report: Path,
     current_rolling30_report: Path,
     output_path: Path,
+    output_csv_path: Path,
     signal_date: str,
 ) -> dict[str, object]:
     required_sources = [
@@ -255,6 +257,7 @@ def _generate_decision_summary_report(
             "skip_reason": reason,
             "error": "",
             "output_markdown": "",
+            "output_csv": "",
             "previous_daily_report_path": "",
         }
     previous_daily_report = _find_previous_daily_report(
@@ -270,6 +273,7 @@ def _generate_decision_summary_report(
             "skip_reason": reason,
             "error": "",
             "output_markdown": "",
+            "output_csv": "",
             "previous_daily_report_path": "",
         }
     try:
@@ -280,6 +284,7 @@ def _generate_decision_summary_report(
             current_rolling5=current_rolling5_report,
             current_rolling30=current_rolling30_report,
             output=output_path,
+            output_csv=output_csv_path,
         )
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
@@ -289,16 +294,19 @@ def _generate_decision_summary_report(
             "execution_status": "FAILED",
             "skip_reason": "",
             "error": error,
-            "output_markdown": "",
+            "output_markdown": str(output_path) if output_path.exists() else "",
+            "output_csv": str(output_csv_path) if output_csv_path.exists() else "",
             "previous_daily_report_path": str(previous_daily_report),
         }
     print(f"SUMMARY decision_summary_report_path={output_path}")
+    print(f"SUMMARY decision_summary_csv_path={output_csv_path}")
     return {
         "status": "OK",
         "execution_status": "EXECUTED",
         "skip_reason": "",
         "error": "",
         "output_markdown": str(output_path),
+        "output_csv": str(output_csv_path),
         "previous_daily_report_path": str(previous_daily_report),
     }
 
@@ -910,6 +918,7 @@ def run_datacenter_swing_pipeline(
         signal_date=signal_date,
         output_hhmm=output_hhmm,
     )
+    decision_summary_output_csv = decision_summary_output_md.with_suffix(".csv")
 
     stages: list[PipelineStage] = []
     if not skip_index:
@@ -1647,7 +1656,16 @@ def run_datacenter_swing_pipeline(
                             Path(rolling_2_report_path),
                             Path(rolling_2_report_csv_path),
                         ]
-                        + ([Path(decision_summary_report_path)] if decision_summary_report_path else []),
+                        + (
+                            [Path(decision_summary_report_path)]
+                            if decision_summary_report_path and Path(decision_summary_report_path).exists()
+                            else []
+                        )
+                        + (
+                            [Path(decision_summary_csv_path)]
+                            if decision_summary_csv_path and Path(decision_summary_csv_path).exists()
+                            else []
+                        ),
                     ),
                 )
             )
@@ -1711,6 +1729,7 @@ def run_datacenter_swing_pipeline(
                 "rolling_2_report_path": "",
                 "rolling_2_report_csv_path": "",
                 "decision_summary_report_path": "",
+                "decision_summary_csv_path": "",
                 "decision_summary.status": "SKIPPED",
                 "decision_summary.execution_status": "DRY_RUN",
                 "decision_summary.skip_reason": "dry_run",
@@ -1736,6 +1755,7 @@ def run_datacenter_swing_pipeline(
     rolling_2_report_path = ""
     rolling_2_report_csv_path = ""
     decision_summary_report_path = ""
+    decision_summary_csv_path = ""
     decision_summary_status = "SKIPPED" if skip_reports else "NOT_RUN"
     decision_summary_execution_status = "SKIPPED" if skip_reports else "NOT_RUN"
     decision_summary_skip_reason = "reports_skipped" if skip_reports else ""
@@ -1835,6 +1855,7 @@ def run_datacenter_swing_pipeline(
                         "rolling_2_report_path": "",
                         "rolling_2_report_csv_path": "",
                         "decision_summary_report_path": "",
+                        "decision_summary_csv_path": "",
                         "decision_summary.status": "SKIPPED",
                         "decision_summary.execution_status": "SKIPPED",
                         "decision_summary.skip_reason": "audit_failed_before_reports_completed",
@@ -1891,9 +1912,11 @@ def run_datacenter_swing_pipeline(
                 current_rolling5_report=Path(rolling_5_report_path),
                 current_rolling30_report=Path(rolling_30_report_path),
                 output_path=decision_summary_output_md,
+                output_csv_path=decision_summary_output_csv,
                 signal_date=signal_date,
             )
             decision_summary_report_path = str(decision_summary_result["output_markdown"])
+            decision_summary_csv_path = str(decision_summary_result["output_csv"])
             decision_summary_status = str(decision_summary_result["status"])
             decision_summary_execution_status = str(decision_summary_result["execution_status"])
             decision_summary_skip_reason = str(decision_summary_result["skip_reason"])
@@ -1957,6 +1980,7 @@ def run_datacenter_swing_pipeline(
             "rolling_2_report_path": rolling_2_report_path,
             "rolling_2_report_csv_path": rolling_2_report_csv_path,
             "decision_summary_report_path": decision_summary_report_path,
+            "decision_summary_csv_path": decision_summary_csv_path,
             "decision_summary.status": decision_summary_status,
             "decision_summary.execution_status": decision_summary_execution_status,
             "decision_summary.skip_reason": decision_summary_skip_reason,

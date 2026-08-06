@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -312,11 +314,54 @@ ROLLING30_EXIT_FIELDS = [
     "risk_reason",
 ]
 
+CSV_FIELDS = [
+    "section",
+    "subsection",
+    "row_type",
+    "field",
+    "value",
+    "previous_value",
+    "current_value",
+    "change",
+    "ticker",
+    "group_name",
+    "metric",
+    "notes",
+]
+
 
 @dataclass(frozen=True)
 class MarkdownReport:
     path: Path
     text: str
+
+
+@dataclass(frozen=True)
+class DecisionSummaryContext:
+    reports: dict[str, MarkdownReport]
+    current_meta: dict[str, str]
+    previous_meta: dict[str, str]
+    current_watch_metrics: dict[str, str]
+    previous_watch_metrics: dict[str, str]
+    current_watchlist: list[dict[str, str]]
+    previous_watchlist: list[dict[str, str]]
+    rolling2_change: list[dict[str, str]]
+    buy_zone: list[dict[str, str]]
+    add_on: list[dict[str, str]]
+    trim_watch: list[dict[str, str]]
+    exit_zone: list[dict[str, str]]
+    daily_breakouts: list[dict[str, str]]
+    daily_pullbacks: list[dict[str, str]]
+    daily_exits: list[dict[str, str]]
+    rolling5_breakouts: list[dict[str, str]]
+    rolling5_pullbacks: list[dict[str, str]]
+    rolling5_alerts: list[dict[str, str]]
+    rolling30_buy: list[dict[str, str]]
+    rolling30_exit: list[dict[str, str]]
+    status_changes: dict[str, list[dict[str, str]]]
+    signal_changes: list[dict[str, str]]
+    in_taxonomy: list[dict[str, str]]
+    not_in_taxonomy: list[dict[str, str]]
 
 
 def normalize_key(value: str) -> str:
@@ -420,6 +465,7 @@ def build_decision_summary(
     current_rolling5: Path,
     current_rolling30: Path,
     output: Path,
+    output_csv: Path | None = None,
 ) -> Path:
     reports = {
         "current_daily": _read_report(current_daily),
@@ -429,13 +475,17 @@ def build_decision_summary(
         "current_rolling30": _read_report(current_rolling30),
     }
 
-    rendered = render_decision_summary(reports)
+    context = build_decision_summary_context(reports)
+    rendered = render_decision_summary(reports, context=context)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(rendered, encoding="utf-8")
+    if output_csv is not None:
+        output_csv.parent.mkdir(parents=True, exist_ok=True)
+        output_csv.write_text(render_decision_summary_csv(context), encoding="utf-8")
     return output
 
 
-def render_decision_summary(reports: dict[str, MarkdownReport]) -> str:
+def build_decision_summary_context(reports: dict[str, MarkdownReport]) -> DecisionSummaryContext:
     current_daily = reports["current_daily"]
     previous_daily = reports["previous_daily"]
     rolling2 = reports["current_rolling2"]
@@ -472,22 +522,340 @@ def render_decision_summary(reports: dict[str, MarkdownReport]) -> str:
     signal_changes = compare_watchlist_signals(current_watchlist, previous_watchlist)
     in_taxonomy, not_in_taxonomy = split_watchlist_by_taxonomy(current_watchlist)
 
+    return DecisionSummaryContext(
+        reports=reports,
+        current_meta=current_meta,
+        previous_meta=previous_meta,
+        current_watch_metrics=current_watch_metrics,
+        previous_watch_metrics=previous_watch_metrics,
+        current_watchlist=current_watchlist,
+        previous_watchlist=previous_watchlist,
+        rolling2_change=rolling2_change,
+        buy_zone=buy_zone,
+        add_on=add_on,
+        trim_watch=trim_watch,
+        exit_zone=exit_zone,
+        daily_breakouts=daily_breakouts,
+        daily_pullbacks=daily_pullbacks,
+        daily_exits=daily_exits,
+        rolling5_breakouts=rolling5_breakouts,
+        rolling5_pullbacks=rolling5_pullbacks,
+        rolling5_alerts=rolling5_alerts,
+        rolling30_buy=rolling30_buy,
+        rolling30_exit=rolling30_exit,
+        status_changes=status_changes,
+        signal_changes=signal_changes,
+        in_taxonomy=in_taxonomy,
+        not_in_taxonomy=not_in_taxonomy,
+    )
+
+
+def render_decision_summary(reports: dict[str, MarkdownReport], *, context: DecisionSummaryContext | None = None) -> str:
+    context = context or build_decision_summary_context(reports)
     lines: list[str] = []
-    current_date = current_meta.get("signal_date", "")
+    current_date = context.current_meta.get("signal_date", "")
     title_date = current_date or "unknown"
     lines.append(f"# Datacenter Daily Decision Summary - {title_date}")
     lines.append("")
-    lines.extend(_metadata_section(current_meta, previous_meta, reports))
-    lines.extend(_executive_signal_section(current_watch_metrics, previous_watch_metrics, rolling2_change, buy_zone, status_changes))
-    lines.extend(_ecosystem_change_section(rolling2_change))
-    lines.extend(_watchlist_summary_section(current_watch_metrics, previous_watch_metrics))
-    lines.extend(_watchlist_status_change_section(status_changes, signal_changes))
-    lines.extend(_rotation_map_section(buy_zone, add_on, trim_watch, exit_zone))
-    lines.extend(_watchlist_decision_section(in_taxonomy, not_in_taxonomy))
-    lines.extend(_scanner_section(daily_breakouts, daily_pullbacks, rolling5_breakouts, rolling5_pullbacks, rolling5_alerts, rolling30_buy))
-    lines.extend(_exit_risk_section(daily_exits, rolling30_exit))
-    lines.extend(_action_summary_section(current_watch_metrics, buy_zone, daily_breakouts, daily_pullbacks, daily_exits, rolling30_buy, rolling30_exit))
+    lines.extend(_metadata_section(context.current_meta, context.previous_meta, context.reports))
+    lines.extend(_executive_signal_section(context.current_watch_metrics, context.previous_watch_metrics, context.rolling2_change, context.buy_zone, context.status_changes))
+    lines.extend(_ecosystem_change_section(context.rolling2_change))
+    lines.extend(_watchlist_summary_section(context.current_watch_metrics, context.previous_watch_metrics))
+    lines.extend(_watchlist_status_change_section(context.status_changes, context.signal_changes))
+    lines.extend(_rotation_map_section(context.buy_zone, context.add_on, context.trim_watch, context.exit_zone))
+    lines.extend(_watchlist_decision_section(context.in_taxonomy, context.not_in_taxonomy))
+    lines.extend(_scanner_section(context.daily_breakouts, context.daily_pullbacks, context.rolling5_breakouts, context.rolling5_pullbacks, context.rolling5_alerts, context.rolling30_buy))
+    lines.extend(_exit_risk_section(context.daily_exits, context.rolling30_exit))
+    lines.extend(_action_summary_section(context.current_watch_metrics, context.buy_zone, context.daily_breakouts, context.daily_pullbacks, context.daily_exits, context.rolling30_buy, context.rolling30_exit))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_decision_summary_csv(context: DecisionSummaryContext) -> str:
+    rows: list[dict[str, str]] = []
+    _add_metadata_csv_rows(rows, context)
+    _add_executive_signal_csv_rows(rows, context)
+    _add_ecosystem_change_csv_rows(rows, context)
+    _add_watchlist_summary_csv_rows(rows, context)
+    _add_status_change_csv_rows(rows, context)
+    _add_rotation_csv_rows(rows, context)
+    _add_watchlist_decision_csv_rows(rows, context)
+    _add_scanner_csv_rows(rows, context)
+    _add_exit_risk_csv_rows(rows, context)
+    _add_action_summary_csv_rows(rows, context)
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, delimiter=";", lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({field: row.get(field, "") for field in CSV_FIELDS})
+    return output.getvalue()
+
+
+def _csv_row(
+    *,
+    section: str,
+    subsection: str = "",
+    row_type: str,
+    field: str = "",
+    value: str = "",
+    previous_value: str = "",
+    current_value: str = "",
+    change: str = "",
+    ticker: str = "",
+    group_name: str = "",
+    metric: str = "",
+    notes: str = "",
+) -> dict[str, str]:
+    return {
+        "section": section,
+        "subsection": subsection,
+        "row_type": row_type,
+        "field": field,
+        "value": value,
+        "previous_value": previous_value,
+        "current_value": current_value,
+        "change": change,
+        "ticker": ticker,
+        "group_name": group_name,
+        "metric": metric,
+        "notes": notes,
+    }
+
+
+def _add_description_csv_row(rows: list[dict[str, str]], section: str) -> None:
+    description = SECTION_DESCRIPTIONS.get(section)
+    if description:
+        rows.append(_csv_row(section=section, row_type="description", value=description))
+
+
+def _add_field_rows(
+    rows: list[dict[str, str]],
+    *,
+    section: str,
+    subsection: str,
+    row_type: str,
+    source_rows: Sequence[dict[str, str]],
+    fields: Sequence[str],
+) -> None:
+    if not source_rows:
+        rows.append(_csv_row(section=section, subsection=subsection, row_type="no_rows", notes="No rows."))
+        return
+    for source in source_rows:
+        ticker = value_for(source, "ticker")
+        group_name = value_for(source, "group_name") or value_for(source, "primary_subindustry")
+        metric = value_for(source, "metric")
+        for field in fields:
+            rows.append(
+                _csv_row(
+                    section=section,
+                    subsection=subsection,
+                    row_type=row_type,
+                    field=field,
+                    value=value_for(source, field),
+                    ticker=ticker,
+                    group_name=group_name,
+                    metric=metric,
+                )
+            )
+
+
+def _add_metadata_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "1. Title and run metadata"
+    metadata_rows = [
+        {"field": "report_name", "value": "Datacenter Daily Decision Summary"},
+        {"field": "current_signal_date", "value": context.current_meta.get("signal_date", "")},
+        {"field": "previous_signal_date", "value": context.previous_meta.get("signal_date", "")},
+        {"field": "generated_at_utc", "value": context.current_meta.get("generated_at_utc", "")},
+        {"field": "signal_version", "value": context.current_meta.get("signal_version", "")},
+        {"field": "ohlc_calc_version", "value": context.current_meta.get("ohlc_calc_version", "")},
+        {"field": "taxonomy_version", "value": context.current_meta.get("taxonomy_version", "")},
+    ]
+    for name, report in context.reports.items():
+        metadata_rows.append({"field": f"source_{name}", "value": str(report.path)})
+    for row in metadata_rows:
+        rows.append(_csv_row(section=section, row_type="metadata", field=row["field"], value=row["value"]))
+    rows.append(
+        _csv_row(
+            section=section,
+            row_type="note",
+            notes="This summary is built deterministically from existing markdown reports only. It is not investment advice.",
+        )
+    )
+
+
+def _add_executive_signal_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "2. Executive signal"
+    _add_description_csv_row(rows, section)
+    timing_row = _metric_row(context.rolling2_change, "timing_state")
+    breadth_row = _metric_row(context.rolling2_change, "pct_above_ema20")
+    timing = value_for(timing_row, "last_value") or value_for(timing_row, "current_value")
+    window_change = _classify_numeric_change(value_for(breadth_row, "change"))
+    executive_rows = [
+        {"field": "ecosystem_timing", "value": timing},
+        {"field": "rolling2_window_change", "value": window_change},
+        {"field": "watchlist_breakout_count", "value": context.current_watch_metrics.get("watchlist_breakout_count", "")},
+        {"field": "watchlist_pullback_count", "value": context.current_watch_metrics.get("watchlist_pullback_count", "")},
+        {"field": "watchlist_high_exit_risk_count", "value": context.current_watch_metrics.get("watchlist_high_exit_risk_count", "")},
+        {"field": "status_improvements", "value": str(len(context.status_changes["improved"]))},
+        {"field": "status_deteriorations", "value": str(len(context.status_changes["deteriorated"]))},
+        {"field": "current_buy_zone_subindustries", "value": ", ".join(value_for(row, "group_name") for row in context.buy_zone) or "None"},
+        {
+            "field": "watchlist_total_change",
+            "value": f"{context.previous_watch_metrics.get('watchlist_tickers_total', '')} -> {context.current_watch_metrics.get('watchlist_tickers_total', '')}",
+        },
+    ]
+    for row in executive_rows:
+        rows.append(_csv_row(section=section, row_type="signal", field=row["field"], value=row["value"]))
+
+
+def _add_ecosystem_change_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "3. Ecosystem dashboard change"
+    _add_description_csv_row(rows, section)
+    by_metric = {normalize_key(value_for(row, "metric")): row for row in context.rolling2_change}
+    for metric in ECOSYSTEM_CHANGE_METRICS:
+        row = by_metric.get(metric, {})
+        rows.append(
+            _csv_row(
+                section=section,
+                row_type="metric_change",
+                metric=metric,
+                previous_value=value_for(row, "first_value") or value_for(row, "previous_value"),
+                current_value=value_for(row, "last_value") or value_for(row, "current_value"),
+                change=value_for(row, "change"),
+            )
+        )
+
+
+def _add_watchlist_summary_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "4. Watchlist summary and change"
+    _add_description_csv_row(rows, section)
+    for metric in WATCHLIST_METRICS:
+        previous = context.previous_watch_metrics.get(metric, "")
+        current = context.current_watch_metrics.get(metric, "")
+        rows.append(
+            _csv_row(
+                section=section,
+                row_type="metric_change",
+                metric=metric,
+                previous_value=previous,
+                current_value=current,
+                change=_delta(previous, current),
+            )
+        )
+
+
+def _add_status_change_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "5. Ticker-level watchlist status changes"
+    _add_description_csv_row(rows, section)
+    for subsection, changes in (
+        ("Improved statuses", context.status_changes["improved"]),
+        ("Deteriorated statuses", context.status_changes["deteriorated"]),
+    ):
+        if not changes:
+            rows.append(_csv_row(section=section, subsection=subsection, row_type="no_rows", notes="No rows."))
+            continue
+        for row in changes:
+            rows.append(
+                _csv_row(
+                    section=section,
+                    subsection=subsection,
+                    row_type="status_change",
+                    field="watchlist_status",
+                    previous_value=value_for(row, "previous_status"),
+                    current_value=value_for(row, "current_status"),
+                    change=f"{value_for(row, 'previous_rank')} -> {value_for(row, 'current_rank')}",
+                    ticker=value_for(row, "ticker"),
+                )
+            )
+    if not context.signal_changes:
+        rows.append(_csv_row(section=section, subsection="Changed watchlist signals", row_type="no_rows", notes="No rows."))
+    for row in context.signal_changes:
+        rows.append(
+            _csv_row(
+                section=section,
+                subsection="Changed watchlist signals",
+                row_type="signal_change",
+                field=value_for(row, "field"),
+                previous_value=value_for(row, "previous_value"),
+                current_value=value_for(row, "current_value"),
+                ticker=value_for(row, "ticker"),
+            )
+        )
+
+
+def _add_rotation_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "6. Rotation map"
+    _add_description_csv_row(rows, section)
+    for subsection, source_rows in (
+        ("Buy-Zone Subindustries", context.buy_zone),
+        ("Add-On Pullback Subindustries", context.add_on),
+        ("Trim/Watch Subindustries", context.trim_watch),
+        ("Exit-Zone Subindustries", context.exit_zone),
+    ):
+        _add_field_rows(rows, section=section, subsection=subsection, row_type="group", source_rows=source_rows, fields=GROUP_FIELDS)
+
+
+def _add_watchlist_decision_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "7. Watchlist ticker decision table"
+    _add_description_csv_row(rows, section)
+    _add_field_rows(rows, section=section, subsection="In Datacenter taxonomy", row_type="ticker", source_rows=context.in_taxonomy, fields=WATCHLIST_FIELDS)
+    _add_field_rows(
+        rows,
+        section=section,
+        subsection="Not in Datacenter taxonomy",
+        row_type="ticker",
+        source_rows=context.not_in_taxonomy,
+        fields=["ticker", "watchlist_status", "in_datacenter_ecosystem", "price_data_status"],
+    )
+
+
+def _add_scanner_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "8. Scanner output"
+    _add_description_csv_row(rows, section)
+    _add_field_rows(rows, section=section, subsection="A. Daily Breakout Ticker Scanner", row_type="scanner", source_rows=context.daily_breakouts, fields=DAILY_BREAKOUT_FIELDS)
+    _add_field_rows(rows, section=section, subsection="B. Daily Pullback Ticker Scanner", row_type="scanner", source_rows=context.daily_pullbacks, fields=DAILY_PULLBACK_FIELDS)
+    _add_field_rows(rows, section=section, subsection="C. Rolling 5 repeated breakout tickers", row_type="scanner", source_rows=context.rolling5_breakouts, fields=ROLLING5_BREAKOUT_FIELDS)
+    alert_rows = context.rolling5_alerts if context.rolling5_alerts else context.rolling5_pullbacks
+    alert_fields = ROLLING5_PULLBACK_ALERT_FIELDS if context.rolling5_alerts else ROLLING5_PULLBACK_FIELDS
+    _add_field_rows(rows, section=section, subsection="D. Rolling 5 pullback alerts", row_type="scanner", source_rows=alert_rows, fields=alert_fields)
+    _add_field_rows(rows, section=section, subsection="E. Rolling 30 buy filter and watch-zone", row_type="scanner", source_rows=context.rolling30_buy, fields=ROLLING30_BUY_FIELDS)
+
+
+def _add_exit_risk_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "9. Exit risk focus"
+    _add_description_csv_row(rows, section)
+    high_daily = [row for row in context.daily_exits if value_for(row, "exit_risk_severity").upper() == "HIGH"]
+    _add_field_rows(rows, section=section, subsection="A. Daily high exit-risk scanner top 20", row_type="exit_risk", source_rows=(high_daily or context.daily_exits)[:20], fields=DAILY_EXIT_FIELDS)
+    _add_field_rows(rows, section=section, subsection="B. Rolling 30 Exit Prefilter top 20", row_type="exit_risk", source_rows=context.rolling30_exit[:20], fields=ROLLING30_EXIT_FIELDS)
+
+
+def _add_action_summary_csv_rows(rows: list[dict[str, str]], context: DecisionSummaryContext) -> None:
+    section = "10. Action summary"
+    _add_description_csv_row(rows, section)
+    high_exit_count = _to_number(context.current_watch_metrics.get("watchlist_high_exit_risk_count", "")) or 0
+    action_rows = [
+        {
+            "field": "watchlist_exit_risk",
+            "value": "REVIEW_EXIT_RISK" if high_exit_count > 0 else "MONITOR",
+            "notes": f"watchlist_high_exit_risk_count={context.current_watch_metrics.get('watchlist_high_exit_risk_count', '')}",
+        },
+        {"field": "daily_breakouts", "value": "MONITOR_BREAKOUT_CONFIRMATION", "notes": _ticker_list(context.daily_breakouts)},
+        {"field": "daily_pullbacks", "value": "MONITOR_PULLBACK_CONFIRMATION", "notes": _ticker_list(context.daily_pullbacks)},
+        {
+            "field": "buy_zone_subindustries",
+            "value": "MONITOR_BREAKOUT_CONFIRMATION",
+            "notes": ", ".join(value_for(row, "group_name") for row in context.buy_zone) or "No rows.",
+        },
+        {"field": "rolling30_watch_zone", "value": "MONITOR_BREAKOUT_CONFIRMATION", "notes": _ticker_list(context.rolling30_buy)},
+        {
+            "field": "exit_risk_focus",
+            "value": "REVIEW_EXIT_RISK" if context.daily_exits or context.rolling30_exit else "MONITOR",
+            "notes": f"daily_exit_rows={len(context.daily_exits)}; rolling30_exit_rows={len(context.rolling30_exit)}",
+        },
+    ]
+    for row in action_rows:
+        rows.append(_csv_row(section=section, row_type="action", field=row["field"], value=row["value"], notes=row["notes"]))
+    rows.append(_csv_row(section=section, row_type="note", notes="Labels are deterministic report-derived states, not buy/sell recommendations."))
 
 
 def compare_watchlist_status(
@@ -600,6 +968,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--current-rolling5", required=True, type=Path)
     parser.add_argument("--current-rolling30", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--output-csv", type=Path)
     args = parser.parse_args(argv)
     try:
         path = build_decision_summary(
@@ -609,10 +978,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             current_rolling5=args.current_rolling5,
             current_rolling30=args.current_rolling30,
             output=args.output,
+            output_csv=args.output_csv,
         )
     except DecisionSummaryError as exc:
         parser.error(str(exc))
     print(f"wrote {path}")
+    if args.output_csv is not None:
+        print(f"wrote {args.output_csv}")
     return 0
 
 

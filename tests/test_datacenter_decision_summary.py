@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import subprocess
 import sys
 from pathlib import Path
@@ -178,6 +179,36 @@ def test_build_summary_contains_required_headers_and_no_rows(tmp_path: Path) -> 
     assert "| watchlist_exit_risk | REVIEW_EXIT_RISK | watchlist_high_exit_risk_count=1 |" in text
 
 
+def test_build_summary_without_csv_keeps_markdown_output_unchanged(tmp_path: Path) -> None:
+    paths = _write_fixture_set(tmp_path)
+    markdown_only = tmp_path / "markdown_only.md"
+    with_csv = tmp_path / "with_csv.md"
+    csv_output = tmp_path / "with_csv.csv"
+
+    build_decision_summary(output=markdown_only, **paths)
+    build_decision_summary(output=with_csv, output_csv=csv_output, **paths)
+
+    assert markdown_only.read_text(encoding="utf-8") == with_csv.read_text(encoding="utf-8")
+    assert csv_output.exists()
+
+
+def test_build_summary_writes_semicolon_csv_with_representative_rows(tmp_path: Path) -> None:
+    paths = _write_fixture_set(tmp_path)
+    output = tmp_path / "summary.md"
+    output_csv = tmp_path / "summary.csv"
+
+    build_decision_summary(output=output, output_csv=output_csv, **paths)
+
+    text = output_csv.read_text(encoding="utf-8")
+    assert text.startswith("section;subsection;row_type;field;value;previous_value;current_value;change;ticker;group_name;metric;notes\n")
+    rows = list(csv.DictReader(text.splitlines(), delimiter=";"))
+    assert any(row["section"] == "1. Title and run metadata" and row["field"] == "current_signal_date" and row["value"] == "2026-08-03" for row in rows)
+    assert any(row["section"] == "2. Executive signal" and row["field"] == "ecosystem_timing" and row["value"] == "BUY_ZONE" for row in rows)
+    assert any(row["section"] == "7. Watchlist ticker decision table" and row["ticker"] == "AMZN" and row["field"] == "watchlist_status" and row["value"] == "BREAKOUT_CANDIDATE" for row in rows)
+    assert any(row["section"] == "8. Scanner output" and row["subsection"] == "A. Daily Breakout Ticker Scanner" and row["ticker"] == "AMZN" for row in rows)
+    assert any(row["section"] == "10. Action summary" and row["field"] == "watchlist_exit_risk" and row["value"] == "REVIEW_EXIT_RISK" for row in rows)
+
+
 def test_section_descriptions_are_inserted_under_sections_2_through_10(tmp_path: Path) -> None:
     paths = _write_fixture_set(tmp_path)
     output = tmp_path / "datacenter_decision_summary_2026-08-03_0813_full.md"
@@ -233,6 +264,40 @@ def test_cli_creates_output_file(tmp_path: Path) -> None:
     )
     assert result.returncode == 0
     assert output.exists()
+    assert "wrote" in result.stdout
+
+
+def test_cli_accepts_output_csv_and_creates_csv_file(tmp_path: Path) -> None:
+    paths = _write_fixture_set(tmp_path)
+    output = tmp_path / "summary.md"
+    output_csv = tmp_path / "summary.csv"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "rawcandle.cli.build_datacenter_decision_summary",
+            "--current-daily",
+            str(paths["current_daily"]),
+            "--previous-daily",
+            str(paths["previous_daily"]),
+            "--current-rolling2",
+            str(paths["current_rolling2"]),
+            "--current-rolling5",
+            str(paths["current_rolling5"]),
+            "--current-rolling30",
+            str(paths["current_rolling30"]),
+            "--output",
+            str(output),
+            "--output-csv",
+            str(output_csv),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert output.exists()
+    assert output_csv.exists()
     assert "wrote" in result.stdout
 
 

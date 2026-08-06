@@ -240,12 +240,16 @@ def test_pipeline_generates_decision_summary_when_previous_daily_exists(tmp_path
 
     summary = result["summary"]
     decision_summary_path = Path(str(summary["decision_summary_report_path"]))
+    decision_summary_csv_path = Path(str(summary["decision_summary_csv_path"]))
     assert summary["pipeline_status"] == "OK"
     assert summary["decision_summary.status"] == "OK"
     assert summary["decision_summary.execution_status"] == "EXECUTED"
     assert decision_summary_path == reports_dir / "datacenter_decision_summary_2026-05-15_0800_full.md"
+    assert decision_summary_csv_path == reports_dir / "datacenter_decision_summary_2026-05-15_0800_full.csv"
     assert decision_summary_path.exists()
+    assert decision_summary_csv_path.exists()
     assert "# Datacenter Daily Decision Summary - 2026-05-15" in decision_summary_path.read_text(encoding="utf-8")
+    assert decision_summary_csv_path.read_text(encoding="utf-8").startswith("section;subsection;row_type;field;value;")
     daily_path = reports_dir / "datacenter_daily_2026-05-15_0800_full.md"
     assert "# Datacenter Daily Swing Signal Report" in daily_path.read_text(encoding="utf-8")
 
@@ -266,6 +270,7 @@ def test_pipeline_skips_decision_summary_nonfatally_without_previous_daily(tmp_p
     summary = result["summary"]
     assert summary["pipeline_status"] == "OK"
     assert summary["decision_summary_report_path"] == ""
+    assert summary["decision_summary_csv_path"] == ""
     assert summary["decision_summary.status"] == "SKIPPED"
     assert summary["decision_summary.execution_status"] == "SKIPPED"
     assert summary["decision_summary.skip_reason"] == "missing_previous_daily"
