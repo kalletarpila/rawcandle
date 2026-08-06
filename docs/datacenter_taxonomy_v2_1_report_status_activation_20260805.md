@@ -1081,3 +1081,191 @@ operation lock, change Scheduler guard state, run Scheduler, run Datacenter
 pipeline, run Stage 2, run EC rebuild/backfill/loaders/chunks, apply aggregate
 repair, apply EC cleanup, finalize watermarks, activate V2.1, modify production
 configuration, create a production backup, or write production databases.
+
+## 2026-08-06 Controlled Resume Preflight Blocked Before Writes
+
+Final resume classification:
+
+```text
+DATACENTER_V2_1_RSO_RESUME_BLOCKED_BEFORE_WRITES
+```
+
+The controlled production resume task was attempted from implementation commit:
+
+```text
+100970b Fix RSO EC revalidation resume path
+```
+
+Repository and source identity matched the required state:
+
+```text
+branch=chore/ignore-backups
+HEAD=100970b1b1dc4a18cd85763b5246a5d51313b20d
+origin/chore/ignore-backups=100970b1b1dc4a18cd85763b5246a5d51313b20d
+V2 CSV sha256=178de3b56891a37b7472748b3f05b77625cc5c9dde4637cb63be50aed807e2e1
+V2.1 CSV sha256=2e27c6e68aa22c53c04e123f79744058b39a6a22b465634fda7510971c3159ef
+existing backup sha256=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+existing backup quick_check=ok
+```
+
+Evidence root:
+
+```text
+temp/datacenter_taxonomy_v2_1_rso_resume_20260806T063238Z/
+```
+
+Starting production state was unchanged:
+
+```text
+deployment_id=2
+deployment_status=LOADED_NOT_ACTIVE
+activation_status=NOT_ACTIVE
+dc_rebuild_status=NOT_STARTED
+ec_rebuild_status=FAILED
+coverage_status=NOT_STARTED
+parity_status=NOT_STARTED
+active_taxonomy=DC_TAXONOMY_FULL_V2
+proposed_taxonomy=DC_TAXONOMY_FULL_V2_1
+Scheduler Datacenter taxonomy=DC_TAXONOMY_FULL_V2
+Scheduler EC taxonomy=DC_TAXONOMY_FULL_V2
+skip_next_run=false
+taxonomy_operation_lock_active=false
+Scheduler is_running=false
+```
+
+Runtime plan reconciliation itself was safe:
+
+```text
+original_plan_hash=a58c27c005bea5cc488d035649857988825ee8bff71120b1e2b7c6c8367a216f
+current_recomputed_plan_hash=d68c48797aca7013b5911c99f78fcac1c6570d826f1769b0298dcbebb03547b6
+current_plan_inputs_hash=a6ff2e318688a427aaa2d2a96d0e7b45d9685e730a4cea16b30906f504c7e400
+plan_reconciliation_status=SAFE_AMENDMENT_READY
+plan_drift_classification=SAFE_IMPLEMENTATION_RECONCILIATION
+business_inputs_unchanged=true
+source_inputs_unchanged=true
+original_plan_preserved=true
+safe_to_resume_after_amendment=true
+repair_amendment_hash=6becb3e78567a2d6c709b8b366457389dba11fa9bfa4a58731c6fbcd6fe147f5
+repair_candidate_hash=27790b87e296d95e7989395f4d7e7ff459306bbd2036625c44619fc2c7259d49
+```
+
+The dynamically derived DC repair scope remained narrow:
+
+```text
+dc_repair_scope=ECOSYSTEM_AGGREGATE_ONLY
+ordinary_dc_recopy_required=false
+repair_candidate_count=506
+```
+
+Pre-repair aggregate inventory:
+
+```text
+dc_group_swing_signal_daily:
+  source V2 aggregate rows=253
+  target V2.1 aggregate rows=0
+  missing target rows=253
+  duplicate keys=0
+  semantic mismatch count=0
+  missing date range=2025-08-01..2026-08-04
+  candidate_key_hash=f73c60109c3c8d688a4c1281caeda1fa01335fe91378c9506c44ae04c11d45ee
+  source_semantic_hash=41469573724a6b01b8f7ac43bf7926e4ff81d064f30b39376ed78692d42575bc
+
+dc_group_index_daily:
+  source V2 aggregate rows=253
+  target V2.1 aggregate rows=0
+  missing target rows=253
+  duplicate keys=0
+  semantic mismatch count=0
+  missing date range=2025-08-01..2026-08-04
+  candidate_key_hash=9025ef6e32c6544057772a1a9ffdea84ddb293f37fc1ba517ea515beca12c4a7
+  source_semantic_hash=a7a6078c68f95d6973eb41b44d98e40ba4baa36bdc03ddfd399ee766c0bb3b8c
+```
+
+However, the corrected backend did not derive the required EC read-only resume
+action. It selected:
+
+```text
+ec_resume_action=REBUILD_EC_FACTS
+ec_rebuild_required=true
+ec_loaders_required=true
+ec_chunks_required=true
+ec_revalidation_required=false
+ec_revalidation_status=BLOCKED
+parity_status=FAILED
+total_mismatch_count=106
+```
+
+The blocking EC parity differences were not missing rows. They were
+`source_run_id` field mismatches on the latest validated date:
+
+```text
+ticker_parity=OK_WITH_WARNINGS
+group_index_parity=OK_WITH_WARNINGS
+group_signal_parity=FAILED, field_mismatch_count=53
+synthetic_ohlc_parity=FAILED, field_mismatch_count=53
+
+group_signal first mismatch:
+  field=source_run_id
+  key=layer:Backup power, signal_date=2026-08-04
+  source=DC_GROUP_SWING_20260805_DC_SWING_SIGNAL_V1
+  target=DC_GROUP_SWING_20260804_DC_SWING_SIGNAL_V1
+
+synthetic_ohlc first mismatch:
+  field=source_run_id
+  key=layer:Backup power, ohlc_date=2026-08-04
+  source=DC_GROUP_SYNTH_OHLC_20250801_20260805_DC_SWING_OHLC_V1
+  target=DC_GROUP_SYNTH_OHLC_20250801_20260804_DC_SWING_OHLC_V1
+```
+
+Because the task explicitly required `EC resume action=REVALIDATE_EXISTING_FACTS`
+and required stopping before writes if the backend derived `REBUILD_EC_FACTS`,
+the resume was stopped before acquiring the operation lock, before setting the
+Scheduler guard, and before any production database write.
+
+No operation ID was created for a state-changing resume, because the canonical
+operation lock was not acquired. No repair amendment was applied. No aggregate
+rows were inserted. No old-version EC cleanup, whole-range validation, watermark
+finalization, deployment evidence update, or activation plan was applied.
+
+Final state remained:
+
+```text
+DC_TAXONOMY_FULL_V2 active=true
+DC_TAXONOMY_FULL_V2_1 active=false
+active taxonomy count=1
+deployment_status=LOADED_NOT_ACTIVE
+activation_status=NOT_ACTIVE
+skip_next_run=false
+taxonomy_operation_lock_active=false
+```
+
+Explicit non-actions:
+
+```text
+Scheduler not run
+Datacenter pipeline not run
+Stage 2 not run
+ordinary DC recopy not performed
+ticker rows not rewritten
+ordinary group rows not rewritten
+synthetic rows not rewritten
+EC rebuild not run
+EC loaders not run
+EC chunks not run
+EC cleanup not applied
+watermarks not finalized
+V2.1 not activated
+migrations not applied
+external fetch not performed
+new full backup not created
+backup not restored
+taxonomy CSVs unchanged
+watchlist unchanged
+```
+
+Required next work before controlled activation: resolve whether the
+`source_run_id` parity differences are acceptable metadata-only drift for
+already materialized V2.1 EC facts, or whether EC facts must be rebuilt by a
+separate explicitly approved recovery task. Do not resume deployment 2 until
+the backend again derives a safe `REVALIDATE_EXISTING_FACTS` action or an
+explicit EC rebuild recovery has been approved.
