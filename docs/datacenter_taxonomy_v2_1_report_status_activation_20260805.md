@@ -2302,3 +2302,153 @@ watchlist modification occurred during this implementation task.
 
 The next controlled deployment-2 resume should use the new source-advance
 contract after reconfirming the same preflight and candidate hashes.
+
+## 2026-08-06 Controlled Resume Completed
+
+Final classification:
+
+```text
+DATACENTER_V2_1_CONTROLLED_RESUME_VERIFIED_READY_TO_ACTIVATE
+```
+
+Controlled resume evidence:
+
+```text
+evidence_root=temp/datacenter_taxonomy_v2_1_controlled_resume_20260806T100634Z
+summary=temp/datacenter_taxonomy_v2_1_controlled_resume_20260806T100634Z/controlled_resume_summary.json
+activation_plan=temp/datacenter_taxonomy_v2_1_controlled_resume_20260806T100634Z/activation_plan_ready.json
+final_counts=temp/datacenter_taxonomy_v2_1_controlled_resume_20260806T100634Z/final_counts_after_guard_restore.json
+```
+
+Existing backup was reused and validated before writes:
+
+```text
+backup_path=temp/taxonomy_change_backups/analysis_taxonomy_change_2_20260805T124226Z.sqlite
+backup_sha256=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+integrity_check=ok
+quick_check=ok
+new_backup_created=false
+backup_restored=false
+```
+
+The controlled write scopes were limited to:
+
+```text
+SEMANTIC_ROW_ONLY
+POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY
+COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
+old-version EC cleanup
+required watermark/evidence/status finalization for READY_TO_ACTIVATE
+```
+
+Applied repair summary:
+
+```text
+semantic_row_repair_status=APPLIED
+semantic_row_key=(2026-08-04, WMS, DC_SWING_SIGNAL_V1)
+semantic_row_field=bullish_divergence_signal
+semantic_row_value=0 -> 1
+ec_semantic_mirror_status=APPLIED
+
+dc_source_advance_apply_status=APPLIED
+dc_source_advance_date=2026-08-05
+dc_source_advance_candidate_count=418
+
+ec_source_advance_apply_status=APPLIED
+ec_resume_action=COPY_POST_DEPLOYMENT_SOURCE_ADVANCE
+ec_loaders_invoked=false
+ec_chunks_invoked=false
+ec_rebuild_required=false
+```
+
+The `2026-08-05` ecosystem aggregate rows were handled as part of
+`POST_DEPLOYMENT_SOURCE_ADVANCE_ONLY`, not as a separate
+`ECOSYSTEM_AGGREGATE_ONLY` repair.
+
+Final production state:
+
+```text
+deployment_id=2
+deployment_status=READY_TO_ACTIVATE
+dc_rebuild_status=OK
+ec_rebuild_status=OK
+coverage_status=OK
+parity_status=OK
+activation_status=NOT_ACTIVE
+last_error=NULL
+
+active_taxonomy=DC_TAXONOMY_FULL_V2
+active_taxonomy_unchanged=true
+DC_TAXONOMY_FULL_V2_1 active=false
+activation_executed=false
+```
+
+Fact and watermark coverage:
+
+```text
+dc_fact_head=2026-08-05
+ec_fact_head=2026-08-05
+dc_required_watermark_components=14
+dc_required_watermark_status=OK
+
+canonical_ec_watermarks:
+  TICKER_SWING_BASE / dc_ticker_swing_signal_daily = 2026-08-05, taxonomy_version_id=3, status=OK
+  GROUP_SWING_BASE / dc_group_swing_signal_daily = 2026-08-05, taxonomy_version_id=3, status=OK
+  SYNTHETIC_OHLC_BASE / dc_group_synthetic_ohlc_daily = 2026-08-05, taxonomy_version_id=3, status=OK
+  GROUP_INDEX / dc_group_index_daily = 2026-08-05, taxonomy_version_id=3, status=OK
+
+stale_ec_rows:
+  ec_ticker_signal_daily=0
+  ec_group_signal_daily=0
+  ec_group_synthetic_ohlc_daily=0
+  ec_group_index_daily=0
+```
+
+Activation readiness:
+
+```text
+activation_plan_status=READY_TO_ACTIVATE
+safe_to_activate=true
+config_transition_required=true
+current_scheduler_taxonomy_status=EXPECTED_CURRENT_V1
+current_scheduler_datacenter_version=DC_TAXONOMY_FULL_V2
+current_scheduler_ec_version=DC_TAXONOMY_FULL_V2
+scheduler_unexpected_changed_keys=[]
+```
+
+Scheduler guard was temporarily enabled during the controlled resume and then
+restored:
+
+```text
+skip_next_run_final=false
+datacenter_taxonomy_version=DC_TAXONOMY_FULL_V2
+ec_source_layer_taxonomy_version=DC_TAXONOMY_FULL_V2
+```
+
+Earlier script attempts on 2026-08-06 failed before repair writes because of
+local operation-script issues or overly strict pre-source-advance validation.
+Each such attempt restored `skip_next_run=false`; the successful attempt then
+completed the controlled resume.
+
+Explicit non-actions during the successful controlled resume:
+
+```text
+Scheduler not run
+Datacenter pipeline not run
+Stage 2 not run
+ticker/group/synthetic/index calculations not run
+EC rebuild not run
+EC loaders not run
+EC chunks not run
+activation not run
+taxonomy CSVs unchanged
+watchlist unchanged
+scheduler taxonomy versions unchanged
+backup not restored
+migrations not applied
+network not used
+unrelated cleanup not performed
+```
+
+Deployment 2 is now ready for a separate activation step. That activation step
+must still be run explicitly; this controlled resume did not activate V2.1.
