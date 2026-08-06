@@ -2452,3 +2452,216 @@ unrelated cleanup not performed
 
 Deployment 2 is now ready for a separate activation step. That activation step
 must still be run explicitly; this controlled resume did not activate V2.1.
+
+## 2026-08-06 Controlled Activation Completed
+
+Final classification:
+
+```text
+DATACENTER_V2_1_ACTIVATION_VERIFIED
+```
+
+Controlled resume code/evidence baseline:
+
+```text
+controlled_resume_commit=c0a2637
+controlled_resume_status=READY_TO_ACTIVATE
+```
+
+Activation evidence:
+
+```text
+evidence_root=temp/datacenter_taxonomy_v2_1_activation_20260806T102656Z
+activation_summary=temp/datacenter_taxonomy_v2_1_activation_20260806T102656Z/activation_summary.json
+activation_apply=temp/datacenter_taxonomy_v2_1_activation_20260806T102656Z/activation_apply_result.json
+pre_activation_plan=temp/datacenter_taxonomy_v2_1_activation_20260806T102656Z/activation_plan_pre_apply.json
+idempotency_plan=temp/datacenter_taxonomy_v2_1_activation_20260806T102656Z/final_idempotency_plan.json
+report_status_metadata=temp/datacenter_taxonomy_v2_1_activation_20260806T102656Z/active_report_status_metadata.json
+```
+
+Activation operation:
+
+```text
+operation_type=ACTIVATE
+operation_id=activate_deployment_2_20260806T102656Z
+deployment_id=2
+activation_plan_identity_hash=2d73ac06546171ee4adb1deb8c59daa4021ea3a68bc9db22ad60694622b9189c
+activation_command=backend: rawcandle.datacenter_taxonomy_replacement.apply_datacenter_taxonomy_activation(...)
+activation_exit_code=0
+```
+
+The backend activation result:
+
+```text
+activation_apply_status=ACTIVE
+activation_db_status=OK
+activation_config_status=OK
+activation_consistency_status=OK
+activation_rollback_attempted=false
+activation_rollback_status=NOT_NEEDED
+activation_error=null
+```
+
+Scheduler-config backup created by the activation backend:
+
+```text
+config_backup_path=temp/datacenter_taxonomy_v2_1_activation_20260806T102656Z/scheduler_config.json.before_taxonomy_activation_20260806T102704Z.json
+config_backup_sha256=9aec4999241439bfc58a0adde23561710c42bb8fbc9ccb427865ff2c0df542e8
+```
+
+Separate guard backup:
+
+```text
+scheduler_guard_backup_path=temp/datacenter_taxonomy_v2_1_activation_20260806T102656Z/scheduler_config_before_activation_guard_20260806T102656Z.json
+```
+
+Final database activation state:
+
+```text
+DC_TAXONOMY_FULL_V2 status=INACTIVE is_active=0
+DC_TAXONOMY_FULL_V2_1 status=ACTIVE is_active=1
+active_taxonomy_count=1
+
+deployment_id=2
+deployment_status=ACTIVE
+activation_status=ACTIVE
+dc_rebuild_status=OK
+ec_rebuild_status=OK
+coverage_status=OK
+parity_status=OK
+last_error=NULL
+```
+
+Final Scheduler taxonomy configuration:
+
+```text
+datacenter_taxonomy_version=DC_TAXONOMY_FULL_V2_1
+datacenter_taxonomy_csv=data/datacenter_taxonomy_full_v2_1.csv
+ec_source_layer_taxonomy_version=DC_TAXONOMY_FULL_V2_1
+ec_source_layer_taxonomy_csv=data/datacenter_taxonomy_full_v2_1.csv
+
+skip_next_run=false
+datacenter_stage2_incremental_enabled=true
+datacenter_stage2_overlap_trading_days=5
+```
+
+Scheduler config transition:
+
+```text
+changed_keys:
+  datacenter_taxonomy_csv
+  datacenter_taxonomy_version
+  ec_source_layer_taxonomy_csv
+  ec_source_layer_taxonomy_version
+
+unexpected_changed_keys=[]
+```
+
+Fact and watermark non-impact:
+
+```text
+DC fact hashes unchanged=true
+EC fact hashes unchanged=true
+DC watermark rows unchanged=true
+EC watermark rows unchanged=true
+```
+
+V2.1 heads remained at the activation head:
+
+```text
+dc_fact_head=2026-08-05
+ec_fact_head=2026-08-05
+```
+
+Post-activation idempotency plan:
+
+```text
+activation_plan_status=ALREADY_ACTIVE
+config_transition_required=false
+blocking_errors=[]
+scheduler_changed_keys=[]
+scheduler_unexpected_changed_keys=[]
+```
+
+Operation lock and guard:
+
+```text
+lock_active=false
+skip_next_run_final=false
+```
+
+Active V2.1 ticker report-status counts:
+
+```text
+CORE=230
+EXTENDED=106
+WATCH_ONLY=14
+```
+
+Selected ticker active report-status verification:
+
+```text
+NVDA primary=CORE secondary=CORE,CORE
+AMD primary=CORE secondary=CORE
+AVGO primary=CORE secondary=CORE,CORE
+MRVL primary=CORE secondary=CORE
+ARM primary=CORE secondary=CORE
+INTC primary=CORE secondary=CORE,CORE
+TSM primary=CORE secondary=CORE
+CBRS primary=CORE
+MU primary=CORE secondary=CORE
+RMBS primary=CORE
+WDC primary=EXTENDED secondary=CORE
+STX primary=EXTENDED secondary=CORE
+SNDK primary=EXTENDED secondary=CORE
+SIMO primary=EXTENDED
+POET primary=CORE
+```
+
+The selected metadata is read from active `ec_membership` rows for
+`DC_TAXONOMY_FULL_V2_1`. The count validation intentionally filters to ticker
+memberships; group-structure memberships can have `NULL` membership roles and
+are not report-status ticker classifications.
+
+Source and backup preservation:
+
+```text
+data/datacenter_taxonomy_full_v2.csv sha256=178de3b56891a37b7472748b3f05b77625cc5c9dde4637cb63be50aed807e2e1
+data/datacenter_taxonomy_full_v2_1.csv sha256=2e27c6e68aa22c53c04e123f79744058b39a6a22b465634fda7510971c3159ef
+existing_backup_sha256=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+new_full_backup_created=false
+backup_restored=false
+```
+
+Explicit non-actions during activation:
+
+```text
+Scheduler not run
+Datacenter pipeline not run
+Stage 2 not run
+calculations not run
+EC rebuild not run
+EC refresh/backfill/loaders/chunks not run
+cleanup not run
+watermark finalization not run
+facts not modified
+watermarks not modified
+taxonomy CSVs unchanged
+watchlist unchanged
+migrations not applied
+external fetch not used
+new full backup not created
+existing backup not restored
+unrelated cleanup not performed
+```
+
+Operational note: the activation apply itself succeeded and passed backend
+consistency verification. The surrounding evidence script then hit a
+post-activation report-status evidence formatting issue, after activation,
+idempotency, non-impact verification, guard restoration, and lock release had
+already completed. A read-only finalization step wrote
+`activation_summary.json` and `active_report_status_metadata.json`; no second
+activation apply was run.
+
+Final result: Datacenter V2.1 is active and ready for the next normal Scheduler
+run.
