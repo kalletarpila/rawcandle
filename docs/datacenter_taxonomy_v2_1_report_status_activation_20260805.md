@@ -3,13 +3,14 @@
 ## Final Classification
 
 ```text
-DATACENTER_V2_1_REPORT_STATUS_ONLY_EXECUTION_FAILED_V2_REMAINS_ACTIVE
+DATACENTER_V2_1_RSO_RESUME_FAILED_V2_REMAINS_ACTIVE
 ```
 
-The controlled `REPORT_STATUS_ONLY` production execution was attempted for
-`DC_TAXONOMY_FULL_V2_1`, but activation was not performed. The execution stopped
-before activation because EC whole-range validation detected stale old-version
-EC rows in the replacement range.
+The controlled `REPORT_STATUS_ONLY` production execution and later guarded RSO
+resume attempts were performed for `DC_TAXONOMY_FULL_V2_1`, but activation was
+not performed. The latest state-changing resume stopped before activation
+because DC aggregate repair validation failed. `DC_TAXONOMY_FULL_V2` remains the
+only active Datacenter taxonomy.
 
 ## Repository And Sources
 
@@ -1346,6 +1347,211 @@ repair, apply EC cleanup, finalize watermarks, activate V2.1, modify production
 configuration, create a production backup, restore a backup, or write production
 databases.
 
-Required next controlled task: resume deployment 2 using the newly derived
-`repair_amendment_hash` and `REVALIDATE_EXISTING_FACTS` action, then stop at
-`READY_TO_ACTIVATE` without activating V2.1.
+## 2026-08-06 Controlled RSO Resume Result
+
+Final resume classification:
+
+```text
+DATACENTER_V2_1_RSO_RESUME_FAILED_V2_REMAINS_ACTIVE
+```
+
+The controlled production resume was attempted from implementation commit:
+
+```text
+dbb4da4 Fix RSO source run parity policy
+local_HEAD_before_resume=dbb4da485982aaa1ad8dc2e2c9869e32fa3b31ed
+remote_HEAD_before_resume=dbb4da485982aaa1ad8dc2e2c9869e32fa3b31ed
+branch=chore/ignore-backups
+```
+
+The resume evidence root was:
+
+```text
+temp/datacenter_taxonomy_v2_1_rso_resume_20260806T082257Z/
+```
+
+Preflight confirmed that the intended resume was a narrow RSO metadata-policy
+resume:
+
+```text
+deployment_id=2
+active_taxonomy=DC_TAXONOMY_FULL_V2
+proposed_taxonomy=DC_TAXONOMY_FULL_V2_1
+deployment_status=LOADED_NOT_ACTIVE
+activation_status=NOT_ACTIVE
+normalized_orchestration_status=REBUILD_FAILED
+safe_next_action=resume_from_failed_phase
+
+plan_reconciliation_status=SAFE_AMENDMENT_READY
+plan_drift_classification=SAFE_IMPLEMENTATION_RECONCILIATION
+business_inputs_unchanged=true
+source_inputs_unchanged=true
+safe_to_resume_after_amendment=true
+
+dc_repair_scope=ECOSYSTEM_AGGREGATE_ONLY
+repair_candidate_count=506
+repair_candidate_hash=27790b87e296d95e7989395f4d7e7ff459306bbd2036625c44619fc2c7259d49
+ordinary_dc_recopy_required=false
+
+ec_resume_action=REVALIDATE_EXISTING_FACTS
+ec_rebuild_required=false
+ec_loaders_required=false
+ec_chunks_required=false
+ec_revalidation_required=true
+parity_policy=RSO_REVALIDATION_METADATA_POLICY_V1
+parity_status=OK_WITH_WARNINGS
+semantic_field_mismatch_count=0
+required_lineage_mismatch_count=0
+operational_metadata_drift_count=106
+total_blocking_mismatch_count=0
+```
+
+The existing SQLite backup was reused and revalidated. No new full backup was
+created:
+
+```text
+backup_path=temp/taxonomy_change_backups/analysis_taxonomy_change_2_20260805T124226Z.sqlite
+backup_sha256=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+backup_size=7943979008
+backup_validation_status=OK
+integrity_check=ok
+```
+
+The first resume attempt was blocked before writes by the confirmation gate:
+
+```text
+run_status=FAILED
+failure_code=CONFIRMATION_FAILED
+failure_message=confirmation mismatch: repair_amendment_hash
+failed_phase=PLANNED
+completed_phases=[]
+cleanup_required=false
+current_taxonomy_remains_active=true
+```
+
+The guarded resume was then retried with the repair amendment hash computed by
+the canonical resume path:
+
+```text
+repair_amendment_hash=b1d1ca112d67804f9bfd64a7306dffa76256673cb919f529ddc1f010ab2566d4
+```
+
+The retry reached the DC fact carry-forward validation phase and failed there:
+
+```text
+run_status=FAILED
+failure_code=DC_AGGREGATE_REPAIR_VALIDATION_FAILED
+failed_phase=DC_FACTS_CARRIED_FORWARD
+completed_phases=PLANNED,BACKUP
+restore_required=false
+cleanup_required=false
+retry_safe=true
+scheduler_guard_restored=true
+current_taxonomy_remains_active=true
+resume_from_phase=DC_FACTS_CARRIED_FORWARD
+```
+
+The blocking validation result was:
+
+```text
+validation_status=BLOCKED
+semantic_mismatch_count=14694
+
+dc_ticker_swing_signal_daily:
+  validation_status=BLOCKED
+  ordinary_key_count=65021
+  ecosystem_aggregate_key_count=0
+  semantic_mismatch_count=1285
+
+dc_group_swing_signal_daily:
+  validation_status=OK
+  ordinary_key_count=13409
+  ecosystem_aggregate_key_count=253
+  semantic_mismatch_count=0
+
+dc_group_synthetic_ohlc_daily:
+  validation_status=OK
+  ordinary_key_count=13409
+  ecosystem_aggregate_key_count=0
+  semantic_mismatch_count=0
+
+dc_group_index_daily:
+  validation_status=BLOCKED
+  ordinary_key_count=13409
+  ecosystem_aggregate_key_count=253
+  semantic_mismatch_count=13409
+```
+
+Post-failure read-only inspection confirmed that V2 remained active and V2.1
+remained inactive:
+
+```text
+DC_TAXONOMY_FULL_V2 status=ACTIVE is_active=1
+DC_TAXONOMY_FULL_V2_1 status=INACTIVE is_active=0
+deployment_status=LOADED_NOT_ACTIVE
+ec_rebuild_status=FAILED
+activation_status=NOT_ACTIVE
+activated_at_utc=NULL
+```
+
+Fact heads after the failed resume:
+
+```text
+dc_ticker_swing_signal_daily head=2026-08-04 rows=65021
+dc_group_swing_signal_daily head=2026-08-04 rows=13662
+dc_group_synthetic_ohlc_daily head=2026-08-04 rows=13409
+dc_group_index_daily head=2026-08-04 rows=13662
+
+ec_ticker_signal_daily head=2026-08-04 rows=65021
+ec_group_signal_daily head=2026-08-04 rows=13409
+ec_group_synthetic_ohlc_daily head=2026-08-04 rows=13409
+ec_group_index_daily head=2026-08-04 rows=13409
+```
+
+The V2.1 DC tables contain ecosystem aggregate rows, but the EC group target
+tables still contain only `GROUP_L1` and `GROUP_L2` rows:
+
+```text
+dc_group_swing_signal_daily V2.1 ecosystem rows=253 date_range=2025-08-01..2026-08-04
+dc_group_index_daily V2.1 ecosystem rows=253 date_range=2025-08-01..2026-08-04
+
+ec_group_signal_daily V2.1 GROUP_L1 rows=4048, GROUP_L2 rows=9361
+ec_group_synthetic_ohlc_daily V2.1 GROUP_L1 rows=4048, GROUP_L2 rows=9361
+ec_group_index_daily V2.1 GROUP_L1 rows=4048, GROUP_L2 rows=9361
+```
+
+Final guards and sources:
+
+```text
+skip_next_run=false
+datacenter_taxonomy_version=DC_TAXONOMY_FULL_V2
+ec_source_layer_taxonomy_version=DC_TAXONOMY_FULL_V2
+taxonomy_operation_lock_active=false
+
+data/datacenter_taxonomy_full_v2.csv sha256=178de3b56891a37b7472748b3f05b77625cc5c9dde4637cb63be50aed807e2e1
+data/datacenter_taxonomy_full_v2_1.csv sha256=2e27c6e68aa22c53c04e123f79744058b39a6a22b465634fda7510971c3159ef
+backup sha256 unchanged=7b00488c4f713c53641920fa270c5c35ede6d6fca89bc531e4a9d2d1430b2721
+```
+
+Explicit non-actions during this resume:
+
+```text
+V2.1 not activated
+Scheduler not run
+Datacenter pipeline not run
+Stage 2 not run
+EC rebuild/loaders/chunks not run
+EC cleanup not applied
+watermark finalization not completed
+migrations not applied
+external fetch not performed
+new full backup not created
+backup not restored
+taxonomy CSVs unchanged
+watchlist unchanged
+```
+
+Required next work before activation: diagnose the DC aggregate repair
+validation contract and the EC group-table ecosystem aggregate mapping. Do not
+activate V2.1 from deployment 2 while `ec_rebuild_status=FAILED` and
+`activation_status=NOT_ACTIVE`.
