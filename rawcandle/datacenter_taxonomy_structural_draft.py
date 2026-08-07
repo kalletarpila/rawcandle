@@ -293,11 +293,11 @@ def ai_software_v3_request(
         ("SOUN", "Vertical AI applications / monetization engines", "WATCH_ONLY"),
     ]
     secondary = [
-        ("SNOW", "AI data cloud / vector data platforms", "EXTENDED"),
-        ("ESTC", "AI data cloud / vector data platforms", "EXTENDED"),
-        ("DDOG", "AI observability / agent operations", "EXTENDED"),
-        ("DT", "AI observability / agent operations", "EXTENDED"),
-        ("NOW", "Agentic automation / workflow AI", "EXTENDED"),
+        ("SNOW", "AI data cloud / vector data platforms", "CORE"),
+        ("ESTC", "AI data cloud / vector data platforms", "CORE"),
+        ("DDOG", "AI observability / agent operations", "CORE"),
+        ("DT", "AI observability / agent operations", "CORE"),
+        ("NOW", "Agentic automation / workflow AI", "CORE"),
         ("GTLB", "AI observability / agent operations", "EXTENDED"),
         ("MSFT", "Agentic automation / workflow AI", "EXTENDED"),
         ("GOOGL", "AI data cloud / vector data platforms", "EXTENDED"),

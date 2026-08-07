@@ -111,21 +111,21 @@ AI software secondary memberships:
 
 ```text
 SNOW: primary remains Operations / Observability / ITSM / data platform / CORE
-  secondary = AI software & data workloads / AI data cloud / vector data platforms / EXTENDED
+  secondary = AI software & data workloads / AI data cloud / vector data platforms / CORE
 ESTC: primary remains Operations / Observability / ITSM / data platform / CORE
-  secondary = AI software & data workloads / AI data cloud / vector data platforms / EXTENDED
+  secondary = AI software & data workloads / AI data cloud / vector data platforms / CORE
 DDOG: primary remains Operations / Observability / ITSM / data platform / CORE
-  secondary = AI software & data workloads / AI observability / agent operations / EXTENDED
+  secondary = AI software & data workloads / AI observability / agent operations / CORE
 DT: primary remains Operations / Observability / ITSM / data platform / CORE
-  secondary = AI software & data workloads / AI observability / agent operations / EXTENDED
+  secondary = AI software & data workloads / AI observability / agent operations / CORE
 NOW: primary remains Operations / Observability / ITSM / data platform / CORE
-  secondary = AI software & data workloads / Agentic automation / workflow AI / EXTENDED
+  secondary = AI software & data workloads / Agentic automation / workflow AI / CORE
 ```
 
-The `EXTENDED` status is used for these preserved-primary AI memberships as the
-conservative first-draft choice: the tickers already have a `CORE` primary
-classification elsewhere, while the new AI layer expresses additional relevance
-rather than replacing their current primary role.
+The `is_primary` and `report_group_status` fields are independent membership
+attributes. These five tickers keep their current primary rows, and their new
+AI software secondary memberships are marked `CORE` because they are anchor
+constituents for the new AI-layer report grouping.
 
 Other existing tickers that kept their current primary memberships and received
 new secondary memberships:
@@ -197,7 +197,8 @@ required columns are present
 all six new subindustries exist under the new layer
 requested CORE / EXTENDED / WATCH_ONLY primary memberships exist
 SNOW, ESTC, DDOG, DT, and NOW kept their base primary memberships
-SNOW, ESTC, DDOG, DT, and NOW received AI secondary memberships
+SNOW, ESTC, DDOG, DT, and NOW received CORE AI secondary memberships
+MSFT, GOOGL, AMZN, ORCL, PANW, FTNT, and CRWD received EXTENDED AI secondary memberships
 WATCH_ONLY tickers BBAI, FSLY, SOUN are present
 explicitly excluded tickers were not added to the new V3 layer
 no accidental unrelated layer/subindustry removals occurred

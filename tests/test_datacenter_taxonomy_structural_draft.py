@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -159,18 +160,42 @@ def test_ai_v3_request_preserves_existing_primary_memberships_and_adds_secondary
         "DT": "AI observability / agent operations",
         "NOW": "Agentic automation / workflow AI",
     }
+    extended_secondary = {
+        "MSFT": "Agentic automation / workflow AI",
+        "GOOGL": "AI data cloud / vector data platforms",
+        "AMZN": "AI edge delivery / inference gateways",
+        "ORCL": "AI data cloud / vector data platforms",
+        "PANW": "AI observability / agent operations",
+        "FTNT": "AI edge delivery / inference gateways",
+        "CRWD": "AI observability / agent operations",
+    }
+    watch_only_primary = {
+        "BBAI": "Enterprise AI operating platforms",
+        "FSLY": "AI edge delivery / inference gateways",
+        "SOUN": "Vertical AI applications / monetization engines",
+    }
     for ticker, primary in expected_base_primary.items():
         primary_rows = [row for row in by_ticker[ticker] if row.is_primary == 1]
         assert [(row.layer, row.subindustry) for row in primary_rows] == [primary]
         assert any(
             row.layer == "AI software & data workloads"
             and row.subindustry == expected_secondary[ticker]
+            and row.report_group_status == "CORE"
+            and row.is_primary == 0
+            for row in by_ticker[ticker]
+        )
+    for ticker, subindustry in extended_secondary.items():
+        assert any(
+            row.layer == "AI software & data workloads"
+            and row.subindustry == subindustry
             and row.report_group_status == "EXTENDED"
             and row.is_primary == 0
             for row in by_ticker[ticker]
         )
     assert result.validation_summary["changed_primary_membership_count"] == 0
     assert result.validation_summary["secondary_membership_added_count"] == 13
+    primary_counts = Counter(row.ticker for row in rows if row.is_primary == 1)
+    assert [ticker for ticker, count in primary_counts.items() if count > 1] == []
     assert any(
         row.ticker == "PLTR"
         and row.layer == "AI software & data workloads"
@@ -179,3 +204,17 @@ def test_ai_v3_request_preserves_existing_primary_memberships_and_adds_secondary
         and row.is_primary == 1
         for row in rows
     )
+    for ticker, subindustry in watch_only_primary.items():
+        assert any(
+            row.layer == "AI software & data workloads"
+            and row.subindustry == subindustry
+            and row.report_group_status == "WATCH_ONLY"
+            and row.is_primary == 1
+            for row in by_ticker[ticker]
+        )
+    excluded = {"AAPL", "TSLA", "META", "NFLX", "SHOP", "UBER", "ABNB", "SEZL", "RDDT", "HOOD"}
+    assert [
+        row.ticker
+        for row in rows
+        if row.ticker in excluded and row.layer == "AI software & data workloads"
+    ] == []
