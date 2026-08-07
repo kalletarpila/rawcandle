@@ -44,6 +44,38 @@ PYTHONPATH=. python3 rawcandle/cli/run_scheduled_stock_update.py \
   --market usa
 ```
 
+## Scheduler fundamentals post-step
+
+The production scheduler entrypoint is `rawcandle/cli/run_stock_update_scheduler.py --config scheduler_config.json`. The configured scheduler run is serialized by the existing scheduler lock and runs these stages in order:
+
+1. configured RawCandle market OHLCV updates
+2. technical relevance post-step, when enabled
+3. Datacenter and EC source-layer post-steps for USA, when the USA market phase is eligible
+4. SwingMaster USA fundamentals post-step
+
+The SwingMaster stage stays on the process boundary. RawCandle invokes the existing SwingMaster CLIs from the configured `swingmaster_repo_path` and does not copy fundamentals logic into RawCandle. By default the scheduler uses `/home/kalle/projects/swingmaster/.venv/bin/python`, `/home/kalle/projects/swingmaster/fundamentals_usa.db`, and the scheduler `osakedata_db_path`.
+
+Daily behavior:
+
+- every non-skipped scheduler run executes SwingMaster USA `check_fundamental_new_results.py` after the RawCandle pipeline finishes
+- the check uses the scheduler's explicit decision date and `swingmaster_calendar_maintenance_limit=100` by default
+- stdout, stderr, command, cwd, and exit code are captured in `swingmaster_usa_result_check_<timestamp>.txt`
+
+Sunday behavior:
+
+- Sunday uses the same single fresh check result from that run
+- if the fresh plan has executable candidates, RawCandle invokes SwingMaster `run_fundamental_quarter_update.py --quarter-refresh-plan-json <fresh-plan>`
+- old plan artifacts are never reused by the scheduler
+- no weekly update is attempted when the check fails, when the check has zero candidates, or Monday-Saturday
+
+Failure behavior:
+
+- check failures are reported as `swingmaster_result_check_status=FAILED` and make the scheduler result failed
+- Sunday update failures are reported as `swingmaster_weekly_update_status=FAILED`; candidate success/failure counts are preserved when the SwingMaster CLI emitted them
+- the scheduler does not retry either SwingMaster subprocess inside the same run
+
+The scheduler summary JSON and CLI output include a dedicated `swingmaster_*` / `swingmaster_fundamentals.*` field family, including active ticker count, 7-day watch-window count, due result checks, confirmation calls, failure retries, maintenance selected, unique provider-check tickers, maintenance backlog remaining, result-check log path, result-check plan path, and weekly update counts. The scheduler UI loads these fields from the latest summary JSON and lists SwingMaster text logs alongside market, Datacenter, and EC logs.
+
 ## Pre-run checklist
 
 - ensure no UI stock update is running

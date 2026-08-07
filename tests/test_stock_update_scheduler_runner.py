@@ -252,6 +252,10 @@ def _write_config(
     ec_source_layer_only_on_new_signal_date=None,
     datacenter_stage2_incremental_enabled=None,
     datacenter_stage2_overlap_trading_days=None,
+    swingmaster_fundamentals_enabled=False,
+    swingmaster_repo_path=None,
+    swingmaster_python_path=None,
+    swingmaster_fundamentals_db_path=None,
 ):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
@@ -265,6 +269,13 @@ def _write_config(
         config.enabled_markets = enabled_markets
     config.skip_next_run = skip_next_run
     config.technical_relevance_enabled = technical_relevance_enabled
+    config.swingmaster_fundamentals_enabled = swingmaster_fundamentals_enabled
+    if swingmaster_repo_path is not None:
+        config.swingmaster_repo_path = str(swingmaster_repo_path)
+    if swingmaster_python_path is not None:
+        config.swingmaster_python_path = str(swingmaster_python_path)
+    if swingmaster_fundamentals_db_path is not None:
+        config.swingmaster_fundamentals_db_path = str(swingmaster_fundamentals_db_path)
     if ec_source_layer_enabled is not None:
         config.ec_source_layer_enabled = ec_source_layer_enabled
     if ec_source_layer_ecosystem is not None:
@@ -3713,3 +3724,287 @@ def test_scheduler_runner_unexpected_scheduler_exception_writes_failed_status(
     assert status["is_running"] is False
     assert status["last_status"] == STATUS_FAILED
     assert "summary write failed" in status["error"]
+
+
+
+def _patch_scheduler_for_swingmaster_only(monkeypatch):
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_technical_relevance_post_step",
+        lambda **kwargs: scheduler_runner.TechnicalRelevancePostStepResult(
+            attempted=0,
+            enabled=False,
+            status="DISABLED",
+            market="usa",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_datacenter_post_step",
+        lambda **kwargs: DatacenterPostStepResult(
+            attempted=1,
+            status="OK",
+            market="usa",
+            audit_validation_status="OK",
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_ec_source_layer_refresh_post_step",
+        lambda **kwargs: scheduler_runner.EcSourceLayerRefreshPostStepResult(
+            attempted=0,
+            status="SKIPPED",
+            skipped_reason="TEST",
+        ),
+    )
+
+
+def _fixed_scheduler_date(monkeypatch, iso_date: str):
+    import datetime as real_datetime
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls.fromisoformat(iso_date + "T12:00:00")
+            return value.replace(tzinfo=tz) if tz is not None else value
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.datetime.datetime", FixedDateTime)
+
+
+def _result_check_stdout(*, status="SUCCESS", candidate_count=0, plan_json="/tmp/fresh_plan.json"):
+    return json.dumps(
+        {
+            "check_status": status,
+            "summary": {
+                "active_fetch_count": 2936,
+                "due_for_confirmation_watch_count": 17,
+                "due_for_result_check_count": 3,
+                "due_for_confirmation_count": 5,
+                "failure_retry_count": 2,
+                "maintenance_selected_count": 100,
+                "unique_provider_check_ticker_count": 110,
+                "maintenance_backlog_remaining": 24,
+                "candidate_count": candidate_count,
+                "plan_json": plan_json,
+            },
+            "artifact_paths": {"plan_json": plan_json},
+            "stages": [],
+        }
+    )
+
+
+def test_scheduler_runner_runs_swingmaster_result_check_on_weekday_without_update(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    _touch(python_path)
+    _fixed_scheduler_date(monkeypatch, "2026-08-07")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return _FakeCompletedProcess(returncode=0, stdout=_result_check_stdout(candidate_count=4), stderr="")
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_run)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+        swingmaster_python_path=python_path,
+        swingmaster_fundamentals_db_path=repo / "fundamentals_usa.db",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(calls) == 1
+    assert "check_fundamental_new_results.py" in calls[0][1]
+    assert "run_fundamental_quarter_update.py" not in " ".join(calls[0])
+    assert result.swingmaster_result_check_status == "SUCCESS"
+    assert result.swingmaster_weekly_update_attempted == 0
+    assert result.swingmaster_active_tickers == 2936
+    assert result.swingmaster_7_day_watch_window_count == 17
+    assert result.swingmaster_due_for_result_check == 3
+    assert result.swingmaster_future_confirmation_provider_calls_now == 5
+    assert result.swingmaster_failure_retries == 2
+    assert result.swingmaster_maintenance_selected == 100
+    assert result.swingmaster_total_unique_provider_check_tickers == 110
+    assert result.swingmaster_maintenance_backlog_remaining == 24
+
+
+def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    _touch(python_path)
+    fresh_plan = str(tmp_path / "fresh_plan.json")
+    _fixed_scheduler_date(monkeypatch, "2026-08-09")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if "check_fundamental_new_results.py" in command[1]:
+            return _FakeCompletedProcess(returncode=0, stdout=_result_check_stdout(candidate_count=2, plan_json=fresh_plan), stderr="")
+        return _FakeCompletedProcess(
+            returncode=0,
+            stdout=(
+                "SUMMARY plan_candidate_count=2\n"
+                "SUMMARY tickers_succeeded=2\n"
+                "SUMMARY failed_candidates_json=[]\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_run)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+        swingmaster_python_path=python_path,
+        swingmaster_fundamentals_db_path=repo / "fundamentals_usa.db",
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(calls) == 2
+    update_command = calls[1]
+    assert "run_fundamental_quarter_update.py" in update_command[1]
+    assert update_command[update_command.index("--quarter-refresh-plan-json") + 1] == fresh_plan
+    assert result.swingmaster_weekly_update_attempted == 1
+    assert result.swingmaster_weekly_update_status == "SUCCESS"
+    assert result.swingmaster_weekly_update_planned_candidates == 2
+    assert result.swingmaster_weekly_update_successful_candidates == 2
+    assert result.swingmaster_weekly_update_failed_candidates == 0
+
+
+def test_scheduler_runner_sunday_zero_candidates_skips_update(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    _touch(python_path)
+    _fixed_scheduler_date(monkeypatch, "2026-08-09")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda command, **kwargs: calls.append(command) or _FakeCompletedProcess(returncode=0, stdout=_result_check_stdout(candidate_count=0), stderr=""),
+    )
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+        swingmaster_python_path=python_path,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(calls) == 1
+    assert result.swingmaster_weekly_update_attempted == 0
+    assert result.swingmaster_weekly_update_status == "SKIPPED"
+
+
+def test_scheduler_runner_check_failure_blocks_sunday_update(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    _touch(python_path)
+    _fixed_scheduler_date(monkeypatch, "2026-08-09")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda command, **kwargs: calls.append(command) or _FakeCompletedProcess(returncode=1, stdout=_result_check_stdout(status="FAILED", candidate_count=2), stderr="bad"),
+    )
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+        swingmaster_python_path=python_path,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(calls) == 1
+    assert result.overall_status == STATUS_FAILED
+    assert result.swingmaster_result_check_status == "FAILED"
+    assert result.swingmaster_weekly_update_attempted == 0
+
+
+def test_scheduler_runner_reports_partial_sunday_update(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    _touch(python_path)
+    _fixed_scheduler_date(monkeypatch, "2026-08-09")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+
+    def fake_run(command, **kwargs):
+        if "check_fundamental_new_results.py" in command[1]:
+            return _FakeCompletedProcess(returncode=0, stdout=_result_check_stdout(candidate_count=3), stderr="")
+        return _FakeCompletedProcess(
+            returncode=1,
+            stdout=(
+                "SUMMARY plan_candidate_count=3\n"
+                "SUMMARY tickers_succeeded=2\n"
+                "SUMMARY failed_candidates_json=[{\"ticker\":\"BAD\"}]\n"
+            ),
+            stderr="one failed",
+        )
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_run)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+        swingmaster_python_path=python_path,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.overall_status == STATUS_FAILED
+    assert result.swingmaster_weekly_update_status == "FAILED"
+    assert result.swingmaster_weekly_update_planned_candidates == 3
+    assert result.swingmaster_weekly_update_successful_candidates == 2
+    assert result.swingmaster_weekly_update_failed_candidates == 1
+    assert result.swingmaster_weekly_update_retryable_candidates == 1

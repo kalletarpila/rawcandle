@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager, redirect_stdout
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import IO, Iterator, List, Optional
 from zoneinfo import ZoneInfo
@@ -166,6 +166,31 @@ class ScheduledStockUpdateRunResult:
     datacenter_taxonomy_version: str = ""
     datacenter_failed_component: str = "NONE"
     datacenter_safe_next_action: str = "NONE"
+    swingmaster_fundamentals_attempted: int = 0
+    swingmaster_result_check_status: str = "DISABLED"
+    swingmaster_result_check_exit_code: int | None = None
+    swingmaster_result_check_log_path: str = ""
+    swingmaster_result_check_plan_json: str = "NONE"
+    swingmaster_result_check_candidate_count: int = 0
+    swingmaster_result_check_error: str = "NONE"
+    swingmaster_active_tickers: int = 0
+    swingmaster_7_day_watch_window_count: int = 0
+    swingmaster_due_for_result_check: int = 0
+    swingmaster_future_confirmation_provider_calls_now: int = 0
+    swingmaster_failure_retries: int = 0
+    swingmaster_maintenance_selected: int = 0
+    swingmaster_total_unique_provider_check_tickers: int = 0
+    swingmaster_maintenance_backlog_remaining: int = 0
+    swingmaster_weekly_update_attempted: int = 0
+    swingmaster_weekly_update_status: str = "SKIPPED"
+    swingmaster_weekly_update_exit_code: int | None = None
+    swingmaster_weekly_update_log_path: str = ""
+    swingmaster_weekly_update_plan_json: str = "NONE"
+    swingmaster_weekly_update_planned_candidates: int = 0
+    swingmaster_weekly_update_successful_candidates: int = 0
+    swingmaster_weekly_update_failed_candidates: int = 0
+    swingmaster_weekly_update_retryable_candidates: int = 0
+    swingmaster_weekly_update_error: str = "NONE"
 
 
 class SchedulerAlreadyRunningError(RuntimeError):
@@ -209,6 +234,35 @@ class TechnicalRelevanceEndDateResolution:
     candidate_count: int
     ticker_valid_date_count: int
     skip_reason: str
+
+
+@dataclass(frozen=True)
+class SwingMasterFundamentalsPostStepResult:
+    attempted: int = 0
+    result_check_status: str = "DISABLED"
+    result_check_exit_code: int | None = None
+    result_check_log_path: str = ""
+    result_check_plan_json: str = "NONE"
+    result_check_candidate_count: int = 0
+    result_check_error: str = "NONE"
+    active_tickers: int = 0
+    seven_day_watch_window_count: int = 0
+    due_for_result_check: int = 0
+    future_confirmation_provider_calls_now: int = 0
+    failure_retries: int = 0
+    maintenance_selected: int = 0
+    total_unique_provider_check_tickers: int = 0
+    maintenance_backlog_remaining: int = 0
+    weekly_update_attempted: int = 0
+    weekly_update_status: str = "SKIPPED"
+    weekly_update_exit_code: int | None = None
+    weekly_update_log_path: str = ""
+    weekly_update_plan_json: str = "NONE"
+    weekly_update_planned_candidates: int = 0
+    weekly_update_successful_candidates: int = 0
+    weekly_update_failed_candidates: int = 0
+    weekly_update_retryable_candidates: int = 0
+    weekly_update_error: str = "NONE"
 
 
 @dataclass(frozen=True)
@@ -1880,6 +1934,315 @@ def _build_market_log_path(log_dir: Path, market: str, started_at: datetime.date
         suffix += 1
 
 
+def _resolve_swingmaster_repo_path(config: StockUpdateSchedulerConfig) -> Path:
+    return Path(config.swingmaster_repo_path).expanduser().resolve()
+
+
+def _resolve_swingmaster_python_path(config: StockUpdateSchedulerConfig) -> Path:
+    repo_path = _resolve_swingmaster_repo_path(config)
+    if config.swingmaster_python_path:
+        python_path = Path(config.swingmaster_python_path).expanduser()
+        if python_path.is_absolute():
+            return python_path.resolve()
+        return (repo_path / python_path).resolve()
+    return (repo_path / ".venv" / "bin" / "python").resolve()
+
+
+def _resolve_swingmaster_fundamentals_db_path(config: StockUpdateSchedulerConfig) -> Path:
+    repo_path = _resolve_swingmaster_repo_path(config)
+    if config.swingmaster_fundamentals_db_path:
+        db_path = Path(config.swingmaster_fundamentals_db_path).expanduser()
+        if db_path.is_absolute():
+            return db_path.resolve()
+        return (repo_path / db_path).resolve()
+    return (repo_path / "fundamentals_usa.db").resolve()
+
+
+def _build_swingmaster_log_path(log_dir: Path, name: str, started_at: datetime.datetime) -> Path:
+    minute_timestamp = _format_utc_filename_minute_timestamp(started_at)
+    base_name = f"swingmaster_{name}_{minute_timestamp}"
+    candidate = log_dir / f"{base_name}.txt"
+    if not candidate.exists():
+        return candidate
+    suffix = 2
+    while True:
+        candidate = log_dir / f"{base_name}_{suffix}.txt"
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
+def _write_swingmaster_process_log(
+    *,
+    log_path: Path,
+    command: list[str],
+    cwd: Path,
+    started_at_utc: str,
+    finished_at_utc: str,
+    exit_code: int | None,
+    stdout: str,
+    stderr: str,
+    error: str | None = None,
+) -> None:
+    lines = [
+        f"run_started_at_utc={started_at_utc}",
+        f"run_finished_at_utc={finished_at_utc}",
+        f"cwd={cwd}",
+        "command=" + json.dumps(command),
+        f"exit_code={exit_code if exit_code is not None else 'NONE'}",
+    ]
+    if error:
+        lines.append(f"error={error}")
+    lines.append("=== STDOUT ===")
+    lines.append(stdout.rstrip())
+    lines.append("=== STDERR ===")
+    lines.append(stderr.rstrip())
+    log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _extract_last_json_object(text: str) -> dict:
+    decoder = json.JSONDecoder()
+    for index in range(len(text) - 1, -1, -1):
+        if text[index] != "{":
+            continue
+        candidate = text[index:].strip()
+        try:
+            value, end_index = decoder.raw_decode(candidate)
+        except json.JSONDecodeError:
+            continue
+        if candidate[end_index:].strip() == "" and isinstance(value, dict):
+            return value
+    raise ValueError("No JSON object found in SwingMaster stdout")
+
+
+def _parse_summary_lines(stdout: str) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for line in stdout.splitlines():
+        if not line.startswith("SUMMARY ") or "=" not in line:
+            continue
+        key, value = line.removeprefix("SUMMARY ").split("=", 1)
+        parsed[key] = value
+    return parsed
+
+
+def _json_list_len(value: str | None) -> int:
+    if not value:
+        return 0
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return 0
+    return len(parsed) if isinstance(parsed, list) else 0
+
+
+def _int_summary(summary: dict, *keys: str) -> int:
+    for key in keys:
+        value = summary.get(key)
+        if value is None or value == "":
+            continue
+        return int(value)
+    return 0
+
+
+def _run_swingmaster_fundamentals_post_step(
+    *,
+    config: StockUpdateSchedulerConfig,
+    decision_date: str,
+) -> SwingMasterFundamentalsPostStepResult:
+    if not config.swingmaster_fundamentals_enabled:
+        return SwingMasterFundamentalsPostStepResult(attempted=0, result_check_status="DISABLED")
+
+    log_dir = Path(config.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    repo_path = _resolve_swingmaster_repo_path(config)
+    python_path = _resolve_swingmaster_python_path(config)
+    fundamentals_db_path = _resolve_swingmaster_fundamentals_db_path(config)
+    osakedata_db_path = Path(config.osakedata_db_path).expanduser().resolve()
+    check_started_at = _utc_now()
+    check_started_at_utc = _format_utc_timestamp(check_started_at)
+    check_log_path = _build_swingmaster_log_path(log_dir, "usa_result_check", check_started_at)
+    check_command = [
+        str(python_path),
+        str(repo_path / "swingmaster" / "cli" / "check_fundamental_new_results.py"),
+        "--fundamentals-db",
+        str(fundamentals_db_path),
+        "--ohlcv-db",
+        str(osakedata_db_path),
+        "--decision-date",
+        decision_date,
+        "--ohlcv-stale-days",
+        str(config.swingmaster_ohlcv_stale_days),
+        "--event-watch-days-after",
+        str(config.swingmaster_event_watch_days_after),
+        "--calendar-maintenance-limit",
+        str(config.swingmaster_calendar_maintenance_limit),
+        "--json",
+    ]
+
+    if not repo_path.exists() or not python_path.exists():
+        missing_path = repo_path if not repo_path.exists() else python_path
+        error = f"Missing SwingMaster dependency: {missing_path}"
+        _write_swingmaster_process_log(
+            log_path=check_log_path,
+            command=check_command,
+            cwd=repo_path,
+            started_at_utc=check_started_at_utc,
+            finished_at_utc=_format_utc_timestamp(_utc_now()),
+            exit_code=None,
+            stdout="",
+            stderr="",
+            error=error,
+        )
+        return SwingMasterFundamentalsPostStepResult(
+            attempted=1,
+            result_check_status="FAILED",
+            result_check_log_path=str(check_log_path),
+            result_check_error=error,
+        )
+
+    try:
+        check_process = subprocess.run(check_command, cwd=str(repo_path), capture_output=True, text=True)
+        _write_swingmaster_process_log(
+            log_path=check_log_path,
+            command=check_command,
+            cwd=repo_path,
+            started_at_utc=check_started_at_utc,
+            finished_at_utc=_format_utc_timestamp(_utc_now()),
+            exit_code=check_process.returncode,
+            stdout=check_process.stdout,
+            stderr=check_process.stderr,
+        )
+        payload = _extract_last_json_object(check_process.stdout)
+        summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+        result_check_status = str(payload.get("check_status") or "FAILED")
+        result_check_error = (
+            "NONE"
+            if check_process.returncode in (0, 2) and result_check_status != "FAILED"
+            else check_process.stderr.strip() or result_check_status
+        )
+    except Exception as exc:
+        stdout = check_process.stdout if "check_process" in locals() else ""
+        stderr = check_process.stderr if "check_process" in locals() else ""
+        exit_code = check_process.returncode if "check_process" in locals() else None
+        _write_swingmaster_process_log(
+            log_path=check_log_path,
+            command=check_command,
+            cwd=repo_path,
+            started_at_utc=check_started_at_utc,
+            finished_at_utc=_format_utc_timestamp(_utc_now()),
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            error=str(exc),
+        )
+        return SwingMasterFundamentalsPostStepResult(
+            attempted=1,
+            result_check_status="FAILED",
+            result_check_exit_code=exit_code,
+            result_check_log_path=str(check_log_path),
+            result_check_error=str(exc),
+        )
+
+    candidate_count = _int_summary(summary, "candidate_count")
+    plan_json = str(summary.get("plan_json") or "NONE")
+    base = {
+        "attempted": 1,
+        "result_check_status": result_check_status,
+        "result_check_exit_code": check_process.returncode,
+        "result_check_log_path": str(check_log_path),
+        "result_check_plan_json": plan_json,
+        "result_check_candidate_count": candidate_count,
+        "result_check_error": result_check_error,
+        "active_tickers": _int_summary(summary, "active_fetch_count", "active_tickers"),
+        "seven_day_watch_window_count": _int_summary(summary, "due_for_confirmation_watch_count"),
+        "due_for_result_check": _int_summary(summary, "due_for_result_check_count"),
+        "future_confirmation_provider_calls_now": _int_summary(summary, "due_for_confirmation_count"),
+        "failure_retries": _int_summary(summary, "failure_retry_count", "failure_retries"),
+        "maintenance_selected": _int_summary(summary, "maintenance_selected_count"),
+        "total_unique_provider_check_tickers": _int_summary(summary, "unique_provider_check_ticker_count"),
+        "maintenance_backlog_remaining": _int_summary(summary, "maintenance_backlog_remaining"),
+    }
+    if check_process.returncode not in (0, 2) or result_check_status == "FAILED":
+        return SwingMasterFundamentalsPostStepResult(**base)
+
+    decision = datetime.date.fromisoformat(decision_date)
+    if decision.weekday() != 6 or candidate_count <= 0:
+        return SwingMasterFundamentalsPostStepResult(**base)
+
+    update_started_at = _utc_now()
+    update_started_at_utc = _format_utc_timestamp(update_started_at)
+    update_log_path = _build_swingmaster_log_path(log_dir, "usa_weekly_update", update_started_at)
+    update_command = [
+        str(python_path),
+        str(repo_path / "swingmaster" / "cli" / "run_fundamental_quarter_update.py"),
+        "--db",
+        str(fundamentals_db_path),
+        "--osakedata-db",
+        str(osakedata_db_path),
+        "--run-id",
+        f"USA_QUARTER_UPDATE_{decision_date}__QUARTERLY",
+        "--market",
+        "usa",
+        "--quarter-refresh-plan-json",
+        plan_json,
+    ]
+    try:
+        update_process = subprocess.run(update_command, cwd=str(repo_path), capture_output=True, text=True)
+        _write_swingmaster_process_log(
+            log_path=update_log_path,
+            command=update_command,
+            cwd=repo_path,
+            started_at_utc=update_started_at_utc,
+            finished_at_utc=_format_utc_timestamp(_utc_now()),
+            exit_code=update_process.returncode,
+            stdout=update_process.stdout,
+            stderr=update_process.stderr,
+        )
+        update_summary = _parse_summary_lines(update_process.stdout)
+        failed_candidates = _json_list_len(update_summary.get("failed_candidates_json"))
+        planned_candidates = int(update_summary.get("plan_candidate_count") or candidate_count)
+        successful_candidates = int(update_summary.get("tickers_succeeded") or max(planned_candidates - failed_candidates, 0))
+        update_error = "NONE" if update_process.returncode == 0 else update_process.stderr.strip() or "WEEKLY_UPDATE_FAILED"
+        return SwingMasterFundamentalsPostStepResult(
+            **base,
+            weekly_update_attempted=1,
+            weekly_update_status="SUCCESS" if update_process.returncode == 0 else "FAILED",
+            weekly_update_exit_code=update_process.returncode,
+            weekly_update_log_path=str(update_log_path),
+            weekly_update_plan_json=plan_json,
+            weekly_update_planned_candidates=planned_candidates,
+            weekly_update_successful_candidates=successful_candidates,
+            weekly_update_failed_candidates=failed_candidates,
+            weekly_update_retryable_candidates=failed_candidates,
+            weekly_update_error=update_error,
+        )
+    except Exception as exc:
+        stdout = update_process.stdout if "update_process" in locals() else ""
+        stderr = update_process.stderr if "update_process" in locals() else ""
+        exit_code = update_process.returncode if "update_process" in locals() else None
+        _write_swingmaster_process_log(
+            log_path=update_log_path,
+            command=update_command,
+            cwd=repo_path,
+            started_at_utc=update_started_at_utc,
+            finished_at_utc=_format_utc_timestamp(_utc_now()),
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            error=str(exc),
+        )
+        return SwingMasterFundamentalsPostStepResult(
+            **base,
+            weekly_update_attempted=1,
+            weekly_update_status="FAILED",
+            weekly_update_exit_code=exit_code,
+            weekly_update_log_path=str(update_log_path),
+            weekly_update_plan_json=plan_json,
+            weekly_update_planned_candidates=candidate_count,
+            weekly_update_error=str(exc),
+        )
+
+
 def _preflight_validate_config(config: StockUpdateSchedulerConfig) -> None:
     osakedata_db_path = Path(config.osakedata_db_path)
     if not osakedata_db_path.exists():
@@ -1994,35 +2357,7 @@ def run_scheduler_config(
             status_initialized = True
 
             if config.skip_next_run:
-                reset_config = StockUpdateSchedulerConfig(
-                    enabled_markets=list(config.enabled_markets),
-                    run_time=config.run_time,
-                    osakedata_db_path=config.osakedata_db_path,
-                    analysis_db_path=config.analysis_db_path,
-                    log_dir=config.log_dir,
-                    timezone=config.timezone,
-                    skip_next_run=False,
-                    technical_relevance_enabled=config.technical_relevance_enabled,
-                    datacenter_stage2_incremental_enabled=(
-                        config.datacenter_stage2_incremental_enabled
-                    ),
-                    datacenter_stage2_overlap_trading_days=(
-                        config.datacenter_stage2_overlap_trading_days
-                    ),
-                    ec_source_layer_enabled=config.ec_source_layer_enabled,
-                    ec_source_layer_ecosystem=config.ec_source_layer_ecosystem,
-                    ec_source_layer_taxonomy_version=config.ec_source_layer_taxonomy_version,
-                    ec_source_layer_taxonomy_csv=config.ec_source_layer_taxonomy_csv,
-                    ec_source_layer_watchlist=config.ec_source_layer_watchlist,
-                    ec_source_layer_backup_dir=config.ec_source_layer_backup_dir,
-                    ec_source_layer_mode=config.ec_source_layer_mode,
-                    ec_source_layer_require_legacy_reports_success=(
-                        config.ec_source_layer_require_legacy_reports_success
-                    ),
-                    ec_source_layer_only_on_new_signal_date=(
-                        config.ec_source_layer_only_on_new_signal_date
-                    ),
-                )
+                reset_config = replace(config, skip_next_run=False)
                 write_scheduler_config(config_path, reset_config)
 
                 result = ScheduledStockUpdateRunResult(
@@ -2153,10 +2488,16 @@ def run_scheduler_config(
                     target_market=datacenter_result.market,
                     datacenter_result=datacenter_result,
                 )
+            swingmaster_result = _run_swingmaster_fundamentals_post_step(
+                config=config,
+                decision_date=effective_today,
+            )
             overall_status = (
                 STATUS_FAILED
                 if technical_relevance_result.status == "FAILED"
                 or datacenter_result.status == "FAILED"
+                or swingmaster_result.result_check_status == "FAILED"
+                or swingmaster_result.weekly_update_status == "FAILED"
                 else market_update_phase_status
             )
             if (
@@ -2342,6 +2683,45 @@ def run_scheduler_config(
                 ),
                 datacenter_failed_component=datacenter_failed_component,
                 datacenter_safe_next_action=datacenter_safe_next_action,
+                swingmaster_fundamentals_attempted=swingmaster_result.attempted,
+                swingmaster_result_check_status=swingmaster_result.result_check_status,
+                swingmaster_result_check_exit_code=swingmaster_result.result_check_exit_code,
+                swingmaster_result_check_log_path=swingmaster_result.result_check_log_path,
+                swingmaster_result_check_plan_json=swingmaster_result.result_check_plan_json,
+                swingmaster_result_check_candidate_count=swingmaster_result.result_check_candidate_count,
+                swingmaster_result_check_error=swingmaster_result.result_check_error,
+                swingmaster_active_tickers=swingmaster_result.active_tickers,
+                swingmaster_7_day_watch_window_count=swingmaster_result.seven_day_watch_window_count,
+                swingmaster_due_for_result_check=swingmaster_result.due_for_result_check,
+                swingmaster_future_confirmation_provider_calls_now=(
+                    swingmaster_result.future_confirmation_provider_calls_now
+                ),
+                swingmaster_failure_retries=swingmaster_result.failure_retries,
+                swingmaster_maintenance_selected=swingmaster_result.maintenance_selected,
+                swingmaster_total_unique_provider_check_tickers=(
+                    swingmaster_result.total_unique_provider_check_tickers
+                ),
+                swingmaster_maintenance_backlog_remaining=(
+                    swingmaster_result.maintenance_backlog_remaining
+                ),
+                swingmaster_weekly_update_attempted=swingmaster_result.weekly_update_attempted,
+                swingmaster_weekly_update_status=swingmaster_result.weekly_update_status,
+                swingmaster_weekly_update_exit_code=swingmaster_result.weekly_update_exit_code,
+                swingmaster_weekly_update_log_path=swingmaster_result.weekly_update_log_path,
+                swingmaster_weekly_update_plan_json=swingmaster_result.weekly_update_plan_json,
+                swingmaster_weekly_update_planned_candidates=(
+                    swingmaster_result.weekly_update_planned_candidates
+                ),
+                swingmaster_weekly_update_successful_candidates=(
+                    swingmaster_result.weekly_update_successful_candidates
+                ),
+                swingmaster_weekly_update_failed_candidates=(
+                    swingmaster_result.weekly_update_failed_candidates
+                ),
+                swingmaster_weekly_update_retryable_candidates=(
+                    swingmaster_result.weekly_update_retryable_candidates
+                ),
+                swingmaster_weekly_update_error=swingmaster_result.weekly_update_error,
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

@@ -340,11 +340,13 @@ def test_list_scheduler_log_files_returns_recent_text_logs(tmp_path):
         "stock_update_omxh_20260617T0900Z.txt",
         "datacenter_pipeline_usa_20260617T0901Z.txt",
         "ec_source_layer_usa_20260617T0902Z.txt",
+        "swingmaster_usa_result_check_20260617T0903Z.txt",
         "ignore.json",
     ]:
         (log_dir / name).write_text("x", encoding="utf-8")
 
     assert [entry["filename"] for entry in list_scheduler_log_files(str(log_dir))] == [
+        "swingmaster_usa_result_check_20260617T0903Z.txt",
         "ec_source_layer_usa_20260617T0902Z.txt",
         "datacenter_pipeline_usa_20260617T0901Z.txt",
         "stock_update_omxh_20260617T0900Z.txt",
@@ -366,6 +368,7 @@ def test_list_scheduler_log_files_limits_to_10_newest_known_scheduler_logs(tmp_p
         "datacenter_pipeline_usa_20260617T0908Z.txt",
         "ec_source_layer_usa_20260617T0909Z.txt",
         "stock_update_omxh_20260617T0910Z.txt",
+        "swingmaster_usa_weekly_update_20260617T0911Z.txt",
         "random_notes_20260617T0911Z.txt",
     ]
     for name in names:
@@ -374,10 +377,10 @@ def test_list_scheduler_log_files_limits_to_10_newest_known_scheduler_logs(tmp_p
     results = list_scheduler_log_files(str(log_dir))
 
     assert len(results) == 10
-    assert results[0]["filename"] == "stock_update_omxh_20260617T0910Z.txt"
-    assert results[-1]["filename"] == "stock_update_usa_20260617T0901Z.txt"
+    assert results[0]["filename"] == "swingmaster_usa_weekly_update_20260617T0911Z.txt"
+    assert results[-1]["filename"] == "datacenter_pipeline_usa_20260617T0902Z.txt"
     assert all(
-        entry["type"] in {"market_log", "datacenter_log", "ec_source_layer_log"}
+        entry["type"] in {"market_log", "datacenter_log", "ec_source_layer_log", "swingmaster_fundamentals_log"}
         for entry in results
     )
 
@@ -775,6 +778,11 @@ def test_run_app_formats_summary_lines_from_latest_summary(tmp_path, monkeypatch
                 "summary_json_path": "/tmp/summary.json",
                 "technical_relevance_status": "OK",
                 "ec_source_layer_status": "SKIPPED",
+                "swingmaster_result_check_status": "SUCCESS",
+                "swingmaster_weekly_update_status": "SKIPPED",
+                "swingmaster_result_check_log_path": "/tmp/result_check.txt",
+                "swingmaster_weekly_update_log_path": "",
+                "swingmaster_result_check_plan_json": "/tmp/plan.json",
                 "market_results": [
                     {
                         "market": "omxh",
@@ -797,6 +805,10 @@ def test_run_app_formats_summary_lines_from_latest_summary(tmp_path, monkeypatch
     assert "overall_status=OK" in page.summary_field.value
     assert "enabled_markets=omxh,usa" in page.summary_field.value
     assert "market=omxh status=OK log=/tmp/omxh.txt" in page.summary_field.value
+    assert "swingmaster_result_check_status=SUCCESS" in page.summary_field.value
+    assert "swingmaster_weekly_update_status=SKIPPED" in page.summary_field.value
+    assert "swingmaster_result_check_log_path=/tmp/result_check.txt" in page.summary_field.value
+    assert "swingmaster_result_check_plan_json=/tmp/plan.json" in page.summary_field.value
 
 
 def test_skip_next_run_helpers_roundtrip(tmp_path, monkeypatch):

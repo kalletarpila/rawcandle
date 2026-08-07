@@ -97,6 +97,23 @@ def _result(overall_status):
         ec_source_layer_group_index_rows=2,
         ec_source_layer_watermark_rows=5,
         ec_source_layer_error="NONE",
+        swingmaster_fundamentals_attempted=1,
+        swingmaster_result_check_status="SUCCESS",
+        swingmaster_result_check_exit_code=0,
+        swingmaster_result_check_log_path="/tmp/logs/swingmaster_check.txt",
+        swingmaster_result_check_plan_json="/tmp/plan.json",
+        swingmaster_result_check_candidate_count=2,
+        swingmaster_active_tickers=2936,
+        swingmaster_7_day_watch_window_count=17,
+        swingmaster_due_for_result_check=3,
+        swingmaster_future_confirmation_provider_calls_now=5,
+        swingmaster_failure_retries=2,
+        swingmaster_maintenance_selected=100,
+        swingmaster_total_unique_provider_check_tickers=110,
+        swingmaster_maintenance_backlog_remaining=24,
+        swingmaster_weekly_update_attempted=0,
+        swingmaster_weekly_update_status="SKIPPED",
+        swingmaster_weekly_update_log_path="",
     )
 
 
@@ -127,6 +144,10 @@ def test_scheduler_cli_successful_run_prints_preserved_summary_lines(monkeypatch
     assert "SUMMARY technical_relevance.attempted=0" in captured.out
     assert "SUMMARY datacenter_pipeline.status=SKIPPED" in captured.out
     assert "SUMMARY ec_source_layer.status=OK" in captured.out
+    assert "SUMMARY swingmaster_fundamentals.result_check_status=SUCCESS" in captured.out
+    assert "SUMMARY swingmaster_fundamentals.active_tickers=2936" in captured.out
+    assert "SUMMARY swingmaster_fundamentals.maintenance_selected=100" in captured.out
+    assert "SUMMARY swingmaster_fundamentals.weekly_update_status=SKIPPED" in captured.out
 
 
 def test_scheduler_cli_ok_with_warnings_exits_one(monkeypatch):

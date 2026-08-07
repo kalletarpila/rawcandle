@@ -15,6 +15,9 @@ DEFAULT_RUN_TIME = "05:30"
 DEFAULT_TIMEZONE = "Europe/Helsinki"
 DEFAULT_DATACENTER_TAXONOMY_CSV = "data/datacenter_ecosystem_taxonomy_full_v1.csv"
 DEFAULT_DATACENTER_TAXONOMY_VERSION = "DC_TAXONOMY_FULL_V1"
+DEFAULT_SWINGMASTER_REPO_PATH = "/home/kalle/projects/swingmaster"
+DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT = 100
+DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS = 14
 _RUN_TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 _REQUIRED_CONFIG_KEYS = {
     "enabled_markets",
@@ -51,6 +54,13 @@ _OPTIONAL_CONFIG_KEYS.update(
         "ec_source_layer_mode",
         "ec_source_layer_require_legacy_reports_success",
         "ec_source_layer_only_on_new_signal_date",
+        "swingmaster_fundamentals_enabled",
+        "swingmaster_repo_path",
+        "swingmaster_python_path",
+        "swingmaster_fundamentals_db_path",
+        "swingmaster_calendar_maintenance_limit",
+        "swingmaster_ohlcv_stale_days",
+        "swingmaster_event_watch_days_after",
     }
 )
 SUPPORTED_EC_SOURCE_LAYER_MODES = ("refresh_latest",)
@@ -91,6 +101,13 @@ class StockUpdateSchedulerConfig:
     ec_source_layer_mode: str = "refresh_latest"
     ec_source_layer_require_legacy_reports_success: bool = True
     ec_source_layer_only_on_new_signal_date: bool = True
+    swingmaster_fundamentals_enabled: bool = True
+    swingmaster_repo_path: str = DEFAULT_SWINGMASTER_REPO_PATH
+    swingmaster_python_path: str | None = None
+    swingmaster_fundamentals_db_path: str | None = None
+    swingmaster_calendar_maintenance_limit: int = DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT
+    swingmaster_ohlcv_stale_days: int = DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS
+    swingmaster_event_watch_days_after: int = 5
 
 
 def validate_market_list(markets: List[str]) -> List[str]:
@@ -170,6 +187,22 @@ def validate_scheduler_config(
         raise ValueError("datacenter_v3_reports_enabled must be a bool")
     if type(config.ec_source_layer_enabled) is not bool:
         raise ValueError("ec_source_layer_enabled must be a bool")
+    if type(config.swingmaster_fundamentals_enabled) is not bool:
+        raise ValueError("swingmaster_fundamentals_enabled must be a bool")
+    if not config.swingmaster_repo_path:
+        raise ValueError("swingmaster_repo_path must be non-empty")
+    if type(config.swingmaster_calendar_maintenance_limit) is not int:
+        raise ValueError("swingmaster_calendar_maintenance_limit must be an int")
+    if config.swingmaster_calendar_maintenance_limit < 0:
+        raise ValueError("swingmaster_calendar_maintenance_limit must be zero or greater")
+    if type(config.swingmaster_ohlcv_stale_days) is not int:
+        raise ValueError("swingmaster_ohlcv_stale_days must be an int")
+    if config.swingmaster_ohlcv_stale_days < 0:
+        raise ValueError("swingmaster_ohlcv_stale_days must be zero or greater")
+    if type(config.swingmaster_event_watch_days_after) is not int:
+        raise ValueError("swingmaster_event_watch_days_after must be an int")
+    if config.swingmaster_event_watch_days_after < 0:
+        raise ValueError("swingmaster_event_watch_days_after must be zero or greater")
     if config.ec_source_layer_mode not in SUPPORTED_EC_SOURCE_LAYER_MODES:
         raise ValueError(
             "ec_source_layer_mode must be one of: "
@@ -248,6 +281,13 @@ def validate_scheduler_config(
         ec_source_layer_only_on_new_signal_date=(
             config.ec_source_layer_only_on_new_signal_date
         ),
+        swingmaster_fundamentals_enabled=config.swingmaster_fundamentals_enabled,
+        swingmaster_repo_path=config.swingmaster_repo_path,
+        swingmaster_python_path=config.swingmaster_python_path,
+        swingmaster_fundamentals_db_path=config.swingmaster_fundamentals_db_path,
+        swingmaster_calendar_maintenance_limit=config.swingmaster_calendar_maintenance_limit,
+        swingmaster_ohlcv_stale_days=config.swingmaster_ohlcv_stale_days,
+        swingmaster_event_watch_days_after=config.swingmaster_event_watch_days_after,
     )
 
 
@@ -333,6 +373,18 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         ec_source_layer_only_on_new_signal_date=data.get(
             "ec_source_layer_only_on_new_signal_date", True
         ),
+        swingmaster_fundamentals_enabled=data.get("swingmaster_fundamentals_enabled", True),
+        swingmaster_repo_path=data.get("swingmaster_repo_path", DEFAULT_SWINGMASTER_REPO_PATH),
+        swingmaster_python_path=data.get("swingmaster_python_path"),
+        swingmaster_fundamentals_db_path=data.get("swingmaster_fundamentals_db_path"),
+        swingmaster_calendar_maintenance_limit=data.get(
+            "swingmaster_calendar_maintenance_limit",
+            DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT,
+        ),
+        swingmaster_ohlcv_stale_days=data.get(
+            "swingmaster_ohlcv_stale_days", DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS
+        ),
+        swingmaster_event_watch_days_after=data.get("swingmaster_event_watch_days_after", 5),
     )
     return validate_scheduler_config(config)
 
@@ -389,5 +441,12 @@ def create_default_scheduler_config(
         ec_source_layer_mode="refresh_latest",
         ec_source_layer_require_legacy_reports_success=True,
         ec_source_layer_only_on_new_signal_date=True,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=DEFAULT_SWINGMASTER_REPO_PATH,
+        swingmaster_python_path=None,
+        swingmaster_fundamentals_db_path=None,
+        swingmaster_calendar_maintenance_limit=DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT,
+        swingmaster_ohlcv_stale_days=DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS,
+        swingmaster_event_watch_days_after=5,
     )
     return validate_scheduler_config(config)
