@@ -1,0 +1,23 @@
+{
+  "active_taxonomy_version": "DC_TAXONOMY_FULL_V2_1",
+  "active_taxonomy_version_id": 3,
+  "active_taxonomy_source": "data/datacenter_taxonomy_full_v2_1.csv",
+  "active_taxonomy_source_hash": "2e27c6e68aa22c53c04e123f79744058b39a6a22b465634fda7510971c3159ef",
+  "blockers": [],
+  "change_execution_class": "FULL_REBUILD",
+  "current_scheduler_datacenter_version": "DC_TAXONOMY_FULL_V2_1",
+  "current_scheduler_ec_version": "DC_TAXONOMY_FULL_V2_1",
+  "expected_ec_required": true,
+  "expected_rebuild_required": true,
+  "observed_current_head_date": "2026-08-06",
+  "planning_date_from": "2025-08-01",
+  "ready_for_execution_later": true,
+  "stale_row_risk": {
+    "assessment": "HIGH_UNLESS_OLD_VERSION_EC_CLEANUP_COMPLETES_BEFORE_WHOLE_RANGE_VALIDATION",
+    "cleanup_phase_required": "OLD_EC_CLEANED",
+    "historical_failure_reference": "docs/datacenter_taxonomy_v2_ec_full_rebuild_retry6_20260803.md",
+    "whole_range_validation_phase": "WHOLE_RANGE_VALIDATED"
+  },
+  "v3_draft_path": "temp/datacenter_taxonomy_v3_ai_software_layer/datacenter_taxonomy_full_v3.csv",
+  "v3_source_hash": "d64f39bc3ec70ddde887d9d438736fe5c83553bc0d67b728d98d5c0514eed977"
+}
