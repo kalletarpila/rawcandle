@@ -9,6 +9,7 @@ from analysis.datacenter_indices.taxonomy import load_datacenter_taxonomy_csv
 from rawcandle.datacenter_taxonomy_structural_draft import (
     DraftMembership,
     StructuralDraftRequest,
+    ai_software_v3_request,
     build_structural_taxonomy_draft,
 )
 
@@ -74,7 +75,7 @@ def test_primary_memberships_under_new_subindustries_validate(tmp_path: Path):
     assert row.is_primary == 1
 
 
-def test_existing_primary_membership_is_moved_without_duplicate_primary(tmp_path: Path):
+def test_existing_primary_membership_is_preserved_and_ai_membership_is_secondary(tmp_path: Path):
     result = build_structural_taxonomy_draft(
         _request(
             tmp_path,
@@ -85,8 +86,10 @@ def test_existing_primary_membership_is_moved_without_duplicate_primary(tmp_path
     rows = load_datacenter_taxonomy_csv(result.draft_csv, "DC_TAXONOMY_FULL_V2")
     bbb_rows = [row for row in rows if row.ticker == "BBB"]
     assert sum(row.is_primary for row in bbb_rows) == 1
-    assert next(row for row in bbb_rows if row.is_primary == 1).subindustry == "Operations AI"
-    assert result.validation_summary["changed_primary_membership_count"] == 1
+    assert next(row for row in bbb_rows if row.is_primary == 1).subindustry == "Observability"
+    assert any(row.layer == "AI software" and row.subindustry == "Operations AI" and row.is_primary == 0 for row in bbb_rows)
+    assert result.validation_summary["changed_primary_membership_count"] == 0
+    assert result.validation_summary["secondary_membership_added_count"] == 1
 
 
 def test_excluded_ticker_is_not_added(tmp_path: Path):
@@ -131,3 +134,48 @@ def test_existing_taxonomy_rows_are_preserved_and_secondary_added(tmp_path: Path
     assert any(row.ticker == "CCC" and row.layer == "Cloud" and row.is_primary == 1 for row in rows)
     assert any(row.ticker == "CCC" and row.layer == "AI software" and row.is_primary == 0 for row in rows)
     assert result.validation_summary["secondary_membership_added_count"] == 1
+
+
+def test_ai_v3_request_preserves_existing_primary_memberships_and_adds_secondary_ai_memberships(tmp_path: Path):
+    result = build_structural_taxonomy_draft(
+        ai_software_v3_request(output_dir=tmp_path / "draft")
+    )
+
+    rows = load_datacenter_taxonomy_csv(result.draft_csv, "DC_TAXONOMY_FULL_V3")
+    by_ticker = {}
+    for row in rows:
+        by_ticker.setdefault(row.ticker, []).append(row)
+    expected_base_primary = {
+        "SNOW": ("Operations", "Observability / ITSM / data platform"),
+        "ESTC": ("Operations", "Observability / ITSM / data platform"),
+        "DDOG": ("Operations", "Observability / ITSM / data platform"),
+        "DT": ("Operations", "Observability / ITSM / data platform"),
+        "NOW": ("Operations", "Observability / ITSM / data platform"),
+    }
+    expected_secondary = {
+        "SNOW": "AI data cloud / vector data platforms",
+        "ESTC": "AI data cloud / vector data platforms",
+        "DDOG": "AI observability / agent operations",
+        "DT": "AI observability / agent operations",
+        "NOW": "Agentic automation / workflow AI",
+    }
+    for ticker, primary in expected_base_primary.items():
+        primary_rows = [row for row in by_ticker[ticker] if row.is_primary == 1]
+        assert [(row.layer, row.subindustry) for row in primary_rows] == [primary]
+        assert any(
+            row.layer == "AI software & data workloads"
+            and row.subindustry == expected_secondary[ticker]
+            and row.report_group_status == "EXTENDED"
+            and row.is_primary == 0
+            for row in by_ticker[ticker]
+        )
+    assert result.validation_summary["changed_primary_membership_count"] == 0
+    assert result.validation_summary["secondary_membership_added_count"] == 13
+    assert any(
+        row.ticker == "PLTR"
+        and row.layer == "AI software & data workloads"
+        and row.subindustry == "Enterprise AI operating platforms"
+        and row.report_group_status == "CORE"
+        and row.is_primary == 1
+        for row in rows
+    )

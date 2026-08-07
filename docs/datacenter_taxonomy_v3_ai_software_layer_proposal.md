@@ -45,6 +45,10 @@ Vertical AI applications / monetization engines
 
 ## Primary Memberships
 
+Existing base-taxonomy tickers keep their current primary memberships. The
+primary memberships below apply only to tickers that are newly added by the V3
+draft.
+
 Enterprise AI operating platforms:
 
 ```text
@@ -56,7 +60,7 @@ WATCH_ONLY: BBAI
 AI data cloud / vector data platforms:
 
 ```text
-CORE: SNOW, MDB, ESTC
+CORE: MDB
 EXTENDED: CFLT, TDC
 WATCH_ONLY: none
 ```
@@ -64,7 +68,7 @@ WATCH_ONLY: none
 AI observability / agent operations:
 
 ```text
-CORE: DDOG, DT
+CORE: none
 EXTENDED: none
 WATCH_ONLY: none
 ```
@@ -72,7 +76,7 @@ WATCH_ONLY: none
 Agentic automation / workflow AI:
 
 ```text
-CORE: NOW, CRM, PATH
+CORE: CRM, PATH
 EXTENDED: TEAM, GTLB, MNDY
 WATCH_ONLY: none
 ```
@@ -102,23 +106,29 @@ ADBE, AI, AKAM, APP, BBAI, CFLT, CRM, DUOL, FSLY, GTLB, IBM, MDB,
 MNDY, NET, PATH, PLTR, SOUN, TDC, TEAM, TEM, UPST
 ```
 
-Existing tickers that received new primary memberships:
+Existing tickers whose primary memberships were preserved and that received new
+AI software secondary memberships:
 
 ```text
-SNOW: Operations / Observability / ITSM / data platform
-  -> AI software & data workloads / AI data cloud / vector data platforms
-ESTC: Operations / Observability / ITSM / data platform
-  -> AI software & data workloads / AI data cloud / vector data platforms
-DDOG: Operations / Observability / ITSM / data platform
-  -> AI software & data workloads / AI observability / agent operations
-DT: Operations / Observability / ITSM / data platform
-  -> AI software & data workloads / AI observability / agent operations
-NOW: Operations / Observability / ITSM / data platform
-  -> AI software & data workloads / Agentic automation / workflow AI
+SNOW: primary remains Operations / Observability / ITSM / data platform / CORE
+  secondary = AI software & data workloads / AI data cloud / vector data platforms / EXTENDED
+ESTC: primary remains Operations / Observability / ITSM / data platform / CORE
+  secondary = AI software & data workloads / AI data cloud / vector data platforms / EXTENDED
+DDOG: primary remains Operations / Observability / ITSM / data platform / CORE
+  secondary = AI software & data workloads / AI observability / agent operations / EXTENDED
+DT: primary remains Operations / Observability / ITSM / data platform / CORE
+  secondary = AI software & data workloads / AI observability / agent operations / EXTENDED
+NOW: primary remains Operations / Observability / ITSM / data platform / CORE
+  secondary = AI software & data workloads / Agentic automation / workflow AI / EXTENDED
 ```
 
-Existing tickers that kept their current primary memberships and received new
-secondary memberships:
+The `EXTENDED` status is used for these preserved-primary AI memberships as the
+conservative first-draft choice: the tickers already have a `CORE` primary
+classification elsewhere, while the new AI layer expresses additional relevance
+rather than replacing their current primary role.
+
+Other existing tickers that kept their current primary memberships and received
+new secondary memberships:
 
 ```text
 MSFT: AI software & data workloads / Agentic automation / workflow AI / EXTENDED
@@ -170,8 +180,8 @@ base_row_count=350
 draft_row_count=384
 new_entity_count=21
 new_membership_count=34
-changed_primary_membership_count=5
-secondary_membership_added_count=8
+changed_primary_membership_count=0
+secondary_membership_added_count=13
 secondary_membership_skipped_count=0
 removed_tickers=[]
 removed_layers=[]
@@ -186,6 +196,8 @@ V3 CSV parses successfully
 required columns are present
 all six new subindustries exist under the new layer
 requested CORE / EXTENDED / WATCH_ONLY primary memberships exist
+SNOW, ESTC, DDOG, DT, and NOW kept their base primary memberships
+SNOW, ESTC, DDOG, DT, and NOW received AI secondary memberships
 WATCH_ONLY tickers BBAI, FSLY, SOUN are present
 explicitly excluded tickers were not added to the new V3 layer
 no accidental unrelated layer/subindustry removals occurred
@@ -204,8 +216,9 @@ then requested secondary rows in proposal order.
 ## Change Type
 
 This is a computational taxonomy change because it adds a new layer, adds new
-subindustries, adds new memberships, and changes five primary memberships. It
-must not be treated as `REPORT_STATUS_ONLY`.
+subindustries, adds new ticker entities, and adds new memberships. It must not
+be treated as `REPORT_STATUS_ONLY`. Existing base tickers keep their current
+primary memberships in this first V3 draft.
 
 ## Later Production Steps
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -60,6 +60,8 @@ def build_structural_taxonomy_draft(request: StructuralDraftRequest) -> Structur
     added_tickers: set[str] = set()
     changed_memberships: list[dict[str, str]] = []
     change_log: list[dict[str, str]] = []
+    secondary_added = 0
+    secondary_skipped: list[dict[str, str]] = []
 
     for membership in request.primary_memberships:
         _validate_requested_membership(membership, excluded=excluded, expected_primary=1)
@@ -67,13 +69,38 @@ def build_structural_taxonomy_draft(request: StructuralDraftRequest) -> Structur
         previous_primary = _primary_row(rows, ticker)
         target_key = _membership_key_from_values(ticker, membership.layer, membership.subindustry)
         if previous_primary is not None and _membership_key(previous_primary) != target_key:
-            previous_primary["is_primary"] = "0"
+            secondary_membership = DraftMembership(
+                ticker=ticker,
+                layer=membership.layer,
+                subindustry=membership.subindustry,
+                report_group_status=membership.report_group_status,
+                is_primary=0,
+                role_weight=membership.role_weight,
+                notes=membership.notes,
+            )
+            if target_key in {_membership_key(row) for row in rows}:
+                secondary_skipped.append(
+                    {
+                        "ticker": ticker,
+                        "layer": membership.layer,
+                        "subindustry": membership.subindustry,
+                        "reason": "membership_already_exists",
+                    }
+                )
+                continue
+            _upsert_membership_row(
+                rows,
+                secondary_membership,
+                request.draft_taxonomy_version,
+                force_primary=False,
+            )
+            secondary_added += 1
             changed_memberships.append(
                 {
-                    "change_type": "primary_membership_changed",
+                    "change_type": "secondary_membership_added",
                     "ticker": ticker,
-                    "from_layer": previous_primary["layer"],
-                    "from_subindustry": previous_primary["subindustry"],
+                    "from_layer": "",
+                    "from_subindustry": "",
                     "to_layer": membership.layer,
                     "to_subindustry": membership.subindustry,
                     "status": membership.report_group_status,
@@ -81,14 +108,15 @@ def build_structural_taxonomy_draft(request: StructuralDraftRequest) -> Structur
             )
             change_log.append(
                 {
-                    "change_type": "primary_membership_changed",
+                    "change_type": "primary_preserved_secondary_membership_added",
                     "ticker": ticker,
                     "layer": membership.layer,
                     "subindustry": membership.subindustry,
                     "status": membership.report_group_status,
-                    "is_primary": "1",
+                    "is_primary": "0",
                 }
             )
+            continue
         action = _upsert_membership_row(
             rows,
             membership,
@@ -109,8 +137,6 @@ def build_structural_taxonomy_draft(request: StructuralDraftRequest) -> Structur
             }
         )
 
-    secondary_added = 0
-    secondary_skipped: list[dict[str, str]] = []
     for membership in request.secondary_memberships:
         _validate_requested_membership(membership, excluded=excluded, expected_primary=0)
         ticker = _ticker(membership.ticker)
@@ -248,14 +274,9 @@ def ai_software_v3_request(
         ("AI", "Enterprise AI operating platforms", "CORE"),
         ("IBM", "Enterprise AI operating platforms", "EXTENDED"),
         ("BBAI", "Enterprise AI operating platforms", "WATCH_ONLY"),
-        ("SNOW", "AI data cloud / vector data platforms", "CORE"),
         ("MDB", "AI data cloud / vector data platforms", "CORE"),
-        ("ESTC", "AI data cloud / vector data platforms", "CORE"),
         ("CFLT", "AI data cloud / vector data platforms", "EXTENDED"),
         ("TDC", "AI data cloud / vector data platforms", "EXTENDED"),
-        ("DDOG", "AI observability / agent operations", "CORE"),
-        ("DT", "AI observability / agent operations", "CORE"),
-        ("NOW", "Agentic automation / workflow AI", "CORE"),
         ("CRM", "Agentic automation / workflow AI", "CORE"),
         ("PATH", "Agentic automation / workflow AI", "CORE"),
         ("TEAM", "Agentic automation / workflow AI", "EXTENDED"),
@@ -272,6 +293,11 @@ def ai_software_v3_request(
         ("SOUN", "Vertical AI applications / monetization engines", "WATCH_ONLY"),
     ]
     secondary = [
+        ("SNOW", "AI data cloud / vector data platforms", "EXTENDED"),
+        ("ESTC", "AI data cloud / vector data platforms", "EXTENDED"),
+        ("DDOG", "AI observability / agent operations", "EXTENDED"),
+        ("DT", "AI observability / agent operations", "EXTENDED"),
+        ("NOW", "Agentic automation / workflow AI", "EXTENDED"),
         ("GTLB", "AI observability / agent operations", "EXTENDED"),
         ("MSFT", "Agentic automation / workflow AI", "EXTENDED"),
         ("GOOGL", "AI data cloud / vector data platforms", "EXTENDED"),
