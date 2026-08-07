@@ -218,6 +218,124 @@ def _write_rolling_report(**kwargs):
     }
 
 
+def _write_taxonomy_csv(path: Path, version: str, rows: list[list[object]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes"]
+    for row in rows:
+        ticker, layer, subindustry, status, is_primary, role_weight, notes = row
+        lines.append(f"{version},{ticker},{layer},{subindustry},{status},{is_primary},{role_weight},{notes}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _base_taxonomy_rows(status: str = "CORE") -> list[list[object]]:
+    return [
+        ["AMZN", "Cloud", "Hyperscalers", status, 1, 1.0, ""],
+        ["GFS", "Semis", "Foundry", status, 1, 1.0, ""],
+    ]
+
+
+def test_previous_daily_lookup_accepts_same_taxonomy(tmp_path):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    current = reports_dir / "datacenter_daily_2026-05-15_0800_full.md"
+    previous = reports_dir / "datacenter_daily_2026-05-14_0700_full.md"
+    current.write_text(CURRENT_DAILY.replace("2026-08-03", "2026-05-15"), encoding="utf-8")
+    previous.write_text(PREVIOUS_DAILY.replace("2026-07-31", "2026-05-14"), encoding="utf-8")
+
+    result = orchestrator._find_previous_daily_report_result(
+        current_daily_report=current,
+        current_signal_date="2026-05-15",
+    )
+
+    assert result.selected_path == previous
+    assert result.skip_reason == ""
+
+
+def test_previous_daily_lookup_reports_missing_when_no_previous_file(tmp_path):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    current = reports_dir / "datacenter_daily_2026-05-15_0800_full.md"
+    current.write_text(CURRENT_DAILY.replace("2026-08-03", "2026-05-15"), encoding="utf-8")
+
+    result = orchestrator._find_previous_daily_report_result(
+        current_daily_report=current,
+        current_signal_date="2026-05-15",
+    )
+
+    assert result.selected_path is None
+    assert result.skip_reason == "missing_previous_daily"
+
+
+def test_previous_daily_lookup_accepts_report_status_only_taxonomy_transition(tmp_path):
+    data_dir = tmp_path / "data"
+    _write_taxonomy_csv(data_dir / "datacenter_taxonomy_full_v1.csv", "DC_TAXONOMY_FULL_V1", _base_taxonomy_rows("WATCH_ONLY"))
+    _write_taxonomy_csv(data_dir / "datacenter_taxonomy_full_v2.csv", "DC_TAXONOMY_FULL_V2", _base_taxonomy_rows("EXTENDED"))
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    current = reports_dir / "datacenter_daily_2026-05-15_0800_full.md"
+    previous = reports_dir / "datacenter_daily_2026-05-14_0700_full.md"
+    current.write_text(
+        CURRENT_DAILY.replace("2026-08-03", "2026-05-15").replace("DC_TAXONOMY_FULL_V1", "DC_TAXONOMY_FULL_V2"),
+        encoding="utf-8",
+    )
+    previous.write_text(PREVIOUS_DAILY.replace("2026-07-31", "2026-05-14"), encoding="utf-8")
+
+    result = orchestrator._find_previous_daily_report_result(
+        current_daily_report=current,
+        current_signal_date="2026-05-15",
+    )
+
+    assert result.selected_path == previous
+
+
+def test_previous_daily_lookup_blocks_structural_taxonomy_transition(tmp_path):
+    data_dir = tmp_path / "data"
+    _write_taxonomy_csv(data_dir / "datacenter_taxonomy_full_v1.csv", "DC_TAXONOMY_FULL_V1", _base_taxonomy_rows())
+    _write_taxonomy_csv(
+        data_dir / "datacenter_taxonomy_full_v2.csv",
+        "DC_TAXONOMY_FULL_V2",
+        _base_taxonomy_rows() + [["NVDA", "Compute", "GPU", "CORE", 1, 1.0, ""]],
+    )
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    current = reports_dir / "datacenter_daily_2026-05-15_0800_full.md"
+    previous = reports_dir / "datacenter_daily_2026-05-14_0700_full.md"
+    current.write_text(
+        CURRENT_DAILY.replace("2026-08-03", "2026-05-15").replace("DC_TAXONOMY_FULL_V1", "DC_TAXONOMY_FULL_V2"),
+        encoding="utf-8",
+    )
+    previous.write_text(PREVIOUS_DAILY.replace("2026-07-31", "2026-05-14"), encoding="utf-8")
+
+    result = orchestrator._find_previous_daily_report_result(
+        current_daily_report=current,
+        current_signal_date="2026-05-15",
+    )
+
+    assert result.selected_path is None
+    assert result.skip_reason == "previous_daily_incompatible_taxonomy"
+    assert result.rejection_reasons[previous.name] == "incompatible_taxonomy:structural_or_computational_change"
+
+
+def test_previous_daily_lookup_selects_latest_eligible_and_never_current(tmp_path):
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    current = reports_dir / "datacenter_daily_2026-05-15_0800_full.md"
+    older = reports_dir / "datacenter_daily_2026-05-13_0700_full.md"
+    latest = reports_dir / "datacenter_daily_2026-05-14_0700_full.md"
+    current.write_text(CURRENT_DAILY.replace("2026-08-03", "2026-05-15"), encoding="utf-8")
+    older.write_text(PREVIOUS_DAILY.replace("2026-07-31", "2026-05-13"), encoding="utf-8")
+    latest.write_text(PREVIOUS_DAILY.replace("2026-07-31", "2026-05-14"), encoding="utf-8")
+
+    result = orchestrator._find_previous_daily_report_result(
+        current_daily_report=current,
+        current_signal_date="2026-05-15",
+    )
+
+    assert result.selected_path == latest
+    assert result.rejection_reasons[current.name] == "current_report"
+
+
 def test_pipeline_generates_decision_summary_when_previous_daily_exists(tmp_path, monkeypatch):
     _create_analysis_db(tmp_path / "analysis.db")
     _patch_report_only_pipeline(monkeypatch)
@@ -275,6 +393,40 @@ def test_pipeline_skips_decision_summary_nonfatally_without_previous_daily(tmp_p
     assert summary["decision_summary.execution_status"] == "SKIPPED"
     assert summary["decision_summary.skip_reason"] == "missing_previous_daily"
     assert (tmp_path / "reports" / "datacenter_daily_2026-05-15_0800_full.md").exists()
+
+
+def test_pipeline_skips_decision_summary_with_explicit_incompatible_taxonomy(tmp_path, monkeypatch):
+    _create_analysis_db(tmp_path / "analysis.db")
+    _patch_report_only_pipeline(monkeypatch)
+    monkeypatch.setattr(orchestrator, "write_daily_swing_signal_report", _write_current_daily_report)
+    monkeypatch.setattr(orchestrator, "write_weekly_swing_report", _write_rolling_report)
+    data_dir = tmp_path / "data"
+    _write_taxonomy_csv(data_dir / "datacenter_taxonomy_full_v1.csv", "DC_TAXONOMY_FULL_V1", _base_taxonomy_rows())
+    _write_taxonomy_csv(
+        data_dir / "datacenter_taxonomy_full_v2.csv",
+        "DC_TAXONOMY_FULL_V2",
+        _base_taxonomy_rows() + [["NVDA", "Compute", "GPU", "CORE", 1, 1.0, ""]],
+    )
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir(parents=True)
+    previous_daily = reports_dir / "datacenter_daily_2026-05-14_0700_full.md"
+    previous_daily.write_text(
+        PREVIOUS_DAILY.replace("2026-07-31", "2026-05-14").replace("DC_TAXONOMY_FULL_V1", "DC_TAXONOMY_FULL_V2"),
+        encoding="utf-8",
+    )
+
+    result = orchestrator.run_datacenter_swing_pipeline(
+        **_base_kwargs(tmp_path),
+        no_technical_relevance=True,
+        windows_report_copy_enabled=False,
+        generated_at_utc="2026-05-16T08:00:00Z",
+    )
+
+    summary = result["summary"]
+    assert summary["pipeline_status"] == "OK"
+    assert summary["decision_summary.status"] == "SKIPPED"
+    assert summary["decision_summary.execution_status"] == "SKIPPED"
+    assert summary["decision_summary.skip_reason"] == "previous_daily_incompatible_taxonomy"
 
 
 def _arg_value(argv: list[str], option: str) -> str:

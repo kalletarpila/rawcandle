@@ -2665,3 +2665,74 @@ activation apply was run.
 
 Final result: Datacenter V2.1 is active and ready for the next normal Scheduler
 run.
+
+## First V2.1 Run Decision Summary Recovery
+
+The first normal V2.1 Scheduler run completed on 2026-08-07 for
+`signal_date=2026-08-06` and generated the daily plus rolling reports for
+`run_time=0816`. Decision-summary generation initially skipped with:
+
+```text
+decision_summary.status=SKIPPED
+decision_summary.skip_reason=missing_previous_daily
+```
+
+Root cause: the previous daily report existed as
+`swing_reports/datacenter_daily_2026-08-05_0817_full.md`, but it was produced
+under `DC_TAXONOMY_FULL_V2`. The decision-summary previous-report lookup
+required exact `taxonomy_version` equality, so the candidate was filtered out
+and then incorrectly reported as missing.
+
+Compatibility finding: comparing the 2026-08-06 V2.1 report to the 2026-08-05
+V2 report is safe for decision-summary purposes because the taxonomy transition
+is `REPORT_STATUS_ONLY`:
+
+```text
+change_execution_class=REPORT_STATUS_ONLY
+report_status_only_safe=true
+report_status_only_blocking_reasons=[]
+changed_fields=notes, report_group_status, taxonomy_version
+```
+
+The report taxonomy listings also matched on the relevant structural counts:
+
+```text
+current taxonomy=DC_TAXONOMY_FULL_V2_1
+previous taxonomy=DC_TAXONOMY_FULL_V2
+current ticker rows=250
+previous ticker rows=250
+current layer rows=13
+previous layer rows=13
+current subindustry rows=33
+previous subindustry rows=33
+current synthetic group count=47
+previous synthetic group count=47
+```
+
+Code fix: decision-summary previous-daily lookup now distinguishes missing from
+incompatible previous reports. Same-taxonomy reports remain accepted. Different
+taxonomy versions are accepted only when the existing taxonomy classifier proves
+the transition is `REPORT_STATUS_ONLY`; structural or computational changes are
+blocked with `previous_daily_incompatible_taxonomy`.
+
+Manual summary generation result:
+
+```text
+swing_reports/datacenter_decision_summary_2026-08-06_0816_full.md
+swing_reports/datacenter_decision_summary_2026-08-06_0816_full.csv
+generation_status=OK
+previous_daily=swing_reports/datacenter_daily_2026-08-05_0817_full.md
+```
+
+Windows copy result:
+
+```text
+destination=/mnt/d/swing_reports
+decision_summary_md_sha256=93927361cbe1aa37a134452d7fedf1329283ca4bdb89c620b6fa642febc7c47a
+decision_summary_csv_sha256=c8f42574e58b2f62249529c648fa45ac2bb9ab73951442e17c828bf09280d4f7
+report_run_attachment_count=10
+```
+
+No Scheduler run, Datacenter pipeline run, Stage 2 run, DC calculation, EC job,
+taxonomy activation, config change, watchlist change, migration, external fetch,
+or production fact/watermark modification was performed during recovery.

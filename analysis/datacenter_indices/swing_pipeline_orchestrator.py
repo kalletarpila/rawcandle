@@ -199,36 +199,147 @@ def _read_report_metadata(path: Path) -> dict[str, str]:
         return {}
 
 
+@dataclass(frozen=True)
+class PreviousDailyReportLookupResult:
+    selected_path: Path | None
+    skip_reason: str
+    rejection_reasons: dict[str, str]
+
+
 def _find_previous_daily_report(
     *,
     current_daily_report: Path,
     current_signal_date: str,
 ) -> Path | None:
+    return _find_previous_daily_report_result(
+        current_daily_report=current_daily_report,
+        current_signal_date=current_signal_date,
+    ).selected_path
+
+
+def _find_previous_daily_report_result(
+    *,
+    current_daily_report: Path,
+    current_signal_date: str,
+) -> PreviousDailyReportLookupResult:
     current_metadata = _read_report_metadata(current_daily_report)
     candidates: list[tuple[str, str, Path]] = []
+    rejection_reasons: dict[str, str] = {}
     for path in current_daily_report.parent.glob("datacenter_daily_*_full.md"):
         if path.resolve() == current_daily_report.resolve():
+            rejection_reasons[path.name] = "current_report"
             continue
         match = DAILY_REPORT_FILENAME_RE.match(path.name)
         if match is None:
+            rejection_reasons[path.name] = "filename_mismatch"
             continue
         candidate_signal_date = match.group("signal_date")
         if candidate_signal_date >= current_signal_date:
+            rejection_reasons[path.name] = "not_earlier_signal_date"
             continue
         candidate_metadata = _read_report_metadata(path)
-        if not _daily_report_metadata_matches(current_metadata, candidate_metadata):
+        matches, reason = _daily_report_metadata_matches(
+            current_metadata,
+            candidate_metadata,
+            report_dir=current_daily_report.parent,
+        )
+        if not matches:
+            rejection_reasons[path.name] = reason
             continue
         candidates.append((candidate_signal_date, path.name, path))
     if not candidates:
-        return None
-    return sorted(candidates)[-1][2]
+        skip_reason = (
+            "previous_daily_incompatible_taxonomy"
+            if any(reason.startswith("incompatible_taxonomy") for reason in rejection_reasons.values())
+            else "missing_previous_daily"
+        )
+        return PreviousDailyReportLookupResult(
+            selected_path=None,
+            skip_reason=skip_reason,
+            rejection_reasons=rejection_reasons,
+        )
+    return PreviousDailyReportLookupResult(
+        selected_path=sorted(candidates)[-1][2],
+        skip_reason="",
+        rejection_reasons=rejection_reasons,
+    )
 
 
-def _daily_report_metadata_matches(current: dict[str, str], candidate: dict[str, str]) -> bool:
-    for key in ("signal_version", "ohlc_calc_version", "taxonomy_version"):
+def _daily_report_metadata_matches(
+    current: dict[str, str],
+    candidate: dict[str, str],
+    *,
+    report_dir: Path,
+) -> tuple[bool, str]:
+    for key in ("signal_version", "ohlc_calc_version"):
         if current.get(key) and candidate.get(key) != current[key]:
-            return False
-    return True
+            return False, f"metadata_mismatch:{key}"
+    current_taxonomy = current.get("taxonomy_version", "")
+    candidate_taxonomy = candidate.get("taxonomy_version", "")
+    if current_taxonomy and candidate_taxonomy != current_taxonomy:
+        compatible, reason = _taxonomy_versions_decision_summary_compatible(
+            previous_taxonomy_version=candidate_taxonomy,
+            current_taxonomy_version=current_taxonomy,
+            report_dir=report_dir,
+        )
+        if not compatible:
+            return False, reason
+    return True, ""
+
+
+def _taxonomy_versions_decision_summary_compatible(
+    *,
+    previous_taxonomy_version: str,
+    current_taxonomy_version: str,
+    report_dir: Path,
+) -> tuple[bool, str]:
+    if previous_taxonomy_version == current_taxonomy_version:
+        return True, ""
+    previous_csv = _find_taxonomy_csv_for_version(previous_taxonomy_version, report_dir=report_dir)
+    current_csv = _find_taxonomy_csv_for_version(current_taxonomy_version, report_dir=report_dir)
+    if previous_csv is None or current_csv is None:
+        return False, "incompatible_taxonomy:taxonomy_csv_not_found"
+    try:
+        from rawcandle.datacenter_taxonomy_change_orchestrator import (
+            CHANGE_EXECUTION_REPORT_STATUS_ONLY,
+            classify_report_status_only_change,
+        )
+
+        classification = classify_report_status_only_change(
+            current_taxonomy_csv=previous_csv,
+            current_taxonomy_version=previous_taxonomy_version,
+            proposed_taxonomy_csv=current_csv,
+            proposed_taxonomy_version=current_taxonomy_version,
+        )
+    except Exception as exc:
+        return False, f"incompatible_taxonomy:classification_failed:{type(exc).__name__}"
+    if classification.get("change_execution_class") == CHANGE_EXECUTION_REPORT_STATUS_ONLY:
+        return True, "compatible_taxonomy:report_status_only"
+    return False, "incompatible_taxonomy:structural_or_computational_change"
+
+
+def _find_taxonomy_csv_for_version(version: str, *, report_dir: Path) -> Path | None:
+    if not version:
+        return None
+    search_roots = [report_dir.parent / "data", Path.cwd() / "data"]
+    seen: set[Path] = set()
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for path in sorted(root.glob("datacenter_taxonomy*.csv")):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    header = handle.readline()
+                    first_data = handle.readline()
+            except OSError:
+                continue
+            if "taxonomy_version" in header and first_data.startswith(version + ","):
+                return path
+    return None
 
 
 def _generate_decision_summary_report(
@@ -260,12 +371,13 @@ def _generate_decision_summary_report(
             "output_csv": "",
             "previous_daily_report_path": "",
         }
-    previous_daily_report = _find_previous_daily_report(
+    previous_lookup = _find_previous_daily_report_result(
         current_daily_report=current_daily_report,
         current_signal_date=signal_date,
     )
+    previous_daily_report = previous_lookup.selected_path
     if previous_daily_report is None:
-        reason = "missing_previous_daily"
+        reason = previous_lookup.skip_reason or "missing_previous_daily"
         print(f"WARNING decision_summary skipped: {reason}")
         return {
             "status": "SKIPPED",

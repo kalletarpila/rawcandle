@@ -79,9 +79,16 @@ Markdown report unchanged.
 
 In the scheduler/report workflow, `previous_daily` is auto-discovered from the
 same output directory by selecting the latest `datacenter_daily_*_full.md` report
-with a signal date earlier than the current report. If no previous daily report
-is available, automatic summary generation is skipped non-fatally and the source
-reports remain usable.
+with a signal date earlier than the current report. Candidate reports must use
+the same `signal_version` and `ohlc_calc_version`. A different
+`taxonomy_version` is accepted only when the repository taxonomy classifier
+proves the transition is `REPORT_STATUS_ONLY`, meaning the comparison contract
+is unchanged except for report metadata such as taxonomy version, report group
+status, and notes. Structural or computational taxonomy changes are skipped
+with `previous_daily_incompatible_taxonomy`.
+
+If no previous daily report is available, automatic summary generation is
+skipped non-fatally and the source reports remain usable.
 
 When automatic summary generation succeeds, the scheduler/report workflow
 attempts to create both sibling artifacts:
@@ -97,8 +104,8 @@ datacenter_decision_summary_YYYY-MM-DD_HHMM_full.csv
   reports.
 - V1 does not generate new analytics or classifications.
 - Scheduler integration is non-fatal: missing source markdown reports or a
-  missing previous daily report skip the summary without failing the completed
-  daily and rolling reports.
+  missing or incompatible previous daily report skip the summary without failing
+  the completed daily and rolling reports.
 - The CSV companion is generated from the same parsed source markdown as the
   Markdown summary. It does not add separate analytics.
 - If source report formatting changes, parser tests may need updates.
