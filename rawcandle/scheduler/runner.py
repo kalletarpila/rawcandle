@@ -1963,9 +1963,9 @@ def _resolve_swingmaster_python_path(config: StockUpdateSchedulerConfig) -> Path
     if config.swingmaster_python_path:
         python_path = Path(config.swingmaster_python_path).expanduser()
         if python_path.is_absolute():
-            return python_path.resolve()
-        return (repo_path / python_path).resolve()
-    return (repo_path / ".venv" / "bin" / "python").resolve()
+            return python_path
+        return repo_path / python_path
+    return repo_path / ".venv" / "bin" / "python"
 
 
 def _resolve_swingmaster_fundamentals_db_path(config: StockUpdateSchedulerConfig) -> Path:

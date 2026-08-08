@@ -3884,6 +3884,46 @@ def test_scheduler_runner_runs_swingmaster_result_check_on_weekday_without_updat
     assert result.swingmaster_maintenance_backlog_remaining == 24
 
 
+def test_scheduler_runner_keeps_swingmaster_venv_python_symlink_path(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    target_python = repo / ".venv" / "bin" / "python3.10"
+    python_path.parent.mkdir(parents=True)
+    _touch(target_python)
+    python_path.symlink_to(target_python.name)
+    _fixed_scheduler_date(monkeypatch, "2026-08-07")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return _FakeCompletedProcess(
+            returncode=0,
+            stdout=_result_check_stdout(candidate_count=0),
+            stderr="",
+        )
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_run)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.swingmaster_result_check_status == "SUCCESS"
+    assert calls[0][0] == str(python_path)
+    assert calls[0][0] != str(target_python)
+
+
 def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypatch):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
