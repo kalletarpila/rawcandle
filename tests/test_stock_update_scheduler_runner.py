@@ -3851,6 +3851,8 @@ def test_scheduler_runner_runs_swingmaster_result_check_on_weekday_without_updat
 
     def fake_run(command, **kwargs):
         calls.append(command)
+        assert kwargs["cwd"] == str(repo)
+        assert str(repo) in kwargs["env"]["PYTHONPATH"].split(":")
         return _FakeCompletedProcess(returncode=0, stdout=_result_check_stdout(candidate_count=4), stderr="")
 
     monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_run)

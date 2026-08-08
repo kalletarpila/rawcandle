@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import io
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -1977,6 +1978,18 @@ def _resolve_swingmaster_fundamentals_db_path(config: StockUpdateSchedulerConfig
     return (repo_path / "fundamentals_usa.db").resolve()
 
 
+def _swingmaster_subprocess_env(repo_path: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    repo_path_text = str(repo_path)
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        repo_path_text
+        if not existing_pythonpath
+        else repo_path_text + os.pathsep + existing_pythonpath
+    )
+    return env
+
+
 def _build_swingmaster_log_path(log_dir: Path, name: str, started_at: datetime.datetime) -> Path:
     minute_timestamp = _format_utc_filename_minute_timestamp(started_at)
     base_name = f"swingmaster_{name}_{minute_timestamp}"
@@ -2120,7 +2133,13 @@ def _run_swingmaster_fundamentals_post_step(
         )
 
     try:
-        check_process = subprocess.run(check_command, cwd=str(repo_path), capture_output=True, text=True)
+        check_process = subprocess.run(
+            check_command,
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            env=_swingmaster_subprocess_env(repo_path),
+        )
         _write_swingmaster_process_log(
             log_path=check_log_path,
             command=check_command,
@@ -2206,7 +2225,13 @@ def _run_swingmaster_fundamentals_post_step(
         plan_json,
     ]
     try:
-        update_process = subprocess.run(update_command, cwd=str(repo_path), capture_output=True, text=True)
+        update_process = subprocess.run(
+            update_command,
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            env=_swingmaster_subprocess_env(repo_path),
+        )
         _write_swingmaster_process_log(
             log_path=update_log_path,
             command=update_command,
