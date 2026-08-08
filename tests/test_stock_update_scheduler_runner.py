@@ -1244,10 +1244,15 @@ def test_run_datacenter_post_step_uses_latest_valid_price_date_in_pipeline_comma
             watchlist_file=str(tmp_path / "watchlist.txt"),
         ),
     )
-    monkeypatch.setattr(
-        "rawcandle.scheduler.runner.subprocess.run",
-        lambda command, **kwargs: calls.append(command)
-        or _FakeCompletedProcess(
+    def fake_subprocess_run(command, **kwargs):
+        started_logs = list(log_dir.glob("datacenter_pipeline_usa_*.txt"))
+        assert len(started_logs) == 1
+        started_log_text = started_logs[0].read_text(encoding="utf-8")
+        assert "status=STARTED" in started_log_text
+        assert "returncode=" not in started_log_text
+        assert "command=python3 run_datacenter_swing_pipeline.py" in started_log_text
+        calls.append(command)
+        return _FakeCompletedProcess(
             0,
             "\n".join(
                 [
@@ -1263,7 +1268,11 @@ def test_run_datacenter_post_step_uses_latest_valid_price_date_in_pipeline_comma
                     "",
                 ]
             ),
-        ),
+        )
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        fake_subprocess_run,
     )
 
     result = scheduler_runner._run_datacenter_post_step(
@@ -3724,6 +3733,35 @@ def test_scheduler_runner_unexpected_scheduler_exception_writes_failed_status(
     assert status["is_running"] is False
     assert status["last_status"] == STATUS_FAILED
     assert "summary write failed" in status["error"]
+
+
+def test_scheduler_runner_base_exception_writes_failed_status(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(tmp_path, enabled_markets=["omxh"])
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(market=kwargs["market"], status=STATUS_OK),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._write_summary_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        run_scheduler_config(config_path=str(config_path))
+
+    status = read_scheduler_status(str(tmp_path / "logs"))
+    assert status["is_running"] is False
+    assert status["last_status"] == STATUS_FAILED
+    assert status["error"] == "KeyboardInterrupt"
 
 
 

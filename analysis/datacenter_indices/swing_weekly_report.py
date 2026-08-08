@@ -7,6 +7,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Sequence
 
+from rawcandle.io_atomic import write_text_atomic
+
 from .swing_daily_report import (
     DEFAULT_OHLC_CALC_VERSION,
     DEFAULT_SIGNAL_VERSION,
@@ -2577,13 +2579,11 @@ def write_weekly_swing_report(
     output_csv_value = ""
     if output_md is not None:
         output_md_path = _normalize_path(output_md)
-        output_md_path.parent.mkdir(parents=True, exist_ok=True)
-        output_md_path.write_text(markdown, encoding="utf-8")
+        write_text_atomic(output_md_path, markdown, encoding="utf-8")
         output_md_value = str(output_md_path)
     if output_csv is not None:
         output_csv_path = _normalize_path(output_csv)
-        output_csv_path.parent.mkdir(parents=True, exist_ok=True)
-        output_csv_path.write_text(csv_text, encoding="utf-8")
+        write_text_atomic(output_csv_path, csv_text, encoding="utf-8")
         output_csv_value = str(output_csv_path)
 
     breakout_count = len(_build_repeated_ticker_rows(list(report_data["ticker_rows"]), signal_field="breakout_signal"))  # type: ignore[arg-type]

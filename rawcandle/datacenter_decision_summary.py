@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from rawcandle.io_atomic import write_text_atomic
+
 
 class DecisionSummaryError(ValueError):
     pass
@@ -477,11 +479,9 @@ def build_decision_summary(
 
     context = build_decision_summary_context(reports)
     rendered = render_decision_summary(reports, context=context)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(rendered, encoding="utf-8")
+    write_text_atomic(output, rendered, encoding="utf-8")
     if output_csv is not None:
-        output_csv.parent.mkdir(parents=True, exist_ok=True)
-        output_csv.write_text(render_decision_summary_csv(context), encoding="utf-8")
+        write_text_atomic(output_csv, render_decision_summary_csv(context), encoding="utf-8")
     return output
 
 

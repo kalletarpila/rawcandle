@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from rawcandle.io_atomic import write_text_atomic
+
 from .taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
 
 GROUP_TYPE_ORDER = {
@@ -1064,10 +1066,8 @@ def write_datacenter_index_report(
 
     output_md_path = _normalize_path(output_md)
     output_csv_path = _normalize_path(output_csv)
-    output_md_path.parent.mkdir(parents=True, exist_ok=True)
-    output_csv_path.parent.mkdir(parents=True, exist_ok=True)
-    output_md_path.write_text(markdown_report, encoding="utf-8")
-    output_csv_path.write_text(csv_report, encoding="utf-8")
+    write_text_atomic(output_md_path, markdown_report, encoding="utf-8")
+    write_text_atomic(output_csv_path, csv_report, encoding="utf-8")
 
     ecosystem_rows = _filter_group_type(rows, "ecosystem")
     layer_rows = _filter_group_type(rows, "layer")

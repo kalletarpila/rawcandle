@@ -20,6 +20,7 @@ from main import RawCandleApp, _today_exclusive_end_date
 from rawcandle.cli.run_ec_source_layer_backfill import run_ec_source_layer_backfill
 from rawcandle.cli.run_ec_source_layer_refresh import run_ec_source_layer_refresh
 from rawcandle.cli.plan_ec_source_layer_build import _read_taxonomy_csv
+from rawcandle.io_atomic import write_text_atomic
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -417,7 +418,8 @@ def write_scheduler_status(
         "started_at_utc": started_at_utc,
         "summary_json_path": summary_json_path,
     }
-    status_path.write_text(
+    write_text_atomic(
+        status_path,
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
@@ -1412,6 +1414,23 @@ def _run_datacenter_post_step(
                 str(config.datacenter_stage2_overlap_trading_days),
             ]
         )
+    started_log_lines = [
+        f"run_started_at_local={_format_local_timestamp(started_at, config.timezone)}",
+        "run_finished_at_local=NONE",
+        f"market={resolved.market}",
+        f"requested_calendar_signal_date={requested_calendar_signal_date}",
+        f"signal_date={signal_date}",
+        f"signal_date_source={signal_date_resolution.signal_date_source}",
+        f"signal_date_resolution={signal_date_resolution.signal_date_resolution}",
+        f"taxonomy_csv_path={taxonomy_csv_path}",
+        f"taxonomy_version={resolved.taxonomy_version}",
+        f"taxonomy_source_sha256={taxonomy_source_sha256}",
+        f"osakedata_db_path={config.osakedata_db_path}",
+        f"analysis_db_path={config.analysis_db_path}",
+        f"command={' '.join(command)}",
+        "status=STARTED",
+    ]
+    write_text_atomic(log_path, "\n".join(started_log_lines) + "\n", encoding="utf-8")
     completed = subprocess.run(
         command,
         cwd=str(_repo_root()),
@@ -1448,7 +1467,7 @@ def _run_datacenter_post_step(
         "=== STDERR ===",
         completed.stderr.rstrip(),
     ]
-    log_path.write_text("\n".join(log_lines).rstrip() + "\n", encoding="utf-8")
+    write_text_atomic(log_path, "\n".join(log_lines).rstrip() + "\n", encoding="utf-8")
     audit_validation_status = _parse_summary_value(
         completed.stdout or "", "audit_validation_status"
     )
@@ -2735,8 +2754,11 @@ def run_scheduler_config(
                 error=None,
             )
             return result
-        except Exception as exc:
+        except BaseException as exc:
             if status_initialized:
+                error = str(exc)
+                if not error:
+                    error = exc.__class__.__name__
                 write_scheduler_status(
                     log_dir=config.log_dir,
                     is_running=False,
@@ -2745,6 +2767,6 @@ def run_scheduler_config(
                     current_market=None,
                     last_status=STATUS_FAILED,
                     summary_json_path=None,
-                    error=str(exc),
+                    error=error,
                 )
             raise
