@@ -388,6 +388,16 @@ class EcBridgeDecision:
     reason_details: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class EcBridgeCatchupState:
+    dc_latest: str | None
+    ec_latest: str | None
+    catchup_start: str | None
+    catchup_end: str | None
+    status: str
+    details: dict[str, object] = field(default_factory=dict)
+
+
 def scheduler_status_path(log_dir: str) -> str:
     return str(Path(log_dir) / "stock_update_scheduler_status.json")
 
@@ -890,10 +900,256 @@ def _valid_iso_date_or_none(value: str | None) -> str | None:
         return None
 
 
+_EC_BRIDGE_DC_FACT_HEADS: tuple[tuple[str, str], ...] = (
+    ("dc_ticker_swing_signal_daily", "signal_date"),
+    ("dc_group_swing_signal_daily", "signal_date"),
+    ("dc_group_synthetic_ohlc_daily", "ohlc_date"),
+    ("dc_group_index_daily", "index_date"),
+)
+
+_EC_BRIDGE_EC_FACT_HEADS: tuple[tuple[str, str], ...] = (
+    ("ec_ticker_signal_daily", "signal_date"),
+    ("ec_group_signal_daily", "signal_date"),
+    ("ec_group_synthetic_ohlc_daily", "signal_date"),
+    ("ec_group_index_daily", "signal_date"),
+)
+
+_EC_BRIDGE_DC_WATERMARK_COMPONENTS: tuple[str, ...] = (
+    "TICKER_SWING_BASE",
+    "GROUP_SWING_BASE",
+    "SYNTHETIC_OHLC_BASE",
+    "GROUP_INDEX",
+)
+
+_EC_BRIDGE_EC_WATERMARK_SOURCES: tuple[str, ...] = tuple(
+    table_name for table_name, _ in _EC_BRIDGE_DC_FACT_HEADS
+)
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _resolve_ec_taxonomy_version_id(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem_code: str,
+    taxonomy_version_code: str,
+) -> tuple[int | None, int | None]:
+    if not _table_exists(conn, "ec_ecosystem") or not _table_exists(conn, "ec_taxonomy_version"):
+        return None, None
+    row = conn.execute(
+        """
+        SELECT e.ecosystem_id, tv.taxonomy_version_id
+        FROM ec_ecosystem e
+        JOIN ec_taxonomy_version tv ON tv.ecosystem_id = e.ecosystem_id
+        WHERE e.ecosystem_code = ?
+          AND tv.taxonomy_version_code = ?
+        """,
+        (ecosystem_code, taxonomy_version_code),
+    ).fetchone()
+    if row is None:
+        return None, None
+    return int(row[0]), int(row[1])
+
+
+def _max_fact_date(
+    conn: sqlite3.Connection,
+    *,
+    table_name: str,
+    date_column: str,
+    taxonomy_version_code: str | None = None,
+    ecosystem_id: int | None = None,
+    taxonomy_version_id: int | None = None,
+) -> str | None:
+    if not _table_exists(conn, table_name):
+        return None
+    predicates: list[str] = []
+    params: list[object] = []
+    if taxonomy_version_code is not None:
+        predicates.append("taxonomy_version = ?")
+        params.append(taxonomy_version_code)
+    if ecosystem_id is not None:
+        predicates.append("ecosystem_id = ?")
+        params.append(ecosystem_id)
+    if taxonomy_version_id is not None:
+        predicates.append("taxonomy_version_id = ?")
+        params.append(taxonomy_version_id)
+    where_sql = " WHERE " + " AND ".join(predicates) if predicates else ""
+    value = conn.execute(
+        f"SELECT MAX({date_column}) FROM {table_name}{where_sql}",
+        tuple(params),
+    ).fetchone()[0]
+    return _valid_iso_date_or_none(str(value)) if value is not None else None
+
+
+def _minimum_present_date(values: list[str | None]) -> str | None:
+    present = [value for value in values if value is not None]
+    if len(present) != len(values):
+        return None
+    return min(present)
+
+
+def _next_calendar_date(date_text: str) -> str:
+    return (datetime.date.fromisoformat(date_text) + datetime.timedelta(days=1)).isoformat()
+
+
+def _resolve_ec_bridge_catchup_state(
+    *,
+    analysis_db_path: str,
+    ecosystem_code: str,
+    taxonomy_version_code: str,
+) -> EcBridgeCatchupState:
+    details: dict[str, object] = {}
+    try:
+        conn = sqlite3.connect(f"file:{Path(analysis_db_path).resolve()}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        return EcBridgeCatchupState(
+            dc_latest=None,
+            ec_latest=None,
+            catchup_start=None,
+            catchup_end=None,
+            status="UNAVAILABLE",
+            details={"error": str(exc)},
+        )
+    try:
+        ecosystem_id, taxonomy_version_id = _resolve_ec_taxonomy_version_id(
+            conn,
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=taxonomy_version_code,
+        )
+        details["ecosystem_id"] = ecosystem_id
+        details["taxonomy_version_id"] = taxonomy_version_id
+        if ecosystem_id is None or taxonomy_version_id is None:
+            return EcBridgeCatchupState(
+                dc_latest=None,
+                ec_latest=None,
+                catchup_start=None,
+                catchup_end=None,
+                status="UNAVAILABLE",
+                details=details,
+            )
+
+        dc_fact_heads = {
+            table_name: _max_fact_date(
+                conn,
+                table_name=table_name,
+                date_column=date_column,
+                taxonomy_version_code=taxonomy_version_code,
+            )
+            for table_name, date_column in _EC_BRIDGE_DC_FACT_HEADS
+        }
+        dc_watermark_heads: dict[str, str | None] = {}
+        if _table_exists(conn, "dc_pipeline_watermark"):
+            for component in _EC_BRIDGE_DC_WATERMARK_COMPONENTS:
+                value = conn.execute(
+                    """
+                    SELECT MAX(end_date)
+                    FROM dc_pipeline_watermark
+                    WHERE component_name = ?
+                      AND taxonomy_version = ?
+                      AND status = 'OK'
+                    """,
+                    (component, taxonomy_version_code),
+                ).fetchone()[0]
+                dc_watermark_heads[component] = (
+                    _valid_iso_date_or_none(str(value)) if value is not None else None
+                )
+        else:
+            dc_watermark_heads = {component: None for component in _EC_BRIDGE_DC_WATERMARK_COMPONENTS}
+        dc_latest = _minimum_present_date(
+            list(dc_fact_heads.values()) + list(dc_watermark_heads.values())
+        )
+
+        ec_fact_heads = {
+            table_name: _max_fact_date(
+                conn,
+                table_name=table_name,
+                date_column=date_column,
+                ecosystem_id=ecosystem_id,
+                taxonomy_version_id=taxonomy_version_id,
+            )
+            for table_name, date_column in _EC_BRIDGE_EC_FACT_HEADS
+        }
+        ec_watermark_heads: dict[str, str | None] = {}
+        if _table_exists(conn, "ec_pipeline_watermark"):
+            for source_table in _EC_BRIDGE_EC_WATERMARK_SOURCES:
+                value = conn.execute(
+                    """
+                    SELECT MAX(latest_signal_date)
+                    FROM ec_pipeline_watermark
+                    WHERE ecosystem_id = ?
+                      AND taxonomy_version_id = ?
+                      AND source_table = ?
+                      AND status = 'OK'
+                    """,
+                    (ecosystem_id, taxonomy_version_id, source_table),
+                ).fetchone()[0]
+                ec_watermark_heads[source_table] = (
+                    _valid_iso_date_or_none(str(value)) if value is not None else None
+                )
+        else:
+            ec_watermark_heads = {source_table: None for source_table in _EC_BRIDGE_EC_WATERMARK_SOURCES}
+        ec_latest = _minimum_present_date(
+            list(ec_fact_heads.values()) + list(ec_watermark_heads.values())
+        )
+
+        details.update(
+            {
+                "dc_fact_heads": dc_fact_heads,
+                "dc_watermark_heads": dc_watermark_heads,
+                "ec_fact_heads": ec_fact_heads,
+                "ec_watermark_heads": ec_watermark_heads,
+            }
+        )
+        if dc_latest is None:
+            return EcBridgeCatchupState(
+                dc_latest=None,
+                ec_latest=ec_latest,
+                catchup_start=None,
+                catchup_end=None,
+                status="NO_VALID_DC_SOURCE_HEAD",
+                details=details,
+            )
+        if ec_latest is None:
+            return EcBridgeCatchupState(
+                dc_latest=dc_latest,
+                ec_latest=None,
+                catchup_start=None,
+                catchup_end=None,
+                status="NO_VALID_EC_SOURCE_HEAD",
+                details=details,
+            )
+        if ec_latest >= dc_latest:
+            return EcBridgeCatchupState(
+                dc_latest=dc_latest,
+                ec_latest=ec_latest,
+                catchup_start=None,
+                catchup_end=None,
+                status="ALIGNED",
+                details=details,
+            )
+        return EcBridgeCatchupState(
+            dc_latest=dc_latest,
+            ec_latest=ec_latest,
+            catchup_start=_next_calendar_date(ec_latest),
+            catchup_end=dc_latest,
+            status="EC_BEHIND_DC",
+            details=details,
+        )
+    finally:
+        conn.close()
+
+
 def _build_ec_bridge_decision(
     *,
     datacenter_result: DatacenterPostStepResult,
     stage2_incremental_enabled: bool,
+    catchup_state: EcBridgeCatchupState | None = None,
 ) -> EcBridgeDecision:
     selected_signal_date = datacenter_result.signal_date or "NONE"
     if datacenter_result.status != "OK" or not datacenter_result.signal_date:
@@ -937,6 +1193,57 @@ def _build_ec_bridge_decision(
         or materialized_start > materialized_end
         or not (materialized_start <= selected_date <= materialized_end)
     ):
+        if catchup_state is not None:
+            if (
+                catchup_state.status == "EC_BEHIND_DC"
+                and catchup_state.catchup_start is not None
+                and catchup_state.catchup_end is not None
+            ):
+                return EcBridgeDecision(
+                    bridge_mode="HISTORICAL_BACKFILL",
+                    selected_signal_date=selected_signal_date,
+                    materialized_start=catchup_state.dc_latest or "NONE",
+                    materialized_end=catchup_state.dc_latest or "NONE",
+                    required_refresh_start=catchup_state.catchup_start,
+                    required_refresh_end=catchup_state.catchup_end,
+                    reason_code="EC_CATCHUP_REQUIRED",
+                    reason_details={
+                        "stage2_execution_status": execution_status or "MISSING",
+                        "dc_latest": catchup_state.dc_latest or "NONE",
+                        "ec_latest": catchup_state.ec_latest or "NONE",
+                        **catchup_state.details,
+                    },
+                )
+            if catchup_state.status == "ALIGNED":
+                return EcBridgeDecision(
+                    bridge_mode="SKIPPED_NO_MATERIALIZATION",
+                    selected_signal_date=selected_signal_date,
+                    materialized_start=catchup_state.dc_latest or "NONE",
+                    materialized_end=catchup_state.dc_latest or "NONE",
+                    required_refresh_start="NONE",
+                    required_refresh_end="NONE",
+                    reason_code="NO_EC_CATCHUP_NEEDED",
+                    reason_details={
+                        "stage2_execution_status": execution_status or "MISSING",
+                        "dc_latest": catchup_state.dc_latest or "NONE",
+                        "ec_latest": catchup_state.ec_latest or "NONE",
+                        **catchup_state.details,
+                    },
+                )
+            if catchup_state.status == "NO_VALID_DC_SOURCE_HEAD":
+                return EcBridgeDecision(
+                    bridge_mode="SKIPPED_NO_MATERIALIZATION",
+                    selected_signal_date=selected_signal_date,
+                    materialized_start="NONE",
+                    materialized_end="NONE",
+                    required_refresh_start="NONE",
+                    required_refresh_end="NONE",
+                    reason_code="NO_VALID_DC_SOURCE_HEAD",
+                    reason_details={
+                        "stage2_execution_status": execution_status or "MISSING",
+                        **catchup_state.details,
+                    },
+                )
         return EcBridgeDecision(
             bridge_mode="SKIPPED_NO_MATERIALIZATION",
             selected_signal_date=selected_signal_date,
@@ -1012,6 +1319,26 @@ def _aggregate_backfill_audit_status(
     if any(status == "OK_WITH_WARNINGS" for status in statuses):
         return "OK_WITH_WARNINGS"
     return "OK"
+
+
+def _aggregate_backfill_row_counts(per_date_results: object) -> dict[str, int]:
+    totals = {
+        "ticker_rows": 0,
+        "group_signal_rows": 0,
+        "synthetic_ohlc_rows": 0,
+        "group_index_rows": 0,
+    }
+    if not isinstance(per_date_results, list):
+        return totals
+    for item in per_date_results:
+        if not isinstance(item, dict):
+            continue
+        row_counts = item.get("row_counts")
+        if not isinstance(row_counts, dict):
+            continue
+        for key in totals:
+            totals[key] += int(row_counts.get(key) or 0)
+    return totals
 
 
 def _summary_bool(value: object) -> bool:
@@ -1656,9 +1983,19 @@ def _run_ec_source_layer_refresh_post_step(
             )
         )
 
+    catchup_state = (
+        _resolve_ec_bridge_catchup_state(
+            analysis_db_path=config.analysis_db_path,
+            ecosystem_code=config.ec_source_layer_ecosystem,
+            taxonomy_version_code=config.ec_source_layer_taxonomy_version,
+        )
+        if datacenter_result.status == "OK" and datacenter_result.signal_date
+        else None
+    )
     bridge_decision = _build_ec_bridge_decision(
         datacenter_result=datacenter_result,
         stage2_incremental_enabled=config.datacenter_stage2_incremental_enabled,
+        catchup_state=catchup_state,
     )
     if datacenter_result.status != "OK" or not datacenter_result.signal_date:
         return _write_log(
@@ -1749,6 +2086,9 @@ def _run_ec_source_layer_refresh_post_step(
         parity_status = _aggregate_backfill_audit_status(
             backfill_summary.get("per_date_results"), "parity_status"
         )
+        row_counts = _aggregate_backfill_row_counts(
+            backfill_summary.get("per_date_results")
+        )
         total_mismatch_count = int(backfill_summary.get("total_mismatch_count") or 0)
         bridge_watermark_refresh_performed = _summary_bool(
             backfill_summary.get("watermark_refresh_performed")
@@ -1771,6 +2111,11 @@ def _run_ec_source_layer_refresh_post_step(
                 coverage_status=coverage_status,
                 parity_status=parity_status,
                 total_mismatch_count=total_mismatch_count,
+                ticker_rows=row_counts["ticker_rows"],
+                group_signal_rows=row_counts["group_signal_rows"],
+                synthetic_ohlc_rows=row_counts["synthetic_ohlc_rows"],
+                group_index_rows=row_counts["group_index_rows"],
+                watermark_rows=int(backfill_summary.get("watermark_rows_total") or 0),
                 error=str(backfill_summary.get("error") or "NONE"),
                 bridge_mode=bridge_decision.bridge_mode,
                 bridge_reason=bridge_decision.reason_code,

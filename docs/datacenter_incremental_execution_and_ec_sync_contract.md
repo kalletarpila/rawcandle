@@ -472,10 +472,27 @@ If the Datacenter execution materializes only the selected signal date:
 If the Datacenter execution rewrites more than the selected signal date:
     use the existing EC historical backfill/date-based replace path
     for the same conservative affected range.
+
+If the current Datacenter execution materializes no Stage 2 range because the
+Datacenter source facts are already current:
+    compare persisted Datacenter source heads against persisted EC heads.
+    if EC is behind Datacenter, run the existing EC historical backfill path
+    for the deterministic missing range from the next EC date through the
+    latest valid Datacenter source date.
+    if EC is aligned with Datacenter, skip EC with an explicit aligned/current
+    reason.
 ```
 
-The EC bridge range must be based on successfully materialized Datacenter
-outputs, not merely on the initially planned range.
+The EC bridge range must be based on either the current run's successfully
+materialized Datacenter outputs or, when the current run correctly skipped
+Datacenter materialization, persisted Datacenter-vs-EC source state. It must
+not rely on the current run's `SKIPPED_BY_INCREMENTAL_PLAN` result as proof
+that no EC work is required.
+
+Persisted Datacenter source truth is bounded by both canonical source fact
+heads and `dc_pipeline_watermark`; a Datacenter watermark ahead of actual facts
+must not cause EC to materialize nonexistent dates. Persisted EC state is read
+from canonical EC fact heads and `ec_pipeline_watermark`.
 
 For the pilot, a single conservative affected range is acceptable even if
 component-level ranges could later differ.
@@ -486,9 +503,13 @@ Current behavior and pilot extension:
   single-date EC latest refresh after a successful Datacenter post-step.
 - `CONFIRMED_FROM_CODE`: the existing EC historical backfill CLI can perform
   date-based replace loads over selected historical dates.
-- The multi-date EC backfill bridge required by this pilot is not currently
-  wired into the scheduler.
-- The pilot must add that bridge at orchestration level without changing the
+- `CONFIRMED_FROM_CODE`: the scheduler bridge can run the historical EC
+  backfill path for a current-run materialized multi-date range.
+- `CONFIRMED_FROM_CODE`: the scheduler bridge also checks persisted DC-vs-EC
+  source heads when the current run materialized no Stage 2 range, so an
+  existing EC lag is caught up instead of being hidden behind
+  `NO_SUCCESSFUL_MATERIALIZATION`.
+- The bridge remains an orchestration-level transition and does not change the
   future EC architecture boundary.
 
 ## 12. EC Bridge Validation
