@@ -18,6 +18,9 @@ DEFAULT_DATACENTER_TAXONOMY_VERSION = "DC_TAXONOMY_FULL_V1"
 DEFAULT_SWINGMASTER_REPO_PATH = "/home/kalle/projects/swingmaster"
 DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT = 100
 DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS = 14
+DEFAULT_SWINGMASTER_CALENDAR_CONFIRMATION_DAYS_BEFORE = 7
+DEFAULT_SWINGMASTER_CALENDAR_STALE_DAYS = 45
+DEFAULT_SWINGMASTER_CALENDAR_FAILURE_RETRY_DAYS = 3
 _RUN_TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 _REQUIRED_CONFIG_KEYS = {
     "enabled_markets",
@@ -61,6 +64,9 @@ _OPTIONAL_CONFIG_KEYS.update(
         "swingmaster_calendar_maintenance_limit",
         "swingmaster_ohlcv_stale_days",
         "swingmaster_event_watch_days_after",
+        "swingmaster_calendar_confirmation_days_before",
+        "swingmaster_calendar_stale_days",
+        "swingmaster_calendar_failure_retry_days",
     }
 )
 SUPPORTED_EC_SOURCE_LAYER_MODES = ("refresh_latest",)
@@ -108,6 +114,13 @@ class StockUpdateSchedulerConfig:
     swingmaster_calendar_maintenance_limit: int = DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT
     swingmaster_ohlcv_stale_days: int = DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS
     swingmaster_event_watch_days_after: int = 5
+    swingmaster_calendar_confirmation_days_before: int = (
+        DEFAULT_SWINGMASTER_CALENDAR_CONFIRMATION_DAYS_BEFORE
+    )
+    swingmaster_calendar_stale_days: int = DEFAULT_SWINGMASTER_CALENDAR_STALE_DAYS
+    swingmaster_calendar_failure_retry_days: int = (
+        DEFAULT_SWINGMASTER_CALENDAR_FAILURE_RETRY_DAYS
+    )
 
 
 def validate_market_list(markets: List[str]) -> List[str]:
@@ -203,6 +216,22 @@ def validate_scheduler_config(
         raise ValueError("swingmaster_event_watch_days_after must be an int")
     if config.swingmaster_event_watch_days_after < 0:
         raise ValueError("swingmaster_event_watch_days_after must be zero or greater")
+    if type(config.swingmaster_calendar_confirmation_days_before) is not int:
+        raise ValueError("swingmaster_calendar_confirmation_days_before must be an int")
+    if config.swingmaster_calendar_confirmation_days_before < 0:
+        raise ValueError(
+            "swingmaster_calendar_confirmation_days_before must be zero or greater"
+        )
+    if type(config.swingmaster_calendar_stale_days) is not int:
+        raise ValueError("swingmaster_calendar_stale_days must be an int")
+    if config.swingmaster_calendar_stale_days < 0:
+        raise ValueError("swingmaster_calendar_stale_days must be zero or greater")
+    if type(config.swingmaster_calendar_failure_retry_days) is not int:
+        raise ValueError("swingmaster_calendar_failure_retry_days must be an int")
+    if config.swingmaster_calendar_failure_retry_days < 0:
+        raise ValueError(
+            "swingmaster_calendar_failure_retry_days must be zero or greater"
+        )
     if config.ec_source_layer_mode not in SUPPORTED_EC_SOURCE_LAYER_MODES:
         raise ValueError(
             "ec_source_layer_mode must be one of: "
@@ -288,6 +317,13 @@ def validate_scheduler_config(
         swingmaster_calendar_maintenance_limit=config.swingmaster_calendar_maintenance_limit,
         swingmaster_ohlcv_stale_days=config.swingmaster_ohlcv_stale_days,
         swingmaster_event_watch_days_after=config.swingmaster_event_watch_days_after,
+        swingmaster_calendar_confirmation_days_before=(
+            config.swingmaster_calendar_confirmation_days_before
+        ),
+        swingmaster_calendar_stale_days=config.swingmaster_calendar_stale_days,
+        swingmaster_calendar_failure_retry_days=(
+            config.swingmaster_calendar_failure_retry_days
+        ),
     )
 
 
@@ -385,6 +421,18 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
             "swingmaster_ohlcv_stale_days", DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS
         ),
         swingmaster_event_watch_days_after=data.get("swingmaster_event_watch_days_after", 5),
+        swingmaster_calendar_confirmation_days_before=data.get(
+            "swingmaster_calendar_confirmation_days_before",
+            DEFAULT_SWINGMASTER_CALENDAR_CONFIRMATION_DAYS_BEFORE,
+        ),
+        swingmaster_calendar_stale_days=data.get(
+            "swingmaster_calendar_stale_days",
+            DEFAULT_SWINGMASTER_CALENDAR_STALE_DAYS,
+        ),
+        swingmaster_calendar_failure_retry_days=data.get(
+            "swingmaster_calendar_failure_retry_days",
+            DEFAULT_SWINGMASTER_CALENDAR_FAILURE_RETRY_DAYS,
+        ),
     )
     return validate_scheduler_config(config)
 
@@ -448,5 +496,12 @@ def create_default_scheduler_config(
         swingmaster_calendar_maintenance_limit=DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT,
         swingmaster_ohlcv_stale_days=DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS,
         swingmaster_event_watch_days_after=5,
+        swingmaster_calendar_confirmation_days_before=(
+            DEFAULT_SWINGMASTER_CALENDAR_CONFIRMATION_DAYS_BEFORE
+        ),
+        swingmaster_calendar_stale_days=DEFAULT_SWINGMASTER_CALENDAR_STALE_DAYS,
+        swingmaster_calendar_failure_retry_days=(
+            DEFAULT_SWINGMASTER_CALENDAR_FAILURE_RETRY_DAYS
+        ),
     )
     return validate_scheduler_config(config)

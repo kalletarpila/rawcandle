@@ -2451,8 +2451,14 @@ def _run_swingmaster_fundamentals_post_step(
         str(config.swingmaster_ohlcv_stale_days),
         "--event-watch-days-after",
         str(config.swingmaster_event_watch_days_after),
+        "--calendar-confirmation-days-before",
+        str(config.swingmaster_calendar_confirmation_days_before),
         "--calendar-maintenance-limit",
         str(config.swingmaster_calendar_maintenance_limit),
+        "--calendar-stale-days",
+        str(config.swingmaster_calendar_stale_days),
+        "--calendar-failure-retry-days",
+        str(config.swingmaster_calendar_failure_retry_days),
         "--json",
     ]
 

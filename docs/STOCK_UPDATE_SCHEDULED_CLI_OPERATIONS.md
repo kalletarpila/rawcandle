@@ -58,7 +58,7 @@ The SwingMaster stage stays on the process boundary. RawCandle invokes the exist
 Daily behavior:
 
 - every non-skipped scheduler run executes SwingMaster USA `check_fundamental_new_results.py` after the RawCandle pipeline finishes
-- the check uses the scheduler's explicit decision date and `swingmaster_calendar_maintenance_limit=100` by default
+- the check uses the scheduler's explicit decision date and explicitly passes all material SwingMaster result-check policy values: `swingmaster_ohlcv_stale_days=14`, `swingmaster_event_watch_days_after=5`, `swingmaster_calendar_confirmation_days_before=7`, `swingmaster_calendar_maintenance_limit=100`, `swingmaster_calendar_stale_days=45`, and `swingmaster_calendar_failure_retry_days=3` by default
 - stdout, stderr, command, cwd, and exit code are captured in `swingmaster_usa_result_check_<timestamp>.txt`
 
 Sunday behavior:

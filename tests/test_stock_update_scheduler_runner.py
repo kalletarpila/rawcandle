@@ -405,6 +405,9 @@ def _write_config(
     swingmaster_repo_path=None,
     swingmaster_python_path=None,
     swingmaster_fundamentals_db_path=None,
+    swingmaster_calendar_confirmation_days_before=None,
+    swingmaster_calendar_stale_days=None,
+    swingmaster_calendar_failure_retry_days=None,
 ):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
@@ -425,6 +428,16 @@ def _write_config(
         config.swingmaster_python_path = str(swingmaster_python_path)
     if swingmaster_fundamentals_db_path is not None:
         config.swingmaster_fundamentals_db_path = str(swingmaster_fundamentals_db_path)
+    if swingmaster_calendar_confirmation_days_before is not None:
+        config.swingmaster_calendar_confirmation_days_before = (
+            swingmaster_calendar_confirmation_days_before
+        )
+    if swingmaster_calendar_stale_days is not None:
+        config.swingmaster_calendar_stale_days = swingmaster_calendar_stale_days
+    if swingmaster_calendar_failure_retry_days is not None:
+        config.swingmaster_calendar_failure_retry_days = (
+            swingmaster_calendar_failure_retry_days
+        )
     if ec_source_layer_enabled is not None:
         config.ec_source_layer_enabled = ec_source_layer_enabled
     if ec_source_layer_ecosystem is not None:
@@ -4353,6 +4366,12 @@ def test_scheduler_runner_runs_swingmaster_result_check_on_weekday_without_updat
 
     assert len(calls) == 1
     assert "check_fundamental_new_results.py" in calls[0][1]
+    assert calls[0][calls[0].index("--ohlcv-stale-days") + 1] == "14"
+    assert calls[0][calls[0].index("--event-watch-days-after") + 1] == "5"
+    assert calls[0][calls[0].index("--calendar-confirmation-days-before") + 1] == "7"
+    assert calls[0][calls[0].index("--calendar-maintenance-limit") + 1] == "100"
+    assert calls[0][calls[0].index("--calendar-stale-days") + 1] == "45"
+    assert calls[0][calls[0].index("--calendar-failure-retry-days") + 1] == "3"
     assert "run_fundamental_quarter_update.py" not in " ".join(calls[0])
     assert result.swingmaster_result_check_status == "SUCCESS"
     assert result.swingmaster_weekly_update_attempted == 0
@@ -4364,6 +4383,49 @@ def test_scheduler_runner_runs_swingmaster_result_check_on_weekday_without_updat
     assert result.swingmaster_maintenance_selected == 100
     assert result.swingmaster_total_unique_provider_check_tickers == 110
     assert result.swingmaster_maintenance_backlog_remaining == 24
+
+
+def test_scheduler_runner_propagates_swingmaster_result_check_policy_overrides(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    _touch(python_path)
+    _fixed_scheduler_date(monkeypatch, "2026-08-07")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return _FakeCompletedProcess(returncode=0, stdout=_result_check_stdout(candidate_count=0), stderr="")
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_run)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+        swingmaster_python_path=python_path,
+        swingmaster_fundamentals_db_path=repo / "fundamentals_usa.db",
+        swingmaster_calendar_confirmation_days_before=5,
+        swingmaster_calendar_stale_days=30,
+        swingmaster_calendar_failure_retry_days=2,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.swingmaster_result_check_status == "SUCCESS"
+    assert len(calls) == 1
+    command = calls[0]
+    assert command[command.index("--calendar-confirmation-days-before") + 1] == "5"
+    assert command[command.index("--calendar-stale-days") + 1] == "30"
+    assert command[command.index("--calendar-failure-retry-days") + 1] == "2"
+    assert "run_fundamental_quarter_update.py" not in " ".join(command)
 
 
 def test_scheduler_runner_keeps_swingmaster_venv_python_symlink_path(tmp_path, monkeypatch):

@@ -55,6 +55,9 @@ def test_default_scheduler_config_uses_omxh_and_omxs_not_usa():
     assert config.ec_source_layer_mode == "refresh_latest"
     assert config.ec_source_layer_require_legacy_reports_success is True
     assert config.ec_source_layer_only_on_new_signal_date is True
+    assert config.swingmaster_calendar_confirmation_days_before == 7
+    assert config.swingmaster_calendar_stale_days == 45
+    assert config.swingmaster_calendar_failure_retry_days == 3
 
 
 def test_market_validation_normalizes_case_whitespace_and_deduplicates():
@@ -96,6 +99,9 @@ def test_scheduler_config_serialization_roundtrip():
         ec_source_layer_mode="refresh_latest",
         ec_source_layer_require_legacy_reports_success=True,
         ec_source_layer_only_on_new_signal_date=False,
+        swingmaster_calendar_confirmation_days_before=5,
+        swingmaster_calendar_stale_days=30,
+        swingmaster_calendar_failure_retry_days=2,
         datacenter_dashboard_reports_reference_html_output_dir=(
             "/home/kalle/projects/rawcandle/swing_reports"
         ),
@@ -122,6 +128,9 @@ def test_scheduler_config_serialization_roundtrip():
         ec_source_layer_mode="refresh_latest",
         ec_source_layer_require_legacy_reports_success=True,
         ec_source_layer_only_on_new_signal_date=False,
+        swingmaster_calendar_confirmation_days_before=5,
+        swingmaster_calendar_stale_days=30,
+        swingmaster_calendar_failure_retry_days=2,
         datacenter_dashboard_reports_reference_html_output_dir=(
             "/home/kalle/projects/rawcandle/swing_reports"
         ),
