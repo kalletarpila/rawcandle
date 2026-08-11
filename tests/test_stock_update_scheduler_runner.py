@@ -4513,6 +4513,7 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
     assert len(calls) == 2
     update_command = calls[1]
     assert "run_fundamental_quarter_update.py" in update_command[1]
+    assert update_command[update_command.index("--decision-date") + 1] == "2026-08-09"
     assert update_command[update_command.index("--quarter-refresh-plan-json") + 1] == fresh_plan
     assert result.swingmaster_weekly_update_attempted == 1
     assert result.swingmaster_weekly_update_status == "SUCCESS"

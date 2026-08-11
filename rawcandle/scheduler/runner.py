@@ -2572,6 +2572,8 @@ def _run_swingmaster_fundamentals_post_step(
         f"USA_QUARTER_UPDATE_{decision_date}__QUARTERLY",
         "--market",
         "usa",
+        "--decision-date",
+        decision_date,
         "--quarter-refresh-plan-json",
         plan_json,
     ]
