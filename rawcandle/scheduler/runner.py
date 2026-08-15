@@ -42,6 +42,9 @@ from services.stock_update_service import (
     format_stock_update_summary_lines,
 )
 
+SWINGMASTER_RESULT_CHECK_SUCCESS = "SUCCESS"
+SWINGMASTER_RESULT_CHECK_FAILED = "FAILED"
+
 
 @dataclass
 class ScheduledMarketRunResult:
@@ -2503,10 +2506,10 @@ def _run_swingmaster_fundamentals_post_step(
         )
         payload = _extract_last_json_object(check_process.stdout)
         summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
-        result_check_status = str(payload.get("check_status") or "FAILED")
+        result_check_status = str(payload.get("check_status") or SWINGMASTER_RESULT_CHECK_FAILED)
         result_check_error = (
             "NONE"
-            if check_process.returncode in (0, 2) and result_check_status != "FAILED"
+            if check_process.returncode in (0, 2) and result_check_status != SWINGMASTER_RESULT_CHECK_FAILED
             else check_process.stderr.strip() or result_check_status
         )
     except Exception as exc:
@@ -2526,7 +2529,7 @@ def _run_swingmaster_fundamentals_post_step(
         )
         return SwingMasterFundamentalsPostStepResult(
             attempted=1,
-            result_check_status="FAILED",
+            result_check_status=SWINGMASTER_RESULT_CHECK_FAILED,
             result_check_exit_code=exit_code,
             result_check_log_path=str(check_log_path),
             result_check_error=str(exc),
@@ -2551,11 +2554,16 @@ def _run_swingmaster_fundamentals_post_step(
         "total_unique_provider_check_tickers": _int_summary(summary, "unique_provider_check_ticker_count"),
         "maintenance_backlog_remaining": _int_summary(summary, "maintenance_backlog_remaining"),
     }
-    if check_process.returncode not in (0, 2) or result_check_status == "FAILED":
+    if check_process.returncode not in (0, 2) or result_check_status == SWINGMASTER_RESULT_CHECK_FAILED:
         return SwingMasterFundamentalsPostStepResult(**base)
 
     decision = datetime.date.fromisoformat(decision_date)
-    if decision.weekday() != 6 or candidate_count <= 0:
+    # Match the SwingMaster UI prerequisite; SwingMaster still owns full plan validation.
+    if (
+        result_check_status != SWINGMASTER_RESULT_CHECK_SUCCESS
+        or decision.weekday() != 6
+        or candidate_count <= 0
+    ):
         return SwingMasterFundamentalsPostStepResult(**base)
 
     update_started_at = _utc_now()

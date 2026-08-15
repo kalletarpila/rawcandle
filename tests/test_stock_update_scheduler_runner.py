@@ -4522,6 +4522,50 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
     assert result.swingmaster_weekly_update_failed_candidates == 0
 
 
+def test_scheduler_runner_partial_result_check_blocks_sunday_update(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    _touch(python_path)
+    _fixed_scheduler_date(monkeypatch, "2026-08-09")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return _FakeCompletedProcess(
+            returncode=2,
+            stdout=_result_check_stdout(status="PARTIAL", candidate_count=2),
+            stderr="",
+        )
+
+    monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_run)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+        swingmaster_python_path=python_path,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(calls) == 1
+    assert "check_fundamental_new_results.py" in calls[0][1]
+    assert result.swingmaster_result_check_status == "PARTIAL"
+    assert result.swingmaster_result_check_exit_code == 2
+    assert result.swingmaster_result_check_candidate_count == 2
+    assert result.swingmaster_result_check_error == "NONE"
+    assert result.swingmaster_weekly_update_attempted == 0
+    assert result.swingmaster_weekly_update_status == "SKIPPED"
+
+
 def test_scheduler_runner_sunday_zero_candidates_skips_update(tmp_path, monkeypatch):
     osakedata_db = tmp_path / "osakedata.db"
     analysis_db = tmp_path / "analysis.db"
