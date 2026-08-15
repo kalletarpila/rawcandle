@@ -195,6 +195,13 @@ class ScheduledStockUpdateRunResult:
     swingmaster_weekly_update_successful_candidates: int = 0
     swingmaster_weekly_update_failed_candidates: int = 0
     swingmaster_weekly_update_retryable_candidates: int = 0
+    swingmaster_weekly_update_v2_canonical_writes: int = 0
+    swingmaster_weekly_update_v2_provenance_writes: int = 0
+    swingmaster_weekly_update_v2_retry: int = 0
+    swingmaster_weekly_update_v2_blocked: int = 0
+    swingmaster_weekly_update_provider_calls: int = 0
+    swingmaster_weekly_update_followup_metadata_errors: int = 0
+    swingmaster_weekly_update_integrated_output_json: str = "NONE"
     swingmaster_weekly_update_error: str = "NONE"
 
 
@@ -267,6 +274,13 @@ class SwingMasterFundamentalsPostStepResult:
     weekly_update_successful_candidates: int = 0
     weekly_update_failed_candidates: int = 0
     weekly_update_retryable_candidates: int = 0
+    weekly_update_v2_canonical_writes: int = 0
+    weekly_update_v2_provenance_writes: int = 0
+    weekly_update_v2_retry: int = 0
+    weekly_update_v2_blocked: int = 0
+    weekly_update_provider_calls: int = 0
+    weekly_update_followup_metadata_errors: int = 0
+    weekly_update_integrated_output_json: str = "NONE"
     weekly_update_error: str = "NONE"
 
 
@@ -2326,6 +2340,16 @@ def _resolve_swingmaster_fundamentals_db_path(config: StockUpdateSchedulerConfig
     return (repo_path / "fundamentals_usa.db").resolve()
 
 
+def _resolve_swingmaster_v2_fundamentals_db_path(config: StockUpdateSchedulerConfig) -> Path:
+    repo_path = _resolve_swingmaster_repo_path(config)
+    if config.swingmaster_v2_fundamentals_db_path:
+        db_path = Path(config.swingmaster_v2_fundamentals_db_path).expanduser()
+        if db_path.is_absolute():
+            return db_path.resolve()
+        return (repo_path / db_path).resolve()
+    return (repo_path / "rc_fundamentals_v2.db").resolve()
+
+
 def _swingmaster_subprocess_env(repo_path: Path) -> dict[str, str]:
     env = os.environ.copy()
     repo_path_text = str(repo_path)
@@ -2437,6 +2461,7 @@ def _run_swingmaster_fundamentals_post_step(
     repo_path = _resolve_swingmaster_repo_path(config)
     python_path = _resolve_swingmaster_python_path(config)
     fundamentals_db_path = _resolve_swingmaster_fundamentals_db_path(config)
+    v2_fundamentals_db_path = _resolve_swingmaster_v2_fundamentals_db_path(config)
     osakedata_db_path = Path(config.osakedata_db_path).expanduser().resolve()
     check_started_at = _utc_now()
     check_started_at_utc = _format_utc_timestamp(check_started_at)
@@ -2569,6 +2594,7 @@ def _run_swingmaster_fundamentals_post_step(
     update_started_at = _utc_now()
     update_started_at_utc = _format_utc_timestamp(update_started_at)
     update_log_path = _build_swingmaster_log_path(log_dir, "usa_weekly_update", update_started_at)
+    integrated_output_json = update_log_path.with_suffix(".integrated.json")
     update_command = [
         str(python_path),
         str(repo_path / "swingmaster" / "cli" / "run_fundamental_quarter_update.py"),
@@ -2584,7 +2610,35 @@ def _run_swingmaster_fundamentals_post_step(
         decision_date,
         "--quarter-refresh-plan-json",
         plan_json,
+        "--dual-store-update",
+        "--v2-db",
+        str(v2_fundamentals_db_path),
+        "--integrated-output-json",
+        str(integrated_output_json),
     ]
+    if not v2_fundamentals_db_path.exists():
+        error = f"Missing SwingMaster dependency: {v2_fundamentals_db_path}"
+        _write_swingmaster_process_log(
+            log_path=update_log_path,
+            command=update_command,
+            cwd=repo_path,
+            started_at_utc=update_started_at_utc,
+            finished_at_utc=_format_utc_timestamp(_utc_now()),
+            exit_code=None,
+            stdout="",
+            stderr="",
+            error=error,
+        )
+        return SwingMasterFundamentalsPostStepResult(
+            **base,
+            weekly_update_attempted=1,
+            weekly_update_status="FAILED",
+            weekly_update_log_path=str(update_log_path),
+            weekly_update_plan_json=plan_json,
+            weekly_update_planned_candidates=candidate_count,
+            weekly_update_integrated_output_json=str(integrated_output_json),
+            weekly_update_error=error,
+        )
     try:
         update_process = subprocess.run(
             update_command,
@@ -2604,21 +2658,32 @@ def _run_swingmaster_fundamentals_post_step(
             stderr=update_process.stderr,
         )
         update_summary = _parse_summary_lines(update_process.stdout)
-        failed_candidates = _json_list_len(update_summary.get("failed_candidates_json"))
+        failed_candidates = int(update_summary.get("tickers_failed") or _json_list_len(update_summary.get("failed_candidates_json")))
         planned_candidates = int(update_summary.get("plan_candidate_count") or candidate_count)
         successful_candidates = int(update_summary.get("tickers_succeeded") or max(planned_candidates - failed_candidates, 0))
-        update_error = "NONE" if update_process.returncode == 0 else update_process.stderr.strip() or "WEEKLY_UPDATE_FAILED"
+        update_error = (
+            "NONE"
+            if update_process.returncode == 0
+            else update_process.stderr.strip() or update_summary.get("overall_status") or "WEEKLY_UPDATE_FAILED"
+        )
         return SwingMasterFundamentalsPostStepResult(
             **base,
             weekly_update_attempted=1,
-            weekly_update_status="SUCCESS" if update_process.returncode == 0 else "FAILED",
+            weekly_update_status="SUCCESS" if update_process.returncode == 0 else "PARTIAL" if update_process.returncode == 2 else "FAILED",
             weekly_update_exit_code=update_process.returncode,
             weekly_update_log_path=str(update_log_path),
             weekly_update_plan_json=plan_json,
             weekly_update_planned_candidates=planned_candidates,
             weekly_update_successful_candidates=successful_candidates,
             weekly_update_failed_candidates=failed_candidates,
-            weekly_update_retryable_candidates=failed_candidates,
+            weekly_update_retryable_candidates=int(update_summary.get("retry_required_count") or failed_candidates),
+            weekly_update_v2_canonical_writes=_int_summary(update_summary, "v2_canonical_writes"),
+            weekly_update_v2_provenance_writes=_int_summary(update_summary, "v2_provenance_writes"),
+            weekly_update_v2_retry=_int_summary(update_summary, "v2_retry"),
+            weekly_update_v2_blocked=_int_summary(update_summary, "v2_blocked"),
+            weekly_update_provider_calls=_int_summary(update_summary, "provider_calls"),
+            weekly_update_followup_metadata_errors=_int_summary(update_summary, "followup_metadata_error_count"),
+            weekly_update_integrated_output_json=str(integrated_output_json),
             weekly_update_error=update_error,
         )
     except Exception as exc:
@@ -2644,6 +2709,7 @@ def _run_swingmaster_fundamentals_post_step(
             weekly_update_log_path=str(update_log_path),
             weekly_update_plan_json=plan_json,
             weekly_update_planned_candidates=candidate_count,
+            weekly_update_integrated_output_json=str(integrated_output_json),
             weekly_update_error=str(exc),
         )
 
@@ -2902,7 +2968,7 @@ def run_scheduler_config(
                 if technical_relevance_result.status == "FAILED"
                 or datacenter_result.status == "FAILED"
                 or swingmaster_result.result_check_status == "FAILED"
-                or swingmaster_result.weekly_update_status == "FAILED"
+                or swingmaster_result.weekly_update_status in {"FAILED", "PARTIAL"}
                 else market_update_phase_status
             )
             if (
@@ -3125,6 +3191,23 @@ def run_scheduler_config(
                 ),
                 swingmaster_weekly_update_retryable_candidates=(
                     swingmaster_result.weekly_update_retryable_candidates
+                ),
+                swingmaster_weekly_update_v2_canonical_writes=(
+                    swingmaster_result.weekly_update_v2_canonical_writes
+                ),
+                swingmaster_weekly_update_v2_provenance_writes=(
+                    swingmaster_result.weekly_update_v2_provenance_writes
+                ),
+                swingmaster_weekly_update_v2_retry=swingmaster_result.weekly_update_v2_retry,
+                swingmaster_weekly_update_v2_blocked=swingmaster_result.weekly_update_v2_blocked,
+                swingmaster_weekly_update_provider_calls=(
+                    swingmaster_result.weekly_update_provider_calls
+                ),
+                swingmaster_weekly_update_followup_metadata_errors=(
+                    swingmaster_result.weekly_update_followup_metadata_errors
+                ),
+                swingmaster_weekly_update_integrated_output_json=(
+                    swingmaster_result.weekly_update_integrated_output_json
                 ),
                 swingmaster_weekly_update_error=swingmaster_result.weekly_update_error,
             )

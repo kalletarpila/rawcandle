@@ -222,6 +222,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"SUMMARY swingmaster_fundamentals.weekly_update_successful_candidates={result.swingmaster_weekly_update_successful_candidates}")
     print(f"SUMMARY swingmaster_fundamentals.weekly_update_failed_candidates={result.swingmaster_weekly_update_failed_candidates}")
     print(f"SUMMARY swingmaster_fundamentals.weekly_update_retryable_candidates={result.swingmaster_weekly_update_retryable_candidates}")
+    print(f"SUMMARY swingmaster_fundamentals.weekly_update_v2_canonical_writes={result.swingmaster_weekly_update_v2_canonical_writes}")
+    print(f"SUMMARY swingmaster_fundamentals.weekly_update_v2_provenance_writes={result.swingmaster_weekly_update_v2_provenance_writes}")
+    print(f"SUMMARY swingmaster_fundamentals.weekly_update_v2_retry={result.swingmaster_weekly_update_v2_retry}")
+    print(f"SUMMARY swingmaster_fundamentals.weekly_update_v2_blocked={result.swingmaster_weekly_update_v2_blocked}")
+    print(f"SUMMARY swingmaster_fundamentals.weekly_update_provider_calls={result.swingmaster_weekly_update_provider_calls}")
+    print(f"SUMMARY swingmaster_fundamentals.weekly_update_followup_metadata_errors={result.swingmaster_weekly_update_followup_metadata_errors}")
+    print(f"SUMMARY swingmaster_fundamentals.weekly_update_integrated_output_json={result.swingmaster_weekly_update_integrated_output_json}")
     print(f"SUMMARY swingmaster_fundamentals.result_check_error={result.swingmaster_result_check_error}")
     print(f"SUMMARY swingmaster_fundamentals.weekly_update_error={result.swingmaster_weekly_update_error}")
 

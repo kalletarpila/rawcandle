@@ -405,6 +405,7 @@ def _write_config(
     swingmaster_repo_path=None,
     swingmaster_python_path=None,
     swingmaster_fundamentals_db_path=None,
+    swingmaster_v2_fundamentals_db_path=None,
     swingmaster_calendar_confirmation_days_before=None,
     swingmaster_calendar_stale_days=None,
     swingmaster_calendar_failure_retry_days=None,
@@ -428,6 +429,8 @@ def _write_config(
         config.swingmaster_python_path = str(swingmaster_python_path)
     if swingmaster_fundamentals_db_path is not None:
         config.swingmaster_fundamentals_db_path = str(swingmaster_fundamentals_db_path)
+    if swingmaster_v2_fundamentals_db_path is not None:
+        config.swingmaster_v2_fundamentals_db_path = str(swingmaster_v2_fundamentals_db_path)
     if swingmaster_calendar_confirmation_days_before is not None:
         config.swingmaster_calendar_confirmation_days_before = (
             swingmaster_calendar_confirmation_days_before
@@ -4477,6 +4480,8 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
     python_path = repo / ".venv" / "bin" / "python"
     python_path.parent.mkdir(parents=True)
     _touch(python_path)
+    v2_db_path = repo / "rc_fundamentals_v2.db"
+    _touch(v2_db_path)
     fresh_plan = str(tmp_path / "fresh_plan.json")
     _fixed_scheduler_date(monkeypatch, "2026-08-09")
     _patch_scheduler_for_swingmaster_only(monkeypatch)
@@ -4491,7 +4496,14 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
             stdout=(
                 "SUMMARY plan_candidate_count=2\n"
                 "SUMMARY tickers_succeeded=2\n"
-                "SUMMARY failed_candidates_json=[]\n"
+                "SUMMARY tickers_failed=0\n"
+                "SUMMARY retry_required_count=0\n"
+                "SUMMARY v2_canonical_writes=2\n"
+                "SUMMARY v2_provenance_writes=20\n"
+                "SUMMARY v2_retry=0\n"
+                "SUMMARY v2_blocked=0\n"
+                "SUMMARY provider_calls=0\n"
+                "SUMMARY followup_metadata_error_count=0\n"
             ),
             stderr="",
         )
@@ -4515,11 +4527,20 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
     assert "run_fundamental_quarter_update.py" in update_command[1]
     assert update_command[update_command.index("--decision-date") + 1] == "2026-08-09"
     assert update_command[update_command.index("--quarter-refresh-plan-json") + 1] == fresh_plan
+    assert "--dual-store-update" in update_command
+    assert update_command[update_command.index("--v2-db") + 1] == str(v2_db_path)
+    integrated_output_json = update_command[update_command.index("--integrated-output-json") + 1]
+    assert integrated_output_json.endswith(".integrated.json")
     assert result.swingmaster_weekly_update_attempted == 1
     assert result.swingmaster_weekly_update_status == "SUCCESS"
     assert result.swingmaster_weekly_update_planned_candidates == 2
     assert result.swingmaster_weekly_update_successful_candidates == 2
     assert result.swingmaster_weekly_update_failed_candidates == 0
+    assert result.swingmaster_weekly_update_retryable_candidates == 0
+    assert result.swingmaster_weekly_update_v2_canonical_writes == 2
+    assert result.swingmaster_weekly_update_v2_provenance_writes == 20
+    assert result.swingmaster_weekly_update_provider_calls == 0
+    assert result.swingmaster_weekly_update_integrated_output_json == integrated_output_json
 
 
 def test_scheduler_runner_partial_result_check_blocks_sunday_update(tmp_path, monkeypatch):
@@ -4642,6 +4663,7 @@ def test_scheduler_runner_reports_partial_sunday_update(tmp_path, monkeypatch):
     python_path = repo / ".venv" / "bin" / "python"
     python_path.parent.mkdir(parents=True)
     _touch(python_path)
+    _touch(repo / "rc_fundamentals_v2.db")
     _fixed_scheduler_date(monkeypatch, "2026-08-09")
     _patch_scheduler_for_swingmaster_only(monkeypatch)
 
@@ -4649,13 +4671,21 @@ def test_scheduler_runner_reports_partial_sunday_update(tmp_path, monkeypatch):
         if "check_fundamental_new_results.py" in command[1]:
             return _FakeCompletedProcess(returncode=0, stdout=_result_check_stdout(candidate_count=3), stderr="")
         return _FakeCompletedProcess(
-            returncode=1,
+            returncode=2,
             stdout=(
                 "SUMMARY plan_candidate_count=3\n"
                 "SUMMARY tickers_succeeded=2\n"
-                "SUMMARY failed_candidates_json=[{\"ticker\":\"BAD\"}]\n"
+                "SUMMARY tickers_failed=0\n"
+                "SUMMARY retry_required_count=1\n"
+                "SUMMARY v2_canonical_writes=2\n"
+                "SUMMARY v2_provenance_writes=20\n"
+                "SUMMARY v2_retry=1\n"
+                "SUMMARY v2_blocked=0\n"
+                "SUMMARY provider_calls=0\n"
+                "SUMMARY followup_metadata_error_count=0\n"
+                "SUMMARY overall_status=PARTIAL\n"
             ),
-            stderr="one failed",
+            stderr="",
         )
 
     monkeypatch.setattr("rawcandle.scheduler.runner.subprocess.run", fake_run)
@@ -4672,8 +4702,46 @@ def test_scheduler_runner_reports_partial_sunday_update(tmp_path, monkeypatch):
     result = run_scheduler_config(config_path=str(config_path))
 
     assert result.overall_status == STATUS_FAILED
-    assert result.swingmaster_weekly_update_status == "FAILED"
+    assert result.swingmaster_weekly_update_status == "PARTIAL"
+    assert result.swingmaster_weekly_update_exit_code == 2
     assert result.swingmaster_weekly_update_planned_candidates == 3
     assert result.swingmaster_weekly_update_successful_candidates == 2
-    assert result.swingmaster_weekly_update_failed_candidates == 1
+    assert result.swingmaster_weekly_update_failed_candidates == 0
     assert result.swingmaster_weekly_update_retryable_candidates == 1
+    assert result.swingmaster_weekly_update_v2_retry == 1
+    assert result.swingmaster_weekly_update_error == "PARTIAL"
+
+
+def test_scheduler_runner_malformed_swingmaster_check_output_is_failed(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    repo = tmp_path / "swingmaster"
+    python_path = repo / ".venv" / "bin" / "python"
+    python_path.parent.mkdir(parents=True)
+    _touch(python_path)
+    _fixed_scheduler_date(monkeypatch, "2026-08-09")
+    _patch_scheduler_for_swingmaster_only(monkeypatch)
+    calls = []
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda command, **kwargs: calls.append(command) or _FakeCompletedProcess(returncode=0, stdout="SUMMARY status=SUCCESS\n", stderr=""),
+    )
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["usa"],
+        osakedata_db=osakedata_db,
+        analysis_db=analysis_db,
+        swingmaster_fundamentals_enabled=True,
+        swingmaster_repo_path=repo,
+        swingmaster_python_path=python_path,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert len(calls) == 1
+    assert result.overall_status == STATUS_FAILED
+    assert result.swingmaster_result_check_status == "FAILED"
+    assert "No JSON object found" in result.swingmaster_result_check_error

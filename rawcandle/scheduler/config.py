@@ -61,6 +61,7 @@ _OPTIONAL_CONFIG_KEYS.update(
         "swingmaster_repo_path",
         "swingmaster_python_path",
         "swingmaster_fundamentals_db_path",
+        "swingmaster_v2_fundamentals_db_path",
         "swingmaster_calendar_maintenance_limit",
         "swingmaster_ohlcv_stale_days",
         "swingmaster_event_watch_days_after",
@@ -111,6 +112,7 @@ class StockUpdateSchedulerConfig:
     swingmaster_repo_path: str = DEFAULT_SWINGMASTER_REPO_PATH
     swingmaster_python_path: str | None = None
     swingmaster_fundamentals_db_path: str | None = None
+    swingmaster_v2_fundamentals_db_path: str | None = None
     swingmaster_calendar_maintenance_limit: int = DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT
     swingmaster_ohlcv_stale_days: int = DEFAULT_SWINGMASTER_OHLCV_STALE_DAYS
     swingmaster_event_watch_days_after: int = 5
@@ -314,6 +316,7 @@ def validate_scheduler_config(
         swingmaster_repo_path=config.swingmaster_repo_path,
         swingmaster_python_path=config.swingmaster_python_path,
         swingmaster_fundamentals_db_path=config.swingmaster_fundamentals_db_path,
+        swingmaster_v2_fundamentals_db_path=config.swingmaster_v2_fundamentals_db_path,
         swingmaster_calendar_maintenance_limit=config.swingmaster_calendar_maintenance_limit,
         swingmaster_ohlcv_stale_days=config.swingmaster_ohlcv_stale_days,
         swingmaster_event_watch_days_after=config.swingmaster_event_watch_days_after,
@@ -413,6 +416,7 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         swingmaster_repo_path=data.get("swingmaster_repo_path", DEFAULT_SWINGMASTER_REPO_PATH),
         swingmaster_python_path=data.get("swingmaster_python_path"),
         swingmaster_fundamentals_db_path=data.get("swingmaster_fundamentals_db_path"),
+        swingmaster_v2_fundamentals_db_path=data.get("swingmaster_v2_fundamentals_db_path"),
         swingmaster_calendar_maintenance_limit=data.get(
             "swingmaster_calendar_maintenance_limit",
             DEFAULT_SWINGMASTER_CALENDAR_MAINTENANCE_LIMIT,
