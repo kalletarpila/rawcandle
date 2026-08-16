@@ -4505,6 +4505,9 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
                 "SUMMARY provider_calls=0\n"
                 "SUMMARY source_a_count=2\n"
                 "SUMMARY source_b_due_count=1\n"
+                "SUMMARY source_b_only_count=1\n"
+                "SUMMARY source_overlap_count=0\n"
+                "SUMMARY execution_scope_hash=abc123\n"
                 "SUMMARY merged_work_unit_count=3\n"
                 "SUMMARY duplicate_merge_count=0\n"
                 "SUMMARY floor_excluded_count=0\n"
@@ -4548,6 +4551,9 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
     assert result.swingmaster_weekly_update_provider_calls == 0
     assert result.swingmaster_weekly_update_source_a_count == 2
     assert result.swingmaster_weekly_update_source_b_due_count == 1
+    assert result.swingmaster_weekly_update_source_b_only_count == 1
+    assert result.swingmaster_weekly_update_source_overlap_count == 0
+    assert result.swingmaster_weekly_update_execution_scope_hash == "abc123"
     assert result.swingmaster_weekly_update_merged_work_unit_count == 3
     assert result.swingmaster_weekly_update_duplicate_merge_count == 0
     assert result.swingmaster_weekly_update_floor_excluded_count == 0

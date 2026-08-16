@@ -202,6 +202,9 @@ class ScheduledStockUpdateRunResult:
     swingmaster_weekly_update_provider_calls: int = 0
     swingmaster_weekly_update_source_a_count: int = 0
     swingmaster_weekly_update_source_b_due_count: int = 0
+    swingmaster_weekly_update_source_b_only_count: int = 0
+    swingmaster_weekly_update_source_overlap_count: int = 0
+    swingmaster_weekly_update_execution_scope_hash: str = "NONE"
     swingmaster_weekly_update_merged_work_unit_count: int = 0
     swingmaster_weekly_update_duplicate_merge_count: int = 0
     swingmaster_weekly_update_floor_excluded_count: int = 0
@@ -287,6 +290,9 @@ class SwingMasterFundamentalsPostStepResult:
     weekly_update_provider_calls: int = 0
     weekly_update_source_a_count: int = 0
     weekly_update_source_b_due_count: int = 0
+    weekly_update_source_b_only_count: int = 0
+    weekly_update_source_overlap_count: int = 0
+    weekly_update_execution_scope_hash: str = "NONE"
     weekly_update_merged_work_unit_count: int = 0
     weekly_update_duplicate_merge_count: int = 0
     weekly_update_floor_excluded_count: int = 0
@@ -2696,6 +2702,9 @@ def _run_swingmaster_fundamentals_post_step(
             weekly_update_provider_calls=_int_summary(update_summary, "provider_calls"),
             weekly_update_source_a_count=_int_summary(update_summary, "source_a_count"),
             weekly_update_source_b_due_count=_int_summary(update_summary, "source_b_due_count"),
+            weekly_update_source_b_only_count=_int_summary(update_summary, "source_b_only_count"),
+            weekly_update_source_overlap_count=_int_summary(update_summary, "source_overlap_count"),
+            weekly_update_execution_scope_hash=str(update_summary.get("execution_scope_hash") or "NONE"),
             weekly_update_merged_work_unit_count=_int_summary(update_summary, "merged_work_unit_count", "operational_merged_count"),
             weekly_update_duplicate_merge_count=_int_summary(update_summary, "duplicate_merge_count"),
             weekly_update_floor_excluded_count=_int_summary(update_summary, "floor_excluded_count"),
@@ -3226,6 +3235,15 @@ def run_scheduler_config(
                 ),
                 swingmaster_weekly_update_source_b_due_count=(
                     swingmaster_result.weekly_update_source_b_due_count
+                ),
+                swingmaster_weekly_update_source_b_only_count=(
+                    swingmaster_result.weekly_update_source_b_only_count
+                ),
+                swingmaster_weekly_update_source_overlap_count=(
+                    swingmaster_result.weekly_update_source_overlap_count
+                ),
+                swingmaster_weekly_update_execution_scope_hash=(
+                    swingmaster_result.weekly_update_execution_scope_hash
                 ),
                 swingmaster_weekly_update_merged_work_unit_count=(
                     swingmaster_result.weekly_update_merged_work_unit_count
