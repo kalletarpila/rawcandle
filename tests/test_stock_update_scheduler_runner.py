@@ -4503,6 +4503,12 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
                 "SUMMARY v2_retry=0\n"
                 "SUMMARY v2_blocked=0\n"
                 "SUMMARY provider_calls=0\n"
+                "SUMMARY source_a_count=2\n"
+                "SUMMARY source_b_due_count=1\n"
+                "SUMMARY merged_work_unit_count=3\n"
+                "SUMMARY duplicate_merge_count=0\n"
+                "SUMMARY floor_excluded_count=0\n"
+                "SUMMARY executable_after_scope_count=3\n"
                 "SUMMARY followup_metadata_error_count=0\n"
             ),
             stderr="",
@@ -4540,6 +4546,12 @@ def test_scheduler_runner_runs_sunday_update_with_fresh_plan(tmp_path, monkeypat
     assert result.swingmaster_weekly_update_v2_canonical_writes == 2
     assert result.swingmaster_weekly_update_v2_provenance_writes == 20
     assert result.swingmaster_weekly_update_provider_calls == 0
+    assert result.swingmaster_weekly_update_source_a_count == 2
+    assert result.swingmaster_weekly_update_source_b_due_count == 1
+    assert result.swingmaster_weekly_update_merged_work_unit_count == 3
+    assert result.swingmaster_weekly_update_duplicate_merge_count == 0
+    assert result.swingmaster_weekly_update_floor_excluded_count == 0
+    assert result.swingmaster_weekly_update_executable_after_scope_count == 3
     assert result.swingmaster_weekly_update_integrated_output_json == integrated_output_json
 
 

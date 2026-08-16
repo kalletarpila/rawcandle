@@ -113,6 +113,12 @@ def _result(overall_status):
         swingmaster_maintenance_backlog_remaining=24,
         swingmaster_weekly_update_attempted=0,
         swingmaster_weekly_update_status="SKIPPED",
+        swingmaster_weekly_update_source_a_count=2,
+        swingmaster_weekly_update_source_b_due_count=1,
+        swingmaster_weekly_update_merged_work_unit_count=3,
+        swingmaster_weekly_update_duplicate_merge_count=0,
+        swingmaster_weekly_update_floor_excluded_count=0,
+        swingmaster_weekly_update_executable_after_scope_count=3,
         swingmaster_weekly_update_log_path="",
     )
 
@@ -148,6 +154,10 @@ def test_scheduler_cli_successful_run_prints_preserved_summary_lines(monkeypatch
     assert "SUMMARY swingmaster_fundamentals.active_tickers=2936" in captured.out
     assert "SUMMARY swingmaster_fundamentals.maintenance_selected=100" in captured.out
     assert "SUMMARY swingmaster_fundamentals.weekly_update_status=SKIPPED" in captured.out
+    assert "SUMMARY swingmaster_fundamentals.weekly_update_source_a_count=2" in captured.out
+    assert "SUMMARY swingmaster_fundamentals.weekly_update_source_b_due_count=1" in captured.out
+    assert "SUMMARY swingmaster_fundamentals.weekly_update_merged_work_unit_count=3" in captured.out
+    assert "SUMMARY swingmaster_fundamentals.weekly_update_executable_after_scope_count=3" in captured.out
 
 
 def test_scheduler_cli_ok_with_warnings_exits_one(monkeypatch):
