@@ -81,3 +81,19 @@ The only open architecture item found by the prototype is CIK source availabilit
 Next action:
 
 `DECIDE V4-1B CIK SOURCE: ACCEPT NULL CIK BOOTSTRAP UNTIL SEC PROVIDER INGEST OR SUPPLY A DETERMINISTIC LOCAL CIK SOURCE; DO NOT INVENT CIKS`
+
+## V4-1A-1 Identity Calendar Bootstrap Update
+
+V4-1A-1 corrects the CIK source to RawCandle's local `temp/v3_active_tickers_99_27.csv`. This file is the initial deterministic V4 bootstrap source for SEC CIK, verified fiscal-year-start anchors, typical fiscal-year start, `chain_status`, and `break_reason`.
+
+The new bootstrap path parses CIK from the SEC Companyfacts URL in `Lähde`, preserves zero-padded 10-digit CIK values, imports company-level CIK provenance, and normalizes wide FY-start CSV columns into annual `company_id + fiscal_year` anchor rows. Missing CIKs remain NULL/review rows; no SEC network calls are made and CIKs are not inferred.
+
+Sharadar ARQ remains the primary quarterly source for `fiscalperiod`, `reportperiod`, and financial fields. Fiscal calendar anchors are validation/reference metadata only.
+
+V4-1A-1 result: `V4_IDENTITY_CALENDAR_BOOTSTRAP_COMPLETE_WITH_REVIEW_ITEMS`.
+
+The prototype found no blocking identity or fiscal-anchor conflicts. It imported 2,436 company-level CIK mappings and 35,245 normalized company/year fiscal anchors. The only review item is 22 local CSV rows whose `Lähde` value does not contain a strict SEC Companyfacts CIK URL.
+
+Next action:
+
+`REVIEW 22 BOOTSTRAP CSV ROWS WITHOUT PARSABLE SEC COMPANYFACTS CIK; OTHERWISE PROCEED TO V4-1B WITH IMPORTED CIKS, VERIFIED FISCAL-CALENDAR METADATA, AND NULL CIKS ONLY WHERE THE LOCAL SOURCE LACKS A STRICT COMPANYFACTS CIK`

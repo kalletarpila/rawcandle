@@ -133,6 +133,19 @@ CREATE TABLE provider_security_identity (
     PRIMARY KEY(provider, provider_security_id)
 );
 
+CREATE TABLE provider_company_identity (
+    provider TEXT NOT NULL,
+    provider_identifier_type TEXT NOT NULL,
+    provider_identifier_value TEXT NOT NULL,
+    company_id INTEGER NOT NULL REFERENCES company(company_id),
+    provider_ticker TEXT,
+    source TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_value TEXT,
+    created_at_utc TEXT NOT NULL,
+    PRIMARY KEY(provider, provider_identifier_type, provider_identifier_value)
+);
+
 CREATE TABLE company_cik (
     company_id INTEGER NOT NULL REFERENCES company(company_id),
     cik_normalized TEXT NOT NULL,
@@ -142,7 +155,43 @@ CREATE TABLE company_cik (
     source_row_id TEXT,
     status TEXT NOT NULL,
     created_at_utc TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'LEGACY_BOOTSTRAP',
+    source_name TEXT,
+    source_field TEXT,
+    source_value TEXT,
+    derivation TEXT,
+    confidence TEXT NOT NULL DEFAULT 'HIGH',
     PRIMARY KEY(company_id, cik_normalized)
+);
+
+CREATE TABLE company_fiscal_calendar_profile (
+    company_id INTEGER PRIMARY KEY REFERENCES company(company_id) ON DELETE CASCADE,
+    typical_fiscal_year_start TEXT,
+    chain_status TEXT,
+    break_reason TEXT,
+    source TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_field TEXT,
+    source_value TEXT,
+    bootstrap_status TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+
+CREATE TABLE company_fiscal_year_anchor (
+    company_id INTEGER NOT NULL REFERENCES company(company_id) ON DELETE CASCADE,
+    fiscal_year INTEGER NOT NULL,
+    fiscal_year_start TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_field TEXT NOT NULL,
+    source_value TEXT,
+    confidence TEXT NOT NULL,
+    observed_verified INTEGER NOT NULL CHECK (observed_verified IN (0, 1)),
+    created_at_utc TEXT NOT NULL,
+    PRIMARY KEY(company_id, fiscal_year)
 );
 
 CREATE TABLE v4_quarter (
@@ -205,6 +254,7 @@ CREATE TABLE v4_ttm_contract (
 
 CREATE INDEX idx_v4_quarter_company_period ON v4_quarter(company_id, fiscal_year, fiscal_quarter);
 CREATE INDEX idx_v4_provenance_field ON v4_field_provenance(canonical_field, provider);
+CREATE INDEX idx_company_fiscal_year_anchor_year ON company_fiscal_year_anchor(fiscal_year, fiscal_year_start);
 """
 
 

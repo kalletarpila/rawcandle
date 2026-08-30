@@ -76,3 +76,36 @@ Prototype input came from the accepted local V4-0D Sharadar Direct API acceptanc
 Integrity checks passed for all three SQLite databases: foreign-key checks returned zero errors, provider replay was idempotent, canonical replay was idempotent, there were no duplicate canonical fiscal-year/quarter rows, no orphan canonical financial rows, no orphan provenance rows, and no non-null canonical field lacked provenance.
 
 CIK bootstrap was attempted from SwingMaster V3 using read-only SQLite inspection. The source contained 2,538 companies but no deterministic CIK column, so V4-1A imported zero CIK rows and recorded the open item for V4-1B rather than manufacturing identifiers.
+
+## V4-1A-1 Identity / Calendar Prototype
+
+V4-1A-1 uses the local RawCandle CSV:
+
+```text
+temp/v3_active_tickers_99_27.csv
+```
+
+as the deterministic bootstrap source for SEC CIK and verified fiscal-year-start metadata. The prototype writes only disposable databases under:
+
+```text
+temp/fundamentals_v4_1a1_identity_calendar_bootstrap/<timestamp>/
+```
+
+Schema additions are limited to canonical identity/calendar support:
+
+- `provider_company_identity`
+- extra provenance columns on `company_cik`
+- `company_fiscal_calendar_profile`
+- `company_fiscal_year_anchor`
+
+The provider schema, 12-field canonical financial contract, Sharadar ARQ primary policy, and MRQ provider-side retention remain unchanged.
+
+Accepted V4-1A-1 prototype run:
+
+```text
+temp/fundamentals_v4_1a1_identity_calendar_bootstrap/20260830T201005Z/
+```
+
+Result: `V4_IDENTITY_CALENDAR_BOOTSTRAP_COMPLETE_WITH_REVIEW_ITEMS`.
+
+The prototype imported 2,436 company-level CIK mappings, 2,470 securities, 2,458 companies, and 35,245 normalized company/year fiscal anchors from 35,399 populated CSV FY-start cells. There were zero ticker multiple-CIK conflicts, zero identity conflicts, zero anchor conflicts, and zero duplicate replay rows. The review item is limited to 22 rows whose `Lähde` value does not contain a strict SEC Companyfacts CIK URL.

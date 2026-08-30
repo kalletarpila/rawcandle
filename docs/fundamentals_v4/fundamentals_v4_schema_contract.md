@@ -80,7 +80,36 @@ Canonical fiscal quarters use provider fiscal-year and fiscal-quarter labels der
 
 ## CIK Bootstrap
 
-V4-1A inspects SwingMaster V3 read-only for CIK values and imports only deterministic mappings with source `MIGRATED_FROM_V3`. The inspected V3 database at `/home/kalle/projects/swingmaster/rc_fundamentals_v3.db` does not contain a CIK column, so the prototype imports zero CIKs and records missing mappings. Future SEC ingestion can populate the same `company_cik` contract without changing the canonical financial schema.
+V4-1A-1 supersedes the earlier V3 DB CIK audit. The initial local V4 bootstrap source for CIK is:
+
+```text
+temp/v3_active_tickers_99_27.csv
+```
+
+CIK is parsed strictly from the SEC Companyfacts URL in the `Lähde` column using `CIK([0-9]{10})\.json`. The stored canonical CIK remains zero-padded 10 digits. Rows without this strict pattern remain NULL/review rows; V4 does not infer or repair CIKs from ticker symbols.
+
+CIK is company-level metadata. V4 stores it in `company_cik` with local bootstrap provenance:
+
+```text
+source_type = LOCAL_VERIFIED_BOOTSTRAP
+source_name = v3_active_tickers_99_27
+source_field = Lähde
+derivation = PARSED_FROM_SEC_COMPANYFACTS_URL
+```
+
+SEC CIK provider identity is stored through `provider_company_identity`, not `security.cik`, because CIK identifies the issuer/company rather than one tradable security.
+
+## Fiscal Calendar Bootstrap
+
+The same CSV is the initial local V4 source for verified fiscal-year-start anchors, typical fiscal-year start, `chain_status`, and `break_reason`.
+
+The wide CSV columns `FY1999 alkoi` through `FY2027 alkoi` are normalized into `company_fiscal_year_anchor` rows keyed by `company_id + fiscal_year`. Blank cells remain blank and are not inferred. If two ticker aliases mapped to the same company disagree for the same fiscal year, the anchor is blocked for review instead of choosing a value automatically.
+
+Company-level profile metadata lives in `company_fiscal_calendar_profile`.
+
+Historical chain breaks do not invalidate newer exact anchors. For example, `BROKEN_AT_FY2011` does not make an explicitly populated FY2027 anchor uncertain.
+
+Fiscal calendar anchors are reference metadata for validation, anomaly detection, future SEC exception handling, and provider fallback. Sharadar `fiscalperiod` remains primary for normal quarterly canonical identity.
 
 ## Production Safety
 

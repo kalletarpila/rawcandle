@@ -116,4 +116,18 @@ shares_outstanding <- sharesbas
 
 Provider-side support fields such as `reportperiod`, `fiscalperiod`, `calendardate`, `date`, `lastupdated`, `debtc`, `debtnc`, `shareswa`, and `shareswadil` are preserved without forcing them into the canonical wide field contract.
 
-V4-1A audited `/home/kalle/projects/swingmaster/rc_fundamentals_v3.db` read-only for deterministic CIK mappings. The inspected V3 schema does not contain a CIK column, so the prototype imported zero CIKs and recorded the missing mappings instead of inventing identifiers. V4 remains prepared for SEC or another deterministic CIK source in a later phase.
+V4-1A audited `/home/kalle/projects/swingmaster/rc_fundamentals_v3.db` read-only and confirmed that CIK was not persisted there. V4-1A-1 corrects the bootstrap source to RawCandle's local `temp/v3_active_tickers_99_27.csv`, which contains SEC Companyfacts URLs and verified fiscal-year-start metadata.
+
+## V4-1A-1 Identity / Calendar Bootstrap
+
+`temp/v3_active_tickers_99_27.csv` is the initial local V4 bootstrap source for:
+
+- ticker to SEC CIK mapping parsed from `Lähde`
+- verified fiscal-year-start anchors
+- typical fiscal-year start
+- `chain_status`
+- `break_reason`
+
+The CSV is an identity/calendar bootstrap source only. Sharadar remains authoritative for quarterly `fiscalperiod`, `reportperiod`, and the accepted financial field values. Fiscal-year-start anchors validate fiscal identity and support future anomaly detection; they do not overwrite Sharadar fiscalperiod during normal ingestion.
+
+CIK belongs to company-level identity. V4 stores SEC CIK mappings in `company_cik` with provenance and stores SEC provider identity in `provider_company_identity`. Security-level identity remains ticker/permaticker/alias focused.

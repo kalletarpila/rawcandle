@@ -204,8 +204,9 @@ def normalize_cik(value: Any) -> str | None:
 
 
 def load_provider_subset(provider_db: Path, acceptance_root: Path, tickers: Iterable[str], run_id: str, now: str) -> dict[str, int]:
-    arq_rows = [row for row in read_csv_rows(acceptance_root / "acceptance_arq_rows.csv") if row.get("ticker") in tickers]
-    mrq_rows = [row for row in read_csv_rows(acceptance_root / "acceptance_mrq_rows.csv") if row.get("ticker") in tickers]
+    permatickers = read_permaticker_map(acceptance_root)
+    arq_rows = [enrich_permaticker(row, permatickers) for row in read_csv_rows(acceptance_root / "acceptance_arq_rows.csv") if row.get("ticker") in tickers]
+    mrq_rows = [enrich_permaticker(row, permatickers) for row in read_csv_rows(acceptance_root / "acceptance_mrq_rows.csv") if row.get("ticker") in tickers]
     with connect(provider_db) as conn:
         conn.execute(
             """
@@ -218,6 +219,28 @@ def load_provider_subset(provider_db: Path, acceptance_root: Path, tickers: Iter
         for row in arq_rows + mrq_rows:
             insert_sharadar_observation(conn, row, run_id, now)
     return provider_counts(provider_db)
+
+
+def read_permaticker_map(acceptance_root: Path) -> dict[str, str]:
+    path = acceptance_root / "permaticker_identity_validation.csv"
+    if not path.exists():
+        return {}
+    output = {}
+    for row in read_csv_rows(path):
+        ticker = str(row.get("ticker") or "").upper()
+        value = nullable_text(row.get("row_permatickers")) or nullable_text(row.get("metadata_permatickers"))
+        if ticker and value:
+            output[ticker] = value.split(",")[0].strip()
+    return output
+
+
+def enrich_permaticker(row: Mapping[str, Any], permatickers: Mapping[str, str]) -> dict[str, Any]:
+    enriched = dict(row)
+    if not nullable_text(enriched.get("permaticker")):
+        ticker = str(enriched.get("ticker") or "").upper()
+        if ticker in permatickers:
+            enriched["permaticker"] = permatickers[ticker]
+    return enriched
 
 
 def insert_sharadar_observation(conn: sqlite3.Connection, row: Mapping[str, Any], run_id: str, now: str) -> str:
@@ -300,6 +323,23 @@ def provider_counts(provider_db: Path) -> dict[str, int]:
 
 
 def ensure_identity(conn: sqlite3.Connection, ticker: str, permaticker: str | None, now: str) -> tuple[int, int]:
+    existing_security = conn.execute(
+        "SELECT security_id, company_id FROM security WHERE current_ticker=?",
+        (ticker,),
+    ).fetchone()
+    if existing_security is not None:
+        security_id = existing_security["security_id"]
+        company_id = existing_security["company_id"]
+        if permaticker:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO provider_security_identity(provider, provider_security_id, security_id, provider_ticker, source, created_at_utc)
+                VALUES ('SHARADAR', ?, ?, ?, 'PROTOTYPE_ACCEPTANCE_CACHE', ?)
+                """,
+                (permaticker, security_id, ticker, now),
+            )
+        return company_id, security_id
+
     company_key = f"SHARADAR:{permaticker}" if permaticker else f"TICKER:{ticker}"
     conn.execute(
         """
