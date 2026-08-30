@@ -122,3 +122,39 @@ data/fundamentals_analysis.db
 ```
 
 The accepted proof artifacts live under `temp/fundamentals_v4_1a_schema_design/<timestamp>/` and are disposable.
+
+## V4-1B Production Contract
+
+The V4-1A schema contract is now instantiated in production by V4-1B at:
+
+```text
+data/fundamentals_provider.db
+data/fundamentals_v4.db
+data/fundamentals_analysis.db
+```
+
+Schema version metadata remains `v4_1a_prototype` for provider, canonical, and analysis schemas; V4-1B is a production bootstrap of that approved schema, not a schema redesign.
+
+Production canonicalization remains ARQ-only. MRQ is retained provider-side for restatement/comparison evidence and does not overwrite ARQ canonical history. ART, MRT, ARY, and MRY were present in the bulk file but excluded from production provider ingestion for this phase.
+
+The production bootstrap created 50,585 canonical quarter rows and 50,585 canonical financial rows. Every non-null canonical financial cell has field-level provenance; `canonical_fields_without_provenance = 0`. NULL values remain NULL and zero values remain zero.
+
+Sharadar 5Y bulk fundamentals delivered these provider identity fields:
+
+```text
+ticker
+dimension
+calendardate
+date
+reportperiod
+fiscalperiod
+lastupdated
+```
+
+The same bulk file did not include `permaticker`. V4-1B therefore could not populate production `provider_security_identity` permaticker rows from this endpoint. The import records this as a review item, while preserving ticker-based mapping against the local 2,470-security bootstrap universe with 0 ticker-security collisions.
+
+Baseline fingerprints for the production run are stored under:
+
+```text
+temp/fundamentals_v4_1b_production_bootstrap/20260830T205438Z/v4_production_baseline_fingerprints.json
+```

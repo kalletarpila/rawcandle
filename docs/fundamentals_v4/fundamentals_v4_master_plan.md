@@ -97,3 +97,40 @@ The prototype found no blocking identity or fiscal-anchor conflicts. It imported
 Next action:
 
 `REVIEW 22 BOOTSTRAP CSV ROWS WITHOUT PARSABLE SEC COMPANYFACTS CIK; OTHERWISE PROCEED TO V4-1B WITH IMPORTED CIKS, VERIFIED FISCAL-CALENDAR METADATA, AND NULL CIKS ONLY WHERE THE LOCAL SOURCE LACKS A STRICT COMPANYFACTS CIK`
+
+## V4-1B Production Bootstrap Update
+
+V4-1B created the first RawCandle production Fundamentals V4 databases:
+
+```text
+data/fundamentals_provider.db
+data/fundamentals_v4.db
+data/fundamentals_analysis.db
+```
+
+The production bootstrap used Sharadar Direct `GET /data/fundamentals?years=5` only. Raw downloaded and extracted provider files, replay snapshots, and detailed audit CSV/JSON outputs are under:
+
+```text
+temp/fundamentals_v4_1b_production_bootstrap/20260830T205438Z/
+```
+
+Result: `V4_PRODUCTION_BOOTSTRAP_COMPLETE_WITH_REVIEW_ITEMS`.
+
+The provider store ingested 102,204 matched target-universe observations: 51,476 ARQ and 50,728 MRQ. Non-quarterly dimensions were not ingested into production provider tables. Canonicalization accepted ARQ only and created 50,585 canonical quarterly financial rows plus 602,940 field-level provenance rows.
+
+The 2,470 local bootstrap tickers remain the authoritative initial V4 universe. The production identity bootstrap created 2,458 companies, 2,470 securities, imported 2,436 company CIK rows, and preserved 22 NULL CIK review rows. Sharadar's 5Y bulk fundamentals CSV did not include a `permaticker` column in this entitlement response, so no production `provider_security_identity` permaticker rows could be imported from this bulk file; ticker-security collisions and permaticker conflicts were both 0.
+
+Integrity and replay checks passed: all three SQLite quick checks returned `ok`, foreign-key errors were 0, canonical duplicate FY/Q rows were 0, non-null canonical fields without provenance were 0, replay created 0 duplicate rows, and baseline fingerprints were identical.
+
+Review items before TTM migration:
+
+- 22 local bootstrap rows without parsable CIK.
+- 19 target tickers without matched ARQ/MRQ rows in the Sharadar 5Y bulk file.
+- 1,044 fiscal anchor mismatches and 238 anchor-not-available cases for audit review; canonical identity was not rewritten.
+- 190 completed fiscal years with Q4 missing and 172 company-level sequence gaps.
+- 1 debt reconciliation `DIFFERENT` row, 255 sharesbas discontinuity flags, and missing provider components where reported.
+- Sharadar 5Y bulk fundamentals endpoint did not provide permaticker values.
+
+Next action:
+
+`KEEP THE PRODUCTION V4 BASELINE FROZEN; RESOLVE ONLY THE SPECIFIC IDENTITY / COVERAGE / PROVIDER QUALITY REVIEW ITEMS BEFORE TTM MIGRATION`

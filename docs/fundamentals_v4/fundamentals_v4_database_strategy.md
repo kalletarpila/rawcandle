@@ -109,3 +109,36 @@ temp/fundamentals_v4_1a1_identity_calendar_bootstrap/20260830T201005Z/
 Result: `V4_IDENTITY_CALENDAR_BOOTSTRAP_COMPLETE_WITH_REVIEW_ITEMS`.
 
 The prototype imported 2,436 company-level CIK mappings, 2,470 securities, 2,458 companies, and 35,245 normalized company/year fiscal anchors from 35,399 populated CSV FY-start cells. There were zero ticker multiple-CIK conflicts, zero identity conflicts, zero anchor conflicts, and zero duplicate replay rows. The review item is limited to 22 rows whose `Lähde` value does not contain a strict SEC Companyfacts CIK URL.
+
+## V4-1B Production Databases
+
+V4-1B creates the production database files for the first time:
+
+```text
+data/fundamentals_provider.db
+data/fundamentals_v4.db
+data/fundamentals_analysis.db
+```
+
+`fundamentals_provider.db` now stores the matched RawCandle target-universe Sharadar ARQ/MRQ observations from the paid 5-year bulk file. The raw full entitlement ZIP and extracted CSV are retained only under `temp/` and are not committed. Rows outside the 2,470 ticker bootstrap universe and non-quarterly dimensions remain out of the production provider tables for this initial baseline.
+
+`fundamentals_v4.db` stores the production company/security identity, local CIK mappings, fiscal calendar profiles and exact annual anchors, ARQ canonical quarters, 12-field quarterly financial rows, and per-field provenance. Sharadar `fiscalperiod` remains the canonical FY/Q identity, `reportperiod` remains `period_end`, Sharadar `date` maps to source availability, and `first_public_result_date` stays NULL in this phase.
+
+`fundamentals_analysis.db` is initialized with the approved schema only. Score, Lifecycle, Valuation, and TTM output rows remain 0 in V4-1B.
+
+Production baseline run:
+
+```text
+temp/fundamentals_v4_1b_production_bootstrap/20260830T205438Z/
+```
+
+Key counts:
+
+- Provider observations: 102,204 total, 51,476 ARQ, 50,728 MRQ.
+- Canonical financial rows: 50,585.
+- Field provenance rows: 602,940.
+- Companies: 2,458; securities: 2,470; CIK rows: 2,436; CIK NULL rows: 22.
+- Fiscal anchors: 35,245; fiscal profiles: 2,458.
+- Analysis model output rows: 0.
+
+Cross-database referential checks are implemented as read-only audits because SQLite cannot enforce foreign keys across separate database files. The V4-1B baseline has 0 dangling provider-security links, 0 missing provider observations referenced by provenance, and 0 analysis company IDs missing from canonical identity.

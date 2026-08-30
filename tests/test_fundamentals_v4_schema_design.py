@@ -338,10 +338,12 @@ def test_analysis_schema_exists_but_no_score_engine(tmp_path: Path) -> None:
         assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name='score_engine_state'").fetchone()
 
 
-def test_no_production_db_creation() -> None:
+def test_schema_design_uses_disposable_paths_not_production(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
     production = Path("/home/kalle/projects/rawcandle/data")
-    forbidden = ["fundamentals_provider.db", "fundamentals_v4.db", "fundamentals_analysis.db"]
-    assert not any((production / name).exists() for name in forbidden)
+    assert paths.provider_db != production / "fundamentals_provider.db"
+    assert paths.canonical_db != production / "fundamentals_v4.db"
+    assert paths.analysis_db != production / "fundamentals_analysis.db"
 
 
 def test_no_v3_writes_and_no_runtime_swingmaster_import() -> None:
