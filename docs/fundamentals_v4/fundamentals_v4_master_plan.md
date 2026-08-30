@@ -69,3 +69,15 @@ If accepted, the next implementation phase is:
 Initial V4-1 schema design may use Sharadar ARQ as the primary quarterly source, while keeping Yahoo and SEC as complementary providers for operational freshness, event timing, identity/provenance, and exception verification.
 
 V4-0D result: `SHARADAR_ACCEPTED_AS_V4_PRIMARY_PROVIDER_WITH_GUARDS`. Proceed to V4-1 with the documented identity, field-projection, date-semantics, and complementary-provider guards.
+
+## V4-1A Schema Design Update
+
+V4-1A result: `V4_SCHEMA_DESIGN_COMPLETE_WITH_OPEN_ARCHITECTURE_ITEMS`.
+
+Implemented RawCandle-owned schema foundations for provider, canonical, and analysis databases, plus a disposable prototype runner and regression tests. The prototype proves ARQ/MRQ coexistence in provider storage, ARQ-only canonicalization, fiscalperiod/reportperiod preservation, explicit Q4 handling, field-level provenance, replay idempotency, and output-only contracts for Score, Lifecycle, and Valuation.
+
+The only open architecture item found by the prototype is CIK source availability. SwingMaster V3 was inspected read-only and does not expose deterministic CIK values. V4-1B must either accept NULL CIK bootstrap until SEC provider ingest exists or provide another deterministic local CIK source. CIKs must not be invented.
+
+Next action:
+
+`DECIDE V4-1B CIK SOURCE: ACCEPT NULL CIK BOOTSTRAP UNTIL SEC PROVIDER INGEST OR SUPPLY A DETERMINISTIC LOCAL CIK SOURCE; DO NOT INVENT CIKS`

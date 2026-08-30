@@ -78,3 +78,42 @@ Sharadar `permaticker` is provider-stable identity metadata, not the sole global
 - provider ids such as Sharadar `permaticker`
 - SEC CIK
 - corporate action and ticker-change evidence
+
+## V4-1A Schema Decision
+
+V4-1A makes the three-database boundary explicit while still using only disposable prototype databases:
+
+- `fundamentals_provider.db`: provider-owned acquisition truth, including run metadata, native Sharadar observations, raw JSON payloads, content hashes, and provider timestamps.
+- `fundamentals_v4.db`: RawCandle canonical quarterly financial truth, including company/security identity, ticker aliases, provider identity links, CIK slots, fiscal-quarter identity, accepted wide quarterly values, field provenance, and the TTM contract placeholder.
+- `fundamentals_analysis.db`: rebuildable analysis output contracts for Score, Lifecycle, and Valuation. V4-1A defines contracts only; it does not migrate or run those engines.
+
+Sharadar ARQ is the primary quarterly canonicalization source for the prototype. MRQ remains stored provider-side and can coexist for audit, comparison, and future policy decisions, but it does not overwrite ARQ canonical rows in V4-1A.
+
+The canonical quarterly field contract is intentionally narrow:
+
+```text
+revenue, gross_profit, operating_income, ebit, ebitda, net_income,
+operating_cashflow, capex, free_cashflow, cash, total_debt,
+shares_outstanding
+```
+
+Sharadar ARQ mapping:
+
+```text
+revenue <- revenue
+gross_profit <- gp
+operating_income <- opinc
+ebit <- ebit
+ebitda <- ebitda
+net_income <- netinc
+operating_cashflow <- ncfo
+capex <- capex
+free_cashflow <- fcf
+cash <- cashneq
+total_debt <- debt
+shares_outstanding <- sharesbas
+```
+
+Provider-side support fields such as `reportperiod`, `fiscalperiod`, `calendardate`, `date`, `lastupdated`, `debtc`, `debtnc`, `shareswa`, and `shareswadil` are preserved without forcing them into the canonical wide field contract.
+
+V4-1A audited `/home/kalle/projects/swingmaster/rc_fundamentals_v3.db` read-only for deterministic CIK mappings. The inspected V3 schema does not contain a CIK column, so the prototype imported zero CIKs and recorded the missing mappings instead of inventing identifiers. V4 remains prepared for SEC or another deterministic CIK source in a later phase.
