@@ -109,7 +109,10 @@ data_backup_*/
 analysis/*.log
 
 # Local API keys / environment overrides
+.env
+.env.*
 .env.local
+.env.sharadar
 
 # Local databases and SQLite runtime files
 *.db
