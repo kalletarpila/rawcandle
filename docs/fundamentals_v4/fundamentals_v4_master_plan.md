@@ -57,3 +57,15 @@ Switch downstream consumers to RawCandle V4 outputs after parity, acceptance, an
 `V4-0D — SHARADAR PAID DIFFICULT-TICKER ACCEPTANCE`
 
 Run from RawCandle after activating one month of Sharadar Fundamentals full history. Do not implement the canonical V4 schema before provider acceptance unless a later architecture review changes that decision.
+
+## V4-0D Acceptance Update
+
+V4-0D runs the paid 5-year difficult-ticker acceptance from RawCandle, using the existing Sharadar Direct API client and `SHARADAR_API_KEY`. It does not create V4 production databases and does not bulk-download the fundamentals table.
+
+If accepted, the next implementation phase is:
+
+`V4-1 — PROVIDER STORE + CANONICAL SCHEMA DESIGN`
+
+Initial V4-1 schema design may use Sharadar ARQ as the primary quarterly source, while keeping Yahoo and SEC as complementary providers for operational freshness, event timing, identity/provenance, and exception verification.
+
+V4-0D result: `SHARADAR_ACCEPTED_AS_V4_PRIMARY_PROVIDER_WITH_GUARDS`. Proceed to V4-1 with the documented identity, field-projection, date-semantics, and complementary-provider guards.

@@ -53,3 +53,21 @@ A. accession and filing metadata
 a. DEI/source-context evidence
 
 V3 repair/reconciliation semantics remain reference-only or retired unless a concrete V4 requirement proves otherwise.
+
+## Sharadar Paid 5-Year Difficult-Ticker Acceptance
+
+V4-0D validates the user's paid `Sharadar Fundamentals 5 Years` entitlement without bulk-downloading the table. The hard gate is a single WDAY ARQ request. If WDAY still returns the former free-tier 403, the acceptance run stops and the implementation is not changed to work around entitlement.
+
+Acceptance scope:
+
+- difficult tickers: AAPL, WDAY, ASTH, CECO, BBY, DELL, GCO, HAE, MRVL, RL, SAIC, TJX, TRNS
+- controls: GOOGL, META, AMZN, XOM, KO
+- targeted ARQ/MRQ by ticker
+- ticker metadata and actions metadata where available
+- no `years=5`, `years=10`, or `years=full` bulk table request
+
+Implementation note: V4-0D uses full ticker-scoped fundamentals rows for ARQ/MRQ because the Direct API field projection omitted `fiscalperiod` during acceptance. The request scope remains small and ticker-targeted.
+
+Decision rule: Sharadar may become the V4 primary normalized fundamentals provider only if the hard known-truth fiscal cases pass, explicit Q4 coverage is broad, quarter continuity is coherent, critical fields are materially covered, and ARQ remains distinguishable from MRQ for point-in-time use. Yahoo and SEC remain complementary providers for freshness, events, provenance, and exceptions.
+
+V4-0D result: `SHARADAR_ACCEPTED_AS_V4_PRIMARY_PROVIDER_WITH_GUARDS`. The acceptance run confirmed paid WDAY entitlement, hard fiscal truth matches, 100% explicit Q4 coverage across evaluated completed fiscal years, 100% latest8Q critical field coverage, coherent FCF/debt reconciliation, and 100% permaticker coverage. Guards remain for CIK identity enrichment, source date semantics, and full-row ARQ/MRQ fetches when `fiscalperiod` is required.

@@ -189,6 +189,23 @@ class SharadarClient:
     def table_schema(self, table: str) -> SharadarResult:
         return self._request("GET", f"/schema/{table}", {}, auth=False)
 
+    def table(
+        self,
+        table: str,
+        *,
+        ticker: str | None = None,
+        fields: Iterable[str] | None = None,
+        limit: int | None = None,
+    ) -> SharadarResult:
+        params: dict[str, str] = {}
+        if ticker:
+            params["ticker"] = ticker.strip().upper()
+        if fields:
+            params["fields"] = ",".join(fields)
+        if limit is not None:
+            params["limit"] = str(limit)
+        return self._request("GET", f"/data/{table}", params, auth=True)
+
     def fundamentals(
         self,
         *,
