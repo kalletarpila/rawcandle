@@ -1,5 +1,7 @@
 # Fundamentals V4 Score V1 Phase 1B Report
 
+> Historical phase report. The later owner-approved V4-4 policy removed the Dilution upstream blocker: locally stored `sharesbas` history is scored directly, split rows are evidence only, and positive YoY changes above 50% are assumed genuine dilution. The active contract is `fundamentals_v4_score_v1_specification.md`.
+
 Status: `COMPLETE_WITH_DILUTION_UPSTREAM_BLOCKER`
 
 Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_3b_score_methodology/20260831T_PHASE1B_LOCKED_V2`

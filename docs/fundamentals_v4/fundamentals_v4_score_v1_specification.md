@@ -1,6 +1,6 @@
 # Fundamentals V4 Score V1 Specification
 
-Status: `METHODOLOGY_LOCKED_WITH_DILUTION_UPSTREAM_BLOCKER`
+Status: `IMPLEMENTED`
 
 Model identifier: `SIMPLE_FUNDAMENTAL_SCORE_V1`
 
@@ -109,9 +109,9 @@ The 4x zero-point floor is intentionally conservative and locked. Development se
 
 ## Dilution: 10 points
 
-Intended metric:
+Scored metric:
 
-`share_change_yoy = split_normalized_period_end_basic_shares_current / split_normalized_period_end_basic_shares_4q_ago - 1`
+`share_change_yoy = stored_period_end_basic_shares_current / stored_period_end_basic_shares_4q_ago - 1`
 
 Provider field semantics are:
 
@@ -129,13 +129,15 @@ Provider field semantics are:
 | `0.05` | 2 |
 | `>= 0.10` | 0 |
 
-### Blocking data requirement
+### Locked local-data policy
 
-The current canonical `shares_outstanding <- sharesbas` history is not proven to be consistently split-adjusted or historically restated. The read-only audit found 2,435 absolute YoY changes above 50% among 33,570 observations through 2025-12-31. Of those, 893 had a local split in the exact comparison interval and 446 remained unresolved after weighted-share and local-action checks.
+The local V4 `shares_outstanding <- sharesbas` values are used directly. The local examples reviewed around known splits were already on a comparable stored basis, so the Score engine must not apply a second mechanical split adjustment. `osakedata.db.splits_data` events in the YoY comparison interval are retained in component evidence only.
 
-Dilution is blocked from production. The smallest upstream correction is a point-in-time, split-normalized period-end basic-share series with explicit split lineage and a resolved/unresolved quality status. Once available, a confirmed genuine increase above 50% receives 0 points and a confirmed genuine reduction receives at most 10 points. An unresolved outlier is a critical data-quality flag and prevents `SCORE_FULL` and `SCORE_READY_ESTIMATED`.
+A positive YoY share change above 50% is classified as `ASSUMED_GENUINE_DILUTION_BY_POLICY`, receives 0 points under the locked anchors, and is not a data-quality blocker. This is an explicit owner-approved policy for this private-use application. External event verification is not required for Score readiness.
 
-No Dilution median imputation value is locked from the contaminated series. The provisional 6.990604216206412-point median is diagnostic only and must not be used.
+Sequential `share_change_qoq` is stored as evidence for event timing only. It is not scored. YoY remains the scored metric so that a large issuance affects the ownership comparison for the full four-quarter window rather than only the first sequential observation.
+
+No Dilution imputation is allowed. The historical provisional median remains diagnostic only.
 
 ## Consistency: 10 points
 
@@ -175,13 +177,13 @@ Historical and delisted securities remain eligible while they have a valid, fres
 
 ## Score statuses
 
-`SCORE_FULL` requires all seven observed components, no imputation, and no unresolved critical data-quality flag.
+`SCORE_FULL` requires all seven observed components and no imputation.
 
-`SCORE_READY_ESTIMATED` requires all five core components (Revenue Growth, EBIT Profitability, EBIT Margin Direction, FCF Margin, and Balance Sheet Resilience), exactly one missing optional component (Dilution or Consistency), one locked component-specific median imputation, and no unresolved critical data-quality flag.
+`SCORE_READY_ESTIMATED` requires all five core components (Revenue Growth, EBIT Profitability, EBIT Margin Direction, FCF Margin, and Balance Sheet Resilience), observed Dilution, and missing Consistency replaced by its locked imputation.
 
-The only currently locked optional imputation is Consistency at `6.988540590181791`. Dilution imputation remains blocked. Until the Dilution upstream blocker is resolved, the model cannot emit `SCORE_FULL`; it also cannot emit `SCORE_READY_ESTIMATED` by imputing Dilution.
+The only locked optional imputation is Consistency at `6.988540590181791`. Dilution is never imputed.
 
-`SCORE_LIMITED` applies when any core component is missing, both optional components are missing, a share-count outlier is unresolved, another critical data-quality issue is unresolved, or the current Dilution blocker affects the result.
+`SCORE_LIMITED` applies when the current TTM snapshot is usable but one or more required components remain missing and the exact Consistency-only imputation rule does not produce `SCORE_READY_ESTIMATED`.
 
 `SCORE_NOT_READY` applies when no usable current TTM snapshot exists, source-availability semantics are unusable, multiple material inputs are absent, or even a diagnostic result would be misleading.
 
@@ -205,11 +207,6 @@ The canonical `fundamentals_v4.db` universe already excludes banks, insurers, RE
 
 Score V1 excludes Lifecycle, Lifecycle multipliers, Valuation, stock-return inputs, future-fundamental optimization, production percentile scoring, `ebit_development_quality`, separately scored sequential margin direction, `fcf_to_ebit`, positive-test-based `fundamental_persistence`, complex cash-runway branches, and dynamic reweighting to 100.
 
-## Upstream responsibilities
+## Production implementation
 
-Production readiness still requires:
-
-1. split-normalized point-in-time period-end basic shares with quality lineage;
-2. production implementation and storage in a later phase without changing canonical quarterly or TTM field semantics.
-
-Phase 1B made no production schema or database changes.
+`rawcandle/fundamentals/score/engine.py` implements this contract and writes results to the existing `fundamentals_analysis.db` tables. It does not change the analysis, canonical-quarter, or TTM schemas. Phase 1B made no production database changes; V4-4 introduced the production Score rows.

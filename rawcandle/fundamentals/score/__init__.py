@@ -1,2 +1,1 @@
-"""Fundamentals V4 score calibration research tooling."""
-
+"""Fundamentals V4 Score V1 research and production tooling."""

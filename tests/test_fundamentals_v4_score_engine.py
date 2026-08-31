@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import inspect
+import sqlite3
+
+import pytest
+
+from rawcandle.fundamentals.score import engine
+
+
+def ttm_row(index: int, *, shares: float = 10.0, core_ready: int = 1, available: bool = True) -> dict[str, object]:
+    year = 2022 + (index - 1) // 4
+    quarter = (index - 1) % 4 + 1
+    revenue = 100.0 * (1.10 ** ((index - 1) / 4.0))
+    return {
+        "ttm_id": index,
+        "company_id": 1,
+        "security_id": 1,
+        "ticker": "TEST",
+        "endpoint_quarter_id": index,
+        "endpoint_fiscal_year": year,
+        "endpoint_fiscal_quarter": f"Q{quarter}",
+        "period_end": f"{year}-{quarter * 3:02d}-28",
+        "ttm_source_available_date": f"{year}-{quarter * 3:02d}-29" if available else None,
+        "ttm_revenue": revenue,
+        "ttm_ebit": revenue * 0.10,
+        "ttm_free_cashflow": revenue * 0.08,
+        "cash": 20.0,
+        "total_debt": 10.0,
+        "shares_outstanding": shares,
+        "core_ttm_ready": core_ready,
+    }
+
+
+def compute(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return engine.compute_score_rows(rows, {}, generated_at="2026-01-01T00:00:00Z", run_id="TEST_RUN")
+
+
+def component(result: dict[str, object], name: str) -> dict[str, object]:
+    return next(item for item in result["components"] if item["component_name"] == name)  # type: ignore[index,union-attr]
+
+
+def create_analysis_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        PRAGMA foreign_keys=ON;
+        CREATE TABLE analysis_model_run (
+            run_id TEXT PRIMARY KEY, model_type TEXT NOT NULL, model_version TEXT NOT NULL,
+            model_fingerprint TEXT NOT NULL, generated_at_utc TEXT NOT NULL,
+            status TEXT NOT NULL, metadata_json TEXT NOT NULL
+        );
+        CREATE TABLE score_result (
+            score_result_id INTEGER PRIMARY KEY, company_id INTEGER NOT NULL,
+            quarter_id INTEGER NOT NULL, model_version TEXT NOT NULL,
+            model_fingerprint TEXT NOT NULL, total_score REAL,
+            readiness_status TEXT NOT NULL, missing_input_reason TEXT,
+            generated_at_utc TEXT NOT NULL,
+            run_id TEXT REFERENCES analysis_model_run(run_id)
+        );
+        CREATE TABLE score_component (
+            score_component_id INTEGER PRIMARY KEY,
+            score_result_id INTEGER NOT NULL REFERENCES score_result(score_result_id) ON DELETE CASCADE,
+            component_name TEXT NOT NULL, component_score REAL,
+            evidence_json TEXT NOT NULL, UNIQUE(score_result_id, component_name)
+        );
+        """
+    )
+
+
+def test_full_score_has_seven_observed_components_and_direct_sum() -> None:
+    result = compute([ttm_row(index) for index in range(1, 9)])[-1]
+    assert result["readiness_status"] == "SCORE_FULL"
+    assert len(result["components"]) == 7
+    direct_sum = sum(item["component_score"] for item in result["components"])  # type: ignore[arg-type,union-attr]
+    assert result["total_score"] == pytest.approx(direct_sum)
+    assert result["total_score"] == pytest.approx(69.4)
+
+
+def test_consistency_is_the_only_imputed_optional_component() -> None:
+    result = compute([ttm_row(index) for index in range(1, 6)])[-1]
+    assert result["readiness_status"] == "SCORE_READY_ESTIMATED"
+    consistency = component(result, "CONSISTENCY")
+    assert consistency["component_score"] == engine.CONSISTENCY_IMPUTATION
+    assert '"value_status":"IMPUTED"' in consistency["evidence_json"]
+
+
+def test_large_positive_share_change_is_scored_as_genuine_dilution() -> None:
+    rows = [ttm_row(index) for index in range(1, 9)]
+    rows[-1]["shares_outstanding"] = 20.0
+    result = compute(rows)[-1]
+    dilution = component(result, "DILUTION")
+    assert dilution["component_score"] == 0.0
+    assert "ASSUMED_GENUINE_DILUTION_BY_POLICY" in dilution["evidence_json"]
+    assert result["readiness_status"] == "SCORE_FULL"
+
+
+def test_not_ready_ttm_has_no_total_score() -> None:
+    rows = [ttm_row(index) for index in range(1, 9)]
+    rows[-1]["core_ttm_ready"] = 0
+    result = compute(rows)[-1]
+    assert result["readiness_status"] == "SCORE_NOT_READY"
+    assert result["total_score"] is None
+
+
+def test_apply_replaces_only_same_model_and_replays_identically() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    create_analysis_schema(conn)
+    rows = compute([ttm_row(index) for index in range(1, 9)])
+    first = engine.apply_scores(conn, rows, run_id="TEST_RUN", generated_at="2026-01-01T00:00:00Z")
+    first_fingerprint = engine.score_fingerprint(conn)
+    second = engine.apply_scores(conn, rows, run_id="TEST_RUN", generated_at="2026-01-01T00:00:00Z")
+    second_fingerprint = engine.score_fingerprint(conn)
+    assert first["rows_after"] == second["rows_after"] == len(rows)
+    assert first_fingerprint == second_fingerprint
+    assert conn.execute("SELECT COUNT(*) FROM score_component").fetchone()[0] == 7 * len(rows)
+
+
+def test_engine_has_no_swingmaster_or_network_runtime_dependency() -> None:
+    source = inspect.getsource(engine).lower()
+    assert "import swingmaster" not in source
+    assert "from swingmaster" not in source
+    assert "requests." not in source
+    assert "sec.gov" not in source
