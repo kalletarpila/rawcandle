@@ -122,11 +122,13 @@ Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_2_ttm/202608
 - Lifecycle rows: `0`
 - Valuation rows: `0`
 
-## V4-3 Score Calibration Baseline
+## V4-3A Score Calibration Baseline (Superseded)
 
 Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_3a_score_scaling/20260831T141119Z`
 
-Classification: `V4_SCORE_V1_CONTINUOUS_SCALING_LOCKED_IMPLEMENTATION_READY`
+Historical classification: `V4_SCORE_V1_CONTINUOUS_SCALING_LOCKED_IMPLEMENTATION_READY`
+
+This classification is superseded by Phase 1B / V4-3B. The active `SIMPLE_FUNDAMENTAL_SCORE_V1` methodology is locked with a Dilution upstream blocker; it is not yet production implementation-ready.
 
 Canonical fingerprint matched pre-phase baseline: `True`
 TTM fingerprint matched pre-phase baseline: `True`

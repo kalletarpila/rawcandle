@@ -1,4 +1,6 @@
-# Fundamentals V4 Score Calibration
+# Fundamentals V4 Score Calibration (Superseded V4-3A Record)
+
+This file records the historical V4-3A calibration only. It is superseded by `SIMPLE_FUNDAMENTAL_SCORE_V1` in `fundamentals_v4_score_v1_specification.md` and must not be used as an active Score V1 contract. The old 25/15/15/15/10/15/5 structure, readiness rules, fingerprint, and implementation-ready classification below are retained only for traceability.
 
 Classification: `V4_SCORE_V1_CONTINUOUS_SCALING_LOCKED_IMPLEMENTATION_READY`
 

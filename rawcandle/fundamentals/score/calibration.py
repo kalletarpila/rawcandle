@@ -1,3 +1,9 @@
+"""Historical V4-3A calibration retained for traceability.
+
+The active Score V1 methodology is SIMPLE_FUNDAMENTAL_SCORE_V1 in methodology.py
+and docs/fundamentals_v4/fundamentals_v4_score_v1_specification.md.
+"""
+
 from __future__ import annotations
 
 import csv

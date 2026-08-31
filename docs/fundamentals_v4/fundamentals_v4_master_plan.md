@@ -167,8 +167,12 @@ Next: `PROCEED TO V4-3: MIGRATE AND VALIDATE THE LOCKED FUNDAMENTAL SCORE ARCHIT
 
 ## V4-3 Score Calibration
 
-V4-3 produced the candidate `V4_FUNDAMENTAL_SCORE_V1` specification and calibration artifacts. Production Score writes remain frozen until V4-4.
+V4-3 produced the historical candidate `V4_FUNDAMENTAL_SCORE_V1` specification and calibration artifacts. It is superseded by V4-3B. Production Score writes remain frozen.
 
 ## V4-3A Score Scaling
 
-V4-3A redesigned `V4_FUNDAMENTAL_SCORE_V1` as independent continuous absolute 0..N component scales. Score means current fundamental state; Delta Score means change in state. Production Score writes remain frozen until V4-4.
+V4-3A redesigned the now-superseded `V4_FUNDAMENTAL_SCORE_V1` as independent continuous absolute 0..N component scales. Its artifacts remain historical evidence, not the active Score V1 contract.
+
+## V4-3B Simple Score Methodology
+
+V4-3B locked `SIMPLE_FUNDAMENTAL_SCORE_V1`, corrected calibration to true quarter-end as-of cross-sections, and locked Consistency and the 4x Balance Sheet floor. Dilution remains blocked pending split-normalized period-end basic-share history. Reliable point-in-time financial-company and REIT classification is also an upstream calibration limitation. Production Score writes remain frozen until these contracts are resolved and a later phase explicitly authorizes implementation.

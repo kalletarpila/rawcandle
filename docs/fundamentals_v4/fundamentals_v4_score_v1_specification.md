@@ -1,144 +1,216 @@
-# Fundamentals V4 Score V1 Locked Specification
+# Fundamentals V4 Score V1 Specification
 
-Version: `V4_FUNDAMENTAL_SCORE_V1`
-Fingerprint: `68601dda8d4e873e58a134c286f5d0468bfefa58dfec84920d4596412371b3ff`
+Status: `METHODOLOGY_LOCKED_WITH_DILUTION_UPSTREAM_BLOCKER`
 
-Score semantic: `CURRENT_FUNDAMENTAL_STATE`.
+Model identifier: `SIMPLE_FUNDAMENTAL_SCORE_V1`
 
-Delta Score semantic: `CHANGE_IN_FUNDAMENTAL_STATE`.
+This specification supersedes the V4-3A `V4_FUNDAMENTAL_SCORE_V1` design. Git history preserves that design; it is not an alternative active Score V1 specification.
 
-Objective: estimate how strong the company's fundamental condition is now. Stock returns, OHLCV returns, future fundamental improvement, Lifecycle output and Valuation output are not inputs or optimization targets.
+## Purpose
 
-Top-level weights are locked at 25/15/15/15/10/15/5 for a total of 100 points.
+Score V1 measures current absolute fundamental strength, direction, cash generation, balance-sheet resilience, ownership dilution, and operating stability. It is not a percentile rank and is not optimized against stock returns or future fundamental outcomes.
 
-Each component is an independent continuous absolute scale from 0 to its component maximum. Missing components are not reweighted to 100; total Score is the direct sum of component points.
+| Component | Maximum |
+|---|---:|
+| Revenue Growth | 20 |
+| EBIT Profitability | 15 |
+| EBIT Margin Direction | 15 |
+| FCF Margin | 15 |
+| Balance Sheet Resilience | 15 |
+| Dilution | 10 |
+| Consistency | 10 |
+| Total | 100 |
 
-Time split uses `ttm_source_available_date`; `period_end` remains the economic quarter label and is not used as the primary split key.
+All ratios are decimal fractions. For example, `0.10` means 10%, and a margin change of `0.05` means five percentage points. Component calculations retain full floating-point precision. Presentation rounding does not change stored or downstream values.
 
-Future validation states are retained as diagnostics only. They are not an acceptance criterion and are not used to fit scoring curves.
+## Common scoring rule
 
-## Growth and earnings development (25 points)
+Each anchor table defines a bounded continuous piecewise-linear function. Values between adjacent anchors are linearly interpolated. Values outside the first and last anchors receive the endpoint score. Missing is distinct from zero.
 
-Economic purpose: measure revenue expansion and EBIT development without double-counting price momentum.
+The canonical score is the direct sum of observed and explicitly imputed component points. It must never use `100 * observed_points / available_weight` or otherwise dynamically reweight available components to 100.
 
-Raw inputs and scoring curves:
+## Revenue Growth: 20 points
 
-- `revenue_growth_yoy_ttm`: piecewise_linear, 10 points, higher is better; low=-0.1, neutral=0.0, high=0.25
-- `ebit_development_quality`: piecewise_linear, 15 points, higher is better; low=0.0, neutral=0.5, high=1.0
+`revenue_growth_yoy_ttm = revenue_ttm_current / revenue_ttm_4q_ago - 1`
 
-History requirement: current TTM plus same fiscal quarter one year earlier.
-Missing-data treatment: component can be partial, but readiness/confidence records missing material inputs; missing values are never converted to zero.
-Denominator guard: ratios return missing when denominator is null, zero, near zero, or economically invalid for that ratio.
-Outlier treatment: bounded curves cap the score impact; valid distressed or high-growth observations remain in the sample.
+The snapshots must be exactly four fiscal quarters apart in one continuous canonical fiscal chain. Both revenue values must be positive and observed.
 
-## Profitability level (15 points)
+| Revenue growth | Points |
+|---:|---:|
+| `<= -0.10` | 0 |
+| `0.00` | 7 |
+| `0.10` | 12 |
+| `0.20` | 16 |
+| `>= 0.30` | 20 |
 
-Economic purpose: measure current EBIT margin strength on normalized TTM fundamentals.
+## EBIT Profitability: 15 points
 
-Raw inputs and scoring curves:
+`ebit_margin_ttm = ebit_ttm / revenue_ttm`
 
-- `ebit_margin_ttm`: piecewise_linear, 15 points, higher is better; low=0.0, neutral=0.1, high=0.25
+Revenue must be positive and observed. There is no EBITDA fallback.
 
-History requirement: current ready TTM.
-Missing-data treatment: component can be partial, but readiness/confidence records missing material inputs; missing values are never converted to zero.
-Denominator guard: ratios return missing when denominator is null, zero, near zero, or economically invalid for that ratio.
-Outlier treatment: bounded curves cap the score impact; valid distressed or high-growth observations remain in the sample.
+| EBIT margin | Points |
+|---:|---:|
+| `<= 0.00` | 0 |
+| `0.10` | 7.5 |
+| `>= 0.25` | 15 |
 
-## Margin direction (15 points)
+## EBIT Margin Direction: 15 points
 
-Economic purpose: measure direction of profitability separately from absolute margin level.
+`ebit_margin_direction = ebit_margin_ttm_current - ebit_margin_ttm_4q_ago`
 
-Raw inputs and scoring curves:
+The unit is a decimal-fraction difference. The snapshots must be exactly four fiscal quarters apart in one continuous canonical fiscal chain. There is no separately scored sequential margin metric.
 
-- `ebit_margin_yoy_change`: piecewise_linear, 10 points, higher is better; low=-0.05, neutral=0.0, high=0.05
-- `ebit_margin_seq_change`: piecewise_linear, 5 points, higher is better; low=-0.02, neutral=0.0, high=0.02
+| YoY EBIT-margin change | Points |
+|---:|---:|
+| `<= -0.05` | 0 |
+| `0.00` | 7.5 |
+| `>= 0.05` | 15 |
 
-History requirement: current TTM, previous sequential TTM, and same fiscal quarter one year earlier.
-Missing-data treatment: component can be partial, but readiness/confidence records missing material inputs; missing values are never converted to zero.
-Denominator guard: ratios return missing when denominator is null, zero, near zero, or economically invalid for that ratio.
-Outlier treatment: bounded curves cap the score impact; valid distressed or high-growth observations remain in the sample.
+## FCF Margin: 15 points
 
-## Cash-flow quality (15 points)
+`fcf_margin_ttm = free_cash_flow_ttm / revenue_ttm`
 
-Economic purpose: measure conversion of accounting earnings into free cash flow with explicit positive-EBIT guards.
+Canonical `free_cash_flow` is provider FCF and reconciles to operating cash flow plus signed capex. Revenue must be positive and observed. `fcf_to_ebit` is not a Score V1 input.
 
-Raw inputs and scoring curves:
+| FCF margin | Points |
+|---:|---:|
+| `<= -0.05` | 0 |
+| `0.00` | 3 |
+| `0.05` | 7 |
+| `0.10` | 11 |
+| `>= 0.20` | 15 |
 
-- `fcf_to_ebit`: piecewise_linear, 10 points, higher is better; low=0.0, neutral=0.6, high=1.2
-- `fcf_margin_ttm`: piecewise_linear, 5 points, higher is better; low=-0.05, neutral=0.0, high=0.12
+## Balance Sheet Resilience: 15 points
 
-History requirement: current ready TTM.
-Missing-data treatment: component can be partial, but readiness/confidence records missing material inputs; missing values are never converted to zero.
-Denominator guard: ratios return missing when denominator is null, zero, near zero, or economically invalid for that ratio.
-Outlier treatment: bounded curves cap the score impact; valid distressed or high-growth observations remain in the sample.
+`net_debt = total_debt - cash`
 
-## Development consistency (10 points)
+When `ebit_ttm > 0`, calculate `net_debt_to_ebit = net_debt / ebit_ttm`:
 
-Economic purpose: measure durability and volatility of recent fundamental development.
+| Net debt / EBIT | Points |
+|---:|---:|
+| `<= 0` | 15 |
+| `1` | 12 |
+| `2` | 8 |
+| `3` | 4 |
+| `>= 4` | 0 |
 
-Raw inputs and scoring curves:
+When `ebit_ttm <= 0`, use exactly these branches:
 
-- `consistency_positive_share`: piecewise_linear, 6 points, higher is better; low=0.0, neutral=0.5, high=1.0
-- `consistency_margin_volatility`: piecewise_linear, 4 points, lower is better; low=0.0, neutral=0.03, high=0.1
+| Condition | Points |
+|---|---:|
+| `net_debt <= 0` and `free_cash_flow_ttm >= 0` | 10 |
+| `net_debt <= 0` and `free_cash_flow_ttm < 0` | 5 |
+| `net_debt > 0` | 0 |
 
-History requirement: at least three recent ready TTM observations; four preferred.
-Missing-data treatment: component can be partial, but readiness/confidence records missing material inputs; missing values are never converted to zero.
-Denominator guard: ratios return missing when denominator is null, zero, near zero, or economically invalid for that ratio.
-Outlier treatment: bounded curves cap the score impact; valid distressed or high-growth observations remain in the sample.
+Cash, total debt, EBIT, and FCF must all be observed. No cash-runway model or alternate balance ratio is part of Score V1.
 
-## Balance-sheet resilience (15 points)
+The 4x zero-point floor is intentionally conservative and locked. Development sensitivity was 42.29% at 4x, 35.25% at 5x, and 30.23% at 6x. In the 4x-or-higher group, median net debt/revenue was 88.78% versus 11.09% below 4x. This supports an economic leverage distinction rather than a distribution-fitting relaxation.
 
-Economic purpose: measure debt/cash resilience conditional on profitability and cash burn.
+## Dilution: 10 points
 
-Raw inputs and scoring curves:
+Intended metric:
 
-- `balance_metric`: piecewise_linear, 15 points, higher is better; low=-4.0, neutral=0.0, high=2.0
+`share_change_yoy = split_normalized_period_end_basic_shares_current / split_normalized_period_end_basic_shares_4q_ago - 1`
 
-History requirement: current ready TTM and endpoint cash/debt.
-Missing-data treatment: component can be partial, but readiness/confidence records missing material inputs; missing values are never converted to zero.
-Denominator guard: ratios return missing when denominator is null, zero, near zero, or economically invalid for that ratio.
-Outlier treatment: bounded curves cap the score impact; valid distressed or high-growth observations remain in the sample.
+Provider field semantics are:
 
-## Dilution (5 points)
+- `sharesbas`: actual period-end basic common shares outstanding;
+- `shareswa`: period weighted-average basic shares used for Basic EPS;
+- `shareswadil`: period weighted-average diluted shares used for Diluted EPS.
 
-Economic purpose: penalize material share issuance while avoiding excessive reward for buybacks.
+`sharesbas` is the correct economic field family. `shareswa` and `shareswadil` must not replace it because that would change the component into an EPS-denominator measure.
 
-Raw inputs and scoring curves:
+| YoY share change | Points |
+|---:|---:|
+| `<= -0.02` | 10 |
+| `0.00` | 8 |
+| `0.02` | 5 |
+| `0.05` | 2 |
+| `>= 0.10` | 0 |
 
-- `share_change_yoy`: piecewise_linear, 5 points, lower is better; low=-0.03, neutral=0.0, high=0.1
+### Blocking data requirement
 
-History requirement: current endpoint shares plus same fiscal quarter one year earlier.
-Missing-data treatment: component can be partial, but readiness/confidence records missing material inputs; missing values are never converted to zero.
-Denominator guard: ratios return missing when denominator is null, zero, near zero, or economically invalid for that ratio.
-Outlier treatment: bounded curves cap the score impact; valid distressed or high-growth observations remain in the sample.
+The current canonical `shares_outstanding <- sharesbas` history is not proven to be consistently split-adjusted or historically restated. The read-only audit found 2,435 absolute YoY changes above 50% among 33,570 observations through 2025-12-31. Of those, 893 had a local split in the exact comparison interval and 446 remained unresolved after weighted-share and local-action checks.
 
-## Readiness
+Dilution is blocked from production. The smallest upstream correction is a point-in-time, split-normalized period-end basic-share series with explicit split lineage and a resolved/unresolved quality status. Once available, a confirmed genuine increase above 50% receives 0 points and a confirmed genuine reduction receives at most 10 points. An unresolved outlier is a critical data-quality flag and prevents `SCORE_FULL` and `SCORE_READY_ESTIMATED`.
 
-`SCORE_READY` requires current TTM readiness, availability date, and at least 80 available component weight. `SCORE_READY_WITH_LIMITED_COMPONENT` requires at least 65 available component weight. Otherwise the row is `SCORE_NOT_READY`. Available component points are summed directly and are never scaled up to 100.
+No Dilution median imputation value is locked from the contaminated series. The provisional 6.990604216206412-point median is diagnostic only and must not be used.
 
-Known gaps are propagated through blocker/readiness flags. CIK NULL and permaticker NULL do not automatically block scoring; historical gaps block only windows whose required feature history is affected.
+## Consistency: 10 points
 
-## Delta Score
+Use the latest four contiguous score-eligible quarterly TTM snapshots ending at the score date. If four are unavailable, use three contiguous snapshots. All snapshots must belong to one continuous canonical fiscal chain, use the same dates for all metrics, and contain Revenue Growth YoY TTM, EBIT Margin TTM, and FCF Margin TTM. Do not skip an internal missing quarter. Otherwise Consistency is missing.
 
-`delta_score_1q = current_total_score - prior_quarter_total_score` when both observations are comparable scored observations for the same company. `delta_score_2q` and `delta_score_4q` follow the same arithmetic over comparable prior scored observations. Delta Score is not a separate weighted component.
+For each adjacent pair and each metric:
 
+`normalized_instability = clamp(abs(current - previous) / tolerance, 0, 1)`
 
-## Calibration Evidence
+| Metric | Tolerance |
+|---|---:|
+| Revenue Growth YoY TTM | `0.20` (20 percentage points) |
+| EBIT Margin TTM | `0.05` (5 percentage points) |
+| FCF Margin TTM | `0.10` (10 percentage points) |
 
-Development score distribution: median `33.74305`, p10 `16.406353600000003`, p25 `22.484935`, p75 `47.908379249999996`, p90 `62.4683189`, floor saturation `0.0%`, ceiling saturation `0.0%`.
+For each metric, average its adjacent normalized-instability values. Give the three metric instabilities equal weight:
 
-Component independence: highest Pearson correlation `0.6262527311515318` for `growth_earnings_development:margin_direction`; highest Spearman correlation `0.6305750150176495` for `growth_earnings_development:margin_direction`. Redundant component pairs: `[]`.
+`average_instability = mean(revenue_instability, ebit_margin_instability, fcf_margin_instability)`
 
-Readiness: `{'SCORE_NOT_READY': 13432, 'SCORE_READY': 30335, 'SCORE_READY_WITH_LIMITED_COMPONENT': 6818}` with readiness pct `59.96837`. Top blockers: `{'YOY_TTM_HISTORY_NOT_READY': 17802, 'CURRENT_TTM_NOT_READY': 8079, 'AVAILABILITY_DATE_MISSING': 7707, 'CONSISTENCY_HISTORY_INSUFFICIENT': 4902}`.
+`consistency_points = clamp(10 * (1 - average_instability), 0, 10)`
 
-Development 2021-2023 4Q outcome separation: `NON_MONOTONIC_REVIEW`. Material defects: `[]`.
+This measures stability of metric levels. It can penalize a large favorable change; EBIT Margin Direction separately rewards favorable EBIT-margin improvement. This behavior is intentional.
 
-2024 validation 4Q outcome separation: `MOSTLY_MONOTONIC`. Refinements made: `[]`.
+Development evidence contained 10,310 observed values: P10 1.88894, P25 4.69422, median 7.00875, P75 8.35267, and P90 8.98712. Zero saturation was 2.19% and full-score saturation 0%. The tolerances are economically interpretable and non-degenerate, so they are locked unchanged.
 
-2025 locked OOS 4Q outcome separation: `NON_MONOTONIC_REVIEW`. Thresholds modified after viewing 2025: `NO`.
+The fixed Consistency imputation value is `6.988540590181791`. It is the median of the five development-cutoff medians, giving each cutoff equal weight.
 
-2026 forward validation: observations `7127`, fully observable 4Q targets `0`, censored/missing 4Q targets `6572`. Thresholds modified after viewing 2026: `NO`.
+## Point-in-time and freshness contract
 
-Final classification: `V4_SCORE_V1_CONTINUOUS_SCALING_LOCKED_IMPLEMENTATION_READY`.
+The primary time key is `ttm_source_available_date`. `period_end` identifies the economic quarter and must not determine when data became knowable.
 
-Next action: `PROCEED TO V4-4: IMPLEMENT THE LOCKED V4_FUNDAMENTAL_SCORE_V1 PRODUCTION ENGINE IN RAWCANDLE, WRITE VERSIONED CONTINUOUS 0..N COMPONENT SCORES AND 0..100 TOTAL SCORES TO fundamentals_analysis.db, IMPLEMENT DELTA SCORE AS A SEPARATE DERIVED CHANGE METRIC, AND PROVE EXACT PARITY WITH THE LOCKED V4-3A SPECIFICATION BEFORE MIGRATING LIFECYCLE OR VALUATION`.
+For an as-of date, select at most one snapshot per security: the latest ready canonical TTM snapshot whose source availability date is on or before the as-of date. No later information may enter the score.
+
+A snapshot older than 180 calendar days at the as-of date is not score-eligible. This two-reporting-cycle maximum is explicit rather than inferred from `period_end`. Development P90 ages were at most 67 days, and the rule removed fewer than 1% of TTM-ready rows at each development cutoff.
+
+Historical and delisted securities remain eligible while they have a valid, fresh point-in-time snapshot. Current active status is not a calibration filter.
+
+## Score statuses
+
+`SCORE_FULL` requires all seven observed components, no imputation, and no unresolved critical data-quality flag.
+
+`SCORE_READY_ESTIMATED` requires all five core components (Revenue Growth, EBIT Profitability, EBIT Margin Direction, FCF Margin, and Balance Sheet Resilience), exactly one missing optional component (Dilution or Consistency), one locked component-specific median imputation, and no unresolved critical data-quality flag.
+
+The only currently locked optional imputation is Consistency at `6.988540590181791`. Dilution imputation remains blocked. Until the Dilution upstream blocker is resolved, the model cannot emit `SCORE_FULL`; it also cannot emit `SCORE_READY_ESTIMATED` by imputing Dilution.
+
+`SCORE_LIMITED` applies when any core component is missing, both optional components are missing, a share-count outlier is unresolved, another critical data-quality issue is unresolved, or the current Dilution blocker affects the result.
+
+`SCORE_NOT_READY` applies when no usable current TTM snapshot exists, source-availability semantics are unusable, multiple material inputs are absent, or even a diagnostic result would be misleading.
+
+Every result must separately expose observed points, imputed points, total points, observed component count, and status. Complete and estimated scores are canonical only under their respective statuses. Limited results are diagnostic only.
+
+## Calibration contract
+
+The original 2021-2023 split is not a complete three-year development sample. Revenue Growth and Margin Direction have zero observations through 2022-Q3, only three at 2022-Q4, and broad coverage beginning in 2023-Q2. Consistency has only 3 observations at 2023-Q2 and 74 at 2023-Q3, reaching 1,989 at 2023-Q4.
+
+The smallest defensible revised split is:
+
+- development: quarter-end as-of cutoffs from 2023-12-31 through 2024-12-31;
+- validation: quarter-end as-of cutoffs from 2025-03-31 through 2025-12-31;
+- untouched forward validation: 2026.
+
+Each cutoff uses one latest known snapshot per security and the 180-day freshness rule. Anchors are absolute economic thresholds; cross-sectional percentiles only test coverage and saturation. Neither future fundamentals nor stock returns fit the model.
+
+No reliable point-in-time sector or industry classification exists in the V4 contract. Banks, insurers, true financial companies, and REITs could not be excluded without inventing name- or ticker-based logic. This is an upstream universe-classification limitation and must be resolved before claiming sector-excluded calibration. Security-type metadata is not a substitute for sector classification.
+
+## Explicit exclusions
+
+Score V1 excludes Lifecycle, Lifecycle multipliers, Valuation, stock-return inputs, future-fundamental optimization, production percentile scoring, `ebit_development_quality`, separately scored sequential margin direction, `fcf_to_ebit`, positive-test-based `fundamental_persistence`, complex cash-runway branches, and dynamic reweighting to 100.
+
+## Upstream responsibilities
+
+Production readiness still requires:
+
+1. split-normalized point-in-time period-end basic shares with quality lineage;
+2. reliable point-in-time sector/industry classification for the intended financial-company and REIT exclusions;
+3. production implementation and storage in a later phase without changing canonical quarterly or TTM field semantics.
+
+Phase 1B made no production schema or database changes.
