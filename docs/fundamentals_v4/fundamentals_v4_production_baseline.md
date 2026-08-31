@@ -107,3 +107,17 @@ TTM readiness:
 - Top blockers: missing free cashflow `13`, missing EBIT `12`, missing revenue `12`, latest4 sequence gap `10`, fewer than 4 quarters `8`
 
 Next action: `PROCEED TO V4-2 WITH EXPLICIT GAP FLAGS; DO NOT DELAY TTM MIGRATION FOR NON-MATERIAL PROVIDER EDGE CASES`
+
+## V4-2 TTM Baseline
+
+Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_2_ttm/20260831T073656Z`
+
+- Classification: `V4_TTM_MIGRATION_COMPLETE_WITH_NON_BLOCKING_GAPS`
+- TTM rows: `50585`
+- Unique companies with ready TTM: `2448`
+- Current TTM ready: `2434`
+- Current TTM not ready: `24`
+- Canonical financial fingerprint unchanged: `True`
+- Score rows: `0`
+- Lifecycle rows: `0`
+- Valuation rows: `0`

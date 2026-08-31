@@ -142,3 +142,7 @@ Key counts:
 - Analysis model output rows: 0.
 
 Cross-database referential checks are implemented as read-only audits because SQLite cannot enforce foreign keys across separate database files. The V4-1B baseline has 0 dangling provider-security links, 0 missing provider observations referenced by provenance, and 0 analysis company IDs missing from canonical identity.
+
+## V4-2 TTM Placement
+
+TTM is persisted in `data/fundamentals_v4.db` as deterministic canonical-derived data. V4-2 created no Score, Lifecycle, or Valuation rows in `data/fundamentals_analysis.db`.

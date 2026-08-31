@@ -158,3 +158,7 @@ Baseline fingerprints for the production run are stored under:
 ```text
 temp/fundamentals_v4_1b_production_bootstrap/20260830T205438Z/v4_production_baseline_fingerprints.json
 ```
+
+## V4-2 TTM Contract
+
+`v4_ttm_values` stores canonical-derived TTM values and readiness rows keyed by company, endpoint quarter, and model version. `v4_ttm_input_quarter` stores the exact four-quarter lineage when present. TTM output remains in `fundamentals_v4.db`; analysis outputs remain in `fundamentals_analysis.db` and are not populated in V4-2.

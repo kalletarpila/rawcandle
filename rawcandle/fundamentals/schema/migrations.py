@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from rawcandle.fundamentals.schema.contract import SCHEMA_VERSION, V4_CANONICAL_FINANCIAL_FIELDS
+from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 
 
 PROVIDER_SCHEMA_SQL = """
@@ -385,6 +386,8 @@ def bootstrap_database(path: Path, db_name: str, schema_sql: str, applied_at_utc
 def bootstrap_all(provider_db: Path, canonical_db: Path, analysis_db: Path, applied_at_utc: str) -> None:
     bootstrap_database(provider_db, "fundamentals_provider", PROVIDER_SCHEMA_SQL, applied_at_utc)
     bootstrap_database(canonical_db, "fundamentals_v4", CANONICAL_SCHEMA_SQL, applied_at_utc)
+    with connect(canonical_db) as conn:
+        ensure_ttm_schema(conn)
     bootstrap_database(analysis_db, "fundamentals_analysis", ANALYSIS_SCHEMA_SQL, applied_at_utc)
 
 
@@ -394,3 +397,8 @@ def canonical_financial_columns(conn: sqlite3.Connection) -> set[str]:
 
 def canonical_field_contract_present(conn: sqlite3.Connection) -> bool:
     return set(V4_CANONICAL_FINANCIAL_FIELDS) <= canonical_financial_columns(conn)
+
+
+def canonical_ttm_contract_present(conn: sqlite3.Connection) -> bool:
+    tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    return {"v4_ttm_contract", "v4_ttm_values", "v4_ttm_input_quarter"} <= tables

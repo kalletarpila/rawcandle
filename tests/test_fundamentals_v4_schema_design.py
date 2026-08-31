@@ -327,7 +327,8 @@ def test_ttm_contract_exists_but_no_engine_migration(tmp_path: Path) -> None:
     bootstrap_all(paths.provider_db, paths.canonical_db, paths.analysis_db, "now")
     with connect(paths.canonical_db) as conn:
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='v4_ttm_contract'").fetchone()
-        assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name='v4_ttm_values'").fetchone()
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='v4_ttm_values'").fetchone()
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='v4_ttm_input_quarter'").fetchone()
 
 
 def test_analysis_schema_exists_but_no_score_engine(tmp_path: Path) -> None:
