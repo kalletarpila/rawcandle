@@ -66,3 +66,13 @@ Score calibration consumed this register as an explicit readiness input. High-le
 New material data-quality gaps discovered by V4-3: `0`.
 
 Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_3_score_calibration/20260831T133335Z`.
+
+## V4-3A Score Scaling Review
+
+Score scaling consumed this register as an explicit readiness input. High-level OPEN categories remain internally consistent at `5`: Fiscal / quarter continuity, Q4, TTM readiness, Identity, and Shares. Detailed issue groups roll up under those categories; for example CIK NULL and permaticker NULL both belong to Identity.
+
+The previous V4-3 future 4Q `IMPROVING` non-monotonicity finding is retained as audit history and reclassified as `NON_BLOCKING_DIAGNOSTIC_UNDER_CURRENT_STATE_SCORE_MODEL`.
+
+New material data-quality gaps discovered by V4-3A: `0`.
+
+Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_3a_score_scaling/20260831T141119Z`.

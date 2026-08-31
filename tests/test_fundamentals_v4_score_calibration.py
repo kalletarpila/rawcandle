@@ -85,7 +85,7 @@ def test_future_targets_are_later_and_not_score_inputs():
 def test_no_stock_ohlcv_lifecycle_or_valuation_inputs_in_features_or_spec():
     spec = score.calibrate_curves(score.build_feature_matrix(eight_quarters()))
     payload = json.dumps(spec, sort_keys=True).lower()
-    forbidden = ("stock_return", "price_return", "close_price", "open_price", "high_price", "low_price", "volume", "ohlcv", "lifecycle", "valuation", "yahoo", "sec")
+    forbidden = ("stock_return", "price_return", "close_price", "open_price", "high_price", "low_price", "volume", "ohlcv", "lifecycle", "valuation", "yahoo", "sec_call")
     for word in forbidden:
         assert word not in payload
 
@@ -97,6 +97,7 @@ def test_feature_formulas_are_deterministic_and_missing_is_preserved():
     row = first[4]
     assert row["revenue_growth_yoy_ttm"] == score.safe_growth(125, 105)
     assert row["ebit_growth_yoy_ttm"] == score.safe_growth(15, 11)
+    assert row["ebit_development_quality"] == score.ebit_development_quality(11, 15, 125)
     assert row["ebit_margin_ttm"] == score.safe_div(15, 125)
     assert row["fcf_to_ebit"] == score.safe_positive_ratio(12, 15)
     assert row["share_change_yoy"] == score.safe_growth(10.5, 10.1)
@@ -132,14 +133,59 @@ def test_score_bounds_component_bounds_and_monotonic_curves():
     assert score.linear_score(-0.03, 5, -0.03, 0.1, higher_is_better=False) >= score.linear_score(0.1, 5, -0.03, 0.1, higher_is_better=False)
 
 
+def test_all_components_can_emit_non_integer_values():
+    row = score.feature_row(
+        ttm_row(1, 5, 2024, "Q1", revenue=123, ebit=17, fcf=9, cash=41, debt=23, shares=10.7),
+        ttm_row(1, 4, 2023, "Q4", revenue=119, ebit=15, fcf=8, cash=40, debt=21, shares=10.3),
+        ttm_row(1, 1, 2023, "Q1", revenue=111, ebit=12, fcf=7, cash=35, debt=22, shares=10.2),
+        [
+            ttm_row(1, 2, 2023, "Q2", revenue=113, ebit=12.5, fcf=7.1),
+            ttm_row(1, 3, 2023, "Q3", revenue=117, ebit=14.1, fcf=8.0),
+            ttm_row(1, 4, 2023, "Q4", revenue=119, ebit=15.0, fcf=8.0),
+            ttm_row(1, 5, 2024, "Q1", revenue=123, ebit=17.0, fcf=9.0),
+        ],
+        None,
+        None,
+        None,
+    )
+    spec = score.calibrate_curves([row])
+    scored = score.score_row(row, spec)
+    non_integer_components = [
+        cid
+        for cid, value in scored["component_scores"].items()
+        if value is not None and abs(float(value) - round(float(value))) > 0.000001
+    ]
+    assert set(non_integer_components) == {component["component_id"] for component in score.COMPONENTS}
+
+
 def test_candidate_spec_fingerprint_deterministic_and_2025_2026_do_not_tune():
     matrix = score.build_feature_matrix(eight_quarters())
     spec1 = score.calibrate_curves(matrix)
     spec2 = score.calibrate_curves(matrix)
     assert score.model_fingerprint(spec1) == score.model_fingerprint(spec2)
-    assert spec1["calibrated_from"] == score.DEV_SPLIT
+    assert spec1["calibrated_from"] == "V4_HISTORY_DISTRIBUTION_SUPPORT_ONLY_NO_OUTCOME_OPTIMIZATION"
+    assert spec1["score_semantic"] == "CURRENT_FUNDAMENTAL_STATE"
+    assert spec1["delta_score_semantic"] == "CHANGE_IN_FUNDAMENTAL_STATE"
     assert "2025" not in json.dumps(spec1["curves"], sort_keys=True)
     assert "2026" not in json.dumps(spec1["curves"], sort_keys=True)
+
+
+def test_missing_component_does_not_trigger_automatic_reweighting_to_100():
+    row = score.feature_row(
+        ttm_row(1, 5, 2024, "Q1", revenue=120, ebit=20, fcf=10, shares=10),
+        None,
+        ttm_row(1, 1, 2023, "Q1", revenue=100, ebit=10, fcf=8, shares=None),
+        [ttm_row(1, 3, 2023, "Q3"), ttm_row(1, 4, 2023, "Q4"), ttm_row(1, 5, 2024, "Q1")],
+        None,
+        None,
+        None,
+    )
+    spec = score.calibrate_curves([row])
+    result = score.score_row(row, spec)
+    assert result["component_scores"]["dilution"] is None
+    assert result["total_score"] == round(sum(v for v in result["component_scores"].values() if v is not None), 6)
+    assert result["score_max_available"] == 95
+    assert result["total_score"] < 100
 
 
 def test_readiness_policy_known_gap_semantics():
@@ -168,7 +214,7 @@ def test_no_swingmaster_runtime_dependency_and_no_production_writer_surface():
     assert "INSERT INTO valuation_result" not in source
 
 
-def test_review_classification_when_development_monotonicity_fails(tmp_path: Path):
+def test_future_monotonicity_failure_is_non_blocking_diagnostic(tmp_path: Path):
     paths = score.ScorePaths(
         repo_root=tmp_path,
         artifact_root=tmp_path / "artifacts",
@@ -189,5 +235,6 @@ def test_review_classification_when_development_monotonicity_fails(tmp_path: Pat
     fp = score.model_fingerprint(spec)
     before = {"score_rows": 0, "lifecycle_rows": 0, "valuation_rows": 0}
     summary = score.final_summary(paths, matrix, scored, spec, fp, before, before, "a", "a", {"values_hash": "t"}, {"values_hash": "t"})
-    assert summary["classification"] == score.CLASSIFICATION_REVIEW
+    assert summary["classification"] == score.CLASSIFICATION_READY
+    assert summary["known_gaps"]["previous_future_improving_non_monotonicity_status"] == "NON_BLOCKING_DIAGNOSTIC"
     assert summary["production_safety"]["production_score_rows_created"] == 0

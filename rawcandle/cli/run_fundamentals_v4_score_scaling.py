@@ -4,11 +4,11 @@ import argparse
 import json
 from pathlib import Path
 
-from rawcandle.fundamentals.score.calibration import CLASSIFICATION_BLOCKED, run_score_calibration, score_paths
+from rawcandle.fundamentals.score.calibration import run_score_calibration, score_paths
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run Fundamentals V4-3 score calibration research phase")
+    parser = argparse.ArgumentParser(description="Run Fundamentals V4-3A continuous score scaling phase")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--no-durable-docs", action="store_true")
@@ -26,14 +26,12 @@ def main() -> int:
     summary = run_score_calibration(paths, write_durable_docs=not args.no_durable_docs)
     print(f"classification={summary['classification']}")
     print(f"artifact_root={summary['artifact_root']}")
+    print(f"score_semantic={summary['philosophy']['score_semantic']}")
+    print(f"delta_score_semantic={summary['philosophy']['delta_score_semantic']}")
     print(f"model_fingerprint={summary['model_lock']['model_fingerprint']}")
-    print(f"development_observations={summary['time_split']['development_observations']}")
-    print(f"validation_observations={summary['time_split']['validation_observations']}")
-    print(f"oos_2025_observations={summary['time_split']['oos_2025_observations']}")
-    print(f"forward_2026_observations={summary['time_split']['forward_2026_observations']}")
     print(json.dumps(summary["production_safety"], sort_keys=True))
     print(f"next_action={summary['next_action']}")
-    return 0 if summary["classification"] != CLASSIFICATION_BLOCKED else 2
+    return 0 if summary["classification"] != "V4_SCORE_V1_CONTINUOUS_SCALING_BLOCKED" else 2
 
 
 if __name__ == "__main__":

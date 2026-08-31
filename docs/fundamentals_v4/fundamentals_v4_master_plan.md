@@ -168,3 +168,7 @@ Next: `PROCEED TO V4-3: MIGRATE AND VALIDATE THE LOCKED FUNDAMENTAL SCORE ARCHIT
 ## V4-3 Score Calibration
 
 V4-3 produced the candidate `V4_FUNDAMENTAL_SCORE_V1` specification and calibration artifacts. Production Score writes remain frozen until V4-4.
+
+## V4-3A Score Scaling
+
+V4-3A redesigned `V4_FUNDAMENTAL_SCORE_V1` as independent continuous absolute 0..N component scales. Score means current fundamental state; Delta Score means change in state. Production Score writes remain frozen until V4-4.

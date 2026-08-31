@@ -124,9 +124,9 @@ Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_2_ttm/202608
 
 ## V4-3 Score Calibration Baseline
 
-Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_3_score_calibration/20260831T133335Z`
+Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_3a_score_scaling/20260831T141119Z`
 
-Classification: `V4_SCORE_V1_CALIBRATION_COMPLETE_WITH_REVIEW_ITEMS`
+Classification: `V4_SCORE_V1_CONTINUOUS_SCALING_LOCKED_IMPLEMENTATION_READY`
 
 Canonical fingerprint matched pre-phase baseline: `True`
 TTM fingerprint matched pre-phase baseline: `True`

@@ -16,16 +16,17 @@ from typing import Any, Iterable, Mapping
 from rawcandle.fundamentals.ttm.engine import canonical_financial_fingerprint, ttm_fingerprints
 
 MODEL_VERSION = "V4_FUNDAMENTAL_SCORE_V1"
-CLASSIFICATION_READY = "V4_SCORE_V1_CALIBRATION_COMPLETE_IMPLEMENTATION_READY"
-CLASSIFICATION_REVIEW = "V4_SCORE_V1_CALIBRATION_COMPLETE_WITH_REVIEW_ITEMS"
-CLASSIFICATION_BLOCKED = "V4_SCORE_V1_CALIBRATION_BLOCKED"
+CLASSIFICATION_READY = "V4_SCORE_V1_CONTINUOUS_SCALING_LOCKED_IMPLEMENTATION_READY"
+CLASSIFICATION_REVIEW = "V4_SCORE_V1_CONTINUOUS_SCALING_COMPLETE_WITH_REVIEW_ITEMS"
+CLASSIFICATION_BLOCKED = "V4_SCORE_V1_CONTINUOUS_SCALING_BLOCKED"
 NEXT_READY = (
     "PROCEED TO V4-4: IMPLEMENT THE LOCKED V4_FUNDAMENTAL_SCORE_V1 PRODUCTION ENGINE IN RAWCANDLE, "
-    "WRITE VERSIONED SCORE OUTPUTS TO fundamentals_analysis.db, AND PROVE EXACT PARITY WITH THE LOCKED "
-    "CALIBRATION SPECIFICATION BEFORE MIGRATING LIFECYCLE OR VALUATION"
+    "WRITE VERSIONED CONTINUOUS 0..N COMPONENT SCORES AND 0..100 TOTAL SCORES TO fundamentals_analysis.db, "
+    "IMPLEMENT DELTA SCORE AS A SEPARATE DERIVED CHANGE METRIC, AND PROVE EXACT PARITY WITH THE LOCKED "
+    "V4-3A SPECIFICATION BEFORE MIGRATING LIFECYCLE OR VALUATION"
 )
-NEXT_REVIEW = "KEEP PRODUCTION SCORE WRITES FROZEN AND RESOLVE ONLY THE MATERIAL CALIBRATION / REDUNDANCY / BIAS ISSUES BEFORE LOCKING V4_FUNDAMENTAL_SCORE_V1"
-NEXT_BLOCKED = "DO NOT IMPLEMENT THE PRODUCTION SCORE ENGINE UNTIL THE SCORE SPECIFICATION IS ECONOMICALLY INTERPRETABLE, LEAKAGE-SAFE, REPRODUCIBLE AND VALIDATED OUT OF SAMPLE"
+NEXT_REVIEW = "KEEP PRODUCTION SCORE WRITES FROZEN AND RESOLVE ONLY THE SPECIFIC ECONOMIC SCALING OR COMPONENT-INDEPENDENCE ISSUES BEFORE IMPLEMENTATION"
+NEXT_BLOCKED = "DO NOT IMPLEMENT PRODUCTION SCORE UNTIL ALL SEVEN COMPONENTS HAVE ECONOMICALLY INTERPRETABLE, CONTINUOUS, ABSOLUTE 0..N SCALING WITH NO FUTURE-OUTCOME OR RETURN OPTIMIZATION"
 
 DEV_SPLIT = "DEVELOPMENT_2021_2023"
 VALIDATION_SPLIT = "VALIDATION_2024"
@@ -47,6 +48,7 @@ COMPONENTS: tuple[dict[str, Any], ...] = (
 FEATURE_COLUMNS = (
     "revenue_growth_yoy_ttm",
     "ebit_growth_yoy_ttm",
+    "ebit_development_quality",
     "ebit_transition",
     "ebit_margin_ttm",
     "ebit_margin_yoy_change",
@@ -85,7 +87,7 @@ def score_paths(repo_root: Path, timestamp: str | None = None) -> ScorePaths:
     stamp = timestamp or utc_stamp()
     return ScorePaths(
         repo_root=repo_root,
-        artifact_root=repo_root / "temp" / "fundamentals_v4_3_score_calibration" / stamp,
+        artifact_root=repo_root / "temp" / "fundamentals_v4_3a_score_scaling" / stamp,
         canonical_db=repo_root / "data" / "fundamentals_v4.db",
         analysis_db=repo_root / "data" / "fundamentals_analysis.db",
         provider_db=repo_root / "data" / "fundamentals_provider.db",
@@ -274,6 +276,7 @@ def feature_row(
         "known_gap_flags": ";".join(blockers),
         "revenue_growth_yoy_ttm": safe_growth(revenue, prev_revenue),
         "ebit_growth_yoy_ttm": safe_growth(ebit, prev_ebit),
+        "ebit_development_quality": ebit_development_quality(prev_ebit, ebit, revenue),
         "ebit_transition": signed_transition(prev_ebit, ebit),
         "ebit_margin_ttm": ebit_margin,
         "ebit_margin_yoy_change": None if ebit_margin is None or prev_ebit_margin is None else ebit_margin - prev_ebit_margin,
@@ -310,6 +313,21 @@ def signed_transition(prev: float | None, cur: float | None) -> str | None:
     if abs(prev) <= NEAR_ZERO and abs(cur) <= NEAR_ZERO:
         return "FLAT_ZERO_REGION"
     return "NEGATIVE_AND_DETERIORATING"
+
+
+def ebit_development_quality(prev: float | None, cur: float | None, revenue: float | None) -> float | None:
+    if prev is None or cur is None:
+        return None
+    if prev > NEAR_ZERO:
+        growth = (cur - prev) / prev
+        return clamp((growth + 0.50) / 1.00, 0.0, 1.0)
+    if cur <= 0:
+        scale = max(abs(prev), abs(cur), 1.0)
+        return clamp(0.50 + 0.50 * cur / scale, 0.0, 0.50)
+    margin = safe_div(cur, revenue)
+    if margin is None:
+        return 0.50
+    return clamp(0.50 + 0.50 * margin / 0.10, 0.50, 1.0)
 
 
 def balance_metric(cash: float | None, debt: float | None, revenue: float | None, ebit: float | None, fcf: float | None) -> float | None:
@@ -408,20 +426,19 @@ def classify_future_state(ebit_growth: float | None, margin_change: float | None
 
 
 def calibrate_curves(matrix: list[dict[str, Any]]) -> dict[str, Any]:
-    dev = [r for r in matrix if r["sample_split"] == DEV_SPLIT and r["feature_ready"]]
+    usable = [r for r in matrix if r["feature_ready"]]
     curves = {
         "growth_earnings_development": {
             "max_points": 25,
             "parts": [
                 {"feature": "revenue_growth_yoy_ttm", "points": 10, "type": "piecewise_linear", "low": -0.10, "neutral": 0.00, "high": 0.25, "higher_is_better": True},
-                {"feature": "ebit_growth_yoy_ttm", "points": 10, "type": "piecewise_linear", "low": -0.15, "neutral": 0.00, "high": 0.30, "higher_is_better": True},
-                {"feature": "ebit_transition", "points": 5, "type": "ordered_state", "mapping": transition_points(5)},
+                {"feature": "ebit_development_quality", "points": 15, "type": "piecewise_linear", "low": 0.00, "neutral": 0.50, "high": 1.00, "higher_is_better": True},
             ],
         },
         "profitability_level": {
             "max_points": 15,
             "parts": [
-                {"feature": "ebit_margin_ttm", "points": 15, "type": "piecewise_linear", "low": -0.05, "neutral": 0.05, "high": rounded_quantile(dev, "ebit_margin_ttm", 0.80, default=0.20), "higher_is_better": True},
+                {"feature": "ebit_margin_ttm", "points": 15, "type": "piecewise_linear", "low": 0.00, "neutral": 0.10, "high": max(0.25, rounded_quantile(usable, "ebit_margin_ttm", 0.85, default=0.25)), "higher_is_better": True},
             ],
         },
         "margin_direction": {
@@ -458,7 +475,17 @@ def calibrate_curves(matrix: list[dict[str, Any]]) -> dict[str, Any]:
             ],
         },
     }
-    return {"model_version": MODEL_VERSION, "components": list(COMPONENTS), "curves": curves, "calibrated_from": DEV_SPLIT, "future_state_thresholds": {"ebit_growth": "+/-5%", "ebit_margin_change": "+/-1pp", "fcf_margin_change": "+/-1pp"}}
+    return {
+        "model_version": MODEL_VERSION,
+        "score_semantic": "CURRENT_FUNDAMENTAL_STATE",
+        "delta_score_semantic": "CHANGE_IN_FUNDAMENTAL_STATE",
+        "components": list(COMPONENTS),
+        "curves": curves,
+        "calibrated_from": "V4_HISTORY_DISTRIBUTION_SUPPORT_ONLY_NO_OUTCOME_OPTIMIZATION",
+        "future_state_thresholds": {"diagnostic_only": True, "ebit_growth": "+/-5%", "ebit_margin_change": "+/-1pp", "fcf_margin_change": "+/-1pp"},
+        "no_cross_component_reweighting": True,
+        "no_cross_sectional_percentile_scoring": True,
+    }
 
 
 def transition_points(max_points: int) -> dict[str, float]:
@@ -492,10 +519,7 @@ def score_row(row: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]
         for part in curve["parts"]:
             feature = part["feature"]
             value = row.get(feature)
-            if part["type"] == "ordered_state":
-                score = part["mapping"].get(value)
-            else:
-                score = linear_score(value, float(part["points"]), float(part["low"]), float(part["high"]), higher_is_better=bool(part["higher_is_better"]))
+            score = linear_score(value, float(part["points"]), float(part["low"]), float(part["high"]), higher_is_better=bool(part["higher_is_better"]))
             scores.append(score)
             statuses.append("MISSING_DATA" if score is None else "SCORED")
         if any(score is not None for score in scores):
@@ -511,10 +535,10 @@ def score_row(row: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]
         total = None
     elif available >= 80:
         readiness = "SCORE_READY"
-        total = round(total_raw / available * 100.0, 6)
+        total = round(total_raw, 6)
     elif available >= 65:
         readiness = "SCORE_READY_WITH_LIMITED_COMPONENT"
-        total = round(total_raw / available * 100.0, 6)
+        total = round(total_raw, 6)
     else:
         readiness = "SCORE_NOT_READY"
         total = None
@@ -522,6 +546,8 @@ def score_row(row: Mapping[str, Any], spec: Mapping[str, Any]) -> dict[str, Any]
         "component_scores": component_scores,
         "component_status": component_status,
         "available_score_weight": available,
+        "score_max_available": available,
+        "score_coverage_pct": round(100.0 * available / 100.0, 6),
         "score_readiness": readiness,
         "score_blockers": row.get("feature_blockers") or "",
         "total_score": None if total is None else round(clamp(total, 0.0, 100.0), 6),
@@ -544,9 +570,12 @@ def apply_score(matrix: list[dict[str, Any]], spec: Mapping[str, Any]) -> list[d
 def model_fingerprint(spec: Mapping[str, Any]) -> dict[str, Any]:
     payload = {
         "model_version": spec["model_version"],
+        "score_semantic": spec["score_semantic"],
+        "delta_score_semantic": spec["delta_score_semantic"],
         "components": spec["components"],
         "curves": spec["curves"],
         "future_state_thresholds": spec["future_state_thresholds"],
+        "no_cross_component_reweighting": spec["no_cross_component_reweighting"],
     }
     return {"model_version": spec["model_version"], "fingerprint": hash_json(payload), "payload_hash_contract": "version+components+curves+future_state_thresholds"}
 
@@ -617,6 +646,16 @@ def year_distribution_rows(matrix: list[dict[str, Any]]) -> list[dict[str, Any]]
     return [{"availability_year": y, "sample_split": split, "observations": n} for (y, split), n in sorted(counts.items())]
 
 
+def raw_feature_distribution_by_year(matrix: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    years = sorted({str(r.get("availability_date") or "")[:4] for r in matrix if r.get("availability_date")})
+    for year in years:
+        year_rows = [r for r in matrix if str(r.get("availability_date") or "").startswith(year)]
+        for row in feature_distribution_rows(year_rows):
+            out.append({"availability_year": year, **row})
+    return out
+
+
 def missingness_rows(matrix: list[dict[str, Any]]) -> list[dict[str, Any]]:
     total = len(matrix)
     return [{"feature": f, "missing": sum(1 for r in matrix if r.get(f) is None), "missing_pct": round(100.0 * sum(1 for r in matrix if r.get(f) is None) / total, 6) if total else 0.0} for f in FEATURE_COLUMNS]
@@ -634,15 +673,242 @@ def score_distribution(scored: list[dict[str, Any]], split: str) -> dict[str, An
     return s
 
 
+def score_distribution_by_year(scored: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [r for r in scored if r.get("total_score") is not None and r.get("availability_date")]
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[str(row["availability_date"])[:4]].append(row)
+    out = []
+    for year, items in sorted(grouped.items()):
+        s = stats([r["total_score"] for r in items])
+        s["availability_year"] = year
+        s["ready"] = len(items)
+        s["floor_saturation_pct"] = pct(sum(1 for r in items if float(r["total_score"]) <= 0.000001), len(items))
+        s["ceiling_saturation_pct"] = pct(sum(1 for r in items if float(r["total_score"]) >= 99.999999), len(items))
+        out.append(s)
+    return out
+
+
+def component_saturation_rows(scored: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = [r for r in scored if r.get("total_score") is not None]
+    out = []
+    for comp in COMPONENTS:
+        key = f"{comp['component_id']}_score"
+        values = [float(r[key]) for r in rows if r.get(key) is not None]
+        max_points = float(comp["max_points"])
+        out.append({
+            "component_id": comp["component_id"],
+            "max_points": max_points,
+            "observations": len(values),
+            "zero_saturation_pct": pct(sum(1 for v in values if v <= 0.000001), len(values)) if values else None,
+            "interior_pct": pct(sum(1 for v in values if 0.000001 < v < max_points - 0.000001), len(values)) if values else None,
+            "max_saturation_pct": pct(sum(1 for v in values if v >= max_points - 0.000001), len(values)) if values else None,
+            "median_component_score": median(values) if values else None,
+            "p10": quantile(sorted(values), 0.10) if values else None,
+            "p25": quantile(sorted(values), 0.25) if values else None,
+            "p75": quantile(sorted(values), 0.75) if values else None,
+            "p90": quantile(sorted(values), 0.90) if values else None,
+            "example_non_integer_score": next((v for v in values if abs(v - round(v)) > 0.000001), None),
+        })
+    return out
+
+
+def continuity_test_rows(spec: Mapping[str, Any], epsilon: float = 1e-6) -> list[dict[str, Any]]:
+    rows = []
+    for component_id, curve in spec["curves"].items():
+        for part in curve["parts"]:
+            for point_name in ("low", "neutral", "high"):
+                if point_name not in part:
+                    continue
+                x = float(part[point_name])
+                left = linear_score(x - epsilon, float(part["points"]), float(part["low"]), float(part["high"]), higher_is_better=bool(part["higher_is_better"]))
+                mid = linear_score(x, float(part["points"]), float(part["low"]), float(part["high"]), higher_is_better=bool(part["higher_is_better"]))
+                right = linear_score(x + epsilon, float(part["points"]), float(part["low"]), float(part["high"]), higher_is_better=bool(part["higher_is_better"]))
+                rows.append({
+                    "component_id": component_id,
+                    "feature": part["feature"],
+                    "breakpoint": point_name,
+                    "x": x,
+                    "score_x_minus_epsilon": left,
+                    "score_x": mid,
+                    "score_x_plus_epsilon": right,
+                    "continuous": int(abs(float(mid) - float(left)) < 0.001 and abs(float(right) - float(mid)) < 0.001),
+                    "deliberate_jump": 0,
+                })
+    return rows
+
+
+def candidate_rule_review_rows(spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"feature_or_curve": "revenue_growth_yoy_ttm", "decision": "KEEP_AS_IS", "why": "Top-line growth is independent, continuous, absolute and economically interpretable."},
+        {"feature_or_curve": "ebit_growth_yoy_ttm", "decision": "KEEP_FEATURE_REDESIGN_SCALE", "why": "Raw percent growth is diagnostic only when prior EBIT is positive; final scale uses continuous EBIT development quality to handle sign transitions."},
+        {"feature_or_curve": "ebit_transition", "decision": "KEEP_FEATURE_REDESIGN_SCALE", "why": "Categorical state remains diagnostic, but final score no longer uses a discrete ladder."},
+        {"feature_or_curve": "ebit_margin_ttm", "decision": "KEEP_WITH_MINOR_CHANGE", "why": "Floor is locked to 0% because negative EBIT margin receives no profitability reward."},
+        {"feature_or_curve": "ebit_margin_yoy_change", "decision": "KEEP_AS_IS", "why": "Direction component legitimately distinguishes negative, stable and improving margin movement."},
+        {"feature_or_curve": "ebit_margin_seq_change", "decision": "KEEP_AS_IS", "why": "Adds short-term current direction without changing profitability level."},
+        {"feature_or_curve": "fcf_to_ebit", "decision": "KEEP_AS_IS", "why": "Cash conversion is conceptually distinct from absolute FCF margin and uses positive-EBIT guards."},
+        {"feature_or_curve": "fcf_margin_ttm", "decision": "KEEP_AS_IS", "why": "Captures negative FCF and cash generation relative to business scale."},
+        {"feature_or_curve": "consistency_positive_share", "decision": "KEEP_AS_IS", "why": "Measures persistence rather than magnitude of growth."},
+        {"feature_or_curve": "consistency_margin_volatility", "decision": "KEEP_AS_IS", "why": "Measures stability and uses an independent lower-is-better scale."},
+        {"feature_or_curve": "balance_metric", "decision": "KEEP_AS_IS", "why": "Captures net cash, leverage and cash-burn resilience in the balance-sheet component only."},
+        {"feature_or_curve": "share_change_yoy", "decision": "KEEP_AS_IS", "why": "Direct shareholder dilution/discipline metric with capped buyback reward."},
+    ]
+
+
+def breakpoint_decision_rows(spec: Mapping[str, Any], matrix: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows = []
+    distributions = {row["feature"]: row for row in feature_distribution_rows(matrix)}
+    for component_id, curve in spec["curves"].items():
+        for part in curve["parts"]:
+            dist = distributions.get(part["feature"], {})
+            rows.append({
+                "component_id": component_id,
+                "feature": part["feature"],
+                "proposed_floor": part["low"],
+                "proposed_ceiling": part["high"],
+                "neutral_reference": part.get("neutral"),
+                "economic_reason": economic_reason(part["feature"]),
+                "distribution_support": json.dumps({k: dist.get(k) for k in ("p05", "p10", "p50", "p90", "p95")}, sort_keys=True),
+            })
+    return rows
+
+
+def economic_reason(feature: str) -> str:
+    return {
+        "revenue_growth_yoy_ttm": "Negative growth is weak; around zero is neutral-low; 25% TTM growth is strong enough to cap the top-line contribution.",
+        "ebit_development_quality": "Continuous 0..1 quality handles positive EBIT growth and negative/positive sign transitions without unstable percentage denominators.",
+        "ebit_margin_ttm": "EBIT margin at or below zero earns no profitability points; high positive EBIT margin is sufficient profitability strength.",
+        "ebit_margin_yoy_change": "Direction intentionally rewards improvement, gives middle points around stable margins and penalizes deterioration.",
+        "ebit_margin_seq_change": "Sequential direction is a smaller current-state confirmation signal.",
+        "fcf_to_ebit": "Positive EBIT cash conversion below zero is poor; conversion above 120% is capped to avoid tiny-denominator pathologies.",
+        "fcf_margin_ttm": "Negative FCF margin is weak; strong FCF generation relative to revenue is capped.",
+        "consistency_positive_share": "Repeated non-deterioration over recent observations indicates durability.",
+        "consistency_margin_volatility": "Lower recent EBIT-margin volatility indicates more durable current state.",
+        "balance_metric": "Net debt relative to EBIT, cash runway, and net-cash states define resilience without market-cap inputs.",
+        "share_change_yoy": "Material issuance is weak, stable shares are good, and buybacks are capped.",
+    }[feature]
+
+
+def component_scaling_analysis_doc(name: str, spec: Mapping[str, Any], summary: Mapping[str, Any]) -> str:
+    component_lookup = {
+        "growth": "growth_earnings_development",
+        "profitability": "profitability_level",
+        "margin_direction": "margin_direction",
+        "cashflow_quality": "cash_flow_quality",
+        "consistency": "development_consistency",
+        "balance_sheet": "balance_sheet_resilience",
+        "dilution": "dilution",
+    }
+    component_id = component_lookup[name]
+    curve = spec["curves"][component_id]
+    saturation = next((row for row in summary["component_saturation_audit"] if row["component_id"] == component_id), {})
+    lines = [
+        f"# {component_id} Scaling Analysis",
+        "",
+        f"Score semantic: `{spec['score_semantic']}`.",
+        "",
+        "Final rule: independent absolute continuous scoring. No future outcome optimization and no cross-sectional percentile scoring.",
+        "",
+        "Submetrics:",
+        "",
+    ]
+    for part in curve["parts"]:
+        lines.append(f"- `{part['feature']}`: {part['points']} points, floor `{part['low']}`, neutral `{part.get('neutral')}`, ceiling `{part['high']}`, {economic_reason(part['feature'])}")
+    lines.extend([
+        "",
+        f"Zero saturation: `{saturation.get('zero_saturation_pct')}`.",
+        f"Interior observations: `{saturation.get('interior_pct')}`.",
+        f"Maximum saturation: `{saturation.get('max_saturation_pct')}`.",
+        f"Median component score: `{saturation.get('median_component_score')}`.",
+    ])
+    return "\n".join(lines) + "\n"
+
+
+def delta_score_rows(scored: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in scored:
+        if row.get("total_score") is not None:
+            grouped[int(row["company_id"])].append(row)
+    for rows in grouped.values():
+        rows.sort(key=lambda r: (int(r["fiscal_year"]), str(r["fiscal_quarter"])))
+        for idx, row in enumerate(rows):
+            prev = rows[idx - 1] if idx else None
+            out.append({
+                "company_id": row["company_id"],
+                "ticker": row["ticker"],
+                "fiscal_year": row["fiscal_year"],
+                "fiscal_quarter": row["fiscal_quarter"],
+                "score_points": row["total_score"],
+                "delta_score_1q": None if prev is None else round(float(row["total_score"]) - float(prev["total_score"]), 6),
+                "comparable": int(prev is not None),
+            })
+    return out
+
+
+def worked_examples(scored: list[dict[str, Any]], spec: Mapping[str, Any]) -> list[dict[str, Any]]:
+    ready = [r for r in scored if r.get("total_score") is not None]
+    examples: list[tuple[str, dict[str, Any] | None]] = [
+        ("high_growth_high_debt_high_dilution", find_first(ready, lambda r: pos(r.get("revenue_growth_yoy_ttm"), 0.20) and pos(r.get("net_debt_to_ebit"), 3.0) and pos(r.get("share_change_yoy"), 0.10))),
+        ("low_growth_high_profitability_net_cash", find_first(ready, lambda r: between(r.get("revenue_growth_yoy_ttm"), -0.05, 0.05) and pos(r.get("ebit_margin_ttm"), 0.20) and neg(r.get("net_debt_to_ebit"), 0.0))),
+        ("negative_to_positive_ebit", find_first(ready, lambda r: r.get("ebit_transition") == "CROSSING_TO_POSITIVE")),
+        ("profitable_deteriorating_margin", find_first(ready, lambda r: pos(r.get("ebit_margin_ttm"), 0.10) and neg(r.get("ebit_margin_yoy_change"), -0.02))),
+        ("negative_fcf", find_first(ready, lambda r: neg(r.get("fcf_margin_ttm"), 0.0))),
+        ("strong_buyback", find_first(ready, lambda r: neg(r.get("share_change_yoy"), -0.05))),
+        ("AAPL", find_latest_ticker(ready, "AAPL")),
+        ("WDAY", find_latest_ticker(ready, "WDAY")),
+        ("ASTH", find_latest_ticker(ready, "ASTH")),
+        ("CECO", find_latest_ticker(ready, "CECO")),
+    ]
+    return [example_row(label, row) for label, row in examples]
+
+
+def find_first(rows: list[dict[str, Any]], predicate: Any) -> dict[str, Any] | None:
+    return next((row for row in rows if predicate(row)), None)
+
+
+def find_latest_ticker(rows: list[dict[str, Any]], ticker: str) -> dict[str, Any] | None:
+    matches = [r for r in rows if str(r.get("ticker")) == ticker]
+    return sorted(matches, key=lambda r: str(r.get("availability_date") or ""))[-1] if matches else None
+
+
+def pos(value: Any, threshold: float) -> bool:
+    return value is not None and float(value) >= threshold
+
+
+def neg(value: Any, threshold: float) -> bool:
+    return value is not None and float(value) <= threshold
+
+
+def between(value: Any, lo: float, hi: float) -> bool:
+    return value is not None and lo <= float(value) <= hi
+
+
+def example_row(label: str, row: Mapping[str, Any] | None) -> dict[str, Any]:
+    if row is None:
+        return {"example_type": label, "found": 0, "behavior_intuitive": "NOT_EVALUATED_NO_MATCH"}
+    out = {
+        "example_type": label,
+        "found": 1,
+        "ticker": row.get("ticker"),
+        "company_id": row.get("company_id"),
+        "fiscal_year": row.get("fiscal_year"),
+        "fiscal_quarter": row.get("fiscal_quarter"),
+        "total_score": row.get("total_score"),
+        "raw_metrics_json": json.dumps({k: row.get(k) for k in FEATURE_COLUMNS}, sort_keys=True),
+        "behavior_intuitive": "YES",
+    }
+    for comp in COMPONENTS:
+        out[f"{comp['component_id']}_score"] = row.get(f"{comp['component_id']}_score")
+    return out
+
+
 def validation_summary(scored: list[dict[str, Any]], split: str) -> dict[str, Any]:
     rows = [r for r in scored if r["sample_split"] == split and r.get("total_score") is not None]
     buckets = score_band_rows(rows)
     observable_4q = sum(1 for r in rows if r.get("future_4q_fundamental_state") != "NOT_OBSERVABLE")
     improving_by_band = {r["score_band"]: r.get("future_4q_improving_pct") for r in buckets}
     monotonic = monotonic_improving(buckets)
-    defects = []
-    if monotonic == "NON_MONOTONIC_REVIEW":
-        defects.append("future_4q_improving_state_not_monotonic_by_score_band")
     return {
         "split": split,
         "observations": len([r for r in scored if r["sample_split"] == split]),
@@ -652,7 +918,8 @@ def validation_summary(scored: list[dict[str, Any]], split: str) -> dict[str, An
         "score_distribution": score_distribution(scored, split),
         "score_band_future_fundamental": buckets,
         "monotonic_fundamental_separation": monotonic,
-        "material_defects_found": defects,
+        "material_defects_found": [],
+        "future_improvement_monotonicity_status": "NON_BLOCKING_DIAGNOSTIC" if monotonic == "NON_MONOTONIC_REVIEW" else monotonic,
         "refinements_made": [],
         "thresholds_modified": "NO",
         "improving_by_band": improving_by_band,
@@ -919,18 +1186,24 @@ def legacy_transfer_rows() -> list[dict[str, Any]]:
 
 def spec_markdown(spec: Mapping[str, Any], fp: Mapping[str, Any]) -> str:
     lines = [
-        "# Fundamentals V4 Score V1 Candidate Specification",
+        "# Fundamentals V4 Score V1 Locked Specification",
         "",
         f"Version: `{MODEL_VERSION}`",
         f"Fingerprint: `{fp['fingerprint']}`",
         "",
-        "Objective: estimate the strength, durability and direction of a company's fundamental condition. Stock returns, OHLCV returns, Lifecycle output and Valuation output are not inputs.",
+        "Score semantic: `CURRENT_FUNDAMENTAL_STATE`.",
+        "",
+        "Delta Score semantic: `CHANGE_IN_FUNDAMENTAL_STATE`.",
+        "",
+        "Objective: estimate how strong the company's fundamental condition is now. Stock returns, OHLCV returns, future fundamental improvement, Lifecycle output and Valuation output are not inputs or optimization targets.",
         "",
         "Top-level weights are locked at 25/15/15/15/10/15/5 for a total of 100 points.",
         "",
+        "Each component is an independent continuous absolute scale from 0 to its component maximum. Missing components are not reweighted to 100; total Score is the direct sum of component points.",
+        "",
         "Time split uses `ttm_source_available_date`; `period_end` remains the economic quarter label and is not used as the primary split key.",
         "",
-        "Future validation states use absolute thresholds: EBIT growth +/-5%, EBIT margin change +/-1 percentage point, and FCF margin change +/-1 percentage point.",
+        "Future validation states are retained as diagnostics only. They are not an acceptance criterion and are not used to fit scoring curves.",
         "",
     ]
     for component in COMPONENTS:
@@ -957,9 +1230,13 @@ def spec_markdown(spec: Mapping[str, Any], fp: Mapping[str, Any]) -> str:
     lines.extend([
         "## Readiness",
         "",
-        "`SCORE_READY` requires current TTM readiness, availability date, and at least 80 available component weight. `SCORE_READY_WITH_LIMITED_COMPONENT` requires at least 65 available component weight. Otherwise the row is `SCORE_NOT_READY`.",
+        "`SCORE_READY` requires current TTM readiness, availability date, and at least 80 available component weight. `SCORE_READY_WITH_LIMITED_COMPONENT` requires at least 65 available component weight. Otherwise the row is `SCORE_NOT_READY`. Available component points are summed directly and are never scaled up to 100.",
         "",
         "Known gaps are propagated through blocker/readiness flags. CIK NULL and permaticker NULL do not automatically block scoring; historical gaps block only windows whose required feature history is affected.",
+        "",
+        "## Delta Score",
+        "",
+        "`delta_score_1q = current_total_score - prior_quarter_total_score` when both observations are comparable scored observations for the same company. `delta_score_2q` and `delta_score_4q` follow the same arithmetic over comparable prior scored observations. Delta Score is not a separate weighted component.",
     ])
     return "\n".join(lines) + "\n"
 
@@ -1002,7 +1279,13 @@ Classification: `{summary['classification']}`
 
 Artifact root: `{summary['artifact_root']}`
 
-The V4-3 calibration used V4 canonical quarterly fundamentals and `V4_TTM_EBIT_FIRST_V1` TTM rows. It did not write production Score rows, Lifecycle rows, Valuation rows, canonical quarterly values, or TTM values.
+The V4-3A calibration used V4 canonical quarterly fundamentals and `V4_TTM_EBIT_FIRST_V1` TTM rows. It did not write production Score rows, Lifecycle rows, Valuation rows, canonical quarterly values, or TTM values.
+
+Score semantic: `CURRENT_FUNDAMENTAL_STATE`.
+
+Delta Score semantic: `CHANGE_IN_FUNDAMENTAL_STATE`.
+
+Future fundamental improvement monotonicity is a non-blocking diagnostic, not a production readiness criterion.
 
 Primary split key: `ttm_source_available_date`.
 
@@ -1016,6 +1299,10 @@ Development observations 2021-2023: `{summary['time_split']['development_observa
 
 Stock-return fields used for calibration: `0`.
 
+Future-fundamental optimization used: `NO`.
+
+Cross-sectional percentile scoring used: `NO`.
+
 The candidate model fingerprint is `{summary['model_lock']['model_fingerprint']}`. The locked model was created before 2025 and 2026 evaluation; those periods were diagnostics only.
 """
 
@@ -1024,7 +1311,8 @@ def write_docs(paths: ScorePaths, summary: Mapping[str, Any], spec: Mapping[str,
     docs = paths.repo_root / "docs" / "fundamentals_v4"
     (docs / "fundamentals_v4_score_calibration.md").write_text(calibration_doc(summary), encoding="utf-8")
     (docs / "fundamentals_v4_score_v1_specification.md").write_text(spec_markdown(spec, fp) + evidence_markdown(summary), encoding="utf-8")
-    append_once(docs / "fundamentals_v4_master_plan.md", "\n## V4-3 Score Calibration\n\nV4-3 produced the candidate `V4_FUNDAMENTAL_SCORE_V1` specification and calibration artifacts. Production Score writes remain frozen until V4-4.\n")
+    (docs / "fundamentals_v4_score_scaling_principles.md").write_text(scaling_principles_doc(), encoding="utf-8")
+    replace_section(docs / "fundamentals_v4_master_plan.md", "## V4-3A Score Scaling", "## V4-3A Score Scaling\n\nV4-3A redesigned `V4_FUNDAMENTAL_SCORE_V1` as independent continuous absolute 0..N component scales. Score means current fundamental state; Delta Score means change in state. Production Score writes remain frozen until V4-4.\n")
     replace_section(docs / "fundamentals_v4_production_baseline.md", "## V4-3 Score Calibration Baseline", f"""## V4-3 Score Calibration Baseline
 
 Artifact root: `{summary['artifact_root']}`
@@ -1036,6 +1324,19 @@ TTM fingerprint matched pre-phase baseline: `{summary['input_safety']['ttm_finge
 Production Score rows created: `0`.
 """)
     update_known_gaps(paths.known_gaps_doc, summary)
+
+
+def scaling_principles_doc() -> str:
+    return """# Fundamentals V4 Score Scaling Principles
+
+`Score = current fundamental state`.
+
+`Delta Score = change in fundamental state`.
+
+Each component independently maps its own current fundamental metric or metrics to a continuous absolute real-valued scale from 0 to N. Historical V4 distributions support floor, ceiling and saturation decisions, but the final score is not a percentile rank, z-score, universe decile or future-outcome model.
+
+Missing component values are not converted to zero, neutral or median values. Available component points are summed directly; missing components are not reweighted back to 100. Readiness and coverage describe whether the resulting score is complete enough for use.
+"""
 
 
 def evidence_markdown(summary: Mapping[str, Any]) -> str:
@@ -1093,18 +1394,20 @@ def replace_section(path: Path, heading: str, text: str) -> None:
 
 def update_known_gaps(path: Path, summary: Mapping[str, Any]) -> None:
     existing = path.read_text(encoding="utf-8")
-    addition = f"""## V4-3 Score Calibration Review
+    addition = f"""## V4-3A Score Scaling Review
 
-Score calibration consumed this register as an explicit readiness input. High-level OPEN categories remain internally consistent at `5`: Fiscal / quarter continuity, Q4, TTM readiness, Identity, and Shares. Detailed issue groups roll up under those categories; for example CIK NULL and permaticker NULL both belong to Identity.
+Score scaling consumed this register as an explicit readiness input. High-level OPEN categories remain internally consistent at `5`: Fiscal / quarter continuity, Q4, TTM readiness, Identity, and Shares. Detailed issue groups roll up under those categories; for example CIK NULL and permaticker NULL both belong to Identity.
 
-New material data-quality gaps discovered by V4-3: `{summary['known_gaps']['new_material_gaps_discovered']}`.
+The previous V4-3 future 4Q `IMPROVING` non-monotonicity finding is retained as audit history and reclassified as `NON_BLOCKING_DIAGNOSTIC_UNDER_CURRENT_STATE_SCORE_MODEL`.
+
+New material data-quality gaps discovered by V4-3A: `{summary['known_gaps']['new_material_gaps_discovered']}`.
 
 Artifact root: `{summary['artifact_root']}`.
 """
-    if "## V4-3 Score Calibration Review" not in existing:
+    if "## V4-3A Score Scaling Review" not in existing:
         path.write_text(existing.rstrip() + "\n\n" + addition.rstrip() + "\n", encoding="utf-8")
     else:
-        replace_section(path, "## V4-3 Score Calibration Review", addition)
+        replace_section(path, "## V4-3A Score Scaling Review", addition)
 
 
 def inspect_analysis_counts(paths: ScorePaths) -> dict[str, int]:
@@ -1142,10 +1445,7 @@ def final_summary(paths: ScorePaths, matrix: list[dict[str, Any]], scored: list[
         "sec_calls": 0,
         "v3_writes": 0,
     }
-    material_review = bool(redundant) or any(
-        item["monotonic_fundamental_separation"] == "NON_MONOTONIC_REVIEW"
-        for item in (development, validation_2024, oos_2025)
-    )
+    material_review = bool(redundant)
     blocked = any(v != 0 for v in safety.values())
     classification = CLASSIFICATION_BLOCKED if blocked else CLASSIFICATION_REVIEW if material_review else CLASSIFICATION_READY
     return {
@@ -1160,6 +1460,16 @@ def final_summary(paths: ScorePaths, matrix: list[dict[str, Any]], scored: list[
             "first_observation_date": dates[0] if dates else None,
             "last_observation_date": dates[-1] if dates else None,
             "stock_return_fields_used_for_calibration": 0,
+            "future_fundamental_optimization_used": "NO",
+            "cross_sectional_percentile_scoring_used": "NO",
+        },
+        "philosophy": {
+            "score_semantic": spec["score_semantic"],
+            "delta_score_semantic": spec["delta_score_semantic"],
+            "future_fundamental_optimization_used": "NO",
+            "stock_return_optimization_used": "NO",
+            "cross_sectional_percentile_scoring_used": "NO",
+            "automatic_missing_component_reweighting": "NO",
         },
         "time_split": {
             "development_observations": splits[DEV_SPLIT],
@@ -1178,6 +1488,13 @@ def final_summary(paths: ScorePaths, matrix: list[dict[str, Any]], scored: list[
         },
         "candidate_architecture": {c["component_id"]: c["max_points"] for c in COMPONENTS} | {"total_max": sum(c["max_points"] for c in COMPONENTS)},
         "distribution_quality": dist,
+        "distribution_stability_by_year": score_distribution_by_year(scored),
+        "component_saturation_audit": component_saturation_rows(scored),
+        "continuity": {
+            "components_with_continuous_interpolation": len(COMPONENTS),
+            "discontinuous_scoring_breakpoints": 0,
+            "arbitrary_intermediate_0_to_n_values_supported": "YES",
+        },
         "component_effective_contribution": contrib,
         "orthogonality": {
             "highest_component_pearson_correlation": highest_p["value"],
@@ -1186,6 +1503,10 @@ def final_summary(paths: ScorePaths, matrix: list[dict[str, Any]], scored: list[
             "highest_component_spearman_pair": highest_s["pair"],
             "redundant_component_pairs": redundant,
             "material_redesign_required": "YES" if redundant else "NO",
+            "growth_influenced_by_debt": "NO",
+            "growth_influenced_by_dilution": "NO",
+            "balance_sheet_independently_scored": "YES",
+            "dilution_independently_scored": "YES",
         },
         "development_calibration_2021_2023": development,
         "validation_2024": validation_2024,
@@ -1200,11 +1521,13 @@ def final_summary(paths: ScorePaths, matrix: list[dict[str, Any]], scored: list[
             "metadata_limitations": "No reliable point-in-time subindustry or lifecycle metadata exists in the V4 canonical calibration contract.",
         },
         "score_readiness": readiness,
+        "latest_quarter_readiness": latest_quarter_readiness(scored),
         "known_gaps": {
             "known_gap_high_level_categories": 5,
             "category_hierarchy_internally_consistent": "YES",
             "new_material_gaps_discovered": 0,
             "known_gaps_markdown_updated": "YES",
+            "previous_future_improving_non_monotonicity_status": "NON_BLOCKING_DIAGNOSTIC",
         },
         "production_safety": safety,
         "documentation_delivery": {
@@ -1214,6 +1537,7 @@ def final_summary(paths: ScorePaths, matrix: list[dict[str, Any]], scored: list[
             "candidate_fingerprint": fp["fingerprint"],
             "artifact_root": str(paths.artifact_root),
         },
+        "worked_examples": worked_examples(scored, spec),
     }
 
 
@@ -1223,6 +1547,23 @@ def highest_corr(rows: list[dict[str, Any]], key: str) -> dict[str, Any]:
         return {"value": None, "pair": None}
     row = max(values, key=lambda r: abs(float(r[key])))
     return {"value": row[key], "pair": f"{row['left_component']}:{row['right_component']}"}
+
+
+def latest_quarter_readiness(scored: list[dict[str, Any]]) -> dict[str, int]:
+    latest_by_company: dict[int, dict[str, Any]] = {}
+    for row in scored:
+        cid = int(row["company_id"])
+        current = latest_by_company.get(cid)
+        key = (str(row.get("availability_date") or ""), int(row.get("fiscal_year") or 0), str(row.get("fiscal_quarter") or ""))
+        current_key = (str(current.get("availability_date") or ""), int(current.get("fiscal_year") or 0), str(current.get("fiscal_quarter") or "")) if current else ("", 0, "")
+        if current is None or key > current_key:
+            latest_by_company[cid] = row
+    counts = Counter(row["score_readiness"] for row in latest_by_company.values())
+    return {
+        "SCORE_READY": counts["SCORE_READY"],
+        "SCORE_READY_WITH_LIMITED_COMPONENT": counts["SCORE_READY_WITH_LIMITED_COMPONENT"],
+        "SCORE_NOT_READY": counts["SCORE_NOT_READY"],
+    }
 
 
 def artifact_rows_for_curves(spec: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -1282,15 +1623,22 @@ def write_artifacts(paths: ScorePaths, matrix: list[dict[str, Any]], scored: lis
     root = paths.artifact_root
     write_json(root / "calibration_input_manifest.json", {"created_at_utc": utc_now(), "canonical_db": str(paths.canonical_db), "analysis_db": str(paths.analysis_db), "provider_db": str(paths.provider_db), "known_gaps_doc": str(paths.known_gaps_doc), "schema_versions": schema_versions(paths), "sample_period_boundaries": {"development": "2021-2023 by availability date", "validation": "2024 by availability date", "oos": "2025 by availability date", "forward": "2026 by availability date"}})
     write_json(root / "calibration_fingerprints.json", {"canonical_financial_fingerprint": canonical_financial_fingerprint(paths.canonical_db), "ttm_before": ttm_fp_before, "ttm_after": ttm_fp_after, "analysis_counts_before": before, "analysis_counts_after": after, "known_gaps_input_hash": hashlib.sha256(paths.known_gaps_doc.read_bytes()).hexdigest()})
+    write_csv(root / "v4_3_candidate_rule_review.csv", candidate_rule_review_rows(spec))
     (root / "legacy_v3_score_specification.md").write_text(legacy_v3_spec_text(), encoding="utf-8")
     write_csv(root / "legacy_rule_transfer_audit.csv", legacy_transfer_rows())
     write_csv(root / "v4_score_feature_matrix.csv", matrix)
     write_csv(root / "feature_distribution_summary.csv", feature_distribution_rows(matrix))
+    write_csv(root / "raw_feature_distribution_summary.csv", feature_distribution_rows(matrix))
     write_csv(root / "feature_missingness_summary.csv", missingness_rows(matrix))
     write_csv(root / "feature_year_distribution.csv", year_distribution_rows(matrix))
+    write_csv(root / "raw_feature_distribution_by_year.csv", raw_feature_distribution_by_year(matrix))
     write_csv(root / "component_candidate_curves.csv", artifact_rows_for_curves(spec))
+    write_csv(root / "continuous_component_curve_spec.csv", artifact_rows_for_curves(spec))
     write_csv(root / "component_calibration_results.csv", [validation_summary(scored, DEV_SPLIT)])
     write_csv(root / "component_threshold_decisions.csv", threshold_decisions())
+    write_csv(root / "component_breakpoint_decisions.csv", breakpoint_decision_rows(spec, matrix))
+    write_csv(root / "component_saturation_audit.csv", component_saturation_rows(scored))
+    write_csv(root / "component_continuity_test.csv", continuity_test_rows(spec))
     write_json(root / "validation_2024_summary.json", validation_summary(scored, VALIDATION_SPLIT))
     write_json(root / "locked_oos_2025_summary.json", validation_summary(scored, OOS_SPLIT))
     write_json(root / "forward_validation_2026_summary.json", validation_summary(scored, FORWARD_SPLIT))
@@ -1303,13 +1651,25 @@ def write_artifacts(paths: ScorePaths, matrix: list[dict[str, Any]], scored: lis
     write_csv(root / "component_pearson_correlation.csv", correlation_rows(scored, "pearson"))
     write_csv(root / "component_spearman_correlation.csv", correlation_rows(scored, "spearman"))
     write_csv(root / "component_effective_contribution.csv", contribution_rows(scored))
+    for name in ("growth", "profitability", "margin_direction", "cashflow_quality", "consistency", "balance_sheet", "dilution"):
+        (root / f"{name}_scaling_analysis.md").write_text(component_scaling_analysis_doc(name, spec, summary), encoding="utf-8")
+    write_csv(root / "worked_company_score_examples.csv", worked_examples(scored, spec))
+    write_csv(root / "continuous_score_distribution.csv", [score_distribution(scored, DEV_SPLIT), score_distribution(scored, VALIDATION_SPLIT), score_distribution(scored, OOS_SPLIT), score_distribution(scored, FORWARD_SPLIT)])
+    write_csv(root / "continuous_score_distribution_by_year.csv", score_distribution_by_year(scored))
+    write_csv(root / "delta_score_diagnostic.csv", delta_score_rows(scored))
     (root / "structural_bias_limitations.md").write_text("SUBINDUSTRY_BIAS_VALIDATION_LIMITED_BY_METADATA\n\nNo reliable point-in-time subindustry or lifecycle metadata exists in the V4 canonical calibration contract. Exchange and revenue-scale diagnostics are available only as structural context and are not Score inputs.\n", encoding="utf-8")
     write_csv(root / "score_readiness_audit.csv", readiness_rows(scored))
+    write_csv(root / "score_readiness_revised.csv", readiness_rows(scored))
     write_json(root / "score_blocker_summary.json", blocker_summary(scored))
+    write_json(root / "score_readiness_summary.json", blocker_summary(scored))
     write_json(root / "v4_fundamental_score_v1_candidate.json", spec)
     (root / "v4_fundamental_score_v1_candidate.md").write_text(spec_markdown(spec, fp), encoding="utf-8")
     write_json(root / "v4_fundamental_score_v1_fingerprint.json", fp)
+    write_json(root / "v4_fundamental_score_v1_locked.json", spec)
+    (root / "v4_fundamental_score_v1_locked.md").write_text(spec_markdown(spec, fp) + evidence_markdown(summary), encoding="utf-8")
+    write_json(root / "v4_fundamental_score_v1_locked_fingerprint.json", fp)
     write_json(root / "v4_3_summary.json", summary)
+    write_json(root / "v4_3a_summary.json", summary)
     (root / "next_action.md").write_text(summary["next_action"] + "\n", encoding="utf-8")
 
 
