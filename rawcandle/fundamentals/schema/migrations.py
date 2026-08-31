@@ -77,9 +77,45 @@ CREATE TABLE sharadar_fundamental_observation (
     shareswadil INTEGER
 );
 
+CREATE TABLE sharadar_ticker_metadata (
+    table_name TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    permaticker TEXT NOT NULL,
+    name TEXT,
+    exchange TEXT,
+    isdelisted TEXT,
+    category TEXT,
+    relatedtickers TEXT,
+    secfilings TEXT,
+    firstpricedate TEXT,
+    lastpricedate TEXT,
+    firstquarter TEXT,
+    lastquarter TEXT,
+    lastupdated TEXT,
+    payload_json TEXT NOT NULL,
+    fetched_at_utc TEXT NOT NULL,
+    PRIMARY KEY(table_name, ticker, permaticker)
+);
+
+CREATE TABLE sharadar_action_metadata (
+    date TEXT NOT NULL,
+    action TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value TEXT,
+    contraticker TEXT NOT NULL,
+    contraname TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    fetched_at_utc TEXT NOT NULL,
+    PRIMARY KEY(date, action, ticker, name, contraticker, contraname)
+);
+
 CREATE INDEX idx_provider_observation_provider_ticker ON provider_observation(provider, provider_ticker);
 CREATE INDEX idx_provider_observation_period ON provider_observation(provider_ticker, dimension, reportperiod, fiscalperiod);
 CREATE INDEX idx_sharadar_fundamental_period ON sharadar_fundamental_observation(ticker, dimension, reportperiod, fiscalperiod);
+CREATE INDEX idx_sharadar_ticker_metadata_ticker ON sharadar_ticker_metadata(ticker, table_name);
+CREATE INDEX idx_sharadar_ticker_metadata_permaticker ON sharadar_ticker_metadata(permaticker);
+CREATE INDEX idx_sharadar_action_metadata_ticker ON sharadar_action_metadata(ticker, date, action);
 """
 
 

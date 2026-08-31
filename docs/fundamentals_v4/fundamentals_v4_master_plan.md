@@ -134,3 +134,19 @@ Review items before TTM migration:
 Next action:
 
 `KEEP THE PRODUCTION V4 BASELINE FROZEN; RESOLVE ONLY THE SPECIFIC IDENTITY / COVERAGE / PROVIDER QUALITY REVIEW ITEMS BEFORE TTM MIGRATION`
+
+## V4-1B-1 Bootstrap Review Update
+
+V4-1B-1 resolved the production bootstrap review population without changing canonical financial values and without running TTM, Score, Lifecycle, or Valuation.
+
+Result: `V4_BOOTSTRAP_REVIEW_COMPLETE_WITH_TRUE_PROVIDER_GAPS`.
+
+The review ingested one Sharadar `tickers` metadata snapshot and one Sharadar `actions` snapshot. It populated 2,465 / 2,470 Sharadar provider security identities with permaticker, left 5 permaticker NULL, and found 0 duplicate permaticker mappings. The original 19 unmatched target tickers were classified as 14 `PROVIDER_TICKER_DIFFERENT`, 3 `TICKER_RENAMED`, and 2 `BOOTSTRAP_UNIVERSE_STALE`.
+
+Window-aware Q4 review corrected the denominator: 9,830 fully observable completed fiscal years, 9,822 explicit Q4 present, and 8 true Q4 provider gaps, for 99.9186% clean Q4 coverage. Continuity is now 128 fully observable continuous companies, 2,151 continuous with left-window truncation, 172 true gaps, and 7 identity-review/no-quarter cases.
+
+TTM input readiness is 2,434 / 2,458 companies, or 99.0236%. The 24 not-ready companies are explained by missing critical fields, latest4 sequence gaps, or fewer than four quarters. These are explicit flags, not a blocker to starting V4-2.
+
+Next action:
+
+`PROCEED TO V4-2 WITH EXPLICIT GAP FLAGS; DO NOT DELAY TTM MIGRATION FOR NON-MATERIAL PROVIDER EDGE CASES`

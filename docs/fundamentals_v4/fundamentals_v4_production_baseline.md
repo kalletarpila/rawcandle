@@ -64,3 +64,46 @@ Replay:
 Baseline fingerprints are stored in `v4_production_baseline_fingerprints.json` under the artifact root. Generated Sharadar bulk files and audit artifacts remain under `temp/` and are not committed.
 
 Next action: `KEEP THE PRODUCTION V4 BASELINE FROZEN; RESOLVE ONLY THE SPECIFIC IDENTITY / COVERAGE / PROVIDER QUALITY REVIEW ITEMS BEFORE TTM MIGRATION`
+
+## V4-1B-1 Post-Review Baseline
+
+Classification: `V4_BOOTSTRAP_REVIEW_COMPLETE_WITH_TRUE_PROVIDER_GAPS`
+
+Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_1b1_bootstrap_review/20260831T062412Z`
+
+Canonical financial fingerprint changed: `NO`.
+
+Provider metadata:
+
+- Sharadar tickers metadata rows fetched: `74078`
+- Target securities matched: `2465`
+- Permaticker populated: `2465`
+- Permaticker NULL: `5`
+- Unique permatickers: `2465`
+- Identity conflicts: `0`
+- Delisted securities: `17`
+- Ticker aliases discovered from safe ticker-change actions: `5`
+
+Review classifications:
+
+- Unmatched 19: `14` provider ticker different, `3` ticker renamed, `2` bootstrap universe stale.
+- Gap 172: `172` true internal missing quarter classifications.
+- Missing Q4 190: `182` false missing due window, `8` true Q4 provider gaps.
+- Shares 255: `107` normal buyback/issuance, `19` reverse split, `14` SPAC/recapitalization, `2` ticker/security change, `113` insufficient evidence.
+- Debt mismatch: `CORZ 2024-Q4 MRQ`, classification `PROVIDER_COMPONENT_INCONSISTENCY`; canonical debt changed `NO`.
+
+Post-review Q4:
+
+- Fully observable completed FYs: `9830`
+- Explicit Q4 present: `9822`
+- True Q4 missing: `8`
+- Clean Q4 coverage: `99.9186%`
+
+TTM readiness:
+
+- TTM input ready: `2434`
+- TTM input not ready: `24`
+- Readiness: `99.0236%`
+- Top blockers: missing free cashflow `13`, missing EBIT `12`, missing revenue `12`, latest4 sequence gap `10`, fewer than 4 quarters `8`
+
+Next action: `PROCEED TO V4-2 WITH EXPLICIT GAP FLAGS; DO NOT DELAY TTM MIGRATION FOR NON-MATERIAL PROVIDER EDGE CASES`

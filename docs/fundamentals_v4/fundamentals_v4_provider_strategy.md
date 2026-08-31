@@ -71,3 +71,16 @@ Implementation note: V4-0D uses full ticker-scoped fundamentals rows for ARQ/MRQ
 Decision rule: Sharadar may become the V4 primary normalized fundamentals provider only if the hard known-truth fiscal cases pass, explicit Q4 coverage is broad, quarter continuity is coherent, critical fields are materially covered, and ARQ remains distinguishable from MRQ for point-in-time use. Yahoo and SEC remain complementary providers for freshness, events, provenance, and exceptions.
 
 V4-0D result: `SHARADAR_ACCEPTED_AS_V4_PRIMARY_PROVIDER_WITH_GUARDS`. The acceptance run confirmed paid WDAY entitlement, hard fiscal truth matches, 100% explicit Q4 coverage across evaluated completed fiscal years, 100% latest8Q critical field coverage, coherent FCF/debt reconciliation, and 100% permaticker coverage. Guards remain for CIK identity enrichment, source date semantics, and full-row ARQ/MRQ fetches when `fiscalperiod` is required.
+
+## V4-1B-1 Metadata Review
+
+V4-1B-1 keeps Sharadar ARQ as the primary canonical quarterly source and MRQ as provider-side comparison evidence. It adds provider metadata from Sharadar Direct only:
+
+- `/data/tickers?limit=100000`
+- `/data/actions?limit=100000`
+
+The tickers snapshot is stored in `fundamentals_provider.db` as provider metadata and used to populate canonical Sharadar `provider_security_identity` rows. It raises permaticker coverage from 0 to 2,465 / 2,470 securities. The remaining 5 NULL cases have no deterministic Sharadar ticker metadata in the snapshot.
+
+Actions metadata is filtered to tickers that were already flagged by the sharesbas discontinuity audit. It is used only for classification. It does not rewrite canonical shares.
+
+V4-1B-1 does not call Yahoo or SEC, does not use Nasdaq Data Link, and does not change canonical financial values.
