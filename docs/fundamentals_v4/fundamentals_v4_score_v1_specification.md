@@ -8,7 +8,7 @@ This specification supersedes the V4-3A `V4_FUNDAMENTAL_SCORE_V1` design. Git hi
 
 ## Purpose
 
-Score V1 measures current absolute fundamental strength, direction, cash generation, balance-sheet resilience, ownership dilution, and operating stability. It is not a percentile rank and is not optimized against stock returns or future fundamental outcomes.
+Score V1 measures current absolute fundamental strength, direction, cash generation, balance-sheet resilience, ownership dilution, and sustained fundamental trajectory. It is not a percentile rank and is not optimized against stock returns or future fundamental outcomes.
 
 | Component | Maximum |
 |---|---:|
@@ -18,7 +18,7 @@ Score V1 measures current absolute fundamental strength, direction, cash generat
 | FCF Margin | 15 |
 | Balance Sheet Resilience | 15 |
 | Dilution | 10 |
-| Consistency | 10 |
+| Fundamental Trajectory | 10 |
 | Total | 100 |
 
 All ratios are decimal fractions. For example, `0.10` means 10%, and a margin change of `0.05` means five percentage points. Component calculations retain full floating-point precision. Presentation rounding does not change stored or downstream values.
@@ -27,7 +27,7 @@ All ratios are decimal fractions. For example, `0.10` means 10%, and a margin ch
 
 Each anchor table defines a bounded continuous piecewise-linear function. Values between adjacent anchors are linearly interpolated. Values outside the first and last anchors receive the endpoint score. Missing is distinct from zero.
 
-The canonical score is the direct sum of observed and explicitly imputed component points. It must never use `100 * observed_points / available_weight` or otherwise dynamically reweight available components to 100.
+The canonical score is the direct sum of observed component points. It must never use `100 * observed_points / available_weight` or otherwise dynamically reweight available components to 100. Score V1 has no active component imputation.
 
 ## Revenue Growth: 20 points
 
@@ -139,31 +139,39 @@ Sequential `share_change_qoq` is stored as evidence for event timing only. It is
 
 No Dilution imputation is allowed. The historical provisional median remains diagnostic only.
 
-## Consistency: 10 points
+## Fundamental Trajectory: 10 points
 
-Use the latest four contiguous score-eligible quarterly TTM snapshots ending at the score date. If four are unavailable, use three contiguous snapshots. All snapshots must belong to one continuous canonical fiscal chain, use the same dates for all metrics, and contain Revenue Growth YoY TTM, EBIT Margin TTM, and FCF Margin TTM. Do not skip an internal missing quarter. Otherwise Consistency is missing.
+Use exactly five contiguous score-eligible quarterly TTM snapshots ending at the score date. They form four QoQ transitions over one fiscal year. Every snapshot must belong to one continuous canonical fiscal chain, be core TTM ready, and contain positive TTM revenue plus observed TTM EBIT and TTM FCF. Do not skip an internal quarter or shorten the window. Otherwise Fundamental Trajectory is missing.
 
-For each adjacent pair and each metric:
+For every signal `x` and its tolerance `T`, score each transition with:
 
-`normalized_instability = clamp(abs(current - previous) / tolerance, 0, 1)`
+`transition_points = clamp(5 + 5 * x / T, 0, 10)`
 
-| Metric | Tolerance |
-|---|---:|
-| Revenue Growth YoY TTM | `0.20` (20 percentage points) |
-| EBIT Margin TTM | `0.05` (5 percentage points) |
-| FCF Margin TTM | `0.10` (10 percentage points) |
+Therefore an unchanged value gives 5 points, improvement gives between 5 and 10 points, and deterioration gives between 0 and 5 points.
 
-For each metric, average its adjacent normalized-instability values. Give the three metric instabilities equal weight:
+### Revenue trajectory
 
-`average_instability = mean(revenue_instability, ebit_margin_instability, fcf_margin_instability)`
+`revenue_signal = revenue_ttm_current / revenue_ttm_previous_quarter - 1`
 
-`consistency_points = clamp(10 * (1 - average_instability), 0, 10)`
+The tolerance is `0.05`. A QoQ TTM revenue change of at least +5% gives 10 transition points; no change gives 5; at most -5% gives 0.
 
-This measures stability of metric levels. It can penalize a large favorable change; EBIT Margin Direction separately rewards favorable EBIT-margin improvement. This behavior is intentional.
+### EBIT-margin trajectory
 
-Development evidence contained 10,310 observed values: P10 1.88894, P25 4.69422, median 7.00875, P75 8.35267, and P90 8.98712. Zero saturation was 2.19% and full-score saturation 0%. The tolerances are economically interpretable and non-degenerate, so they are locked unchanged.
+`ebit_margin_signal = ebit_margin_ttm_current - ebit_margin_ttm_previous_quarter`
 
-The fixed Consistency imputation value is `6.988540590181791`. It is the median of the five development-cutoff medians, giving each cutoff equal weight.
+The tolerance is `0.05`, meaning five percentage points. An increase of at least five percentage points gives 10 transition points; no change gives 5; a decrease of at least five percentage points gives 0.
+
+### FCF trajectory
+
+`fcf_signal = (free_cash_flow_ttm_current - free_cash_flow_ttm_previous_quarter) / revenue_ttm_previous_quarter`
+
+The tolerance is `0.10`. Scaling the FCF change by prior TTM revenue keeps the signal interpretable when prior FCF is zero or negative. An improvement equal to at least 10% of prior TTM revenue gives 10 transition points; no change gives 5; deterioration of at least 10% gives 0.
+
+Average each signal's four transition scores. Give the three resulting metric averages equal weight:
+
+`fundamental_trajectory_points = mean(revenue_trajectory, ebit_margin_trajectory, fcf_trajectory)`
+
+This component intentionally overlaps the level and YoY direction components. It rewards sustained sequential fundamental improvement, gives neutral points for an unchanged trajectory, and penalizes deterioration. It replaces the historical level-stability Consistency component. Fundamental Trajectory is never imputed.
 
 ## Point-in-time and freshness contract
 
@@ -177,21 +185,17 @@ Historical and delisted securities remain eligible while they have a valid, fres
 
 ## Score statuses
 
-`SCORE_FULL` requires all seven observed components and no imputation.
+`SCORE_FULL` requires all seven observed components.
 
-`SCORE_READY_ESTIMATED` requires all five core components (Revenue Growth, EBIT Profitability, EBIT Margin Direction, FCF Margin, and Balance Sheet Resilience), observed Dilution, and missing Consistency replaced by its locked imputation.
-
-The only locked optional imputation is Consistency at `6.988540590181791`. Dilution is never imputed.
-
-`SCORE_LIMITED` applies when the current TTM snapshot is usable but one or more required components remain missing and the exact Consistency-only imputation rule does not produce `SCORE_READY_ESTIMATED`.
+`SCORE_LIMITED` applies when the current TTM snapshot is usable but one or more required components remain missing. No missing component is imputed or dynamically reweighted.
 
 `SCORE_NOT_READY` applies when no usable current TTM snapshot exists, source-availability semantics are unusable, multiple material inputs are absent, or even a diagnostic result would be misleading.
 
-Every result must separately expose observed points, imputed points, total points, observed component count, and status. Complete and estimated scores are canonical only under their respective statuses. Limited results are diagnostic only.
+Every result must separately expose observed points, imputed points, total points, observed component count, and status. `imputed_points` is zero under the active contract. Complete scores are canonical; Limited results are diagnostic only.
 
 ## Calibration contract
 
-The original 2021-2023 split is not a complete three-year development sample. Revenue Growth and Margin Direction have zero observations through 2022-Q3, only three at 2022-Q4, and broad coverage beginning in 2023-Q2. Consistency has only 3 observations at 2023-Q2 and 74 at 2023-Q3, reaching 1,989 at 2023-Q4.
+The original 2021-2023 split is not a complete three-year development sample. Revenue Growth and Margin Direction have zero observations through 2022-Q3, only three at 2022-Q4, and broad coverage beginning in 2023-Q2. Historical Consistency calibration remains research evidence only and does not define Fundamental Trajectory.
 
 The smallest defensible revised split is:
 
@@ -205,7 +209,7 @@ The canonical `fundamentals_v4.db` universe already excludes banks, insurers, RE
 
 ## Explicit exclusions
 
-Score V1 excludes Lifecycle, Lifecycle multipliers, Valuation, stock-return inputs, future-fundamental optimization, production percentile scoring, `ebit_development_quality`, separately scored sequential margin direction, `fcf_to_ebit`, positive-test-based `fundamental_persistence`, complex cash-runway branches, and dynamic reweighting to 100.
+Score V1 excludes Lifecycle, Lifecycle multipliers, Valuation, stock-return inputs, future-fundamental optimization, production percentile scoring, `ebit_development_quality`, the superseded level-stability Consistency formula, `fcf_to_ebit`, positive-test-based `fundamental_persistence`, complex cash-runway branches, and dynamic reweighting to 100.
 
 ## Production implementation
 

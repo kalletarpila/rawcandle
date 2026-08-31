@@ -9,13 +9,13 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import mean
 from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals.score.methodology import (
     ANCHORS,
-    CONSISTENCY_TOLERANCES,
     balance_points,
-    consistency_points,
+    clamp,
     fiscal_ordinal,
     piecewise_score,
     safe_div,
@@ -26,7 +26,6 @@ from rawcandle.fundamentals.ttm.engine import canonical_financial_fingerprint, t
 
 MODEL_VERSION = "SIMPLE_FUNDAMENTAL_SCORE_V1"
 TTM_MODEL_VERSION = "V4_TTM_EBIT_FIRST_V1"
-CONSISTENCY_IMPUTATION = 6.988540590181791
 COMPONENTS = (
     "REVENUE_GROWTH",
     "EBIT_PROFITABILITY",
@@ -34,9 +33,13 @@ COMPONENTS = (
     "FCF_MARGIN",
     "BALANCE_SHEET_RESILIENCE",
     "DILUTION",
-    "CONSISTENCY",
+    "FUNDAMENTAL_TRAJECTORY",
 )
-CORE_COMPONENTS = COMPONENTS[:5]
+TRAJECTORY_TOLERANCES = {
+    "revenue_qoq_ttm": 0.05,
+    "ebit_margin_change_qoq": 0.05,
+    "fcf_change_to_prior_revenue": 0.10,
+}
 MODEL_CONTRACT = {
     "model_version": MODEL_VERSION,
     "ttm_model_version": TTM_MODEL_VERSION,
@@ -47,10 +50,13 @@ MODEL_CONTRACT = {
         "FCF_MARGIN": {"maximum": 15.0, "anchors": ANCHORS["fcf_margin_ttm"]},
         "BALANCE_SHEET_RESILIENCE": {"maximum": 15.0, "positive_ebit_floor": 4.0},
         "DILUTION": {"maximum": 10.0, "anchors": ANCHORS["share_change_yoy"]},
-        "CONSISTENCY": {
+        "FUNDAMENTAL_TRAJECTORY": {
             "maximum": 10.0,
-            "tolerances": CONSISTENCY_TOLERANCES,
-            "imputation": CONSISTENCY_IMPUTATION,
+            "window_ttm_snapshots": 5,
+            "qoq_transitions": 4,
+            "neutral_points": 5.0,
+            "tolerances": TRAJECTORY_TOLERANCES,
+            "imputation": None,
         },
     },
     "dilution_policy": {
@@ -62,7 +68,6 @@ MODEL_CONTRACT = {
     },
     "statuses": {
         "SCORE_FULL": "all_seven_components_observed",
-        "SCORE_READY_ESTIMATED": "five_core_and_dilution_observed_consistency_imputed",
         "SCORE_LIMITED": "usable_current_ttm_but_canonical_score_incomplete",
         "SCORE_NOT_READY": "current_ttm_not_ready_or_availability_date_missing",
     },
@@ -190,6 +195,68 @@ def _evidence(
     return evidence
 
 
+def trajectory_points(
+    endpoint_ordinal: int,
+    rows_by_ordinal: Mapping[int, Mapping[str, Any]],
+) -> tuple[float | None, dict[str, Any]]:
+    ordinals = list(range(endpoint_ordinal - 4, endpoint_ordinal + 1))
+    window = [rows_by_ordinal.get(ordinal) for ordinal in ordinals]
+    base_evidence: dict[str, Any] = {
+        "required_ttm_snapshots": 5,
+        "required_qoq_transitions": 4,
+        "fiscal_ordinals": ordinals,
+        "tolerances": TRAJECTORY_TOLERANCES,
+    }
+    if any(row is None for row in window):
+        return None, {**base_evidence, "blocker": "NON_CONTIGUOUS_FIVE_SNAPSHOT_WINDOW"}
+    snapshots = [row for row in window if row is not None]
+    if any(int(row.get("core_ttm_ready") or 0) != 1 for row in snapshots):
+        return None, {**base_evidence, "blocker": "WINDOW_TTM_NOT_CORE_READY"}
+    if any(_number(row.get("ttm_revenue")) is None or float(row["ttm_revenue"]) <= 0.0 for row in snapshots):
+        return None, {**base_evidence, "blocker": "WINDOW_REVENUE_NOT_POSITIVE"}
+    if any(_number(row.get("ttm_ebit")) is None or _number(row.get("ttm_free_cashflow")) is None for row in snapshots):
+        return None, {**base_evidence, "blocker": "WINDOW_EBIT_OR_FCF_MISSING"}
+
+    transitions: list[dict[str, Any]] = []
+    metric_points: dict[str, list[float]] = defaultdict(list)
+    for previous, current in zip(snapshots, snapshots[1:]):
+        previous_revenue = float(previous["ttm_revenue"])
+        current_revenue = float(current["ttm_revenue"])
+        revenue_signal = current_revenue / previous_revenue - 1.0
+        previous_ebit_margin = float(previous["ttm_ebit"]) / previous_revenue
+        current_ebit_margin = float(current["ttm_ebit"]) / current_revenue
+        ebit_signal = current_ebit_margin - previous_ebit_margin
+        fcf_signal = (float(current["ttm_free_cashflow"]) - float(previous["ttm_free_cashflow"])) / previous_revenue
+        signals = {
+            "revenue_qoq_ttm": revenue_signal,
+            "ebit_margin_change_qoq": ebit_signal,
+            "fcf_change_to_prior_revenue": fcf_signal,
+        }
+        points = {
+            metric: clamp(5.0 + 5.0 * signal / TRAJECTORY_TOLERANCES[metric], 0.0, 10.0)
+            for metric, signal in signals.items()
+        }
+        for metric, value in points.items():
+            metric_points[metric].append(value)
+        transitions.append({
+            "from_quarter_id": previous["endpoint_quarter_id"],
+            "to_quarter_id": current["endpoint_quarter_id"],
+            "from_period_end": previous["period_end"],
+            "to_period_end": current["period_end"],
+            "signals": signals,
+            "points": points,
+        })
+    metric_averages = {metric: mean(values) for metric, values in metric_points.items()}
+    total = mean(metric_averages.values())
+    return total, {
+        **base_evidence,
+        "blocker": None,
+        "transition_scoring": "clamp(5 + 5 * signal / tolerance, 0, 10)",
+        "metric_average_points": metric_averages,
+        "transitions": transitions,
+    }
+
+
 def compute_score_rows(
     ttm_rows: Sequence[Mapping[str, Any]],
     split_events: Mapping[str, Sequence[Mapping[str, Any]]],
@@ -222,7 +289,7 @@ def compute_score_rows(
             share_change_qoq = safe_growth(shares, prior_quarter_shares)
             ticker = str(row["ticker"])
             split_matches = _split_matches(ticker, previous_year if chain_ok else None, row, split_events)
-            consistency = consistency_points(ordinal, by_ordinal, levels)
+            trajectory, trajectory_evidence = trajectory_points(ordinal, by_ordinal)
 
             scores = {
                 "REVENUE_GROWTH": piecewise_score(current["revenue_growth_yoy_ttm"], ANCHORS["revenue_growth_yoy_ttm"]),
@@ -231,7 +298,7 @@ def compute_score_rows(
                 "FCF_MARGIN": piecewise_score(current["fcf_margin_ttm"], ANCHORS["fcf_margin_ttm"]),
                 "BALANCE_SHEET_RESILIENCE": balance_points(row),
                 "DILUTION": piecewise_score(share_change_yoy, ANCHORS["share_change_yoy"]),
-                "CONSISTENCY": consistency,
+                "FUNDAMENTAL_TRAJECTORY": trajectory,
             }
             evidence = {
                 "REVENUE_GROWTH": _evidence(metric="revenue_growth_yoy_ttm", value=current["revenue_growth_yoy_ttm"], inputs={"ttm_revenue_current": row.get("ttm_revenue"), "ttm_revenue_4q_ago": previous_year.get("ttm_revenue") if previous_year and chain_ok else None}, observed=scores["REVENUE_GROWTH"] is not None, extra={"continuous_fiscal_chain": chain_ok}),
@@ -240,15 +307,11 @@ def compute_score_rows(
                 "FCF_MARGIN": _evidence(metric="fcf_margin_ttm", value=current["fcf_margin_ttm"], inputs={"ttm_free_cashflow": row.get("ttm_free_cashflow"), "ttm_revenue": row.get("ttm_revenue")}, observed=scores["FCF_MARGIN"] is not None),
                 "BALANCE_SHEET_RESILIENCE": _evidence(metric="balance_sheet_resilience", value=scores["BALANCE_SHEET_RESILIENCE"], inputs={"cash": row.get("cash"), "total_debt": row.get("total_debt"), "ttm_ebit": row.get("ttm_ebit"), "ttm_free_cashflow": row.get("ttm_free_cashflow")}, observed=scores["BALANCE_SHEET_RESILIENCE"] is not None),
                 "DILUTION": _evidence(metric="share_change_yoy", value=share_change_yoy, inputs={"shares_current": shares, "shares_4q_ago": previous_shares}, observed=scores["DILUTION"] is not None, extra={"share_change_qoq_evidence_only": share_change_qoq, "split_events_evidence_only": split_matches, "split_adjustment_applied": False, "large_positive_change_policy": "ASSUMED_GENUINE_DILUTION_BY_POLICY" if share_change_yoy is not None and share_change_yoy > 0.50 else "NOT_APPLICABLE"}),
-                "CONSISTENCY": _evidence(metric="consistency_points", value=consistency, inputs={"required_contiguous_snapshots": "latest_4_else_3", "tolerances": CONSISTENCY_TOLERANCES}, observed=consistency is not None),
+                "FUNDAMENTAL_TRAJECTORY": _evidence(metric="fundamental_trajectory_points", value=trajectory, inputs={"window": "five_contiguous_ttm_snapshots", "transition_count": 4}, observed=trajectory is not None, extra=trajectory_evidence),
             }
 
             current_ready = int(row.get("core_ttm_ready") or 0) == 1 and bool(row.get("ttm_source_available_date"))
             imputed_components: list[str] = []
-            if current_ready and all(scores[name] is not None for name in (*CORE_COMPONENTS, "DILUTION")) and scores["CONSISTENCY"] is None:
-                scores["CONSISTENCY"] = CONSISTENCY_IMPUTATION
-                imputed_components.append("CONSISTENCY")
-                evidence["CONSISTENCY"].update({"metric_value": CONSISTENCY_IMPUTATION, "value_status": "IMPUTED", "imputation_basis": "locked_development_cutoff_median"})
 
             missing = [name for name in COMPONENTS if scores[name] is None]
             observed = [name for name in COMPONENTS if scores[name] is not None and name not in imputed_components]
@@ -260,9 +323,6 @@ def compute_score_rows(
             elif not missing and not imputed_components:
                 status = "SCORE_FULL"
                 total_score = observed_points
-            elif not missing and imputed_components == ["CONSISTENCY"]:
-                status = "SCORE_READY_ESTIMATED"
-                total_score = observed_points + imputed_points
             else:
                 status = "SCORE_LIMITED"
                 total_score = observed_points + imputed_points

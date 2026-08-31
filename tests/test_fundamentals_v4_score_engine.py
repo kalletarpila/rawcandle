@@ -71,17 +71,52 @@ def test_full_score_has_seven_observed_components_and_direct_sum() -> None:
     result = compute([ttm_row(index) for index in range(1, 9)])[-1]
     assert result["readiness_status"] == "SCORE_FULL"
     assert len(result["components"]) == 7
+    assert {item["component_name"] for item in result["components"]} == set(engine.COMPONENTS)  # type: ignore[union-attr]
+    assert "CONSISTENCY" not in engine.COMPONENTS
     direct_sum = sum(item["component_score"] for item in result["components"])  # type: ignore[arg-type,union-attr]
     assert result["total_score"] == pytest.approx(direct_sum)
-    assert result["total_score"] == pytest.approx(69.4)
+    assert component(result, "FUNDAMENTAL_TRAJECTORY")["component_score"] > 5.0
 
 
-def test_consistency_is_the_only_imputed_optional_component() -> None:
+def test_five_snapshots_produce_full_score_without_imputation() -> None:
     result = compute([ttm_row(index) for index in range(1, 6)])[-1]
-    assert result["readiness_status"] == "SCORE_READY_ESTIMATED"
-    consistency = component(result, "CONSISTENCY")
-    assert consistency["component_score"] == engine.CONSISTENCY_IMPUTATION
-    assert '"value_status":"IMPUTED"' in consistency["evidence_json"]
+    assert result["readiness_status"] == "SCORE_FULL"
+    trajectory = component(result, "FUNDAMENTAL_TRAJECTORY")
+    assert trajectory["component_score"] is not None
+    assert '"value_status":"OBSERVED"' in trajectory["evidence_json"]
+
+
+def test_trajectory_flat_is_neutral_and_growth_or_decline_moves_score() -> None:
+    flat = [ttm_row(index) for index in range(1, 6)]
+    for item in flat:
+        item.update(ttm_revenue=100.0, ttm_ebit=10.0, ttm_free_cashflow=8.0)
+    flat_rows = {engine.fiscal_ordinal(item["endpoint_fiscal_year"], item["endpoint_fiscal_quarter"]): item for item in flat}
+    flat_score, _ = engine.trajectory_points(max(flat_rows), flat_rows)
+    assert flat_score == 5.0
+
+    growth = [dict(item) for item in flat]
+    for index in range(1, len(growth)):
+        previous = growth[index - 1]
+        current = growth[index]
+        current["ttm_revenue"] = float(previous["ttm_revenue"]) * 1.05
+        previous_margin = float(previous["ttm_ebit"]) / float(previous["ttm_revenue"])
+        current["ttm_ebit"] = float(current["ttm_revenue"]) * (previous_margin + 0.05)
+        current["ttm_free_cashflow"] = float(previous["ttm_free_cashflow"]) + 0.10 * float(previous["ttm_revenue"])
+    growth_rows = {engine.fiscal_ordinal(item["endpoint_fiscal_year"], item["endpoint_fiscal_quarter"]): item for item in growth}
+    growth_score, _ = engine.trajectory_points(max(growth_rows), growth_rows)
+    assert growth_score == pytest.approx(10.0)
+
+    decline = [dict(item) for item in flat]
+    for index in range(1, len(decline)):
+        previous = decline[index - 1]
+        current = decline[index]
+        current["ttm_revenue"] = float(previous["ttm_revenue"]) * 0.95
+        previous_margin = float(previous["ttm_ebit"]) / float(previous["ttm_revenue"])
+        current["ttm_ebit"] = float(current["ttm_revenue"]) * (previous_margin - 0.05)
+        current["ttm_free_cashflow"] = float(previous["ttm_free_cashflow"]) - 0.10 * float(previous["ttm_revenue"])
+    decline_rows = {engine.fiscal_ordinal(item["endpoint_fiscal_year"], item["endpoint_fiscal_quarter"]): item for item in decline}
+    decline_score, _ = engine.trajectory_points(max(decline_rows), decline_rows)
+    assert decline_score == pytest.approx(0.0)
 
 
 def test_large_positive_share_change_is_scored_as_genuine_dilution() -> None:

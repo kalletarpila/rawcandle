@@ -1,6 +1,6 @@
 # Fundamentals V4 Score V1 Phase 1B Report
 
-> Historical phase report. The later owner-approved V4-4 policy removed the Dilution upstream blocker: locally stored `sharesbas` history is scored directly, split rows are evidence only, and positive YoY changes above 50% are assumed genuine dilution. The active contract is `fundamentals_v4_score_v1_specification.md`.
+> Historical phase report. Later owner-approved V4-4 revisions removed the Dilution upstream blocker and replaced the level-stability Consistency component with Fundamental Trajectory. The active contract is `fundamentals_v4_score_v1_specification.md`.
 
 Status: `COMPLETE_WITH_DILUTION_UPSTREAM_BLOCKER`
 
