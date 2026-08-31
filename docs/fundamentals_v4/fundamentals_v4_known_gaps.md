@@ -58,3 +58,11 @@ TTM is blocked only for companies whose current latest four-quarter window is in
 
 ## 8. Update history
 - V4-2, delivery commit `Migrate Fundamentals V4 TTM engine`: migrated EBIT-first TTM, wrote production TTM rows, and reconciled current TTM blockers. Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_2_ttm/20260831T073656Z`.
+
+## V4-3 Score Calibration Review
+
+Score calibration consumed this register as an explicit readiness input. High-level OPEN categories remain internally consistent at `5`: Fiscal / quarter continuity, Q4, TTM readiness, Identity, and Shares. Detailed issue groups roll up under those categories; for example CIK NULL and permaticker NULL both belong to Identity.
+
+New material data-quality gaps discovered by V4-3: `0`.
+
+Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_3_score_calibration/20260831T133335Z`.

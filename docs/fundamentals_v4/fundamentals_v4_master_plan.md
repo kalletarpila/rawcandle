@@ -164,3 +164,7 @@ Production TTM rows: `50585`
 Current TTM ready / not ready: `2434` / `24`
 
 Next: `PROCEED TO V4-3: MIGRATE AND VALIDATE THE LOCKED FUNDAMENTAL SCORE ARCHITECTURE AGAINST V4 CANONICAL + TTM DATA; KEEP THE KNOWN-GAPS REGISTER AS AN EXPLICIT DOWNSTREAM QUALITY INPUT`
+
+## V4-3 Score Calibration
+
+V4-3 produced the candidate `V4_FUNDAMENTAL_SCORE_V1` specification and calibration artifacts. Production Score writes remain frozen until V4-4.
