@@ -1,6 +1,6 @@
 # Fundamentals V4 Score V1 Phase 1B Report
 
-Status: `COMPLETE_WITH_DILUTION_AND_CLASSIFICATION_UPSTREAM_BLOCKERS`
+Status: `COMPLETE_WITH_DILUTION_UPSTREAM_BLOCKER`
 
 Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_3b_score_methodology/20260831T_PHASE1B_LOCKED_V2`
 
@@ -63,7 +63,7 @@ Median quarterly anchor saturations were: Revenue Growth 18.41% at the floor and
 
 The complete per-cutoff P10/P25/P50/P75/P85/P90, non-null counts, saturations, and snapshot-age values are in `asof_cross_sections.csv`. `development_percentile_ranges.csv` contains the aggregate table.
 
-Sector and industry composition could not be reported reliably. V4 has current security-type category metadata but no trustworthy point-in-time sector/industry or financial-company/REIT classification. No name heuristic or current-active survivorship filter was introduced.
+Sector and industry composition could not be reported from reliable point-in-time columns. This does not affect the intended exclusions: the canonical `fundamentals_v4.db` universe already excludes banks, insurers, REITs, and other true financial companies upstream. The calibration applied no additional name, ticker, exchange, security-status, or current-active filter.
 
 ## Consistency validation
 
@@ -139,4 +139,4 @@ Artifact SHA-256 values:
 | `dilution_outlier_strata.csv` | `08353c212788df12ac63162fc9592099109bf0096943b3e30c45598ba4ffed36` |
 | `dilution_outlier_sample.csv` | `15ecbdca4cfec3b9ed590b7e935431d37a2c24a014d1b31def0287eae5a8f7a5` |
 
-The remaining blockers are split-normalized period-end share history and reliable point-in-time financial-company/REIT classification. No production Score implementation should claim full readiness until those upstream contracts exist.
+The remaining upstream blocker is split-normalized period-end share history. Point-in-time sector/industry composition reporting remains unavailable, but financial-company and REIT exclusion is not a blocker because those company types are absent from the canonical universe. No production Score implementation should claim full readiness until the share-history contract exists.

@@ -199,7 +199,7 @@ The smallest defensible revised split is:
 
 Each cutoff uses one latest known snapshot per security and the 180-day freshness rule. Anchors are absolute economic thresholds; cross-sectional percentiles only test coverage and saturation. Neither future fundamentals nor stock returns fit the model.
 
-No reliable point-in-time sector or industry classification exists in the V4 contract. Banks, insurers, true financial companies, and REITs could not be excluded without inventing name- or ticker-based logic. This is an upstream universe-classification limitation and must be resolved before claiming sector-excluded calibration. Security-type metadata is not a substitute for sector classification.
+The canonical `fundamentals_v4.db` universe already excludes banks, insurers, REITs, and other true financial companies upstream. Score calibration therefore applies no additional sector, industry, name, ticker, exchange, security-status, or current-active filter. The absence of point-in-time sector/industry columns in the V4 contract limits composition reporting, but it is not a Score V1 readiness blocker because the excluded company types are not present in the canonical universe.
 
 ## Explicit exclusions
 
@@ -210,7 +210,6 @@ Score V1 excludes Lifecycle, Lifecycle multipliers, Valuation, stock-return inpu
 Production readiness still requires:
 
 1. split-normalized point-in-time period-end basic shares with quality lineage;
-2. reliable point-in-time sector/industry classification for the intended financial-company and REIT exclusions;
-3. production implementation and storage in a later phase without changing canonical quarterly or TTM field semantics.
+2. production implementation and storage in a later phase without changing canonical quarterly or TTM field semantics.
 
 Phase 1B made no production schema or database changes.

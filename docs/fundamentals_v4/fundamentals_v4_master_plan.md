@@ -175,4 +175,4 @@ V4-3A redesigned the now-superseded `V4_FUNDAMENTAL_SCORE_V1` as independent con
 
 ## V4-3B Simple Score Methodology
 
-V4-3B locked `SIMPLE_FUNDAMENTAL_SCORE_V1`, corrected calibration to true quarter-end as-of cross-sections, and locked Consistency and the 4x Balance Sheet floor. Dilution remains blocked pending split-normalized period-end basic-share history. Reliable point-in-time financial-company and REIT classification is also an upstream calibration limitation. Production Score writes remain frozen until these contracts are resolved and a later phase explicitly authorizes implementation.
+V4-3B locked `SIMPLE_FUNDAMENTAL_SCORE_V1`, corrected calibration to true quarter-end as-of cross-sections, and locked Consistency and the 4x Balance Sheet floor. The canonical universe already excludes banks, insurers, REITs, and other true financial companies, so point-in-time sector classification is not a Score blocker. Dilution remains blocked pending split-normalized period-end basic-share history. Production Score writes remain frozen until that contract is resolved and a later phase explicitly authorizes implementation.
