@@ -147,8 +147,16 @@ UNCLASSIFIED publishes `LIFECYCLE_NOT_READY`, `final_state = NULL`, clears the c
 
 Pure observations retain company/security identity, fiscal year/quarter, endpoint quarter id, period end, source availability date, source data version and model identity. Replay consumes a non-decreasing source-availability sequence and never mutates prior inputs or outputs. Equal availability dates retain caller-established deterministic order.
 
-RawCandle does not preserve a complete historical lifecycle information-version chain and does not claim an investor-knowable PIT lifecycle history. The future production implementation will replay the currently accepted canonical and TTM history in canonical fiscal-quarter order and label it `REVISED_HISTORY`. Restatements may therefore change earlier lifecycle results retrospectively.
+RawCandle does not preserve a complete historical lifecycle information-version chain and does not claim an investor-knowable PIT lifecycle history. The revised-history implementation replays the currently accepted canonical and TTM history in canonical fiscal-quarter order and labels it `REVISED_HISTORY`. Restatements may therefore change earlier lifecycle results retrospectively.
 
 ## Scope boundary
 
 Phase 2A contains only the pure classifier, state machine, tests and documentation. It performs no database read or write, migration, production backfill, scheduler/report integration or activation. Lifecycle V1 does not alter Score V1 behavior, rows, version or fingerprint.
+
+## Revised-history persistence contract
+
+Phase 2C persists the current-canonical interpretation under the explicit mode `REVISED_HISTORY`. One active row is allowed for each company, fiscal quarter, lifecycle model fingerprint and history mode. A source restatement may change an earlier row and all later confirmed states, so refresh replays the complete affected company. Full-universe rebuild uses the same path.
+
+Current and history readers require an explicit model fingerprint. The current reader selects the greatest canonical fiscal sequence even when it is `UNCLASSIFIED`; in that case it returns `LIFECYCLE_NOT_READY` and no current economic class. `last_confirmed_state` remains audit data only.
+
+The persistence layer does not change the methodology contract, model version, fingerprint, thresholds, priorities, missing-data matrix or state machine.

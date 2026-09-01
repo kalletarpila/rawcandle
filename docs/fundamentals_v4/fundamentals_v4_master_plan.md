@@ -192,3 +192,7 @@ Status: `RETIRED_BEFORE_PRODUCTION_ACTIVATION`
 Phase 2B implemented an append-only PIT persistence experiment in commit `f3b5520d876463aeced46ec7f55fa235206f5101`. It was never migrated, backfilled, scheduled, reported or activated in production. Phase 2B.1 removed its code, schema definitions, CLI, tests and active specification in a forward cleanup commit; Git history preserves the experiment if it is ever needed for research.
 
 The locked direction is revised-history only. Future lifecycle production history will use currently accepted canonical and TTM data, run in canonical fiscal-quarter order, carry the explicit label `REVISED_HISTORY`, and remain subject to retrospective restatement changes. It answers what lifecycle history looks like under currently accepted fundamentals, not what an investor saw on each historical date. This is an accepted simplification for the personal research scope. Score V1 remains independent.
+
+## Lifecycle Phase 2C
+
+Phase 2C implements the unactivated revised-history pipeline: current canonical/TTM adapter, complete company replay through the unchanged Phase 2A engine, the `lifecycle_revised_result` schema, atomic fingerprint-scoped replacement, explicit-fingerprint readers, guarded dry-run/apply CLI, quick checks and a temporary full-universe rehearsal. The production analysis database is explicitly blocked as a destination. Production migration and backfill remain Phase 2D work requiring separate authorization.

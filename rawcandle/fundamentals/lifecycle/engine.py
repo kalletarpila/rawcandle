@@ -319,7 +319,7 @@ def _classify_zero_revenue(observation: LifecycleObservation) -> RawLifecycleRes
 
 
 def classify_raw_state(observation: LifecycleObservation) -> RawLifecycleResult:
-    """Classify one PIT TTM observation without persistence or mutable state."""
+    """Classify one source-provenanced TTM observation without mutable state."""
     if observation.ttm_model_version != TTM_MODEL_VERSION:
         return _unclassified(
             observation,
@@ -551,20 +551,20 @@ def advance_state_machine(
 
 
 def replay_state_machine(raw_results: Sequence[RawLifecycleResult]) -> tuple[StateMachineResult, ...]:
-    """Replay a caller-provided chronological PIT sequence deterministically."""
+    """Replay a caller-provided chronological source sequence deterministically."""
     state = LifecycleMachineState()
     output: list[StateMachineResult] = []
     previous_date: date | None = None
     for raw_result in raw_results:
         available = raw_result.observation.source_available_date
         if available is None:
-            raise ValueError("LIFECYCLE_PIT_AVAILABILITY_DATE_REQUIRED")
+            raise ValueError("LIFECYCLE_REPLAY_AVAILABILITY_DATE_REQUIRED")
         try:
             current_date = date.fromisoformat(available)
         except ValueError as exc:
-            raise ValueError("LIFECYCLE_PIT_AVAILABILITY_DATE_INVALID") from exc
+            raise ValueError("LIFECYCLE_REPLAY_AVAILABILITY_DATE_INVALID") from exc
         if previous_date is not None and current_date < previous_date:
-            raise ValueError("LIFECYCLE_PIT_SEQUENCE_NOT_CHRONOLOGICAL")
+            raise ValueError("LIFECYCLE_REPLAY_SEQUENCE_NOT_CHRONOLOGICAL")
         state, result = advance_state_machine(state, raw_result)
         output.append(result)
         previous_date = current_date
