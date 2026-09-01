@@ -184,3 +184,11 @@ Status: `PURE_METHODOLOGY_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`
 Phase 2A implements `V4_FUNDAMENTAL_LIFECYCLE_V1` as a pure raw classifier and immutable two-observation state machine. The active specification is `fundamentals_v4_lifecycle_v1_specification.md`. SCALING precedes GROWTH, PRE_REVENUE is an exact four-zero-quarter STARTUP profile, STRUGGLING is separate from TRANSITION, DISTRESSED enters immediately and exits only after two identical recovery states, and UNCLASSIFIED clears candidates while exposing the last confirmed state only as history.
 
 No schema, production database, Score behavior, backfill, scheduler, report or activation changed. Production PIT event construction and persistence remain a separate next phase.
+
+## Lifecycle Phase 2B
+
+Status: `PERSISTENCE_FOUNDATION_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`
+
+Phase 2B adds deterministic date-level knowledge batches, explicit same-day canonical-winner handling, restatement-aware suffix replay, separate PIT and revised-history modes, and an append-only `V4_LIFECYCLE_PIT_1` persistence contract. Current, as-of and fiscal-quarter audit APIs require the locked Lifecycle V1 fingerprint.
+
+The existing analysis `lifecycle_result` and Score tables are unchanged. Migration and write validation use disposable databases; the CLI is dry-run by default, requires an explicit non-production destination for writes and rejects the production analysis path. Production canonical-version feed validation, migration, backfill, readers and activation are reserved for Phase 2C.

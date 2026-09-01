@@ -51,15 +51,12 @@ For a ready economic observation, `final_state` is the current confirmed public 
 
 Startup profile is retained with a confirmed STARTUP state. A stable confirmed STARTUP observation updates its current startup profile; a candidate STARTUP profile becomes confirmed only with the state transition.
 
-## Deferred production boundary
+## Phase 2B persistence foundation
 
-Phase 2A deliberately does not provide a database loader, writer, migration, CLI, backfill or activation path. The next PIT persistence phase owns:
+Phase 2B adds a separate append-only `lifecycle_pit_result` contract without changing the locked classifier or its fingerprint. Versioned quarterly inputs are grouped into atomic date-level knowledge batches. Current and lag4 TTM evidence is rebuilt from the winning as-known versions, and a restatement appends the corrected state-machine-dependent suffix.
 
-- canonical TTM and exact four-quarter input loading;
-- immutable availability/version event identity;
-- same-date deterministic tie-breaking;
-- append-only PIT result persistence;
-- revised-history replay separation;
-- production rehearsal, idempotency and activation controls.
+`PIT` and `REVISED_HISTORY` are distinct replay modes. Current, as-of and fiscal-quarter audit reads require an explicit model fingerprint. UNCLASSIFIED remains publicly not ready with no current final class.
 
-The existing `lifecycle_result` schema was not changed or written in this phase. Its suitability for immutable PIT event versions must be reviewed before persistence is implemented.
+The complete persistence, ordering, replay, schema, read API and safety contract is documented in `fundamentals_v4_lifecycle_v1_pit_persistence.md`.
+
+Phase 2B remains non-production-active. It does not migrate or write the production database, backfill results, add scheduler/report integration, or modify Score V1. Those operational boundaries remain reserved for explicit Phase 2C authorization.
