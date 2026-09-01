@@ -1,5 +1,7 @@
 # Lifecycle V1 Revised-History Runbook
 
+Production deployment evidence is recorded in `fundamentals_v4_lifecycle_v1_phase2d_deployment.md`.
+
 ## Semantics
 
 Lifecycle V1 answers what each company's lifecycle path looks like under the currently accepted canonical and TTM history. Every row is labeled `REVISED_HISTORY`. Restatements can revise older classifications; this dataset is not an investor-knowable historical record.
