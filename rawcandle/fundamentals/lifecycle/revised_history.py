@@ -96,6 +96,22 @@ class ReplaceReport:
     result_fingerprint: str
 
 
+@dataclass(frozen=True)
+class RefreshReport:
+    model_version: str
+    model_fingerprint: str
+    scope: str
+    companies: int
+    source_input_fingerprint: str
+    result_fingerprint: str
+    rows_before: int
+    rows_after: int
+    rows_deleted: int
+    rows_inserted: int
+    rows_unchanged: int
+    quick_check_ok: bool
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -490,6 +506,26 @@ def summarize(rows: Sequence[Mapping[str, Any]], source_fingerprint: str) -> dic
     }
 
 
+def summarize_current(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    latest: dict[int, Mapping[str, Any]] = {}
+    for row in rows:
+        company_id = int(row["company_id"])
+        if company_id not in latest or int(row["fiscal_sequence"]) > int(latest[company_id]["fiscal_sequence"]):
+            latest[company_id] = row
+    current = list(latest.values())
+    ready = [row for row in current if row["lifecycle_status"] == LifecycleStatus.READY.value]
+    return {
+        "companies": len(current),
+        "status_counts": dict(sorted(Counter(row["lifecycle_status"] for row in current).items())),
+        "final_state_counts": dict(sorted(Counter(row["final_state"] or "NONE" for row in current).items())),
+        "ready_final_state_counts": dict(sorted(Counter(row["final_state"] for row in ready).items())),
+        "startup_profile_counts": dict(sorted(Counter(row["final_startup_profile"] or "NONE" for row in current).items())),
+        "unclassified_reason_counts": dict(sorted(Counter(
+            row["reason_code"] for row in current if row["raw_state"] == LifecycleState.UNCLASSIFIED.value
+        ).items())),
+    }
+
+
 def quick_check(
     conn: sqlite3.Connection,
     *,
@@ -556,3 +592,39 @@ def quick_check(
         "result_fingerprint": actual_fp,
         "sqlite_quick_check": sqlite_result,
     }
+
+
+def refresh_revised_history(
+    canonical_db: Path,
+    analysis_db: Path,
+    *,
+    company_ids: Sequence[int] | None = None,
+) -> RefreshReport:
+    selected = tuple(sorted(set(int(value) for value in (company_ids or ()))))
+    source = load_revised_source(canonical_db, company_ids=selected)
+    rows = build_revised_results(source)
+    company_scope = selected or None
+    scope_name = "CHANGED_COMPANIES" if selected else "FULL_UNIVERSE_FALLBACK"
+    with sqlite3.connect(analysis_db) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        ensure_revised_schema(conn)
+        report = replace_revised_results(conn, rows, company_scope=company_scope)
+        check = quick_check(conn, expected_rows=rows)
+        if not check["ok"]:
+            raise RuntimeError(f"LIFECYCLE_REFRESH_QUICK_CHECK_FAILED:{check['details']}")
+        conn.commit()
+    return RefreshReport(
+        model_version=MODEL_VERSION,
+        model_fingerprint=MODEL_FINGERPRINT,
+        scope=scope_name,
+        companies=len({row["company_id"] for row in rows}),
+        source_input_fingerprint=source.source_input_fingerprint,
+        result_fingerprint=report.result_fingerprint,
+        rows_before=report.rows_before,
+        rows_after=report.rows_after,
+        rows_deleted=report.rows_deleted,
+        rows_inserted=report.rows_inserted,
+        rows_unchanged=report.rows_unchanged,
+        quick_check_ok=bool(check["ok"]),
+    )

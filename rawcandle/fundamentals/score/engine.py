@@ -6,7 +6,7 @@ import json
 import shutil
 import sqlite3
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
@@ -397,6 +397,12 @@ def score_fingerprint(conn: sqlite3.Connection) -> dict[str, Any]:
     return {"row_count": len(rows), "component_count": len(components), "fingerprint": hashlib.sha256(payload.encode("utf-8")).hexdigest()}
 
 
+def refresh_lifecycle_after_score(paths: ScorePaths) -> dict[str, Any]:
+    from rawcandle.fundamentals.lifecycle.revised_history import refresh_revised_history
+
+    return asdict(refresh_revised_history(paths.canonical_db, paths.analysis_db))
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
@@ -476,6 +482,22 @@ def run_score(paths: ScorePaths, *, write_production: bool = True) -> dict[str, 
         "valuation_writes": 0,
         "swingmaster_runtime_dependency": 0,
     }
+    if write_production and complete:
+        try:
+            summary["lifecycle_refresh"] = {
+                "status": "COMPLETE",
+                **refresh_lifecycle_after_score(paths),
+            }
+        except Exception as exc:
+            summary["classification"] = "V4_SCORE_V1_IMPLEMENTATION_BLOCKED"
+            summary["lifecycle_refresh"] = {
+                "status": "FAILED",
+                "error": str(exc),
+            }
+            _write_json(paths.artifact_root / "score_v1_summary.json", summary)
+            raise RuntimeError("POST_SCORE_LIFECYCLE_REFRESH_FAILED") from exc
+    else:
+        summary["lifecycle_refresh"] = {"status": "SKIPPED"}
     _write_json(paths.artifact_root / "score_v1_summary.json", summary)
     _write_json(paths.artifact_root / "score_v1_model_contract.json", MODEL_CONTRACT)
     _write_sample(paths.artifact_root / "score_v1_sample.csv", rows)

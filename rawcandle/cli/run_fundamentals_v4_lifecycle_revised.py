@@ -19,6 +19,7 @@ from rawcandle.fundamentals.lifecycle.revised_history import (
     quick_check,
     replace_revised_results,
     summarize,
+    summarize_current,
 )
 from rawcandle.fundamentals.score.engine import score_fingerprint
 
@@ -30,7 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--company-id", action="append", type=int, default=[])
     parser.add_argument("--ticker", action="append", default=[])
     parser.add_argument("--full-universe", action="store_true")
-    parser.add_argument("--apply", action="store_true", help="Write to the explicit non-production destination")
+    parser.add_argument("--model-fingerprint")
+    parser.add_argument("--apply", action="store_true", help="Write to the explicit destination")
+    parser.add_argument("--confirm-production", action="store_true")
     parser.add_argument(
         "--rehearsal-source-analysis-db",
         type=Path,
@@ -44,7 +47,25 @@ def _production_analysis_path() -> Path:
     return (Path(__file__).resolve().parents[2] / "data" / "fundamentals_analysis.db").resolve()
 
 
+def _production_canonical_path() -> Path:
+    return (Path(__file__).resolve().parents[2] / "data" / "fundamentals_v4.db").resolve()
+
+
+def _production_market_path() -> Path:
+    return (Path(__file__).resolve().parents[2] / "data" / "osakedata.db").resolve()
+
+
+def _table_names(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+        return {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+
 def _validate(args: argparse.Namespace) -> None:
+    canonical = args.canonical_db.resolve()
+    destination = args.destination_db.resolve() if args.destination_db else None
+    production = destination == _production_analysis_path()
     if args.full_universe and (args.company_id or args.ticker):
         raise ValueError("FULL_UNIVERSE_CANNOT_HAVE_COMPANY_FILTERS")
     if not args.full_universe and not args.company_id and not args.ticker:
@@ -53,12 +74,44 @@ def _validate(args: argparse.Namespace) -> None:
         raise ValueError("APPLY_REQUIRES_EXPLICIT_DESTINATION")
     if args.rehearsal_source_analysis_db and not args.apply:
         raise ValueError("REHEARSAL_REQUIRES_APPLY")
-    if args.apply and args.destination_db.resolve() == _production_analysis_path():
-        raise ValueError("PHASE_2C_PRODUCTION_DESTINATION_BLOCKED")
-    if args.destination_db and args.destination_db.resolve() == args.canonical_db.resolve():
+    if args.model_fingerprint is not None and args.model_fingerprint != MODEL_FINGERPRINT:
+        raise ValueError("LIFECYCLE_MODEL_FINGERPRINT_MISMATCH")
+    if args.confirm_production and not production:
+        raise ValueError("PRODUCTION_CONFIRMATION_ONLY_AUTHORIZES_EXACT_ANALYSIS_DATABASE")
+    if production and args.apply:
+        if not args.confirm_production:
+            raise ValueError("PRODUCTION_APPLY_REQUIRES_CONFIRMATION")
+        if not args.full_universe:
+            raise ValueError("INITIAL_PRODUCTION_APPLY_REQUIRES_FULL_UNIVERSE")
+        if args.model_fingerprint != MODEL_FINGERPRINT:
+            raise ValueError("PRODUCTION_APPLY_REQUIRES_EXPLICIT_MODEL_FINGERPRINT")
+        if args.destination_db.absolute() != _production_analysis_path() or args.destination_db.is_symlink():
+            raise ValueError("PRODUCTION_DESTINATION_MUST_BE_EXACT_NONSYMLINK_PATH")
+        if (
+            canonical != _production_canonical_path()
+            or args.canonical_db.absolute() != _production_canonical_path()
+            or args.canonical_db.is_symlink()
+        ):
+            raise ValueError("PRODUCTION_APPLY_REQUIRES_AUTHORIZED_CANONICAL_SOURCE")
+    if destination == _production_market_path():
+        raise ValueError("MARKET_DATABASE_DESTINATION_BLOCKED")
+    if destination and destination == canonical:
         raise ValueError("SOURCE_AND_DESTINATION_MUST_DIFFER")
     if args.rehearsal_source_analysis_db and args.destination_db.resolve() == args.rehearsal_source_analysis_db.resolve():
         raise ValueError("REHEARSAL_SOURCE_AND_DESTINATION_MUST_DIFFER")
+    required_source = {"company", "security", "v4_quarter", "v4_quarter_financials", "v4_ttm_values", "v4_ttm_input_quarter"}
+    missing_source = required_source - _table_names(args.canonical_db)
+    if missing_source:
+        raise ValueError(f"CANONICAL_SOURCE_SCHEMA_INVALID:{','.join(sorted(missing_source))}")
+    if production:
+        required_destination = {"schema_version", "score_result", "score_component", "lifecycle_result"}
+        missing_destination = required_destination - _table_names(args.destination_db)
+        if missing_destination:
+            raise ValueError(f"PRODUCTION_ANALYSIS_SCHEMA_INVALID:{','.join(sorted(missing_destination))}")
+        with sqlite3.connect(f"file:{args.destination_db}?mode=ro", uri=True) as conn:
+            old_count = int(conn.execute("SELECT COUNT(*) FROM lifecycle_result").fetchone()[0])
+        if old_count != 0:
+            raise ValueError(f"OLD_LIFECYCLE_RESULT_UNEXPECTEDLY_POPULATED:{old_count}")
 
 
 def _backup(source_path: Path, destination_path: Path) -> None:
@@ -94,7 +147,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         "model_version": MODEL_VERSION,
         "model_fingerprint": MODEL_FINGERPRINT,
         "summary": summarize(rows, source.source_input_fingerprint),
-        "planned": {"rows": len(rows)},
+        "current_summary": summarize_current(rows),
+        "target_validation": "ok",
+        "planned": {"rows": len(rows), "schema_create": 1 if args.destination_db and "lifecycle_revised_result" not in _table_names(args.destination_db) else 0},
     }
     plan_database = args.rehearsal_source_analysis_db or args.destination_db
     if plan_database and plan_database.exists():
@@ -127,6 +182,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "rows_inserted": 0 if unchanged else len(rows),
             "rows_deleted": 0 if unchanged else existing,
             "rows_unchanged": existing if unchanged else 0,
+            "schema_create": 0 if table_exists else 1,
         }
     if args.apply:
         destination = args.destination_db

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import sqlite3
 from pathlib import Path
 
 import pytest
 
-from rawcandle.cli.run_fundamentals_v4_lifecycle_revised import build_parser, run
+from rawcandle.cli.run_fundamentals_v4_lifecycle_revised import _validate, build_parser, run
 from rawcandle.fundamentals.lifecycle.engine import MODEL_FINGERPRINT, LifecycleObservation
 from rawcandle.fundamentals.lifecycle.revised_history import (
     HISTORY_MODE,
@@ -18,6 +19,7 @@ from rawcandle.fundamentals.lifecycle.revised_history import (
     load_revised_source,
     logical_fingerprint,
     quick_check,
+    refresh_revised_history,
     replace_revised_results,
 )
 
@@ -26,6 +28,7 @@ def _canonical(path: Path, *, duplicate: bool = False, bad_ready_input: bool = F
     conn = sqlite3.connect(path)
     conn.executescript(
         """
+        CREATE TABLE company(company_id INTEGER PRIMARY KEY);
         CREATE TABLE security(security_id INTEGER PRIMARY KEY,company_id INTEGER,current_ticker TEXT);
         CREATE TABLE v4_quarter(quarter_id INTEGER PRIMARY KEY,company_id INTEGER,fiscal_year INTEGER,fiscal_quarter TEXT,period_end TEXT);
         CREATE TABLE v4_quarter_financials(quarter_id INTEGER PRIMARY KEY,revenue REAL);
@@ -38,6 +41,7 @@ def _canonical(path: Path, *, duplicate: bool = False, bad_ready_input: bool = F
           ttm_id INTEGER,input_position INTEGER,input_quarter_id INTEGER,input_values_hash TEXT);
         """
     )
+    conn.execute("INSERT INTO company VALUES(1)")
     conn.execute("INSERT INTO security VALUES(10,1,'AAA')")
     for index in range(1, 10):
         year = 2022 + (index - 1) // 4
@@ -295,8 +299,60 @@ def test_cli_blocks_phase_2c_production_destination(tmp_path: Path) -> None:
         "--canonical-db", str(canonical), "--destination-db", str(production),
         "--ticker", "AAA", "--apply",
     ])
-    with pytest.raises(ValueError, match="PRODUCTION_DESTINATION_BLOCKED"):
+    with pytest.raises(ValueError, match="PRODUCTION_APPLY_REQUIRES_CONFIRMATION"):
         run(args)
+
+
+def test_production_authorization_guards_fail_closed(tmp_path: Path) -> None:
+    parser = build_parser()
+    root = Path(__file__).resolve().parents[1]
+    canonical = root / "data" / "fundamentals_v4.db"
+    production = root / "data" / "fundamentals_analysis.db"
+    fingerprint = MODEL_FINGERPRINT
+
+    with pytest.raises(ValueError, match="ONLY_AUTHORIZES_EXACT"):
+        _validate(parser.parse_args([
+            "--canonical-db", str(canonical), "--destination-db", str(tmp_path / "temp.db"),
+            "--full-universe", "--model-fingerprint", fingerprint, "--apply", "--confirm-production",
+        ]))
+    with pytest.raises(ValueError, match="EXPLICIT_MODEL_FINGERPRINT"):
+        _validate(parser.parse_args([
+            "--canonical-db", str(canonical), "--destination-db", str(production),
+            "--full-universe", "--apply", "--confirm-production",
+        ]))
+    with pytest.raises(ValueError, match="FINGERPRINT_MISMATCH"):
+        _validate(parser.parse_args([
+            "--canonical-db", str(canonical), "--destination-db", str(production),
+            "--full-universe", "--model-fingerprint", "wrong", "--apply", "--confirm-production",
+        ]))
+    with pytest.raises(ValueError, match="FULL_UNIVERSE"):
+        _validate(parser.parse_args([
+            "--canonical-db", str(canonical), "--destination-db", str(production), "--company-id", "1",
+            "--model-fingerprint", fingerprint, "--apply", "--confirm-production",
+        ]))
+    fake_canonical = tmp_path / "canonical.db"
+    _canonical(fake_canonical)
+    with pytest.raises(ValueError, match="AUTHORIZED_CANONICAL"):
+        _validate(parser.parse_args([
+            "--canonical-db", str(fake_canonical), "--destination-db", str(production),
+            "--full-universe", "--model-fingerprint", fingerprint, "--apply", "--confirm-production",
+        ]))
+    with pytest.raises(ValueError, match="MARKET_DATABASE_DESTINATION_BLOCKED"):
+        _validate(parser.parse_args([
+            "--canonical-db", str(canonical), "--destination-db", str(root / "data" / "osakedata.db"),
+            "--full-universe", "--apply",
+        ]))
+
+
+def test_confirmed_production_arguments_pass_read_only_validation() -> None:
+    root = Path(__file__).resolve().parents[1]
+    args = build_parser().parse_args([
+        "--canonical-db", str(root / "data" / "fundamentals_v4.db"),
+        "--destination-db", str(root / "data" / "fundamentals_analysis.db"),
+        "--full-universe", "--model-fingerprint", MODEL_FINGERPRINT,
+        "--apply", "--confirm-production",
+    ])
+    _validate(args)
 
 
 def test_cli_filtered_apply_runs_twice_and_is_deterministic(tmp_path: Path) -> None:
@@ -317,3 +373,57 @@ def test_cli_filtered_apply_runs_twice_and_is_deterministic(tmp_path: Path) -> N
     plan = run(plan_args)
     assert plan["planned"]["rows_inserted"] == 0
     assert plan["planned"]["rows_unchanged"] == 9
+
+
+def test_refresh_full_universe_is_idempotent_and_reports_fallback(tmp_path: Path) -> None:
+    canonical = tmp_path / "canonical.db"
+    analysis = tmp_path / "analysis.db"
+    _canonical(canonical)
+    first = refresh_revised_history(canonical, analysis)
+    second = refresh_revised_history(canonical, analysis)
+    assert first.scope == second.scope == "FULL_UNIVERSE_FALLBACK"
+    assert first.rows_inserted == 9
+    assert second.rows_inserted == 0 and second.rows_unchanged == 9
+    assert first.result_fingerprint == second.result_fingerprint
+    selected = refresh_revised_history(canonical, analysis, company_ids=[1])
+    assert selected.scope == "CHANGED_COMPANIES"
+    assert selected.companies == 1 and selected.rows_unchanged == 9
+
+
+def test_active_lifecycle_writer_does_not_use_legacy_table() -> None:
+    import rawcandle.fundamentals.lifecycle.revised_history as revised
+
+    source = inspect.getsource(revised)
+    assert "INSERT INTO lifecycle_result" not in source
+    assert "DELETE FROM lifecycle_result" not in source
+
+
+def test_refresh_failure_preserves_lifecycle_and_unrelated_committed_data(tmp_path: Path) -> None:
+    canonical = tmp_path / "canonical.db"
+    analysis = tmp_path / "analysis.db"
+    _canonical(canonical)
+    refresh_revised_history(canonical, analysis)
+    with sqlite3.connect(analysis) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE score_guard(value TEXT)")
+        conn.execute("INSERT INTO score_guard VALUES('committed')")
+        before = logical_fingerprint([dict(row) for row in conn.execute(
+            "SELECT * FROM lifecycle_revised_result ORDER BY company_id,fiscal_sequence"
+        )])
+        conn.execute(
+            "CREATE TRIGGER fail_lifecycle_insert BEFORE INSERT ON lifecycle_revised_result "
+            "BEGIN SELECT RAISE(FAIL,'forced lifecycle failure'); END"
+        )
+        conn.commit()
+    with sqlite3.connect(canonical) as conn:
+        conn.execute("UPDATE v4_ttm_values SET ttm_revenue=ttm_revenue+1 WHERE ttm_id=9")
+        conn.commit()
+    with pytest.raises(sqlite3.IntegrityError, match="forced lifecycle failure"):
+        refresh_revised_history(canonical, analysis)
+    with sqlite3.connect(analysis) as conn:
+        conn.row_factory = sqlite3.Row
+        after = logical_fingerprint([dict(row) for row in conn.execute(
+            "SELECT * FROM lifecycle_revised_result ORDER BY company_id,fiscal_sequence"
+        )])
+        assert before == after
+        assert conn.execute("SELECT value FROM score_guard").fetchone()[0] == "committed"

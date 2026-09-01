@@ -35,9 +35,18 @@ The rehearsal checks both rebuild fingerprints, requires zero writes on the seco
 
 `RevisedLifecycleRepository` provides `current_company`, `current_universe`, `history` and `fiscal_quarter`. Every call requires `model_fingerprint`. A latest `UNCLASSIFIED` row is returned as `LIFECYCLE_NOT_READY`; readers do not substitute an older state.
 
-## Phase 2D Production Boundary
+## Phase 2D Production Authorization
 
-Do not run production apply until Phase 2D is explicitly authorized and the CLI production guard is deliberately changed in that phase. The authorized procedure must:
+Production apply requires all of the following guards:
+
+- exact canonical path `/home/kalle/projects/rawcandle/data/fundamentals_v4.db`;
+- exact destination `/home/kalle/projects/rawcandle/data/fundamentals_analysis.db`;
+- both paths must be ordinary non-symlink paths;
+- `--full-universe`;
+- `--model-fingerprint db72e072fc2f0d9e3ceb13db1ee4cc92045383a5f44bfb65d21858b80190832f`;
+- `--apply` and `--confirm-production`.
+
+The confirmation flag fails closed for every other destination. Temporary rehearsal apply remains available without production confirmation. The authorized procedure must:
 
 1. Verify a clean worktree and the approved commit.
 2. Record database sizes, mtimes, `PRAGMA quick_check`, Score fingerprint and row counts.
@@ -50,7 +59,7 @@ Do not run production apply until Phase 2D is explicitly authorized and the CLI 
 9. Verify the Score fingerprint, rows and representative component values are unchanged.
 10. Record final metadata, logs and backup location.
 
-After Phase 2D authorization and removal of the Phase 2C guard, the intended production command is:
+The production command is:
 
 ```bash
 cd /home/kalle/projects/rawcandle
@@ -69,12 +78,15 @@ sqlite3 -readonly "$BACKUP" 'PRAGMA quick_check;'
 python3 -m rawcandle.cli.run_fundamentals_v4_lifecycle_revised \
   --canonical-db /home/kalle/projects/rawcandle/data/fundamentals_v4.db \
   --full-universe \
+  --model-fingerprint db72e072fc2f0d9e3ceb13db1ee4cc92045383a5f44bfb65d21858b80190832f \
   --output-json /tmp/rawcandle_lifecycle_phase2d_plan.json
 
 python3 -m rawcandle.cli.run_fundamentals_v4_lifecycle_revised \
   --canonical-db /home/kalle/projects/rawcandle/data/fundamentals_v4.db \
   --destination-db /home/kalle/projects/rawcandle/data/fundamentals_analysis.db \
-  --full-universe --apply \
+  --full-universe \
+  --model-fingerprint db72e072fc2f0d9e3ceb13db1ee4cc92045383a5f44bfb65d21858b80190832f \
+  --apply --confirm-production \
   --output-json /tmp/rawcandle_lifecycle_phase2d_production.json
 
 sqlite3 -readonly data/fundamentals_analysis.db 'PRAGMA quick_check;'
@@ -91,4 +103,10 @@ sqlite3 -readonly data/fundamentals_analysis.restored.db 'PRAGMA quick_check;'
 mv data/fundamentals_analysis.restored.db data/fundamentals_analysis.db
 ```
 
-The production guard removal, process stop and restore execution all require explicit Phase 2D authorization.
+## Continuous Refresh
+
+The existing Score V1 production run is the final established Fundamentals V4 processing stage. After Score commits and passes integrity checks, it invokes lifecycle revised-history refresh. Canonical and TTM processing therefore precede Score, and lifecycle runs last. Because the current path does not expose a reliable changed-company set, the operational hook uses a deterministic full-universe rebuild. An unchanged source produces zero lifecycle writes.
+
+Lifecycle failure is recorded as `lifecycle_refresh.status=FAILED` in `score_v1_summary.json` and raised as `POST_SCORE_LIFECYCLE_REFRESH_FAILED`. It does not undo the already committed Score result and its own replacement transaction preserves the previously committed lifecycle dataset.
+
+The process stop and restore execution require explicit authorization. Keep the verified backup until the user authorizes removal.

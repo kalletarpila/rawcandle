@@ -69,4 +69,12 @@ The only active history mode is `REVISED_HISTORY`. The adapter reads the current
 
 The complete target set is calculated and validated before writing. Full rebuild replaces the locked fingerprint inside one savepoint and removes stale universe rows; a filtered refresh replaces only the selected companies' complete histories. A matching logical fingerprint causes no row writes, and parallel fingerprints are retained. Readers require an explicit fingerprint and never fall back from a latest `UNCLASSIFIED` result to an earlier economic state.
 
-No scheduler, UI, report integration, production schema or production rows are activated in Phase 2C. Score V1 remains independent and unchanged.
+## Phase 2D operational activation
+
+Production apply is authorized only when the CLI receives `--apply`, the exact production analysis destination, `--confirm-production`, `--full-universe` and the explicit locked model fingerprint. The canonical source and analysis destination must be the exact non-symlink repository paths. Confirmation cannot authorize a temporary, canonical or market-data destination.
+
+The normal V4 Score production path invokes `refresh_lifecycle_after_score` only after Score has committed and passed its existing integrity checks. The current upstream path does not expose a trustworthy changed-company set, so operational refresh uses `FULL_UNIVERSE_FALLBACK`. The reusable refresh API also supports complete-history replay for an explicit changed-company set when a trustworthy set becomes available.
+
+Lifecycle refresh owns its SQLite transaction. A failed replacement rolls back and preserves the prior revised-history rows; already committed canonical, TTM and Score data are outside that transaction. Failures are written to the Score run summary and raised to the existing CLI/job boundary. The old `lifecycle_result` table remains an untouched schema placeholder; all active Lifecycle V1 writes and readers use `lifecycle_revised_result`.
+
+No scheduler parallel to the existing Fundamentals V4 path, UI or report consumer is added. Lifecycle calculation remains independent of Score values and methodology.

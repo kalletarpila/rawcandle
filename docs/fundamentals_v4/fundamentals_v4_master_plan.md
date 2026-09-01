@@ -196,3 +196,7 @@ The locked direction is revised-history only. Future lifecycle production histor
 ## Lifecycle Phase 2C
 
 Phase 2C implements the unactivated revised-history pipeline: current canonical/TTM adapter, complete company replay through the unchanged Phase 2A engine, the `lifecycle_revised_result` schema, atomic fingerprint-scoped replacement, explicit-fingerprint readers, guarded dry-run/apply CLI, quick checks and a temporary full-universe rehearsal. The production analysis database is explicitly blocked as a destination. Production migration and backfill remain Phase 2D work requiring separate authorization.
+
+## Lifecycle Phase 2D
+
+Phase 2D adds narrow exact-path production authorization and activates revised-history refresh after the existing Score V1 production stage. The operational refresh is full-universe because no trustworthy changed-company set is currently exposed. Lifecycle uses its own transaction, preserves the previous lifecycle dataset on failure and cannot roll back already committed canonical, TTM or Score data. The legacy empty `lifecycle_result` table remains untouched; `lifecycle_revised_result` is the active Lifecycle V1 table. Deployment evidence is recorded separately after the authorized production backfill.

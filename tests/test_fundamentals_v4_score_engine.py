@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -157,3 +158,33 @@ def test_engine_has_no_swingmaster_or_network_runtime_dependency() -> None:
     assert "from swingmaster" not in source
     assert "requests." not in source
     assert "sec.gov" not in source
+
+
+def test_score_pipeline_refreshes_lifecycle_only_after_score_commit() -> None:
+    source = inspect.getsource(engine.run_score)
+    assert source.index("apply_scores(conn, rows") < source.index("conn.commit()")
+    assert source.index("conn.commit()") < source.index("refresh_lifecycle_after_score(paths)")
+
+
+def test_post_score_lifecycle_failure_leaves_committed_score_data_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    analysis = tmp_path / "analysis.db"
+    with sqlite3.connect(analysis) as conn:
+        create_analysis_schema(conn)
+        rows = compute([ttm_row(index) for index in range(1, 9)])
+        engine.apply_scores(conn, rows, run_id="TEST_RUN", generated_at="2026-01-01T00:00:00Z")
+        conn.commit()
+        before = engine.score_fingerprint(conn)
+    paths = engine.ScorePaths(tmp_path, tmp_path / "artifacts", tmp_path / "canonical.db", analysis, tmp_path / "market.db")
+
+    def fail(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("forced lifecycle failure")
+
+    import rawcandle.fundamentals.lifecycle.revised_history as revised
+    monkeypatch.setattr(revised, "refresh_revised_history", fail)
+    with pytest.raises(RuntimeError, match="forced lifecycle failure"):
+        engine.refresh_lifecycle_after_score(paths)
+    with sqlite3.connect(analysis) as conn:
+        conn.row_factory = sqlite3.Row
+        assert engine.score_fingerprint(conn) == before
