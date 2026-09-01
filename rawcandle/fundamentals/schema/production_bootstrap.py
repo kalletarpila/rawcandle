@@ -475,9 +475,9 @@ def insert_production_sharadar_observation(
         """
         INSERT OR IGNORE INTO sharadar_fundamental_observation(
             observation_id, ticker, permaticker, dimension, calendardate, reportperiod, fiscalperiod, date, lastupdated,
-            revenue, gp, opinc, ebit, ebitda, netinc, ncfo, capex, fcf, cashneq, debt, debtc, debtnc,
+            revenue, gp, opinc, ebit, ebitda, netinc, netinccmn, ncfo, capex, fcf, cashneq, debt, debtc, debtnc,
             sharesbas, shareswa, shareswadil
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             observation_id,
@@ -495,6 +495,7 @@ def insert_production_sharadar_observation(
             int_or_none(row.get("ebit")),
             int_or_none(row.get("ebitda")),
             int_or_none(row.get("netinc")),
+            int_or_none(row.get("netinccmn")),
             int_or_none(row.get("ncfo")),
             int_or_none(row.get("capex")),
             int_or_none(row.get("fcf")),

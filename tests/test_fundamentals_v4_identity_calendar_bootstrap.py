@@ -82,6 +82,7 @@ def _acceptance_csvs(root: Path) -> None:
             "ebit": "70",
             "ebitda": "75",
             "netinc": "60",
+            "netinccmn": "55",
             "ncfo": "50",
             "capex": "-10",
             "fcf": "40",

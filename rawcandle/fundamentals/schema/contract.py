@@ -8,6 +8,7 @@ V4_CANONICAL_FINANCIAL_FIELDS: tuple[str, ...] = (
     "ebit",
     "ebitda",
     "net_income",
+    "net_income_common",
     "operating_cashflow",
     "capex",
     "free_cashflow",
@@ -23,6 +24,7 @@ SHARADAR_ARQ_FIELD_MAPPING: dict[str, str] = {
     "ebit": "ebit",
     "ebitda": "ebitda",
     "net_income": "netinc",
+    "net_income_common": "netinccmn",
     "operating_cashflow": "ncfo",
     "capex": "capex",
     "free_cashflow": "fcf",
@@ -45,4 +47,4 @@ SHARADAR_SUPPORT_FIELDS: tuple[str, ...] = (
 
 PROVIDER_NAMES: tuple[str, ...] = ("SHARADAR", "YAHOO", "SEC", "MIGRATED_FROM_V3")
 
-SCHEMA_VERSION = "v4_1a_prototype"
+SCHEMA_VERSION = "v4_3b_valuation_foundation"

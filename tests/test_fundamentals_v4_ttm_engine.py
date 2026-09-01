@@ -39,6 +39,7 @@ def q(company_id: int, qid: int, fy: int, fq: str, **overrides):
         "ebit": 7,
         "ebitda": 6,
         "net_income": 5,
+        "net_income_common": 4,
         "operating_cashflow": 4,
         "capex": -1,
         "free_cashflow": 3,

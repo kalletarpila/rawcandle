@@ -34,6 +34,7 @@ FIELD_PROJECTION = (
     "ebit",
     "ebitda",
     "netinc",
+    "netinccmn",
     "ncfo",
     "capex",
     "fcf",

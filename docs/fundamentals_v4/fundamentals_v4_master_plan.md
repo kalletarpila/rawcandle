@@ -36,6 +36,12 @@ Port lifecycle state logic without changing thresholds or fingerprints.
 
 Implement valuation using RawCandle-owned OHLCV and canonical publish/availability dates.
 
+### Valuation Phase 3B
+
+Status: `PURE_ENGINE_AND_TEMPORARY_MIGRATION_FOUNDATION_COMPLETE_NOT_PRODUCTION_ACTIVE`
+
+Phase 3B adds the canonical `net_income_common <- netinccmn` and TTM `ttm_net_income_common` contracts, an explicit temporary-database migration, deterministic availability-date price selection, exact current taxonomy applicability rules, and the pure `ABSOLUTE_VALUATION_SCORE_V1` engine. Production schemas, valuation rows, normal pipelines, and backfills remain unchanged. Phase 3C may design guarded persistence and production migration after reviewing the Phase 3B rehearsal.
+
 ## 9. V4-8 Yahoo Operational Refresh
 
 Use Yahoo for result discovery, current availability, event timing, and selective enrichment.

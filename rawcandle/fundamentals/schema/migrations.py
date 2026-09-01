@@ -66,6 +66,7 @@ CREATE TABLE sharadar_fundamental_observation (
     ebit INTEGER,
     ebitda INTEGER,
     netinc INTEGER,
+    netinccmn INTEGER,
     ncfo INTEGER,
     capex INTEGER,
     fcf INTEGER,
@@ -256,6 +257,7 @@ CREATE TABLE v4_quarter_financials (
     ebit INTEGER,
     ebitda INTEGER,
     net_income INTEGER,
+    net_income_common INTEGER,
     operating_cashflow INTEGER,
     capex INTEGER,
     free_cashflow INTEGER,
@@ -279,7 +281,7 @@ CREATE TABLE v4_field_provenance (
     rule_version TEXT NOT NULL,
     confidence TEXT NOT NULL,
     UNIQUE(quarter_id, canonical_field, provider_observation_id, source_native_field),
-    CHECK (canonical_field IN ('revenue','gross_profit','operating_income','ebit','ebitda','net_income','operating_cashflow','capex','free_cashflow','cash','total_debt','shares_outstanding'))
+    CHECK (canonical_field IN ('revenue','gross_profit','operating_income','ebit','ebitda','net_income','net_income_common','operating_cashflow','capex','free_cashflow','cash','total_debt','shares_outstanding'))
 );
 
 CREATE TABLE v4_ttm_contract (
@@ -402,3 +404,157 @@ def canonical_field_contract_present(conn: sqlite3.Connection) -> bool:
 def canonical_ttm_contract_present(conn: sqlite3.Connection) -> bool:
     tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     return {"v4_ttm_contract", "v4_ttm_values", "v4_ttm_input_quarter"} <= tables
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _ensure_common_earnings_provenance_contract(conn: sqlite3.Connection) -> None:
+    sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='v4_field_provenance'"
+    ).fetchone()
+    if sql_row is None or "net_income_common" in str(sql_row["sql"]):
+        return
+    conn.executescript(
+        """
+        CREATE TABLE v4_field_provenance_v3b (
+            provenance_id INTEGER PRIMARY KEY,
+            quarter_id INTEGER NOT NULL REFERENCES v4_quarter(quarter_id) ON DELETE CASCADE,
+            canonical_field TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_observation_id TEXT NOT NULL,
+            source_native_field TEXT NOT NULL,
+            transformation TEXT NOT NULL,
+            accepted_at_utc TEXT NOT NULL,
+            rule_version TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            UNIQUE(quarter_id, canonical_field, provider_observation_id, source_native_field),
+            CHECK (canonical_field IN ('revenue','gross_profit','operating_income','ebit','ebitda','net_income','net_income_common','operating_cashflow','capex','free_cashflow','cash','total_debt','shares_outstanding'))
+        );
+        INSERT INTO v4_field_provenance_v3b SELECT * FROM v4_field_provenance;
+        DROP TABLE v4_field_provenance;
+        ALTER TABLE v4_field_provenance_v3b RENAME TO v4_field_provenance;
+        CREATE INDEX idx_v4_provenance_field ON v4_field_provenance(canonical_field, provider);
+        """
+    )
+
+
+def migrate_valuation_foundation(
+    provider_db: Path,
+    canonical_db: Path,
+    applied_at_utc: str,
+    *,
+    allow_production: bool = False,
+) -> dict[str, int]:
+    """Apply the Phase 3B additive contract to explicitly supplied databases."""
+    production_paths = {
+        Path("/home/kalle/projects/rawcandle/data/fundamentals_provider.db"),
+        Path("/home/kalle/projects/rawcandle/data/fundamentals_v4.db"),
+    }
+    if not allow_production and {provider_db.resolve(), canonical_db.resolve()} & production_paths:
+        raise PermissionError("PHASE3B_PRODUCTION_SCHEMA_MIGRATION_NOT_AUTHORIZED")
+    counts = {
+        "provider_columns_added": 0,
+        "canonical_columns_added": 0,
+        "ttm_columns_added": 0,
+        "provider_rows_backfilled": 0,
+        "canonical_rows_backfilled": 0,
+        "provenance_rows_added": 0,
+    }
+    with connect(provider_db) as provider:
+        if "netinccmn" not in _columns(provider, "sharadar_fundamental_observation"):
+            provider.execute("ALTER TABLE sharadar_fundamental_observation ADD COLUMN netinccmn INTEGER")
+            counts["provider_columns_added"] += 1
+        before = provider.total_changes
+        provider.execute(
+            """
+            UPDATE sharadar_fundamental_observation
+            SET netinccmn=(
+                SELECT CAST(NULLIF(json_extract(po.payload_json, '$.netinccmn'), '') AS INTEGER)
+                FROM provider_observation po
+                WHERE po.observation_id=sharadar_fundamental_observation.observation_id
+            )
+            WHERE netinccmn IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM provider_observation po
+                  WHERE po.observation_id=sharadar_fundamental_observation.observation_id
+                    AND NULLIF(json_extract(po.payload_json, '$.netinccmn'), '') IS NOT NULL
+              )
+            """
+        )
+        counts["provider_rows_backfilled"] = provider.total_changes - before
+        provider.execute(
+            "INSERT OR REPLACE INTO schema_version(db_name,version,applied_at_utc) VALUES ('fundamentals_provider',?,?)",
+            (SCHEMA_VERSION, applied_at_utc),
+        )
+
+    with connect(canonical_db) as canonical:
+        if "net_income_common" not in _columns(canonical, "v4_quarter_financials"):
+            canonical.execute("ALTER TABLE v4_quarter_financials ADD COLUMN net_income_common INTEGER")
+            counts["canonical_columns_added"] += 1
+        _ensure_common_earnings_provenance_contract(canonical)
+        ensure_ttm_schema(canonical)
+        ttm_columns = _columns(canonical, "v4_ttm_values")
+        if "ttm_net_income_common" not in ttm_columns:
+            canonical.execute("ALTER TABLE v4_ttm_values ADD COLUMN ttm_net_income_common REAL")
+            counts["ttm_columns_added"] += 1
+        if "net_income_common_4q_ready" not in ttm_columns:
+            canonical.execute(
+                "ALTER TABLE v4_ttm_values ADD COLUMN net_income_common_4q_ready INTEGER NOT NULL DEFAULT 0 CHECK (net_income_common_4q_ready IN (0,1))"
+            )
+            counts["ttm_columns_added"] += 1
+
+        provider_values: dict[str, int | None] = {}
+        with connect(provider_db) as provider:
+            provider_values = {
+                str(row["observation_id"]): row["netinccmn"]
+                for row in provider.execute(
+                    "SELECT observation_id,netinccmn FROM sharadar_fundamental_observation"
+                )
+            }
+        selected = canonical.execute(
+            """
+            SELECT quarter_id,provider,provider_observation_id,accepted_at_utc,confidence
+            FROM v4_field_provenance
+            WHERE canonical_field='net_income'
+            ORDER BY quarter_id,provenance_id
+            """
+        ).fetchall()
+        seen: set[int] = set()
+        for row in selected:
+            quarter_id = int(row["quarter_id"])
+            if quarter_id in seen:
+                continue
+            seen.add(quarter_id)
+            value = provider_values.get(str(row["provider_observation_id"]))
+            if value is None:
+                continue
+            before = canonical.total_changes
+            canonical.execute(
+                "UPDATE v4_quarter_financials SET net_income_common=? WHERE quarter_id=? AND net_income_common IS NULL",
+                (value, quarter_id),
+            )
+            counts["canonical_rows_backfilled"] += canonical.total_changes - before
+            before = canonical.total_changes
+            canonical.execute(
+                """
+                INSERT OR IGNORE INTO v4_field_provenance(
+                    quarter_id,canonical_field,provider,provider_observation_id,source_native_field,
+                    transformation,accepted_at_utc,rule_version,confidence
+                ) VALUES (?,'net_income_common',?,?,'netinccmn','DIRECT',?,'SHARADAR_ARQ_PRIMARY_V1',?)
+                """,
+                (
+                    quarter_id,
+                    row["provider"],
+                    row["provider_observation_id"],
+                    row["accepted_at_utc"],
+                    row["confidence"],
+                ),
+            )
+            counts["provenance_rows_added"] += canonical.total_changes - before
+        canonical.execute(
+            "INSERT OR REPLACE INTO schema_version(db_name,version,applied_at_utc) VALUES ('fundamentals_v4',?,?)",
+            (SCHEMA_VERSION, applied_at_utc),
+        )
+    return counts

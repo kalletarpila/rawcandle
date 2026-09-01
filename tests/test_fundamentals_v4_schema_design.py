@@ -73,6 +73,7 @@ def _row(ticker: str, dimension: str, reportperiod: str, fiscalperiod: str, reve
         "ebit": "4",
         "ebitda": "5",
         "netinc": "6",
+        "netinccmn": "5",
         "ncfo": "7",
         "capex": "-2",
         "fcf": "5",
@@ -123,7 +124,7 @@ def test_schema_versions_exist(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     bootstrap_all(paths.provider_db, paths.canonical_db, paths.analysis_db, "now")
     with connect(paths.provider_db) as conn:
-        assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == "v4_1a_prototype"
+            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == "v4_3b_valuation_foundation"
 
 
 def test_fk_enforcement_works(tmp_path: Path) -> None:

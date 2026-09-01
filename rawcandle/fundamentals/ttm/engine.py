@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 MODEL_VERSION = "V4_TTM_EBIT_FIRST_V1"
-CALCULATION_VERSION = MODEL_VERSION
+CALCULATION_VERSION = "V4_TTM_EBIT_FIRST_V1_COMMON_EARNINGS_ADDENDUM"
 CLASSIFICATION_READY = "V4_TTM_MIGRATION_COMPLETE_DOWNSTREAM_READY"
 CLASSIFICATION_NON_BLOCKING = "V4_TTM_MIGRATION_COMPLETE_WITH_NON_BLOCKING_GAPS"
 CLASSIFICATION_BLOCKED = "V4_TTM_MIGRATION_BLOCKED"
@@ -26,6 +26,7 @@ FLOW_FIELDS = (
     "ebit",
     "ebitda",
     "net_income",
+    "net_income_common",
     "operating_cashflow",
     "capex",
     "free_cashflow",
@@ -40,6 +41,7 @@ TTM_FIELD_MAP = {
     "ebit": "ttm_ebit",
     "ebitda": "ttm_ebitda",
     "net_income": "ttm_net_income",
+    "net_income_common": "ttm_net_income_common",
     "operating_cashflow": "ttm_operating_cashflow",
     "capex": "ttm_capex",
     "free_cashflow": "ttm_free_cashflow",
@@ -78,6 +80,7 @@ CREATE TABLE IF NOT EXISTS v4_ttm_values (
     ttm_ebit REAL,
     ttm_ebitda REAL,
     ttm_net_income REAL,
+    ttm_net_income_common REAL,
     ttm_operating_cashflow REAL,
     ttm_capex REAL,
     ttm_free_cashflow REAL,
@@ -90,6 +93,7 @@ CREATE TABLE IF NOT EXISTS v4_ttm_values (
     ebit_4q_ready INTEGER NOT NULL CHECK (ebit_4q_ready IN (0,1)),
     ebitda_4q_ready INTEGER NOT NULL CHECK (ebitda_4q_ready IN (0,1)),
     net_income_4q_ready INTEGER NOT NULL CHECK (net_income_4q_ready IN (0,1)),
+    net_income_common_4q_ready INTEGER NOT NULL CHECK (net_income_common_4q_ready IN (0,1)),
     operating_cashflow_4q_ready INTEGER NOT NULL CHECK (operating_cashflow_4q_ready IN (0,1)),
     capex_4q_ready INTEGER NOT NULL CHECK (capex_4q_ready IN (0,1)),
     free_cashflow_4q_ready INTEGER NOT NULL CHECK (free_cashflow_4q_ready IN (0,1)),
@@ -277,7 +281,7 @@ def compute_ttm_rows(rows: list[dict[str, Any]], *, run_id: str, calculated_at: 
             values: dict[str, Any] = {}
             if len(present) == 4:
                 for field, out_field in TTM_FIELD_MAP.items():
-                    ok = all(row[field] is not None for row in present)
+                    ok = all(row.get(field) is not None for row in present)
                     field_ready[field] = int(ok)
                     values[out_field] = sum(float(row[field]) for row in present) if ok else None
                     if field in CORE_FLOW_FIELDS and not ok:
@@ -347,10 +351,10 @@ def apply_ttm(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> dict[str,
     insert_fields = [
         "company_id", "security_id", "endpoint_quarter_id", "endpoint_fiscal_year", "endpoint_fiscal_quarter", "period_end",
         "model_version", "calculation_version", "readiness_status", "blocker_codes_json", "blocker_details_json",
-        "ttm_revenue", "ttm_gross_profit", "ttm_operating_income", "ttm_ebit", "ttm_ebitda", "ttm_net_income",
+        "ttm_revenue", "ttm_gross_profit", "ttm_operating_income", "ttm_ebit", "ttm_ebitda", "ttm_net_income", "ttm_net_income_common",
         "ttm_operating_cashflow", "ttm_capex", "ttm_free_cashflow", "cash", "total_debt", "shares_outstanding",
         "revenue_4q_ready", "gross_profit_4q_ready", "operating_income_4q_ready", "ebit_4q_ready", "ebitda_4q_ready",
-        "net_income_4q_ready", "operating_cashflow_4q_ready", "capex_4q_ready", "free_cashflow_4q_ready",
+        "net_income_4q_ready", "net_income_common_4q_ready", "operating_cashflow_4q_ready", "capex_4q_ready", "free_cashflow_4q_ready",
         "core_ttm_ready", "ttm_source_available_date", "first_public_result_date", "input_quarter_ids_json", "input_values_hash",
         "canonical_financial_fingerprint", "output_fingerprint", "run_id", "calculated_at_utc", "created_at_utc", "updated_at_utc",
     ]

@@ -50,6 +50,7 @@ FUNDAMENTALS_REQUIRED_FIELDS = (
     "ebit",
     "ebitda",
     "netinc",
+    "netinccmn",
     "ncfo",
     "capex",
     "fcf",
