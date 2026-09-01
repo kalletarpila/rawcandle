@@ -403,6 +403,17 @@ def refresh_lifecycle_after_score(paths: ScorePaths) -> dict[str, Any]:
     return asdict(refresh_revised_history(paths.canonical_db, paths.analysis_db))
 
 
+def refresh_valuation_after_lifecycle(paths: ScorePaths) -> dict[str, Any]:
+    from rawcandle.fundamentals.valuation.production import refresh_valuation
+
+    return asdict(refresh_valuation(
+        paths.canonical_db,
+        paths.analysis_db,
+        paths.market_db,
+        calculated_at=utc_now(),
+    ))
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
@@ -415,8 +426,15 @@ def _write_sample(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
         writer.writerows({field: row.get(field) for field in fields} for row in rows[:1000])
 
 
-def run_score(paths: ScorePaths, *, write_production: bool = True) -> dict[str, Any]:
+def run_score(
+    paths: ScorePaths,
+    *,
+    write_production: bool = True,
+    production_preflight: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     paths.artifact_root.mkdir(parents=True, exist_ok=False)
+    if production_preflight is not None:
+        _write_json(paths.artifact_root / "production_preflight.json", production_preflight)
     generated_at = utc_now()
     run_id = f"SCORE_V1_{utc_stamp()}"
     canonical_before = canonical_financial_fingerprint(paths.canonical_db)
@@ -496,8 +514,25 @@ def run_score(paths: ScorePaths, *, write_production: bool = True) -> dict[str, 
             }
             _write_json(paths.artifact_root / "score_v1_summary.json", summary)
             raise RuntimeError("POST_SCORE_LIFECYCLE_REFRESH_FAILED") from exc
+        try:
+            summary["valuation_refresh"] = {
+                "status": "COMPLETE",
+                "scope": "FULL_UNIVERSE_FALLBACK",
+                **refresh_valuation_after_lifecycle(paths),
+            }
+            summary["valuation_writes"] = summary["valuation_refresh"]["rows_inserted"]
+        except Exception as exc:
+            summary["classification"] = "V4_SCORE_V1_IMPLEMENTATION_BLOCKED"
+            summary["valuation_refresh"] = {
+                "status": "FAILED",
+                "scope": "FULL_UNIVERSE_FALLBACK",
+                "error": str(exc),
+            }
+            _write_json(paths.artifact_root / "score_v1_summary.json", summary)
+            raise RuntimeError("POST_LIFECYCLE_VALUATION_REFRESH_FAILED") from exc
     else:
         summary["lifecycle_refresh"] = {"status": "SKIPPED"}
+        summary["valuation_refresh"] = {"status": "SKIPPED"}
     _write_json(paths.artifact_root / "score_v1_summary.json", summary)
     _write_json(paths.artifact_root / "score_v1_model_contract.json", MODEL_CONTRACT)
     _write_sample(paths.artifact_root / "score_v1_sample.csv", rows)

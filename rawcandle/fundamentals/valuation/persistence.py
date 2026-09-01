@@ -77,6 +77,12 @@ CREATE INDEX IF NOT EXISTS idx_valuation_revised_status
     ON {TABLE_NAME}(model_fingerprint,history_mode,valuation_status,reason_code);
 """
 
+SCHEMA_STATEMENTS = (
+    SCHEMA_SQL.split(";", 1)[0],
+    f"CREATE INDEX IF NOT EXISTS idx_valuation_revised_current ON {TABLE_NAME}(model_fingerprint,history_mode,company_id,fiscal_sequence DESC)",
+    f"CREATE INDEX IF NOT EXISTS idx_valuation_revised_status ON {TABLE_NAME}(model_fingerprint,history_mode,valuation_status,reason_code)",
+)
+
 LOGICAL_FIELDS = (
     "company_id", "security_id", "ticker", "security_active", "fiscal_year", "fiscal_quarter",
     "fiscal_sequence", "quarter_id", "period_end", "fundamental_available_date", "price_date",
@@ -267,7 +273,8 @@ def logical_fingerprint(rows: Sequence[Mapping[str, Any]]) -> str:
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA_SQL)
+    for statement in SCHEMA_STATEMENTS:
+        conn.execute(statement)
     conn.execute("CREATE TABLE IF NOT EXISTS schema_version(db_name TEXT PRIMARY KEY,version TEXT NOT NULL,applied_at_utc TEXT NOT NULL)")
 
 

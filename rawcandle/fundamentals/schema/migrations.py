@@ -13,6 +13,7 @@ from rawcandle.fundamentals.schema.provenance import (
     write_provenance_many,
 )
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
+from rawcandle.fundamentals.valuation.persistence import SCHEMA_SQL as VALUATION_SCHEMA_SQL
 
 
 PROVIDER_SCHEMA_SQL = """
@@ -375,7 +376,7 @@ CREATE TABLE valuation_result (
 CREATE INDEX idx_score_result_company_quarter ON score_result(company_id, quarter_id);
 CREATE INDEX idx_lifecycle_result_company_quarter ON lifecycle_result(company_id, quarter_id);
 CREATE INDEX idx_valuation_result_company_quarter ON valuation_result(company_id, quarter_id);
-"""
+""" + VALUATION_SCHEMA_SQL
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -563,10 +564,11 @@ def migrate_canonical_valuation_copy(
     applied_at_utc: str,
     *,
     inject_failure_at: str | None = None,
+    allow_production: bool = False,
 ) -> dict[str, object]:
     """Migrate and backfill a non-production canonical copy from a read-only provider."""
     production_canonical = Path("/home/kalle/projects/rawcandle/data/fundamentals_v4.db").resolve()
-    if canonical_db.resolve() == production_canonical:
+    if canonical_db.resolve() == production_canonical and not allow_production:
         raise PermissionError("PHASE3C_PRODUCTION_CANONICAL_WRITE_BLOCKED")
     if canonical_db.resolve() == provider_db.resolve():
         raise ValueError("CANONICAL_DESTINATION_EQUALS_PROVIDER_SOURCE")

@@ -80,3 +80,24 @@ sqlite3 data/fundamentals_analysis.db "PRAGMA quick_check; PRAGMA foreign_key_ch
 After either restore, rerun production row/fingerprint checks. Do not delete backups until the canonical and analysis checkpoints, second apply and pipeline smoke test are accepted.
 
 The canonical and analysis databases remain independent transactions. Canonical rollback restores its online backup; it does not attempt to reverse additive DDL in place.
+
+## Authorized production CLI
+
+Phase 3D uses `rawcandle.cli.run_fundamentals_v4_valuation_production`. It defaults to dry-run and accepts only the four exact absolute production paths. Every apply requires `--apply`, `--confirm-production`, `--full-universe`, and the locked model fingerprint. Before any database write, the CLI prints the resolved paths and persists them as `<stage>_production_preflight.json` in the output directory. The Score production entrypoint applies the same gate and writes `production_preflight.json` to its artifact directory before its first database write.
+
+Canonical apply:
+
+```bash
+python3 -m rawcandle.cli.run_fundamentals_v4_valuation_production \
+  --stage canonical \
+  --canonical-db /home/kalle/projects/rawcandle/data/fundamentals_v4.db \
+  --provider-db /home/kalle/projects/rawcandle/data/fundamentals_provider.db \
+  --analysis-db /home/kalle/projects/rawcandle/data/fundamentals_analysis.db \
+  --market-db /home/kalle/projects/rawcandle/data/osakedata.db \
+  --model-fingerprint 17a9c388647f9e810b9a88b5de1de764a1cb9f406c0f9e4f602da87b285ef62f \
+  --full-universe --apply --confirm-production --output-dir "$BACKUP/canonical-apply"
+```
+
+Valuation dry-run uses the same command with `--stage valuation` and without the two write flags. First and second production applies add `--apply --confirm-production`. The CLI persists resolved paths and before/after database evidence for every stage.
+
+The established operational hook remains the Score production path. After Score commits, Lifecycle refresh completes and commits, then Valuation refresh runs with `FULL_UNIVERSE_FALLBACK`. Valuation owns its analysis-local transaction; failure preserves the previous valuation rows and is raised as `POST_LIFECYCLE_VALUATION_REFRESH_FAILED` without undoing Score or Lifecycle.

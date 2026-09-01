@@ -70,13 +70,19 @@ A run atomically replaces only rows whose model version is `SIMPLE_FUNDAMENTAL_S
 Production command:
 
 ```bash
-python3 -m rawcandle.cli.run_fundamentals_v4_score
+python3 -m rawcandle.cli.run_fundamentals_v4_score \
+  --repo-root /home/kalle/projects/rawcandle \
+  --valuation-model-fingerprint 17a9c388647f9e810b9a88b5de1de764a1cb9f406c0f9e4f602da87b285ef62f \
+  --full-universe --apply --confirm-production
 ```
 
 Read-only production rehearsal:
 
 ```bash
-python3 -m rawcandle.cli.run_fundamentals_v4_score --no-production-write
+python3 -m rawcandle.cli.run_fundamentals_v4_score \
+  --repo-root /home/kalle/projects/rawcandle \
+  --valuation-model-fingerprint 17a9c388647f9e810b9a88b5de1de764a1cb9f406c0f9e4f602da87b285ef62f \
+  --full-universe
 ```
 
 Each execution first writes to a copied rehearsal analysis database. A production execution writes the result twice with identical input and verifies identical value fingerprints. It also verifies that canonical financials, TTM values, Lifecycle rows, and Valuation rows are unchanged, `PRAGMA quick_check` is `ok`, and foreign-key validation has no errors.

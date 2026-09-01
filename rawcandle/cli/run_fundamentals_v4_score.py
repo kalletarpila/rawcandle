@@ -1,17 +1,27 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from rawcandle.fundamentals.score.engine import ScorePaths, run_score, score_paths
+from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_MODEL_FINGERPRINT
+from rawcandle.fundamentals.valuation.production import PRODUCTION_PATHS, validate_production_request
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Fundamentals V4 Simple Fundamental Score V1")
-    parser.add_argument("--repo-root", type=Path, default=Path.cwd())
+    parser.add_argument("--repo-root", type=Path, default=Path.cwd().resolve())
     parser.add_argument("--artifact-root", type=Path)
-    parser.add_argument("--no-production-write", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--valuation-model-fingerprint", required=True)
+    parser.add_argument("--full-universe", action="store_true")
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--confirm-production", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     paths = score_paths(args.repo_root)
     if args.artifact_root:
         paths = ScorePaths(
@@ -21,7 +31,28 @@ def main() -> int:
             analysis_db=paths.analysis_db,
             market_db=paths.market_db,
         )
-    summary = run_score(paths, write_production=not args.no_production_write)
+    resolved = validate_production_request(
+        canonical_db=paths.canonical_db,
+        provider_db=PRODUCTION_PATHS["provider"],
+        analysis_db=paths.analysis_db,
+        market_db=paths.market_db,
+        model_fingerprint=args.valuation_model_fingerprint,
+        full_universe=args.full_universe,
+        apply=args.apply,
+        confirm_production=args.confirm_production,
+    )
+    preflight = {
+        "mode": "APPLY" if args.apply else "DRY_RUN",
+        "resolved_paths": resolved,
+        "valuation_model_fingerprint": args.valuation_model_fingerprint,
+        "scope": "FULL_UNIVERSE",
+    }
+    print(json.dumps({"production_preflight": preflight}, sort_keys=True), flush=True)
+    summary = run_score(
+        paths,
+        write_production=args.apply,
+        production_preflight=preflight,
+    )
     print(f"classification={summary['classification']}")
     print(f"artifact_root={summary['artifact_root']}")
     print(f"model_version={summary['model_version']}")
