@@ -214,3 +214,17 @@ Phase 3C.2 replaces the original provenance-table rebuild with schema version `v
 Phase 3D code gate adds narrow production authorization and activates Valuation after the established Score and Lifecycle stages. The operational fallback remains full-universe until a trustworthy changed-company set exists. Each analysis model commits independently, and Valuation failure preserves prior valuation rows while surfacing the overall run as failed.
 
 Phase 3D production deployment completed on 2026-09-01 with verified retained backups, zero-write second canonical and Valuation applies, locked Valuation fingerprints, unchanged Score/Lifecycle results, read-only osakedata/provider sources, and no rollback. The deployment record is `fundamentals_v4_valuation_v1_phase3d_deployment.md`.
+
+## Relative Position Phase 4A
+
+Phase 4A completed the read-only source, identity, current classification, taxonomy, peer-size, and percentile-method readiness investigation. It locked separate Fundamental and Valuation denominators, ascending average-rank percentiles, sector/industry/ecosystem minimums of 20/10/20, and DATACENTER `CORE + EXTENDED` company-deduplicated membership. Sector and industry are current classifications, not historical PIT data.
+
+## Relative Position Phase 4B
+
+Status: `PURE_ENGINE_AND_READ_ONLY_FULL_UNIVERSE_REHEARSAL_COMPLETE`
+
+Phase 4B implements `CURRENT_REVISED_SNAPSHOT_RELATIVE_POSITION_V1` as a pure deterministic engine and explicit-path read-only adapter. V1 ranks only Fundamental Score and Absolute Valuation Score across `UNIVERSE`, `SECTOR`, `INDUSTRY`, and `ECOSYSTEM`. It has no component, composite, or taxonomy-layer rank.
+
+The 2026-09-01 double rehearsal exactly reconciled 2,198 Fundamental, 2,246 Valuation, 204 DATACENTER Fundamental, and 201 DATACENTER Valuation eligible companies. Both canonical serialized runs were byte-identical. No production schema, result, migration, writer, or pipeline activation was added.
+
+Phase 4C is the separate persistence and deployment phase. It may add an atomic current-snapshot store, explicit-fingerprint readers, unchanged-source zero-write behavior, and a full relative-snapshot refresh after Score and Valuation. It must not rebuild canonical history, TTM, Score, Lifecycle, or Valuation.
