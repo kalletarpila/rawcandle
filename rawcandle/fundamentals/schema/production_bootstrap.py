@@ -29,6 +29,13 @@ from rawcandle.fundamentals.schema.identity_calendar_bootstrap import (
     summarize_bootstrap,
 )
 from rawcandle.fundamentals.schema.migrations import bootstrap_all, canonical_field_contract_present, connect
+from rawcandle.fundamentals.schema.provenance import (
+    count_provenance,
+    provenance_counts_by_field,
+    provenance_provider_observation_ids,
+    read_provenance,
+    write_provenance,
+)
 from rawcandle.fundamentals.schema.prototype import (
     PROTOTYPE_TICKERS,
     int_or_none,
@@ -573,17 +580,16 @@ def canonicalize_arq_production(paths: ProductionPaths, now: str) -> dict[str, A
             for canonical_field, native_field in SHARADAR_ARQ_FIELD_MAPPING.items():
                 if row[native_field] is None:
                     continue
-                before_prov = canonical.total_changes
-                canonical.execute(
-                    """
-                    INSERT OR IGNORE INTO v4_field_provenance(
-                        quarter_id, canonical_field, provider, provider_observation_id, source_native_field,
-                        transformation, accepted_at_utc, rule_version, confidence
-                    ) VALUES (?, ?, 'SHARADAR', ?, ?, 'DIRECT', ?, 'SHARADAR_ARQ_PRIMARY_V1', 'HIGH')
-                    """,
-                    (quarter_id, canonical_field, row["observation_id"], native_field, now),
+                inserted_provenance += write_provenance(
+                    canonical,
+                    {
+                        "quarter_id": quarter_id, "canonical_field": canonical_field, "provider": "SHARADAR",
+                        "provider_observation_id": row["observation_id"], "source_native_field": native_field,
+                        "transformation": "DIRECT", "accepted_at_utc": now,
+                        "rule_version": "SHARADAR_ARQ_PRIMARY_V1", "confidence": "HIGH",
+                    },
+                    ignore_duplicate=True,
                 )
-                inserted_provenance += int(canonical.total_changes > before_prov)
     summary = {
         "inserted_quarters": inserted_quarters,
         "inserted_financial_rows": inserted_financials,
@@ -604,7 +610,7 @@ def canonical_counts(canonical_db: Path) -> dict[str, int]:
             "permatickers": conn.execute("SELECT COUNT(*) FROM provider_security_identity WHERE provider='SHARADAR'").fetchone()[0],
             "canonical_quarters": conn.execute("SELECT COUNT(*) FROM v4_quarter").fetchone()[0],
             "canonical_financial_rows": conn.execute("SELECT COUNT(*) FROM v4_quarter_financials").fetchone()[0],
-            "provenance_rows": conn.execute("SELECT COUNT(*) FROM v4_field_provenance").fetchone()[0],
+            "provenance_rows": count_provenance(conn),
             "cik_rows": conn.execute("SELECT COUNT(*) FROM company_cik").fetchone()[0],
             "fiscal_profiles": conn.execute("SELECT COUNT(*) FROM company_fiscal_calendar_profile").fetchone()[0],
             "fiscal_anchors": conn.execute("SELECT COUNT(*) FROM company_fiscal_year_anchor").fetchone()[0],
@@ -696,7 +702,7 @@ def _pct(part: int, total: int) -> float:
 
 def provenance_summary(paths: ProductionPaths) -> dict[str, Any]:
     with connect(paths.canonical_db) as conn:
-        by_field = [dict(row) for row in conn.execute("SELECT canonical_field, COUNT(*) rows FROM v4_field_provenance GROUP BY canonical_field ORDER BY canonical_field")]
+        by_field = provenance_counts_by_field(conn)
         missing = canonical_fields_without_provenance(conn)
     summary = {"by_field": by_field, "canonical_fields_without_provenance": missing}
     write_json(paths.artifact_root / "canonical_provenance_summary.json", summary)
@@ -706,10 +712,7 @@ def provenance_summary(paths: ProductionPaths) -> dict[str, Any]:
 def canonical_fields_without_provenance(conn: Any) -> int:
     missing = 0
     for row in conn.execute("SELECT * FROM v4_quarter_financials"):
-        provenanced = {
-            prov["canonical_field"]
-            for prov in conn.execute("SELECT canonical_field FROM v4_field_provenance WHERE quarter_id=?", (row["quarter_id"],))
-        }
+        provenanced = {prov["canonical_field"] for prov in read_provenance(conn, quarter_id=row["quarter_id"])}
         for field in V4_CANONICAL_FINANCIAL_FIELDS:
             if row[field] is not None and field not in provenanced:
                 missing += 1
@@ -932,7 +935,8 @@ def production_integrity(paths: ProductionPaths) -> tuple[dict[str, Any], dict[s
         ).fetchone()[0]
         canonical["orphan_securities"] = conn.execute("SELECT COUNT(*) FROM security s LEFT JOIN company c ON c.company_id=s.company_id WHERE c.company_id IS NULL").fetchone()[0]
         canonical["orphan_financials"] = conn.execute("SELECT COUNT(*) FROM v4_quarter_financials f LEFT JOIN v4_quarter q ON q.quarter_id=f.quarter_id WHERE q.quarter_id IS NULL").fetchone()[0]
-        canonical["orphan_provenance"] = conn.execute("SELECT COUNT(*) FROM v4_field_provenance p LEFT JOIN v4_quarter q ON q.quarter_id=p.quarter_id WHERE q.quarter_id IS NULL").fetchone()[0]
+        quarter_ids = {row[0] for row in conn.execute("SELECT quarter_id FROM v4_quarter")}
+        canonical["orphan_provenance"] = sum(row["quarter_id"] not in quarter_ids for row in read_provenance(conn))
         canonical["canonical_fields_without_provenance"] = canonical_fields_without_provenance(conn)
         canonical["invalid_fiscal_quarters"] = conn.execute("SELECT COUNT(*) FROM v4_quarter WHERE fiscal_quarter NOT IN ('Q1','Q2','Q3','Q4')").fetchone()[0]
         canonical["invalid_cik_format"] = conn.execute("SELECT COUNT(*) FROM company_cik WHERE cik_normalized NOT GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'").fetchone()[0]
@@ -964,7 +968,7 @@ def cross_db_integrity(paths: ProductionPaths) -> dict[str, int]:
         canonical_security_ids = {row["security_id"] for row in canonical.execute("SELECT security_id FROM security")}
         provider_security_ids = {row["security_id"] for row in provider.execute("SELECT DISTINCT security_id FROM provider_observation WHERE security_id IS NOT NULL")}
         provider_observation_ids = {row["observation_id"] for row in provider.execute("SELECT observation_id FROM provider_observation")}
-        provenance_observation_ids = {row["provider_observation_id"] for row in canonical.execute("SELECT DISTINCT provider_observation_id FROM v4_field_provenance")}
+        provenance_observation_ids = provenance_provider_observation_ids(canonical)
         canonical_company_ids = {row["company_id"] for row in canonical.execute("SELECT company_id FROM company")}
         analysis_company_ids = {
             row["company_id"]

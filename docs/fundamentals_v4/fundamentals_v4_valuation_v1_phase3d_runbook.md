@@ -44,13 +44,15 @@ Require 50,585 first-run inserts, zero second-run inserts/deletes, source finger
 
 Phase 3D must add a narrow exact-path authorization surface before any following production write. It must expose the same tested functions and preserve these checkpoints:
 
-1. Stage A-B: `migrate_canonical_valuation_copy` equivalent authorized only for exact `data/fundamentals_v4.db`, with provider opened read-only.
+1. Stage A-B: authorize the tested additive `migrate_canonical_valuation_copy` only for exact `data/fundamentals_v4.db`, with provider opened read-only. It must add scalar columns plus `v4_common_earnings_provenance`; it must never rebuild, drop, rename, or copy `v4_field_provenance`.
 2. Stage C: verify 50,171 canonical common-income rows and 42,596 common-income-ready TTM rows; rerun must change zero rows.
 3. Stage D: dry-run `load_canonical_source` and require the rehearsed source fingerprint before analysis migration.
 4. Stage E-F: create `valuation_revised_result`, then call `replace_results` for the exact model fingerprint in one analysis-local transaction.
 5. Stage G: repeat the same apply and require zero writes plus the rehearsed result fingerprint.
 6. Run `quick_check`, reader smoke tests, current distribution and exact-zero audit.
 7. Only then add valuation refresh after Score/Lifecycle in the normal pipeline. Pipeline activation code and command do not exist in Phase 3C and must not be invented or executed before Phase 3D review.
+
+Before Stage D require canonical schema version `v4_3c2_additive_provenance`, zero material freelist, a final size close to the rehearsed 288,563,200 bytes, 50,171 common-earnings provenance rows in the dedicated table, and zero logical changes/file growth on an identical second canonical migration. `VACUUM` is neither part of deployment nor rollback.
 
 ## Post-deployment checks
 
@@ -76,3 +78,5 @@ sqlite3 data/fundamentals_analysis.db "PRAGMA quick_check; PRAGMA foreign_key_ch
 ```
 
 After either restore, rerun production row/fingerprint checks. Do not delete backups until the canonical and analysis checkpoints, second apply and pipeline smoke test are accepted.
+
+The canonical and analysis databases remain independent transactions. Canonical rollback restores its online backup; it does not attempt to reverse additive DDL in place.

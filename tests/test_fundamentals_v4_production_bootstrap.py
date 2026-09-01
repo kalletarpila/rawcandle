@@ -34,6 +34,7 @@ from rawcandle.fundamentals.schema.production_bootstrap import (
     sharesbas_audit,
     target_tickers,
 )
+from rawcandle.fundamentals.schema.provenance import read_provenance
 
 
 class FakeResponse:
@@ -308,7 +309,7 @@ def test_provenance_every_non_null_field_provider_null_and_zero_preserved(tmp_pa
     with connect(paths.canonical_db) as conn:
         assert conn.execute("SELECT revenue FROM v4_quarter_financials f JOIN v4_quarter q ON q.quarter_id=f.quarter_id JOIN security s ON s.company_id=q.company_id WHERE s.current_ticker='AAPL' AND q.source_fiscalperiod='2026-Q1'").fetchone()[0] == 0
         for field in V4_CANONICAL_FINANCIAL_FIELDS:
-            assert conn.execute("SELECT COUNT(*) FROM v4_field_provenance WHERE canonical_field=?", (field,)).fetchone()[0] > 0
+            assert read_provenance(conn, canonical_field=field)
 
 
 def test_fcf_and_debt_consistency(tmp_path: Path) -> None:

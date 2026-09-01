@@ -137,7 +137,7 @@ data/fundamentals_analysis.db
 
 Schema version metadata remains `v4_1a_prototype` for provider, canonical, and analysis schemas; V4-1B is a production bootstrap of that approved schema, not a schema redesign.
 
-Phase 3B defines the additive schema version `v4_3b_valuation_foundation` for temporary migration and future production deployment. It adds provider `netinccmn`, canonical `net_income_common`, TTM `ttm_net_income_common`, and `net_income_common_4q_ready` without changing existing `netinc`-based fields. Phase 3B does not apply this migration to production.
+Phase 3C.2 supersedes the Phase 3B temporary schema with `v4_3c2_additive_provenance`. It adds provider `netinccmn`, canonical `net_income_common`, TTM `ttm_net_income_common`, and `net_income_common_4q_ready` without changing existing `netinc`-based fields. Existing fields remain in `v4_field_provenance`; common-earnings provenance is restricted to `v4_common_earnings_provenance`, whose checks permit only `net_income_common <- netinccmn`. Callers use `schema.provenance.read_provenance` and the corresponding write functions instead of selecting or unioning physical stores. Production is still unchanged until Phase 3D authorization.
 
 Production canonicalization remains ARQ-only. MRQ is retained provider-side for restatement/comparison evidence and does not overwrite ARQ canonical history. ART, MRT, ARY, and MRY were present in the bulk file but excluded from production provider ingestion for this phase.
 

@@ -26,7 +26,7 @@ provider netinccmn
 
 `net_income <- netinc` and `ttm_net_income` remain unchanged. `net_income_common_4q_ready` is independent from existing core TTM readiness. The valuation engine never reads provider `payload_json`; the temporary production-source rehearsal adapter uses exact existing provenance only because production has not yet received the Phase 3B schema migration.
 
-Schema version `v4_3b_valuation_foundation` and `migrate_valuation_foundation(...)` are tested against temporary databases only.
+Schema version `v4_3c2_additive_provenance` and the corrected migration are tested against temporary databases only. The migration adds common-earnings scalar columns and a dedicated restricted provenance table; it never rebuilds `v4_field_provenance`. Unified provenance APIs route legacy and common-earnings fields transparently.
 
 ## Date and price contract
 
@@ -120,4 +120,4 @@ This engine constructs filing/availability-date revised-history observations. A 
 
 ## Phase 3C persistence preparation
 
-Phase 3C adds copy-only canonical/common-earnings migration, versioned `valuation_revised_result` persistence, explicit-fingerprint readers, guarded rehearsal tooling, quick checks, a mandatory exact-zero audit and a separate current-universe distribution. Production remains unmigrated and contains no valuation rows. See `fundamentals_v4_valuation_v1_phase3c_report.md` and `fundamentals_v4_valuation_v1_phase3d_runbook.md`.
+Phase 3C adds copy-only canonical/common-earnings migration, versioned `valuation_revised_result` persistence, explicit-fingerprint readers, guarded rehearsal tooling, quick checks, a mandatory exact-zero audit and a separate current-universe distribution. Phase 3C.2 replaces the original provenance-table rebuild with the logically identical additive contract. Production remains unmigrated and contains no valuation rows. See `fundamentals_v4_valuation_v1_phase3c_report.md`, `fundamentals_v4_valuation_v1_phase3c2_report.md`, and `fundamentals_v4_valuation_v1_phase3d_runbook.md`.

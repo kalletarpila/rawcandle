@@ -1,5 +1,7 @@
 # Valuation V1 Phase 3C Persistence and Production Gate
 
+> Historical evidence: the migration described here rebuilt `v4_field_provenance` and is retired. Phase 3C.2 preserves these results with the additive migration documented in `fundamentals_v4_valuation_v1_phase3c2_report.md`. Do not use the original migration for Phase 3D.
+
 ## Status
 
 Phase 3C prepares revised-history persistence and rehearses the canonical and analysis database stages on verified SQLite backups. It does not migrate or write production and does not activate a pipeline hook.

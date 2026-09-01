@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from rawcandle.fundamentals.schema.migrations import migrate_canonical_valuation_copy
+from rawcandle.fundamentals.schema.provenance import read_provenance
 from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT, select_price
 from rawcandle.fundamentals.valuation.persistence import (
     CURRENT_FRESHNESS_DAYS,
@@ -54,7 +55,18 @@ def database_evidence(path: Path) -> dict[str, Any]:
     with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as conn:
         quick = str(conn.execute("PRAGMA quick_check").fetchone()[0])
         tables = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    return {"path": str(path.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "quick_check": quick, "tables": sorted(tables)}
+        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
+        freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        schema_versions = [tuple(row) for row in conn.execute(
+            "SELECT db_name,version,applied_at_utc FROM schema_version ORDER BY db_name"
+        )] if "schema_version" in tables else []
+    return {
+        "path": str(path.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+        "quick_check": quick, "tables": sorted(tables), "page_size": page_size,
+        "page_count": page_count, "freelist_count": freelist_count,
+        "freelist_bytes": page_size * freelist_count, "schema_versions": schema_versions,
+    }
 
 
 def validate_destinations(
@@ -291,14 +303,21 @@ def export_zero_sample(path: Path, rows: Sequence[Mapping[str, Any]], canonical_
         for quarter_id in quarter_ids:
             for item in conn.execute(
                 """SELECT i.input_position,q.fiscal_year,q.fiscal_quarter,f.net_income_common,
-                          fp.provider_observation_id,fp.source_native_field
+                          i.input_quarter_id
                    FROM v4_ttm_values t JOIN v4_ttm_input_quarter i ON i.ttm_id=t.ttm_id
                    JOIN v4_quarter q ON q.quarter_id=i.input_quarter_id
                    JOIN v4_quarter_financials f ON f.quarter_id=i.input_quarter_id
-                   LEFT JOIN v4_field_provenance fp ON fp.quarter_id=i.input_quarter_id AND fp.canonical_field='net_income_common'
                    WHERE t.endpoint_quarter_id=? ORDER BY i.input_position""", (quarter_id,)
             ):
-                common_inputs[quarter_id].append(dict(item))
+                record = dict(item)
+                provenance = read_provenance(
+                    conn,
+                    quarter_id=int(record.pop("input_quarter_id")),
+                    canonical_field="net_income_common",
+                )
+                record["provider_observation_id"] = provenance[0]["provider_observation_id"] if provenance else None
+                record["source_native_field"] = provenance[0]["source_native_field"] if provenance else None
+                common_inputs[quarter_id].append(record)
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = ["company_id", "ticker", "fiscal_year", "fiscal_quarter", "fundamental_available_date", "price_date", "selected_price", "shares_outstanding", "market_cap", "enterprise_value", "ttm_ebit", "ttm_free_cashflow", "ttm_net_income_common", "ebit_yield", "ebit_points", "fcf_yield", "fcf_points", "earnings_yield", "earnings_points", "total_valuation_score", "lifecycle", "sector", "industry", "valuation_status", "reason_code", "common_quarter_inputs_json"]
     with path.open("w", newline="", encoding="utf-8") as handle:

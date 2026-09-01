@@ -47,4 +47,4 @@ SHARADAR_SUPPORT_FIELDS: tuple[str, ...] = (
 
 PROVIDER_NAMES: tuple[str, ...] = ("SHARADAR", "YAHOO", "SEC", "MIGRATED_FROM_V3")
 
-SCHEMA_VERSION = "v4_3b_valuation_foundation"
+SCHEMA_VERSION = "v4_3c2_additive_provenance"

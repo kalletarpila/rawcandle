@@ -80,7 +80,6 @@ CREATE TABLE IF NOT EXISTS v4_ttm_values (
     ttm_ebit REAL,
     ttm_ebitda REAL,
     ttm_net_income REAL,
-    ttm_net_income_common REAL,
     ttm_operating_cashflow REAL,
     ttm_capex REAL,
     ttm_free_cashflow REAL,
@@ -93,7 +92,6 @@ CREATE TABLE IF NOT EXISTS v4_ttm_values (
     ebit_4q_ready INTEGER NOT NULL CHECK (ebit_4q_ready IN (0,1)),
     ebitda_4q_ready INTEGER NOT NULL CHECK (ebitda_4q_ready IN (0,1)),
     net_income_4q_ready INTEGER NOT NULL CHECK (net_income_4q_ready IN (0,1)),
-    net_income_common_4q_ready INTEGER NOT NULL CHECK (net_income_common_4q_ready IN (0,1)),
     operating_cashflow_4q_ready INTEGER NOT NULL CHECK (operating_cashflow_4q_ready IN (0,1)),
     capex_4q_ready INTEGER NOT NULL CHECK (capex_4q_ready IN (0,1)),
     free_cashflow_4q_ready INTEGER NOT NULL CHECK (free_cashflow_4q_ready IN (0,1)),
@@ -108,6 +106,8 @@ CREATE TABLE IF NOT EXISTS v4_ttm_values (
     calculated_at_utc TEXT NOT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
+    ttm_net_income_common REAL,
+    net_income_common_4q_ready INTEGER NOT NULL DEFAULT 0 CHECK (net_income_common_4q_ready IN (0,1)),
     UNIQUE(company_id, endpoint_quarter_id, model_version)
 );
 

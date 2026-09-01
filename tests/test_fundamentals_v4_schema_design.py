@@ -124,7 +124,7 @@ def test_schema_versions_exist(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     bootstrap_all(paths.provider_db, paths.canonical_db, paths.analysis_db, "now")
     with connect(paths.provider_db) as conn:
-            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == "v4_3b_valuation_foundation"
+            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == "v4_3c2_additive_provenance"
 
 
 def test_fk_enforcement_works(tmp_path: Path) -> None:

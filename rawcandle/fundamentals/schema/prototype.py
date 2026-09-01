@@ -12,6 +12,7 @@ from typing import Any, Iterable, Mapping
 
 from rawcandle.fundamentals.schema.contract import SHARADAR_ARQ_FIELD_MAPPING, SHARADAR_SUPPORT_FIELDS, V4_CANONICAL_FINANCIAL_FIELDS
 from rawcandle.fundamentals.schema.migrations import bootstrap_all, canonical_field_contract_present, connect
+from rawcandle.fundamentals.schema.provenance import count_provenance, read_provenance, write_provenance
 
 
 PROTOTYPE_TICKERS = ("AAPL", "WDAY", "ASTH", "CECO")
@@ -441,14 +442,15 @@ def canonicalize_arq(provider_db: Path, canonical_db: Path, now: str) -> dict[st
             for canonical_field, native_field in SHARADAR_ARQ_FIELD_MAPPING.items():
                 if row[native_field] is None:
                     continue
-                canonical_conn.execute(
-                    """
-                    INSERT OR IGNORE INTO v4_field_provenance(
-                        quarter_id, canonical_field, provider, provider_observation_id, source_native_field,
-                        transformation, accepted_at_utc, rule_version, confidence
-                    ) VALUES (?, ?, 'SHARADAR', ?, ?, 'DIRECT', ?, 'SHARADAR_ARQ_PRIMARY_V1', 'HIGH')
-                    """,
-                    (quarter_id, canonical_field, row["observation_id"], native_field, now),
+                write_provenance(
+                    canonical_conn,
+                    {
+                        "quarter_id": quarter_id, "canonical_field": canonical_field, "provider": "SHARADAR",
+                        "provider_observation_id": row["observation_id"], "source_native_field": native_field,
+                        "transformation": "DIRECT", "accepted_at_utc": now,
+                        "rule_version": "SHARADAR_ARQ_PRIMARY_V1", "confidence": "HIGH",
+                    },
+                    ignore_duplicate=True,
                 )
     return canonical_counts(canonical_db)
 
@@ -460,7 +462,7 @@ def canonical_counts(canonical_db: Path) -> dict[str, int]:
             "securities": conn.execute("SELECT COUNT(*) FROM security").fetchone()[0],
             "canonical_quarters": conn.execute("SELECT COUNT(*) FROM v4_quarter").fetchone()[0],
             "canonical_financial_rows": conn.execute("SELECT COUNT(*) FROM v4_quarter_financials").fetchone()[0],
-            "provenance_rows": conn.execute("SELECT COUNT(*) FROM v4_field_provenance").fetchone()[0],
+            "provenance_rows": count_provenance(conn),
             "cik_rows": conn.execute("SELECT COUNT(*) FROM company_cik").fetchone()[0],
         }
 
@@ -507,9 +509,8 @@ def validate_integrity(paths: PrototypePaths) -> dict[str, Any]:
         output["orphan_financial_rows"] = conn.execute(
             "SELECT COUNT(*) FROM v4_quarter_financials f LEFT JOIN v4_quarter q ON q.quarter_id=f.quarter_id WHERE q.quarter_id IS NULL"
         ).fetchone()[0]
-        output["orphan_provenance_rows"] = conn.execute(
-            "SELECT COUNT(*) FROM v4_field_provenance p LEFT JOIN v4_quarter q ON q.quarter_id=p.quarter_id WHERE q.quarter_id IS NULL"
-        ).fetchone()[0]
+        quarter_ids = {row[0] for row in conn.execute("SELECT quarter_id FROM v4_quarter")}
+        output["orphan_provenance_rows"] = sum(row["quarter_id"] not in quarter_ids for row in read_provenance(conn))
         output["canonical_fields_without_provenance"] = canonical_fields_without_provenance(conn)
         output["canonical_field_contract_present"] = canonical_field_contract_present(conn)
     return output
@@ -520,10 +521,7 @@ def canonical_fields_without_provenance(conn: sqlite3.Connection) -> int:
     rows = conn.execute("SELECT * FROM v4_quarter_financials").fetchall()
     for row in rows:
         quarter_id = row["quarter_id"]
-        provenanced = {
-            prov["canonical_field"]
-            for prov in conn.execute("SELECT canonical_field FROM v4_field_provenance WHERE quarter_id=?", (quarter_id,))
-        }
+        provenanced = {prov["canonical_field"] for prov in read_provenance(conn, quarter_id=quarter_id)}
         for field in V4_CANONICAL_FINANCIAL_FIELDS:
             if row[field] is not None and field not in provenanced:
                 missing += 1
