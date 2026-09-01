@@ -183,12 +183,12 @@ Status: `PURE_METHODOLOGY_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`
 
 Phase 2A implements `V4_FUNDAMENTAL_LIFECYCLE_V1` as a pure raw classifier and immutable two-observation state machine. The active specification is `fundamentals_v4_lifecycle_v1_specification.md`. SCALING precedes GROWTH, PRE_REVENUE is an exact four-zero-quarter STARTUP profile, STRUGGLING is separate from TRANSITION, DISTRESSED enters immediately and exits only after two identical recovery states, and UNCLASSIFIED clears candidates while exposing the last confirmed state only as history.
 
-No schema, production database, Score behavior, backfill, scheduler, report or activation changed. Production PIT event construction and persistence remain a separate next phase.
+No schema, production database, Score behavior, backfill, scheduler, report or activation changed. The next implementation phase is a small deterministic revised-history persistence and production backfill.
 
-## Lifecycle Phase 2B
+## Lifecycle Phase 2B (Retired Project Record)
 
-Status: `PERSISTENCE_FOUNDATION_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`
+Status: `RETIRED_BEFORE_PRODUCTION_ACTIVATION`
 
-Phase 2B adds deterministic date-level knowledge batches, explicit same-day canonical-winner handling, restatement-aware suffix replay, separate PIT and revised-history modes, and an append-only `V4_LIFECYCLE_PIT_1` persistence contract. Current, as-of and fiscal-quarter audit APIs require the locked Lifecycle V1 fingerprint.
+Phase 2B implemented an append-only PIT persistence experiment in commit `f3b5520d876463aeced46ec7f55fa235206f5101`. It was never migrated, backfilled, scheduled, reported or activated in production. Phase 2B.1 removed its code, schema definitions, CLI, tests and active specification in a forward cleanup commit; Git history preserves the experiment if it is ever needed for research.
 
-The existing analysis `lifecycle_result` and Score tables are unchanged. Migration and write validation use disposable databases; the CLI is dry-run by default, requires an explicit non-production destination for writes and rejects the production analysis path. Production canonical-version feed validation, migration, backfill, readers and activation are reserved for Phase 2C.
+The locked direction is revised-history only. Future lifecycle production history will use currently accepted canonical and TTM data, run in canonical fiscal-quarter order, carry the explicit label `REVISED_HISTORY`, and remain subject to retrospective restatement changes. It answers what lifecycle history looks like under currently accepted fundamentals, not what an investor saw on each historical date. This is an accepted simplification for the personal research scope. Score V1 remains independent.

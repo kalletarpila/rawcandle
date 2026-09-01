@@ -127,7 +127,7 @@ current final_state = NULL in state-machine output
 
 The engine returns deterministic reason codes in these groups:
 
-- TTM/PIT readiness: `TTM_NOT_READY`, `TTM_MODEL_VERSION_UNSUPPORTED`, `SOURCE_AVAILABILITY_DATE_MISSING`, `SOURCE_AVAILABILITY_DATE_INVALID`.
+- TTM/source readiness: `TTM_NOT_READY`, `TTM_MODEL_VERSION_UNSUPPORTED`, `SOURCE_AVAILABILITY_DATE_MISSING`, `SOURCE_AVAILABILITY_DATE_INVALID`.
 - Current inputs: `CURRENT_REVENUE_MISSING`, `CURRENT_REVENUE_INVALID`, `CURRENT_REVENUE_NEGATIVE`, `CURRENT_EBIT_MISSING`, `CURRENT_EBIT_INVALID`, `CURRENT_FCF_MISSING`, `CURRENT_FCF_INVALID`.
 - Pre-revenue evidence: `PRE_REVENUE_QUARTER_COUNT_INVALID`, `PRE_REVENUE_QUARTER_REVENUE_MISSING`, `PRE_REVENUE_QUARTER_REVENUE_INVALID`, `ZERO_REVENUE_PRE_REVENUE_CONDITIONS_NOT_MET`.
 - Lag4 evidence: `FISCAL_CHAIN_INVALID`, `LAG4_REVENUE_MISSING`, `LAG4_REVENUE_INVALID`, `LAG4_REVENUE_NONPOSITIVE`, `LAG4_EBIT_MISSING`, `LAG4_EBIT_INVALID`.
@@ -143,11 +143,11 @@ DISTRESSED entry is immediate and clears any candidate. Exit from confirmed DIST
 
 UNCLASSIFIED publishes `LIFECYCLE_NOT_READY`, `final_state = NULL`, clears the candidate and does not count toward confirmation. `last_confirmed_state` is preserved only as explicit history. It must not be presented as the current reliable class.
 
-## Point-in-time contract
+## Replay input contract
 
 Pure observations retain company/security identity, fiscal year/quarter, endpoint quarter id, period end, source availability date, source data version and model identity. Replay consumes a non-decreasing source-availability sequence and never mutates prior inputs or outputs. Equal availability dates retain caller-established deterministic order.
 
-The future production PIT layer must append a new calculation event when a restatement becomes available. It must not overwrite or backdate the earlier PIT result. Revised economic history is a separate future replay mode and must not replace the investor-knowable PIT history.
+RawCandle does not preserve a complete historical lifecycle information-version chain and does not claim an investor-knowable PIT lifecycle history. The future production implementation will replay the currently accepted canonical and TTM history in canonical fiscal-quarter order and label it `REVISED_HISTORY`. Restatements may therefore change earlier lifecycle results retrospectively.
 
 ## Scope boundary
 

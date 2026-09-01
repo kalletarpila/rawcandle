@@ -31,11 +31,11 @@ input_ttm_model_version = V4_TTM_EBIT_FIRST_V1
 
 The SHA-256 fingerprint covers public classes/statuses, exact priority, thresholds, PRE_REVENUE contract, state-machine policy and excluded input families.
 
-## Fiscal and PIT mapping
+## Fiscal and source mapping
 
-`LifecycleObservation` receives the existing V4 identities and TTM values rather than querying a database. `endpoint_fiscal_year` and `endpoint_fiscal_quarter` identify the economic period; `endpoint_quarter_id` is the stable canonical endpoint; `lag4_chain_valid` records that the caller used the canonical fiscal chain rather than row offsets or calendar subtraction. `source_available_date` orders PIT replay, while `source_data_version` can identify the provider/canonical vintage in the future persistence phase.
+`LifecycleObservation` receives the existing V4 identities and TTM values rather than querying a database. `endpoint_fiscal_year` and `endpoint_fiscal_quarter` identify the economic period; `endpoint_quarter_id` is the stable canonical endpoint; `lag4_chain_valid` records that the caller used the canonical fiscal chain rather than row offsets or calendar subtraction. `source_available_date` remains required source provenance and readiness evidence, while `source_data_version` can identify the currently accepted provider/canonical input.
 
-The pure replay validates non-decreasing ISO availability dates. It does not sort or mutate inputs because equal-date event tie-breaking belongs to the future PIT event builder. Later restatements therefore become new ordered observations rather than rewrites of prior result objects.
+The pure replay validates the caller-provided non-decreasing availability sequence and never sorts or mutates its inputs. This validation remains part of the Phase 2A pure contract. It does not imply that RawCandle preserves every historical information version.
 
 ## Numerical behavior
 
@@ -51,12 +51,12 @@ For a ready economic observation, `final_state` is the current confirmed public 
 
 Startup profile is retained with a confirmed STARTUP state. A stable confirmed STARTUP observation updates its current startup profile; a candidate STARTUP profile becomes confirmed only with the state transition.
 
-## Phase 2B persistence foundation
+## Revised-history direction
 
-Phase 2B adds a separate append-only `lifecycle_pit_result` contract without changing the locked classifier or its fingerprint. Versioned quarterly inputs are grouped into atomic date-level knowledge batches. Current and lag4 TTM evidence is rebuilt from the winning as-known versions, and a restatement appends the corrected state-machine-dependent suffix.
+The unactivated Phase 2B PIT persistence experiment was removed from the active codebase in Phase 2B.1. No historical PIT lifecycle dataset is claimed. Git history retains the retired experiment, but there is no active PIT schema, repository, reader, writer or CLI.
 
-`PIT` and `REVISED_HISTORY` are distinct replay modes. Current, as-of and fiscal-quarter audit reads require an explicit model fingerprint. UNCLASSIFIED remains publicly not ready with no current final class.
+The next production phase will implement a small deterministic `REVISED_HISTORY` solution based on the currently accepted canonical and TTM history. It will replay observations in canonical fiscal-quarter order and answer: "What does the company's lifecycle history look like using the currently accepted fundamental data?"
 
-The complete persistence, ordering, replay, schema, read API and safety contract is documented in `fundamentals_v4_lifecycle_v1_pit_persistence.md`.
+That history may change retrospectively after restatements. Source availability dates remain useful provenance, but the system will not guarantee the exact class an investor would have seen on every historical date. This simplification is accepted for the personal research scope.
 
-Phase 2B remains non-production-active. It does not migrate or write the production database, backfill results, add scheduler/report integration, or modify Score V1. Those operational boundaries remain reserved for explicit Phase 2C authorization.
+No revised-history persistence, migration, writer, backfill, reader, scheduler or report integration is implemented in Phase 2B.1. Score V1 remains independent of lifecycle.
