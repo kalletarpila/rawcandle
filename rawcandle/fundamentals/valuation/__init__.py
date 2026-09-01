@@ -8,6 +8,12 @@ from rawcandle.fundamentals.valuation.engine import (
     classify_applicability,
     select_price,
 )
+from rawcandle.fundamentals.valuation.persistence import (
+    CURRENT_FRESHNESS_DAYS,
+    PERSISTENCE_SCHEMA_VERSION,
+    ValuationRepository,
+    quick_check,
+)
 
 __all__ = [
     "MODEL_FINGERPRINT",
@@ -18,4 +24,8 @@ __all__ = [
     "calculate_valuation",
     "classify_applicability",
     "select_price",
+    "CURRENT_FRESHNESS_DAYS",
+    "PERSISTENCE_SCHEMA_VERSION",
+    "ValuationRepository",
+    "quick_check",
 ]

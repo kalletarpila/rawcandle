@@ -117,3 +117,7 @@ The Phase 3B artifact is under `temp/fundamentals_v4_valuation_phase3b/20260901T
 ## Future filing-date and daily snapshot distinction
 
 This engine constructs filing/availability-date revised-history observations. A future daily valuation snapshot may reuse the pure formulas, but it must have a separate observation-date contract and must not be mixed into this history without an explicit model contract.
+
+## Phase 3C persistence preparation
+
+Phase 3C adds copy-only canonical/common-earnings migration, versioned `valuation_revised_result` persistence, explicit-fingerprint readers, guarded rehearsal tooling, quick checks, a mandatory exact-zero audit and a separate current-universe distribution. Production remains unmigrated and contains no valuation rows. See `fundamentals_v4_valuation_v1_phase3c_report.md` and `fundamentals_v4_valuation_v1_phase3d_runbook.md`.

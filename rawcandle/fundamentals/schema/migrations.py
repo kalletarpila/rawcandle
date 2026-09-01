@@ -416,7 +416,7 @@ def _ensure_common_earnings_provenance_contract(conn: sqlite3.Connection) -> Non
     ).fetchone()
     if sql_row is None or "net_income_common" in str(sql_row["sql"]):
         return
-    conn.executescript(
+    conn.execute(
         """
         CREATE TABLE v4_field_provenance_v3b (
             provenance_id INTEGER PRIMARY KEY,
@@ -431,13 +431,13 @@ def _ensure_common_earnings_provenance_contract(conn: sqlite3.Connection) -> Non
             confidence TEXT NOT NULL,
             UNIQUE(quarter_id, canonical_field, provider_observation_id, source_native_field),
             CHECK (canonical_field IN ('revenue','gross_profit','operating_income','ebit','ebitda','net_income','net_income_common','operating_cashflow','capex','free_cashflow','cash','total_debt','shares_outstanding'))
-        );
-        INSERT INTO v4_field_provenance_v3b SELECT * FROM v4_field_provenance;
-        DROP TABLE v4_field_provenance;
-        ALTER TABLE v4_field_provenance_v3b RENAME TO v4_field_provenance;
-        CREATE INDEX idx_v4_provenance_field ON v4_field_provenance(canonical_field, provider);
+        )
         """
     )
+    conn.execute("INSERT INTO v4_field_provenance_v3b SELECT * FROM v4_field_provenance")
+    conn.execute("DROP TABLE v4_field_provenance")
+    conn.execute("ALTER TABLE v4_field_provenance_v3b RENAME TO v4_field_provenance")
+    conn.execute("CREATE INDEX idx_v4_provenance_field ON v4_field_provenance(canonical_field, provider)")
 
 
 def migrate_valuation_foundation(
@@ -557,4 +557,120 @@ def migrate_valuation_foundation(
             "INSERT OR REPLACE INTO schema_version(db_name,version,applied_at_utc) VALUES ('fundamentals_v4',?,?)",
             (SCHEMA_VERSION, applied_at_utc),
         )
+    return counts
+
+
+def migrate_canonical_valuation_copy(
+    canonical_db: Path,
+    provider_db: Path,
+    applied_at_utc: str,
+) -> dict[str, int]:
+    """Migrate and backfill a non-production canonical copy from a read-only provider."""
+    production_canonical = Path("/home/kalle/projects/rawcandle/data/fundamentals_v4.db").resolve()
+    if canonical_db.resolve() == production_canonical:
+        raise PermissionError("PHASE3C_PRODUCTION_CANONICAL_WRITE_BLOCKED")
+    if canonical_db.resolve() == provider_db.resolve():
+        raise ValueError("CANONICAL_DESTINATION_EQUALS_PROVIDER_SOURCE")
+    counts = {
+        "canonical_columns_added": 0,
+        "ttm_columns_added": 0,
+        "canonical_rows_backfilled": 0,
+        "provenance_rows_added": 0,
+        "ttm_rows_changed": 0,
+    }
+    provider_uri = f"file:{provider_db.resolve()}?mode=ro"
+    with connect(canonical_db) as canonical:
+        if "net_income_common" not in _columns(canonical, "v4_quarter_financials"):
+            canonical.execute("ALTER TABLE v4_quarter_financials ADD COLUMN net_income_common INTEGER")
+            counts["canonical_columns_added"] += 1
+        _ensure_common_earnings_provenance_contract(canonical)
+        ensure_ttm_schema(canonical)
+        ttm_columns = _columns(canonical, "v4_ttm_values")
+        if "ttm_net_income_common" not in ttm_columns:
+            canonical.execute("ALTER TABLE v4_ttm_values ADD COLUMN ttm_net_income_common REAL")
+            counts["ttm_columns_added"] += 1
+        if "net_income_common_4q_ready" not in ttm_columns:
+            canonical.execute(
+                "ALTER TABLE v4_ttm_values ADD COLUMN net_income_common_4q_ready INTEGER NOT NULL DEFAULT 0 CHECK (net_income_common_4q_ready IN (0,1))"
+            )
+            counts["ttm_columns_added"] += 1
+        canonical.execute("ATTACH DATABASE ? AS provider_ro", (provider_uri,))
+        before = canonical.total_changes
+        canonical.execute(
+            """
+            UPDATE v4_quarter_financials
+            SET net_income_common=(
+                SELECT CAST(NULLIF(json_extract(po.payload_json,'$.netinccmn'),'') AS INTEGER)
+                FROM v4_field_provenance fp
+                JOIN provider_ro.provider_observation po ON po.observation_id=fp.provider_observation_id
+                WHERE fp.quarter_id=v4_quarter_financials.quarter_id
+                  AND fp.canonical_field='net_income'
+                ORDER BY fp.provenance_id LIMIT 1
+            )
+            WHERE net_income_common IS NULL
+              AND EXISTS (
+                SELECT 1 FROM v4_field_provenance fp
+                JOIN provider_ro.provider_observation po ON po.observation_id=fp.provider_observation_id
+                WHERE fp.quarter_id=v4_quarter_financials.quarter_id
+                  AND fp.canonical_field='net_income'
+                  AND NULLIF(json_extract(po.payload_json,'$.netinccmn'),'') IS NOT NULL
+              )
+            """
+        )
+        counts["canonical_rows_backfilled"] = canonical.total_changes - before
+        before = canonical.total_changes
+        canonical.execute(
+            """
+            INSERT OR IGNORE INTO v4_field_provenance(
+                quarter_id,canonical_field,provider,provider_observation_id,source_native_field,
+                transformation,accepted_at_utc,rule_version,confidence
+            )
+            SELECT fp.quarter_id,'net_income_common',fp.provider,fp.provider_observation_id,'netinccmn',
+                   'DIRECT',fp.accepted_at_utc,'SHARADAR_ARQ_PRIMARY_V1',fp.confidence
+            FROM v4_field_provenance fp
+            JOIN provider_ro.provider_observation po ON po.observation_id=fp.provider_observation_id
+            WHERE fp.canonical_field='net_income'
+              AND NULLIF(json_extract(po.payload_json,'$.netinccmn'),'') IS NOT NULL
+            """
+        )
+        counts["provenance_rows_added"] = canonical.total_changes - before
+        before = canonical.total_changes
+        canonical.execute(
+            """
+            UPDATE v4_ttm_values
+            SET ttm_net_income_common=(
+                    SELECT CASE WHEN COUNT(*)=4 AND COUNT(f.net_income_common)=4
+                                THEN SUM(f.net_income_common) END
+                    FROM v4_ttm_input_quarter i
+                    JOIN v4_quarter_financials f ON f.quarter_id=i.input_quarter_id
+                    WHERE i.ttm_id=v4_ttm_values.ttm_id
+                ),
+                net_income_common_4q_ready=CASE WHEN (
+                    SELECT COUNT(f.net_income_common)
+                    FROM v4_ttm_input_quarter i
+                    JOIN v4_quarter_financials f ON f.quarter_id=i.input_quarter_id
+                    WHERE i.ttm_id=v4_ttm_values.ttm_id
+                )=4 THEN 1 ELSE 0 END
+            WHERE COALESCE(ttm_net_income_common,9.87654321e307) != COALESCE((
+                    SELECT CASE WHEN COUNT(*)=4 AND COUNT(f.net_income_common)=4
+                                THEN SUM(f.net_income_common) END
+                    FROM v4_ttm_input_quarter i
+                    JOIN v4_quarter_financials f ON f.quarter_id=i.input_quarter_id
+                    WHERE i.ttm_id=v4_ttm_values.ttm_id
+                ),9.87654321e307)
+               OR net_income_common_4q_ready != CASE WHEN (
+                    SELECT COUNT(f.net_income_common)
+                    FROM v4_ttm_input_quarter i
+                    JOIN v4_quarter_financials f ON f.quarter_id=i.input_quarter_id
+                    WHERE i.ttm_id=v4_ttm_values.ttm_id
+                )=4 THEN 1 ELSE 0 END
+            """
+        )
+        counts["ttm_rows_changed"] = canonical.total_changes - before
+        canonical.execute(
+            "INSERT OR REPLACE INTO schema_version(db_name,version,applied_at_utc) VALUES ('fundamentals_v4',?,?)",
+            (SCHEMA_VERSION, applied_at_utc),
+        )
+        canonical.commit()
+        canonical.execute("DETACH DATABASE provider_ro")
     return counts
