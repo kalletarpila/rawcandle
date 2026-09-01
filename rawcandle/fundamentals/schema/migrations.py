@@ -13,6 +13,9 @@ from rawcandle.fundamentals.schema.provenance import (
     write_provenance_many,
 )
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
+from rawcandle.fundamentals.relative_position.persistence import (
+    SCHEMA_SQL as RELATIVE_POSITION_SCHEMA_SQL,
+)
 from rawcandle.fundamentals.valuation.persistence import SCHEMA_SQL as VALUATION_SCHEMA_SQL
 
 
@@ -376,7 +379,7 @@ CREATE TABLE valuation_result (
 CREATE INDEX idx_score_result_company_quarter ON score_result(company_id, quarter_id);
 CREATE INDEX idx_lifecycle_result_company_quarter ON lifecycle_result(company_id, quarter_id);
 CREATE INDEX idx_valuation_result_company_quarter ON valuation_result(company_id, quarter_id);
-""" + VALUATION_SCHEMA_SQL
+""" + VALUATION_SCHEMA_SQL + RELATIVE_POSITION_SCHEMA_SQL
 
 
 def connect(path: Path) -> sqlite3.Connection:

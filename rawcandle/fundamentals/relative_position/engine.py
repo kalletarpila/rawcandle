@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from enum import Enum
 from numbers import Real
@@ -195,6 +195,33 @@ class RelativeSnapshot:
 
     def to_json(self) -> str:
         return canonical_json(self.to_dict())
+
+
+def _result_fingerprint_payload(
+    *,
+    snapshot_date: str,
+    source_fingerprint: str,
+    results: Sequence[RelativePositionResult],
+    coverage: Sequence[CoverageRecord],
+) -> dict[str, Any]:
+    return {
+        "model_version": MODEL_VERSION,
+        "model_fingerprint": MODEL_FINGERPRINT,
+        "semantic_mode": "CURRENT_REVISED_SNAPSHOT",
+        "snapshot_date": snapshot_date,
+        "source_fingerprint": source_fingerprint,
+        "results": [result.to_dict() for result in results],
+        "coverage": [record.to_dict() for record in coverage],
+    }
+
+
+def recalculate_result_fingerprint(snapshot: RelativeSnapshot) -> str:
+    return _hash(_result_fingerprint_payload(
+        snapshot_date=snapshot.snapshot_date,
+        source_fingerprint=snapshot.source_fingerprint,
+        results=snapshot.results,
+        coverage=snapshot.coverage,
+    ))
 
 
 def normalize_classification(value: str | None) -> str | None:
@@ -588,23 +615,14 @@ def calculate_snapshot(
 
     ordered_results = tuple(sorted(results, key=_result_sort_key))
     ordered_coverage = tuple(sorted(coverage, key=_coverage_sort_key))
-    fingerprint_payload = {
-        "model_version": MODEL_VERSION,
-        "model_fingerprint": MODEL_FINGERPRINT,
-        "semantic_mode": "CURRENT_REVISED_SNAPSHOT",
-        "snapshot_date": snapshot_date,
-        "source_fingerprint": source_fp,
-        "results": [result.to_dict() for result in ordered_results],
-        "coverage": [record.to_dict() for record in ordered_coverage],
-    }
-    result_fp = _hash(fingerprint_payload)
-    return RelativeSnapshot(
+    provisional = RelativeSnapshot(
         model_version=MODEL_VERSION,
         model_fingerprint=MODEL_FINGERPRINT,
         semantic_mode="CURRENT_REVISED_SNAPSHOT",
         snapshot_date=snapshot_date,
         source_fingerprint=source_fp,
-        result_fingerprint=result_fp,
+        result_fingerprint="",
         results=ordered_results,
         coverage=ordered_coverage,
     )
+    return replace(provisional, result_fingerprint=recalculate_result_fingerprint(provisional))

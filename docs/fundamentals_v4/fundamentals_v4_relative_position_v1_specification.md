@@ -110,4 +110,4 @@ The result fingerprint covers the complete deterministically ordered ranking and
 
 Existing Fundamental, Lifecycle, and Valuation histories are revised economic histories. Sector and industry are accepted as current-only; taxonomy membership can be revised; and no complete historical PIT classification and peer-membership chain exists. Relative Position V1 therefore exposes only a current revised snapshot.
 
-Phase 4C may add separate persistence, atomic snapshot activation, unchanged-source idempotency, readers, and daily full-snapshot refresh after Fundamental and Valuation updates. Such refresh recalculates only relative positions. It must not rebuild canonical history, TTM, Score, Lifecycle, or Valuation.
+Phase 4C adds separate bounded persistence, atomic snapshot activation, unchanged-content idempotency, explicit-fingerprint readers, and a protected production-copy rehearsal. Production migration and the daily full-snapshot refresh remain Phase 4D work. Such refresh recalculates only relative positions and must not rebuild canonical history, TTM, Score, Lifecycle, or Valuation.

@@ -227,4 +227,12 @@ Phase 4B implements `CURRENT_REVISED_SNAPSHOT_RELATIVE_POSITION_V1` as a pure de
 
 The 2026-09-01 double rehearsal exactly reconciled 2,198 Fundamental, 2,246 Valuation, 204 DATACENTER Fundamental, and 201 DATACENTER Valuation eligible companies. Both canonical serialized runs were byte-identical. No production schema, result, migration, writer, or pipeline activation was added.
 
-Phase 4C is the separate persistence and deployment phase. It may add an atomic current-snapshot store, explicit-fingerprint readers, unchanged-source zero-write behavior, and a full relative-snapshot refresh after Score and Valuation. It must not rebuild canonical history, TTM, Score, Lifecycle, or Valuation.
+## Relative Position Phase 4C
+
+Phase 4C implements the bounded current-snapshot store, atomic active pointer, complete coverage audit, explicit-fingerprint readers, reusable quick check, and protected production-copy rehearsal CLI. It retains active plus one previous complete bulk snapshot. A date-only refresh with unchanged economic and eligibility content is a bulk no-op while bounded audit metadata advances the validated-through date.
+
+The production-copy rehearsal reproduces the Phase 4B result fingerprint and counts, verifies zero-write idempotency, changed-source activation, four rollback boundaries, CRMD readers, and unchanged production source hashes. Production schema migration, production writes, and pipeline activation remain blocked.
+
+## Relative Position Phase 4D
+
+Phase 4D is the separately authorized production migration and activation phase. It must add a reviewed exact-path production wrapper, execute the deployment runbook, and hook one full current-snapshot refresh after Absolute Valuation. It must not rebuild canonical history, TTM, Score, Lifecycle, or Valuation.

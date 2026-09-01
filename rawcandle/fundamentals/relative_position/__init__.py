@@ -12,7 +12,19 @@ from rawcandle.fundamentals.relative_position.engine import (
     RelativeSnapshot,
     RelativeStatus,
     calculate_snapshot,
+    recalculate_result_fingerprint,
     source_fingerprint,
+)
+from rawcandle.fundamentals.relative_position.persistence import (
+    PERSISTENCE_SCHEMA_VERSION,
+    ApplyReport,
+    RelativePositionRepository,
+    apply_snapshot,
+    ensure_schema,
+    migrate_analysis_copy,
+    quick_check,
+    source_content_fingerprint,
+    validate_snapshot,
 )
 
 __all__ = (
@@ -27,5 +39,15 @@ __all__ = (
     "RelativeSnapshot",
     "RelativeStatus",
     "calculate_snapshot",
+    "recalculate_result_fingerprint",
     "source_fingerprint",
+    "PERSISTENCE_SCHEMA_VERSION",
+    "ApplyReport",
+    "RelativePositionRepository",
+    "apply_snapshot",
+    "ensure_schema",
+    "migrate_analysis_copy",
+    "quick_check",
+    "source_content_fingerprint",
+    "validate_snapshot",
 )
