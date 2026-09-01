@@ -7,6 +7,10 @@ from pathlib import Path
 from rawcandle.fundamentals.score.engine import ScorePaths, run_score, score_paths
 from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_MODEL_FINGERPRINT
 from rawcandle.fundamentals.valuation.production import PRODUCTION_PATHS, validate_production_request
+from rawcandle.fundamentals.relative_position.production import (
+    PRODUCTION_PATHS as RELATIVE_POSITION_PRODUCTION_PATHS,
+    validate_production_request as validate_relative_position_production_request,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -14,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", type=Path, default=Path.cwd().resolve())
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--valuation-model-fingerprint", required=True)
+    parser.add_argument("--relative-position-model-fingerprint", required=True)
     parser.add_argument("--full-universe", action="store_true")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-production", action="store_true")
@@ -41,10 +46,23 @@ def main(argv: list[str] | None = None) -> int:
         apply=args.apply,
         confirm_production=args.confirm_production,
     )
+    relative_resolved = validate_relative_position_production_request(
+        canonical_db=paths.canonical_db,
+        provider_db=RELATIVE_POSITION_PRODUCTION_PATHS["provider"],
+        analysis_db=paths.analysis_db,
+        market_db=paths.market_db,
+        taxonomy_db=RELATIVE_POSITION_PRODUCTION_PATHS["taxonomy"],
+        model_fingerprint=args.relative_position_model_fingerprint,
+        full_universe=args.full_universe,
+        apply=args.apply,
+        confirm_production=args.confirm_production,
+    )
     preflight = {
         "mode": "APPLY" if args.apply else "DRY_RUN",
         "resolved_paths": resolved,
         "valuation_model_fingerprint": args.valuation_model_fingerprint,
+        "relative_position_model_fingerprint": args.relative_position_model_fingerprint,
+        "relative_position_resolved_paths": relative_resolved,
         "scope": "FULL_UNIVERSE",
     }
     print(json.dumps({"production_preflight": preflight}, sort_keys=True), flush=True)
@@ -52,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         paths,
         write_production=args.apply,
         production_preflight=preflight,
+        relative_position_model_fingerprint=args.relative_position_model_fingerprint,
     )
     print(f"classification={summary['classification']}")
     print(f"artifact_root={summary['artifact_root']}")

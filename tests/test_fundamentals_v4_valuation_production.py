@@ -12,6 +12,9 @@ from rawcandle.cli.run_fundamentals_v4_valuation_production import build_parser
 from rawcandle.fundamentals.score import engine as score_engine
 from rawcandle.fundamentals.schema.migrations import ANALYSIS_SCHEMA_SQL, bootstrap_database, connect
 from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT
+from rawcandle.fundamentals.relative_position.engine import (
+    MODEL_FINGERPRINT as RELATIVE_POSITION_MODEL_FINGERPRINT,
+)
 from rawcandle.fundamentals.valuation import production
 
 
@@ -58,11 +61,13 @@ def test_score_pipeline_cli_is_also_dry_run_and_explicitly_gated() -> None:
     args = score_parser().parse_args([
         "--repo-root", "/home/kalle/projects/rawcandle",
         "--valuation-model-fingerprint", MODEL_FINGERPRINT,
+        "--relative-position-model-fingerprint", RELATIVE_POSITION_MODEL_FINGERPRINT,
         "--full-universe",
     ])
     assert args.apply is False
     assert args.confirm_production is False
     assert args.valuation_model_fingerprint == MODEL_FINGERPRINT
+    assert args.relative_position_model_fingerprint == RELATIVE_POSITION_MODEL_FINGERPRINT
 
 
 def test_production_cli_persists_resolved_paths_before_apply(

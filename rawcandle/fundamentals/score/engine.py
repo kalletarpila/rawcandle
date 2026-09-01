@@ -414,6 +414,24 @@ def refresh_valuation_after_lifecycle(paths: ScorePaths) -> dict[str, Any]:
     ))
 
 
+def refresh_relative_position_after_valuation(
+    paths: ScorePaths,
+    *,
+    model_fingerprint: str,
+) -> dict[str, Any]:
+    from rawcandle.fundamentals.relative_position.production import refresh_relative_position
+
+    return asdict(refresh_relative_position(
+        canonical_db=paths.canonical_db,
+        analysis_db=paths.analysis_db,
+        market_db=paths.market_db,
+        taxonomy_db=paths.repo_root / "data" / "analysis.db",
+        snapshot_date=datetime.now(timezone.utc).date().isoformat(),
+        model_fingerprint=model_fingerprint,
+        applied_at_utc=utc_now(),
+    ))
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
@@ -431,6 +449,7 @@ def run_score(
     *,
     write_production: bool = True,
     production_preflight: Mapping[str, Any] | None = None,
+    relative_position_model_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     paths.artifact_root.mkdir(parents=True, exist_ok=False)
     if production_preflight is not None:
@@ -530,9 +549,33 @@ def run_score(
             }
             _write_json(paths.artifact_root / "score_v1_summary.json", summary)
             raise RuntimeError("POST_LIFECYCLE_VALUATION_REFRESH_FAILED") from exc
+        try:
+            if relative_position_model_fingerprint is None:
+                raise ValueError("RELATIVE_POSITION_MODEL_FINGERPRINT_REQUIRED")
+            summary["relative_position_refresh"] = {
+                "status": "COMPLETE",
+                "scope": "FULL_UNIVERSE",
+                **refresh_relative_position_after_valuation(
+                    paths,
+                    model_fingerprint=relative_position_model_fingerprint,
+                ),
+            }
+            summary["relative_position_writes"] = summary["relative_position_refresh"][
+                "apply"
+            ]["result_rows_inserted"]
+        except Exception as exc:
+            summary["classification"] = "V4_SCORE_V1_IMPLEMENTATION_BLOCKED"
+            summary["relative_position_refresh"] = {
+                "status": "FAILED",
+                "scope": "FULL_UNIVERSE",
+                "error": str(exc),
+            }
+            _write_json(paths.artifact_root / "score_v1_summary.json", summary)
+            raise RuntimeError("POST_VALUATION_RELATIVE_POSITION_REFRESH_FAILED") from exc
     else:
         summary["lifecycle_refresh"] = {"status": "SKIPPED"}
         summary["valuation_refresh"] = {"status": "SKIPPED"}
+        summary["relative_position_refresh"] = {"status": "SKIPPED"}
     _write_json(paths.artifact_root / "score_v1_summary.json", summary)
     _write_json(paths.artifact_root / "score_v1_model_contract.json", MODEL_CONTRACT)
     _write_sample(paths.artifact_root / "score_v1_sample.csv", rows)
