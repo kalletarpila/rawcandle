@@ -93,6 +93,6 @@ Persisted active counts reproduced Phase 4B: Fundamental eligible 2,198; Valuati
 
 Canonical, analysis source, market, and taxonomy production database SHA-256, size, mtime, schema hash, and SQLite checks were identical before and after. The rehearsal report contains the evidence. The provider database was never opened by the workflow; its post-run SHA-256 remained `17660df9f00837fbb52668aff17144d1b167aae4458dfa1a3c057701924b6d9c`, size 546,754,560 bytes, mtime epoch 1,788,157,472, and quick check `ok`, matching the recorded pre-run baseline. No production database was migrated or written.
 
-## Phase 4D boundary
+## Phase 4D production activation
 
-Phase 4D must add a separately reviewed production authorization wrapper, execute the deployment runbook, and only then connect one full Relative Position refresh after the completed daily Valuation step. Phase 4C code is callable by that wrapper but cannot authorize production itself.
+Phase 4D was deployed on 2026-09-01 from code commit `75377e07f46913d2af21cc5c858f3ff85d43e265`. The exact-path production wrapper, first active snapshot, zero-bulk-write identical replay, production readers, and post-Valuation full-snapshot hook are active. The Phase 4C CLI remains production-blocked; only the Phase 4D wrapper can authorize the exact production paths. See `fundamentals_v4_relative_position_v1_phase4d_deployment.md` for commands, backup, fingerprints, counts, reader checks, pipeline smoke, and integrity evidence.

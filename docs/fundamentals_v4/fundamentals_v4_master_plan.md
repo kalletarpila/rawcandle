@@ -235,4 +235,6 @@ The production-copy rehearsal reproduces the Phase 4B result fingerprint and cou
 
 ## Relative Position Phase 4D
 
-Phase 4D is the separately authorized production migration and activation phase. It must add a reviewed exact-path production wrapper, execute the deployment runbook, and hook one full current-snapshot refresh after Absolute Valuation. It must not rebuild canonical history, TTM, Score, Lifecycle, or Valuation.
+Status: `PRODUCTION_ACTIVE`
+
+Phase 4D added the reviewed exact-path production wrapper and activated one full current-snapshot refresh after Absolute Valuation. Production deployment completed on 2026-09-01 from code commit `75377e07f46913d2af21cc5c858f3ff85d43e265`: the first apply activated 13,737 result rows and 19,596 coverage rows, the identical replay and pipeline smoke made zero bulk writes, and all reader and integrity checks passed. Score, Lifecycle, Valuation, canonical, provider, market, and taxonomy contents remained unchanged. The deployment record is `fundamentals_v4_relative_position_v1_phase4d_deployment.md`.
