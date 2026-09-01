@@ -176,3 +176,11 @@ V4-3A redesigned the now-superseded `V4_FUNDAMENTAL_SCORE_V1` as independent con
 ## V4-3B Simple Score Methodology
 
 V4-3B locked `SIMPLE_FUNDAMENTAL_SCORE_V1`, corrected calibration to true quarter-end as-of cross-sections, and locked the 4x Balance Sheet floor. The canonical universe already excludes banks, insurers, REITs, and other true financial companies, so point-in-time sector classification is not a Score blocker. Later owner-approved revisions score stored period-end basic shares directly, treat positive YoY changes above 50% as genuine dilution, and replace level-stability Consistency with the 10-point five-snapshot Fundamental Trajectory component. V4-4 implements production Score writes in the existing analysis schema.
+
+## Lifecycle Phase 2A
+
+Status: `PURE_METHODOLOGY_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`
+
+Phase 2A implements `V4_FUNDAMENTAL_LIFECYCLE_V1` as a pure raw classifier and immutable two-observation state machine. The active specification is `fundamentals_v4_lifecycle_v1_specification.md`. SCALING precedes GROWTH, PRE_REVENUE is an exact four-zero-quarter STARTUP profile, STRUGGLING is separate from TRANSITION, DISTRESSED enters immediately and exits only after two identical recovery states, and UNCLASSIFIED clears candidates while exposing the last confirmed state only as history.
+
+No schema, production database, Score behavior, backfill, scheduler, report or activation changed. Production PIT event construction and persistence remain a separate next phase.
