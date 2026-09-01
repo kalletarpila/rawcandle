@@ -101,3 +101,5 @@ python3 -m rawcandle.cli.run_fundamentals_v4_valuation_production \
 Valuation dry-run uses the same command with `--stage valuation` and without the two write flags. First and second production applies add `--apply --confirm-production`. The CLI persists resolved paths and before/after database evidence for every stage.
 
 The established operational hook remains the Score production path. After Score commits, Lifecycle refresh completes and commits, then Valuation refresh runs with `FULL_UNIVERSE_FALLBACK`. Valuation owns its analysis-local transaction; failure preserves the previous valuation rows and is raised as `POST_LIFECYCLE_VALUATION_REFRESH_FAILED` without undoing Score or Lifecycle.
+
+The 2026-09-01 production execution is recorded in `fundamentals_v4_valuation_v1_phase3d_deployment.md`.
