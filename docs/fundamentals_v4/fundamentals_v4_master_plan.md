@@ -238,3 +238,17 @@ The production-copy rehearsal reproduces the Phase 4B result fingerprint and cou
 Status: `PRODUCTION_ACTIVE`
 
 Phase 4D added the reviewed exact-path production wrapper and activated one full current-snapshot refresh after Absolute Valuation. Production deployment completed on 2026-09-01 from code commit `75377e07f46913d2af21cc5c858f3ff85d43e265`: the first apply activated 13,737 result rows and 19,596 coverage rows, the identical replay and pipeline smoke made zero bulk writes, and all reader and integrity checks passed. Score, Lifecycle, Valuation, canonical, provider, market, and taxonomy contents remained unchanged. The deployment record is `fundamentals_v4_relative_position_v1_phase4d_deployment.md`.
+
+## Fundamental Delta Phase 5A
+
+Status: `READ_ONLY_METHOD_AND_DATA_CONTRACT_COMPLETE`
+
+Phase 5A selected strict Candidate A for canonical total Delta: two complete, fully observed, TTM-ready, model-identical Score endpoints on the stable seven-component 100-point denominator. It established currently revised history semantics, complete fiscal chains, independent component diagnostics, categorical Lifecycle context, separate filing-date Valuation diagnostics, and exclusion of historical Relative Position changes. It made no code, schema or production changes.
+
+## Fundamental Delta Phase 5B
+
+Status: `PURE_ENGINE_AND_READ_ONLY_FULL_HISTORY_REHEARSAL_COMPLETE_NOT_PRODUCTION_ACTIVE`
+
+Phase 5B implements pure deterministic QoQ, `TWO_QUARTER` and YoY Fundamental Delta, the shared fiscal resolver, separate Lifecycle and Valuation contexts, explicit-fingerprint read-only adapters, focused regressions and a two-pass full-history rehearsal. The active specification is `fundamentals_v4_delta_v1_specification.md` and implementation record is `fundamentals_v4_delta_v1_phase5b_implementation.md`.
+
+Phase 5B creates no production schema, persistence, migration, backfill, reader activation or pipeline hook. Phase 5C remains a separately authorized compact persistence design and deployment decision.
