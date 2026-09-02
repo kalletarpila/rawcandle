@@ -252,3 +252,13 @@ Status: `PURE_ENGINE_AND_READ_ONLY_FULL_HISTORY_REHEARSAL_COMPLETE_NOT_PRODUCTIO
 Phase 5B implements pure deterministic QoQ, `TWO_QUARTER` and YoY Fundamental Delta, the shared fiscal resolver, separate Lifecycle and Valuation contexts, explicit-fingerprint read-only adapters, focused regressions and a two-pass full-history rehearsal. The active specification is `fundamentals_v4_delta_v1_specification.md` and implementation record is `fundamentals_v4_delta_v1_phase5b_implementation.md`.
 
 Phase 5B creates no production schema, persistence, migration, backfill, reader activation or pipeline hook. Phase 5C remains a separately authorized compact persistence design and deployment decision.
+
+## Fundamental Delta Phase 5C
+
+Status: `ADDITIVE_PERSISTENCE_AND_PRODUCTION_COPY_REHEARSAL_COMPLETE_NOT_PRODUCTION_ACTIVE`
+
+Phase 5C implements persistence version `V4_FUNDAMENTAL_DELTA_REVISED_HISTORY_V1`: one wide total row, seven wide component rows and separate wide Lifecycle and filing-date Valuation rows per endpoint. It adds idempotent fresh/upgrade schema support, deterministic packages, atomic full/company replacement, explicit-fingerprint readers, reusable quick checks and a production-path-blocked rehearsal CLI.
+
+The production-copy rehearsal persisted 50,585 totals, 354,095 components, 50,585 Lifecycle contexts and 50,585 Valuation diagnostics. The first apply succeeded, the identical apply made zero logical writes and no page growth, complete-company change/removal/restore worked, and six failure boundaries rolled back. Actual growth was approximately 602 MB, primarily Valuation explanatory JSON and component audit rows; Phase 5D must explicitly accept this storage result or authorize redesign before deployment.
+
+No real production database, active pipeline or provider operation changed. Phase 5D remains separately authorized and must add the exact-path production wrapper, Delta pipeline stage after Valuation and before Relative Position, retained backup, deployment evidence and rollback controls described in `fundamentals_v4_delta_v1_phase5d_runbook.md`.
