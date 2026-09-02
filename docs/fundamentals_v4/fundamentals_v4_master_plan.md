@@ -253,12 +253,12 @@ Phase 5B implements pure deterministic QoQ, `TWO_QUARTER` and YoY Fundamental De
 
 Phase 5B creates no production schema, persistence, migration, backfill, reader activation or pipeline hook. Phase 5C remains a separately authorized compact persistence design and deployment decision.
 
-## Fundamental Delta Phase 5C
+## Fundamental Delta Phase 5C.2
 
 Status: `ADDITIVE_PERSISTENCE_AND_PRODUCTION_COPY_REHEARSAL_COMPLETE_NOT_PRODUCTION_ACTIVE`
 
-Phase 5C implements persistence version `V4_FUNDAMENTAL_DELTA_REVISED_HISTORY_V1`: one wide total row, seven wide component rows and separate wide Lifecycle and filing-date Valuation rows per endpoint. It adds idempotent fresh/upgrade schema support, deterministic packages, atomic full/company replacement, explicit-fingerprint readers, reusable quick checks and a production-path-blocked rehearsal CLI.
+The never-deployed Phase 5C V1 layout was retired after Phase 5C.1 measured approximately 602 MB growth. Phase 5C.2 implements normalized Alternative D as persistence version `V4_FUNDAMENTAL_DELTA_REVISED_HISTORY_V2`, layout fingerprint `001d4d86ff3f279b2c44f497d536883a8f63bf281ee34c9086881e14635997c0`.
 
-The production-copy rehearsal persisted 50,585 totals, 354,095 components, 50,585 Lifecycle contexts and 50,585 Valuation diagnostics. The first apply succeeded, the identical apply made zero logical writes and no page growth, complete-company change/removal/restore worked, and six failure boundaries rolled back. Actual growth was approximately 602 MB, primarily Valuation explanatory JSON and component audit rows; Phase 5D must explicitly accept this storage result or authorize redesign before deployment.
+V2 persists 50,585 compact totals and 354,095 narrow `WITHOUT ROWID` components. Lifecycle and Valuation contexts are calculated on demand from targeted authoritative revised histories; no Delta-owned context rows or Valuation JSON exist. The first apply, identical no-op, complete-company change/removal/restore and six rollback boundaries passed. Production-copy growth was 68,038,656 bytes, close to the approximately 64.46 MB prototype target and about 88.69% below V1.
 
-No real production database, active pipeline or provider operation changed. Phase 5D remains separately authorized and must add the exact-path production wrapper, Delta pipeline stage after Valuation and before Relative Position, retained backup, deployment evidence and rollback controls described in `fundamentals_v4_delta_v1_phase5d_runbook.md`.
+No real production database, active pipeline or provider operation changed. Phase 5D remains separately authorized and must add the exact-path production wrapper, direct additive V2 migration, Delta pipeline stage after Valuation and before Relative Position, retained backup, deployment evidence and rollback controls described in `fundamentals_v4_delta_v1_phase5d_runbook.md`.

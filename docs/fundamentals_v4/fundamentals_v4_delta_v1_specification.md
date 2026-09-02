@@ -57,6 +57,8 @@ Relative Position, peer percentiles, taxonomy changes and historical rank moveme
 
 The compact endpoint result retains current identity, fiscal identity, availability date, source Score status and fingerprint, three independently ready horizon records, prior endpoint references, total changes, component contributions, reconciliation and deterministic reason codes. Model, source and result fingerprints are separate. Lifecycle and Valuation use their own provenance. A combined rehearsal fingerprint is an audit package identity only, not an economic model.
 
-## Production Boundary
+## Persistence Separation And Production Boundary
 
-Phase 5B provides pure calculation, read-only adapters and an artifact rehearsal only. It creates no production schema, migration, persistence writer, result row, backfill or pipeline hook. Any persistence is a separately authorized Phase 5C decision.
+Phase 5B provides the pure calculation and context engines. Phase 5C.2's non-production V2 persistence stores only Fundamental total and seven component histories. Lifecycle Change Context and filing-date Valuation Change Diagnostic are derived on demand from their authoritative revised histories; they are not copied into Delta tables and Valuation explanatory JSON is not persisted by Delta.
+
+Phase 5C.2 creates no production migration, backfill or pipeline hook. Production activation remains a separately authorized Phase 5D decision.

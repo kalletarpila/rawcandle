@@ -9,7 +9,8 @@ import pytest
 from tests.test_fundamentals_v4_delta_source import build_databases
 from rawcandle.fundamentals.delta.engine import MODEL_FINGERPRINT
 from rawcandle.fundamentals.delta.persistence import (
-    COMPONENT_TABLE, LIFECYCLE_TABLE, META_TABLE, SCHEMA_STATEMENTS, TABLES, TOTAL_TABLE,
+    COMPONENT_TABLE, COMPONENT_TYPE_TABLE, LAYOUT_FINGERPRINT, LIFECYCLE_TABLE, META_TABLE,
+    PACKAGE_TABLE, REASON_TABLE, SCHEMA_STATEMENTS, STATUS_TABLE, TABLES, TOTAL_TABLE,
     VALUATION_TABLE, apply_package, build_persistence_package, ensure_schema, quick_check,
     recalculate_row_fingerprint, rebuild_package, schema_signature, validate_package,
 )
@@ -61,33 +62,52 @@ def test_fresh_and_upgraded_delta_schema_are_equivalent_and_idempotent():
     upgraded.execute("CREATE TABLE score_result(score_result_id INTEGER PRIMARY KEY)")
     before={row[0] for row in upgraded.execute("SELECT name FROM sqlite_schema")}
     for conn in (fresh,upgraded): ensure_schema(conn,applied_at_utc="n"); ensure_schema(conn,applied_at_utc="n")
-    delta_names={META_TABLE,*TABLES,"idx_fundamental_delta_current","idx_fundamental_delta_cross_section","idx_fundamental_delta_component_reader","idx_lifecycle_change_current","idx_valuation_change_current"}
+    delta_names={PACKAGE_TABLE,STATUS_TABLE,REASON_TABLE,COMPONENT_TYPE_TABLE,*TABLES,"idx_fundamental_delta_current","idx_fundamental_delta_cross_section"}
     fresh_objects={row[0]:row[1] for row in fresh.execute("SELECT name,sql FROM sqlite_schema WHERE name IN (%s)"%(','.join('?' for _ in delta_names)),tuple(delta_names))}
     upgraded_objects={row[0]:row[1] for row in upgraded.execute("SELECT name,sql FROM sqlite_schema WHERE name IN (%s)"%(','.join('?' for _ in delta_names)),tuple(delta_names))}
     assert fresh_objects==upgraded_objects
     assert before <= {row[0] for row in upgraded.execute("SELECT name FROM sqlite_schema")}
     assert not any("VACUUM" in statement.upper() or "ALTER TABLE" in statement.upper() or "DROP TABLE" in statement.upper() for statement in SCHEMA_STATEMENTS)
     assert upgraded.execute("PRAGMA foreign_key_check").fetchall()==[]
+    assert not {LIFECYCLE_TABLE,VALUATION_TABLE,"fundamental_delta_revised_result","fundamental_delta_revised_component"} & set(fresh_objects)
+    assert "WITHOUT ROWID" in fresh_objects[COMPONENT_TABLE]
+    assert all("payload_json" not in sql for sql in fresh_objects.values())
 
 
 def test_full_apply_identical_noop_and_quick_check(connection,package):
     first=apply_package(connection,package,applied_at_utc="n")
-    assert (first.total_inserted,first.component_inserted,first.lifecycle_inserted,first.valuation_inserted)==(5,35,5,5)
+    assert (first.total_inserted,first.component_inserted,first.lifecycle_inserted,first.valuation_inserted)==(5,35,0,0)
     second=apply_package(connection,package,applied_at_utc="n")
     assert second.outcome=="NO_CHANGE"
     assert sum((second.total_inserted,second.total_deleted,second.total_updated,second.component_inserted,second.component_deleted,second.component_updated,second.lifecycle_inserted,second.lifecycle_deleted,second.lifecycle_updated,second.valuation_inserted,second.valuation_deleted,second.valuation_updated))==0
-    assert quick_check(connection,model_fingerprint=MODEL_FINGERPRINT)["ok"]
+    deep=quick_check(connection,model_fingerprint=MODEL_FINGERPRINT,authoritative_package=package)
+    assert deep["ok"] and deep["authoritative_replay"]
     assert connection.execute("PRAGMA foreign_key_check").fetchall()==[]
 
 
-def test_changed_full_apply_reports_update_and_preserves_other_model(connection,package):
+def test_changed_full_apply_reports_update_and_layout_metadata(connection,package):
     apply_package(connection,package,applied_at_utc="n")
-    row=dict(connection.execute(f"SELECT * FROM {TOTAL_TABLE} LIMIT 1").fetchone()); row["fundamental_delta_result_id"]+=1; row["company_id"]+=100; row["model_fingerprint"]="other"; row["result_fingerprint"]="other"
-    columns=tuple(row); connection.execute(f"INSERT INTO {TOTAL_TABLE}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",tuple(row.values())); connection.commit()
     report=apply_package(connection,changed_package(package),applied_at_utc="n")
     assert report.total_updated==1 and report.total_unchanged==4
+    metadata=connection.execute(f"SELECT * FROM {PACKAGE_TABLE}").fetchone()
+    assert metadata["layout_fingerprint"]==LAYOUT_FINGERPRINT
+    assert metadata["total_row_count"]==5 and metadata["component_row_count"]==35
+
+
+def test_apply_preserves_rows_owned_by_another_model_package(connection,package):
+    apply_package(connection,package,applied_at_utc="n")
+    metadata=dict(connection.execute(f"SELECT * FROM {PACKAGE_TABLE}").fetchone())
+    metadata.update(package_id=metadata["package_id"]+1,model_fingerprint="other-model",economic_package_fingerprint="other-package",physical_content_fingerprint="other-content",total_row_count=1,component_row_count=0)
+    columns=tuple(metadata)
+    connection.execute(f"INSERT INTO {PACKAGE_TABLE}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",tuple(metadata.values()))
+    endpoint=dict(connection.execute(f"SELECT * FROM {TOTAL_TABLE} LIMIT 1").fetchone())
+    endpoint.update(endpoint_id=endpoint["endpoint_id"]+10**15,package_id=metadata["package_id"],company_id=999999,result_fingerprint="other-row")
+    columns=tuple(endpoint)
+    connection.execute(f"INSERT INTO {TOTAL_TABLE}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",tuple(endpoint.values()))
+    connection.commit()
+    report=apply_package(connection,changed_package(package),applied_at_utc="n")
     assert report.retained_other_model_rows==1
-    assert connection.execute(f"SELECT COUNT(*) FROM {TOTAL_TABLE} WHERE model_fingerprint='other'").fetchone()[0]==1
+    assert connection.execute(f"SELECT COUNT(*) FROM {TOTAL_TABLE} WHERE package_id=?",(metadata["package_id"],)).fetchone()[0]==1
 
 
 def test_company_rebuild_change_removal_restore_and_idempotency(connection,package):
@@ -161,8 +181,12 @@ def test_source_lag_and_unavailable_value_contracts_rejected(package):
         rebuild_package(package.total_rows,components,package.lifecycle_rows,package.valuation_rows,fundamental_source_fingerprint=package.fundamental_source_fingerprint,lifecycle_source_fingerprint=package.lifecycle_source_fingerprint,valuation_source_fingerprint=package.valuation_source_fingerprint)
 
 
-def test_readers_current_history_endpoint_cross_section_components_and_contexts(connection,package):
-    apply_package(connection,package,applied_at_utc="n")
+def test_readers_current_history_endpoint_cross_section_components_and_contexts(tmp_path):
+    paths=build_databases(tmp_path/"reader_source")
+    source=load_delta_source(paths,score_model_fingerprint=SCORE_FP,lifecycle_model_fingerprint=LIFECYCLE_FP,valuation_model_fingerprint=VALUATION_FP)
+    package=build_persistence_package(source)
+    connection=sqlite3.connect(paths.analysis_db); connection.row_factory=sqlite3.Row; connection.execute("PRAGMA foreign_keys=ON")
+    ensure_schema(connection,applied_at_utc="n"); connection.commit(); apply_package(connection,package,applied_at_utc="n")
     fundamental=FundamentalDeltaRepository(connection); lifecycle=LifecycleChangeRepository(connection); valuation=ValuationChangeRepository(connection)
     current=fundamental.current_company(1,model_fingerprint=MODEL_FINGERPRINT)
     assert current["fiscal_quarter"]=="Q1" and len(fundamental.history(1,model_fingerprint=MODEL_FINGERPRINT))==5
@@ -170,8 +194,34 @@ def test_readers_current_history_endpoint_cross_section_components_and_contexts(
     assert len(fundamental.cross_section(current["fiscal_year"],current["fiscal_quarter"],model_fingerprint=MODEL_FINGERPRINT))==1
     combined=fundamental.with_components(1,current["fiscal_year"],current["fiscal_quarter"],model_fingerprint=MODEL_FINGERPRINT)
     assert len(combined["components"])==7
-    assert lifecycle.current_company(1,model_fingerprint=MODEL_FINGERPRINT)["current_final_state"]=="MATURE"
-    assert isinstance(valuation.current_company(1,model_fingerprint=MODEL_FINGERPRINT)["qoq_payload"],dict)
+    assert lifecycle.current_company(1,model_fingerprint=LIFECYCLE_FP)["current_final_state"]=="MATURE"
+    valuation_current=valuation.current_company(1,model_fingerprint=VALUATION_FP)
+    assert len(valuation_current["horizons"])==3
+    assert len(lifecycle.current_batch((1,),model_fingerprint=LIFECYCLE_FP))==1
+    assert len(valuation.current_batch((1,),model_fingerprint=VALUATION_FP))==1
     assert fundamental.history(1,model_fingerprint=MODEL_FINGERPRINT)[0]["qoq_delta"] is None
     assert current["qoq_delta"] == 0.0
     with pytest.raises(ValueError,match="FINGERPRINT_REJECTED"): fundamental.current_company(1,model_fingerprint="wrong")
+    connection.close()
+
+
+def test_v2_query_plans_use_only_justified_indexes(connection,package):
+    apply_package(connection,package,applied_at_utc="n")
+    package_id=connection.execute(f"SELECT package_id FROM {PACKAGE_TABLE}").fetchone()[0]
+    endpoint_id=connection.execute(f"SELECT endpoint_id FROM {TOTAL_TABLE} LIMIT 1").fetchone()[0]
+    current=" ".join(row[3] for row in connection.execute(f"EXPLAIN QUERY PLAN SELECT * FROM {TOTAL_TABLE} WHERE package_id=? AND company_id=? ORDER BY fiscal_sequence DESC LIMIT 1",(package_id,1)))
+    cross=" ".join(row[3] for row in connection.execute(f"EXPLAIN QUERY PLAN SELECT * FROM {TOTAL_TABLE} WHERE package_id=? AND fiscal_year=? AND fiscal_quarter=? ORDER BY company_id",(package_id,2025,1)))
+    component=" ".join(row[3] for row in connection.execute(f"EXPLAIN QUERY PLAN SELECT * FROM {COMPONENT_TABLE} WHERE endpoint_id=? ORDER BY component_id",(endpoint_id,)))
+    assert "idx_fundamental_delta_current" in current
+    assert "idx_fundamental_delta_cross_section" in cross
+    assert "PRIMARY KEY" in component
+    indexes={row[0] for row in connection.execute("SELECT name FROM sqlite_schema WHERE type='index'")}
+    assert "idx_fundamental_delta_component_reader" not in indexes
+
+
+def test_never_deployed_v1_schema_is_rejected():
+    conn=sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE fundamental_delta_revised_result(id INTEGER)")
+    with pytest.raises(RuntimeError,match="NEVER_DEPLOYED_DELTA_V1"):
+        ensure_schema(conn,applied_at_utc="n")
+    conn.close()

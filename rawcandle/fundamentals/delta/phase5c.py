@@ -19,6 +19,8 @@ from rawcandle.fundamentals.delta.readers import (
     FundamentalDeltaRepository, LifecycleChangeRepository, ValuationChangeRepository,
 )
 from rawcandle.fundamentals.delta.source import DeltaSource, ReadOnlyDeltaPaths, latest_fresh_observations, load_delta_source
+from rawcandle.fundamentals.lifecycle.engine import MODEL_FINGERPRINT as LIFECYCLE_MODEL_FINGERPRINT
+from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_MODEL_FINGERPRINT
 
 
 PRODUCTION_PATHS = {
@@ -96,7 +98,11 @@ def validate_request(*, analysis_db:Path,canonical_db:Path,provider_db:Path,mark
 
 def _changed_source_package(package:DeltaPersistencePackage, *, marker:str) -> DeltaPersistencePackage:
     source=fingerprint({"source":package.fundamental_source_fingerprint,"simulation":marker})
-    totals=[recalculate_row_fingerprint({**row,"source_fingerprint":source}) for row in package.total_rows]
+    totals=[]
+    for index,row in enumerate(package.total_rows):
+        values={**row,"source_fingerprint":source}
+        if index==0: values["current_available_date"]="2099-01-01"
+        totals.append(recalculate_row_fingerprint(values))
     components=[recalculate_row_fingerprint({**row,"source_fingerprint":source}) for row in package.component_rows]
     return rebuild_package(totals,components,package.lifecycle_rows,package.valuation_rows,fundamental_source_fingerprint=source,lifecycle_source_fingerprint=package.lifecycle_source_fingerprint,valuation_source_fingerprint=package.valuation_source_fingerprint)
 
@@ -120,7 +126,10 @@ def _spot_checks(conn:sqlite3.Connection, source:Any) -> dict[str,Any]:
         company_id=next((cid for cid,name in source.company_tickers.items() if name==ticker),None)
         if company_id is None: output[ticker]=None; continue
         total=fundamental.current_company(company_id,model_fingerprint=MODEL_FINGERPRINT)
-        output[ticker]={"company_id":company_id,"qoq":total["qoq_delta"],"two_quarter":total["two_quarter_delta"],"yoy":total["yoy_delta"],"components":len(fundamental.with_components(company_id,total["fiscal_year"],total["fiscal_quarter"],model_fingerprint=MODEL_FINGERPRINT)["components"]),"lifecycle":lifecycle.current_company(company_id,model_fingerprint=MODEL_FINGERPRINT)["current_final_state"],"valuation_two_quarter":valuation.current_company(company_id,model_fingerprint=MODEL_FINGERPRINT)["two_quarter_delta"]}
+        life=lifecycle.current_company(company_id,model_fingerprint=LIFECYCLE_MODEL_FINGERPRINT)
+        val=valuation.current_company(company_id,model_fingerprint=VALUATION_MODEL_FINGERPRINT)
+        val_two_quarter=next(item for item in val["horizons"] if item["horizon"].value=="TWO_QUARTER")
+        output[ticker]={"company_id":company_id,"qoq":total["qoq_delta"],"two_quarter":total["two_quarter_delta"],"yoy":total["yoy_delta"],"components":len(fundamental.with_components(company_id,total["fiscal_year"],total["fiscal_quarter"],model_fingerprint=MODEL_FINGERPRINT)["components"]),"lifecycle":life["current_final_state"],"valuation_two_quarter":val_two_quarter["score_change"]}
     return output
 
 
@@ -159,7 +168,7 @@ def run_phase5c(*,analysis_db:Path,canonical_db:Path,provider_db:Path,market_db:
     before={name:database_evidence(path) for name,path in source_paths.items()}
     source=load_delta_source(ReadOnlyDeltaPaths(analysis_db,canonical_db),score_model_fingerprint=score_model_fingerprint,lifecycle_model_fingerprint=lifecycle_model_fingerprint,valuation_model_fingerprint=valuation_model_fingerprint)
     started=time.monotonic(); package=build_persistence_package(source); build_seconds=time.monotonic()-started
-    report={"ok":True,"mode":"APPLY" if apply else "DRY_RUN","scope":"FULL" if full_universe else "COMPANY","company_ids":sorted(set(company_ids)),"destination":str(destination.resolve()),"package_fingerprint":package.package_fingerprint,"source_fingerprints":{"fundamental":package.fundamental_source_fingerprint,"lifecycle":package.lifecycle_source_fingerprint,"valuation":package.valuation_source_fingerprint},"result_fingerprints":{"fundamental":package.fundamental_result_fingerprint,"lifecycle":package.lifecycle_result_fingerprint,"valuation":package.valuation_result_fingerprint},"package_rows":{"total":len(package.total_rows),"component":len(package.component_rows),"lifecycle":len(package.lifecycle_rows),"valuation":len(package.valuation_rows)},"readiness_reconciliation":_readiness_reconciliation(package,as_of_date=as_of_date,source=source),"package_build_seconds":build_seconds,"production_sources_before":before}
+    report={"ok":True,"mode":"APPLY" if apply else "DRY_RUN","scope":"FULL" if full_universe else "COMPANY","company_ids":sorted(set(company_ids)),"destination":str(destination.resolve()),"package_fingerprint":package.package_fingerprint,"source_fingerprints":{"fundamental":package.fundamental_source_fingerprint,"lifecycle":package.lifecycle_source_fingerprint,"valuation":package.valuation_source_fingerprint},"result_fingerprints":{"fundamental":package.fundamental_result_fingerprint,"lifecycle":package.lifecycle_result_fingerprint,"valuation":package.valuation_result_fingerprint},"persisted_rows":{"total":len(package.total_rows),"component":len(package.component_rows),"lifecycle":0,"valuation":0},"validation_context_rows":{"lifecycle":len(package.lifecycle_rows),"valuation":len(package.valuation_rows)},"readiness_reconciliation":_readiness_reconciliation(package,as_of_date=as_of_date,source=source),"package_build_seconds":build_seconds,"production_sources_before":before}
     if not apply:
         after={name:database_evidence(path) for name,path in source_paths.items()}; report["production_sources_after"]=after
         report["destination_exists"]=destination.exists(); report["sources_unchanged"]={name:before[name]==after[name] for name in source_paths}
@@ -202,7 +211,7 @@ def run_phase5c(*,analysis_db:Path,canonical_db:Path,provider_db:Path,market_db:
                 except RuntimeError as exc: failures[stage]={"error":str(exc),"previous_state_preserved":quick_check(conn,model_fingerprint=MODEL_FINGERPRINT)["content_fingerprint"]==before_content}
                 else: raise RuntimeError(f"PHASE5C_FAILURE_INJECTION_DID_NOT_FAIL:{stage}")
             report["failure_injections"]=failures
-        report["quick_check"]=quick_check(conn,model_fingerprint=MODEL_FINGERPRINT)
+        report["quick_check"]=quick_check(conn,model_fingerprint=MODEL_FINGERPRINT,authoritative_package=package)
         if not report["quick_check"]["ok"]: raise RuntimeError(f"PHASE5C_QUICK_CHECK_FAILED:{report['quick_check']['details']}")
     finally: conn.close()
     report["destination_after"]=storage_evidence(destination)

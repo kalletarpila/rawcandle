@@ -207,12 +207,18 @@ def _score_rows(conn: sqlite3.Connection, score_fingerprint: str) -> tuple[list[
     return observations, fingerprint({"results": source_payload, "components": component_payload})
 
 
-def _lifecycle_rows(conn: sqlite3.Connection, model_fingerprint: str) -> tuple[list[LifecycleObservation], str]:
+def _lifecycle_rows(conn: sqlite3.Connection, model_fingerprint: str, company_ids: Sequence[int] = ()) -> tuple[list[LifecycleObservation], str]:
+    company_clause = ""
+    params: list[Any] = [model_fingerprint, HISTORY_MODE]
+    if company_ids:
+        selected = tuple(sorted(set(map(int, company_ids))))
+        company_clause = f" AND company_id IN ({','.join('?' for _ in selected)})"
+        params.extend(selected)
     rows = conn.execute(
-        """SELECT * FROM lifecycle_revised_result
-             WHERE model_fingerprint=? AND history_mode=?
+        f"""SELECT * FROM lifecycle_revised_result
+             WHERE model_fingerprint=? AND history_mode=? {company_clause}
              ORDER BY company_id,fiscal_sequence,lifecycle_revised_result_id""",
-        (model_fingerprint, HISTORY_MODE),
+        params,
     ).fetchall()
     _duplicate_guard(rows, source="LIFECYCLE")
     output: list[LifecycleObservation] = []
@@ -240,12 +246,18 @@ def _lifecycle_rows(conn: sqlite3.Connection, model_fingerprint: str) -> tuple[l
     return output, fingerprint(payload)
 
 
-def _valuation_rows(conn: sqlite3.Connection, model_fingerprint: str) -> tuple[list[ValuationObservation], str]:
+def _valuation_rows(conn: sqlite3.Connection, model_fingerprint: str, company_ids: Sequence[int] = ()) -> tuple[list[ValuationObservation], str]:
+    company_clause = ""
+    params: list[Any] = [model_fingerprint, HISTORY_MODE]
+    if company_ids:
+        selected = tuple(sorted(set(map(int, company_ids))))
+        company_clause = f" AND company_id IN ({','.join('?' for _ in selected)})"
+        params.extend(selected)
     rows = conn.execute(
-        """SELECT * FROM valuation_revised_result
-             WHERE model_fingerprint=? AND history_mode=?
+        f"""SELECT * FROM valuation_revised_result
+             WHERE model_fingerprint=? AND history_mode=? {company_clause}
              ORDER BY company_id,fiscal_sequence,valuation_revised_result_id""",
-        (model_fingerprint, HISTORY_MODE),
+        params,
     ).fetchall()
     _duplicate_guard(rows, source="VALUATION")
     output: list[ValuationObservation] = []

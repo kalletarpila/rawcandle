@@ -2,7 +2,9 @@
 
 ## Current Hard Stop
 
-Phase 5C is not production-authorized. `run_fundamentals_v4_delta_phase5c` rejects the exact production analysis path, source aliases, symlinks and destinations under `backups/`; it has no `--confirm-production`. Do not execute a production migration until Phase 5D adds and reviews a narrow exact-path production wrapper, pipeline hook and deployment record.
+Phase 5C.2 is not production-authorized. `run_fundamentals_v4_delta_phase5c` rejects the exact production analysis path, source aliases, symlinks and destinations under `backups/`; it has no `--confirm-production`. Do not execute a production migration until Phase 5D adds and reviews a narrow exact-path production wrapper, pipeline hook and deployment record.
+
+The only authorized future layout is persistence version `V4_FUNDAMENTAL_DELTA_REVISED_HISTORY_V2`, layout fingerprint `001d4d86ff3f279b2c44f497d536883a8f63bf281ee34c9086881e14635997c0`. V1 was never deployed. Production must receive the additive V2 schema directly; do not create, migrate or drop V1 Delta tables.
 
 The following Phase 5C command was verified against `--help` and remains the required final rehearsal:
 
@@ -64,14 +66,15 @@ The authorized command sequence must expose distinct operations for dry-run, add
 
 After the first authorized apply:
 
-- row counts must be 50,585 / 354,095 / 50,585 / 50,585 unless upstream source fingerprints changed and the difference is explained;
+- persisted row counts must be 50,585 total / 354,095 component / zero Delta-owned Lifecycle / zero Delta-owned Valuation unless upstream source fingerprints changed and the difference is explained;
 - Fundamental/Lifecycle/Valuation result fingerprints must match the same-run source package;
+- persistence/layout fingerprints must match the locked V2 values and no Valuation JSON may exist;
 - every quick-check detail must be empty;
-- CRMD and APD must return seven components and exact engine values;
+- CRMD and APD must return seven persisted components plus on-demand Lifecycle and Valuation context and exact engine values;
 - SQLite quick check must be `ok` and foreign-key violations zero;
-- first apply storage growth must be reviewed against the Phase 5C approximately 602 MB result.
+- first apply storage growth must be reviewed against the Phase 5C.2 68,038,656-byte rehearsal result and approximately 65 MB design target.
 
-Run the identical apply immediately. It must report zero inserted, deleted and updated result/context rows, unchanged size/page count and the same content fingerprint.
+Run the identical apply immediately. It must report zero inserted, deleted and updated total/component rows, unchanged size/page count and the same content fingerprint. Validate one-company and 20-company on-demand context readers separately; they must not create rows or cache tables.
 
 Activate the pipeline only after both applies pass. Insert Delta after Valuation and before Relative Position. Delta failure must leave previous Delta history active, surface pipeline failure, avoid provider calls and leave already committed Score/Lifecycle/Valuation untouched. Relative Position behavior after Delta failure must be explicit in the Phase 5D code review.
 
@@ -79,7 +82,7 @@ Run a no-provider-update pipeline smoke and record every stage, transaction outc
 
 ## Rollback
 
-Rollback criteria include migration/apply exception, quick-check or FK failure, fingerprint mismatch, wrong row counts, partial contexts, failed idempotency, unexplained storage growth or reader mismatch.
+Rollback criteria include migration/apply exception, quick-check or FK failure, fingerprint mismatch, wrong row counts, any persisted context/JSON, failed idempotency, unexplained storage growth or reader mismatch.
 
 Stop all writers before restoring. Retain the failed production database for diagnosis, then restore through SQLite:
 
