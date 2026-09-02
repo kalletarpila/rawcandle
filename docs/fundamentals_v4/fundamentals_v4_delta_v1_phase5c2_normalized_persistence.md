@@ -92,4 +92,4 @@ Warm local median/P90 timings were 0.013/0.015 ms for persisted current Fundamen
 
 ## Production Boundary
 
-No production migration, write, pipeline activation, provider update or push occurred. Phase 5D must add a separately reviewed exact-path production wrapper, retained backup, first apply, identical no-op, reader/context checks, pipeline hook after Valuation and before Relative Position, and rollback/deployment record.
+No production migration, write, pipeline activation, provider update or push occurred during Phase 5C.2. Those controls were subsequently implemented and verified in Phase 5D; see `fundamentals_v4_delta_v1_phase5d_deployment.md`.

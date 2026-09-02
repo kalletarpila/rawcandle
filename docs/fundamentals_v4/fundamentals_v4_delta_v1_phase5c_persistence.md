@@ -19,4 +19,4 @@ The retired objects are:
 
 V2 migration rejects a disposable development database containing these objects with `NEVER_DEPLOYED_DELTA_V1_LAYOUT_REQUIRES_DISPOSABLE_DATABASE_RECREATION`. It does not add production `DROP` statements for a schema production never received.
 
-The active persistence record is `fundamentals_v4_delta_v1_phase5c2_normalized_persistence.md`. Delta remains not production-active; Phase 5D is still a separate authorization and deployment step.
+The normalized persistence design record is `fundamentals_v4_delta_v1_phase5c2_normalized_persistence.md`. Phase 5D subsequently activated it in production; see `fundamentals_v4_delta_v1_phase5d_deployment.md`.

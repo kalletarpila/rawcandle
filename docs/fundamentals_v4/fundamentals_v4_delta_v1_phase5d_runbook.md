@@ -1,12 +1,12 @@
 # Fundamental Delta V1 Phase 5D Deployment Runbook
 
-## Current Hard Stop
+## Current Production Status
 
-Phase 5C.2 is not production-authorized. `run_fundamentals_v4_delta_phase5c` rejects the exact production analysis path, source aliases, symlinks and destinations under `backups/`; it has no `--confirm-production`. Do not execute a production migration until Phase 5D adds and reviews a narrow exact-path production wrapper, pipeline hook and deployment record.
+Phase 5D completed on 2026-09-02. Fundamental Delta V1 is active with normalized V2 persistence. The production wrapper is `rawcandle.cli.run_fundamentals_v4_delta_production`; it defaults to dry-run and requires exact paths, locked fingerprints, full history, `--apply`, and `--confirm-production` for writes. The verified deployment record is `fundamentals_v4_delta_v1_phase5d_deployment.md`.
 
 The only authorized future layout is persistence version `V4_FUNDAMENTAL_DELTA_REVISED_HISTORY_V2`, layout fingerprint `001d4d86ff3f279b2c44f497d536883a8f63bf281ee34c9086881e14635997c0`. V1 was never deployed. Production must receive the additive V2 schema directly; do not create, migrate or drop V1 Delta tables.
 
-The following Phase 5C command was verified against `--help` and remains the required final rehearsal:
+The following Phase 5C command remains the historical final-rehearsal command:
 
 ```bash
 python3 -m rawcandle.cli.run_fundamentals_v4_delta_phase5c \
@@ -58,7 +58,7 @@ Record production size, mtime, SHA-256, schema hash, page/freelist counts and ke
 
 ## Phase 5D Authorization Gate
 
-Phase 5D must add a production command with all of these hard requirements before use: exact five production paths, locked four model fingerprints, `--full-universe`, explicit `--apply`, explicit `--confirm-production`, no symlink/alias, no provider call, its own transaction and an artifact directory. Verify its actual `--help`; do not substitute a manually edited Phase 5C command.
+Phase 5D added a production command with these hard requirements: exact five production paths, locked four model fingerprints, `--full-universe`, explicit `--apply`, explicit `--confirm-production`, no symlink/alias, no provider call, its own transaction and an artifact directory. Use its actual `--help`; do not substitute a manually edited Phase 5C command.
 
 The authorized command sequence must expose distinct operations for dry-run, additive migration/apply, required identical second apply, quick check and reader spot checks. Run full-history fallback unless a trustworthy upstream changed-company set is proven. Never perform quarter-only replacement.
 

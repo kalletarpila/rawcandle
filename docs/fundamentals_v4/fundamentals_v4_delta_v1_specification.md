@@ -61,4 +61,4 @@ The compact endpoint result retains current identity, fiscal identity, availabil
 
 Phase 5B provides the pure calculation and context engines. Phase 5C.2's non-production V2 persistence stores only Fundamental total and seven component histories. Lifecycle Change Context and filing-date Valuation Change Diagnostic are derived on demand from their authoritative revised histories; they are not copied into Delta tables and Valuation explanatory JSON is not persisted by Delta.
 
-Phase 5C.2 creates no production migration, backfill or pipeline hook. Production activation remains a separately authorized Phase 5D decision.
+Phase 5C.2 created no production migration, backfill or pipeline hook. Phase 5D deployed the locked V2 layout on 2026-09-02 and activated Delta after Valuation and before Relative Position. The deployment evidence is recorded in `fundamentals_v4_delta_v1_phase5d_deployment.md`.
