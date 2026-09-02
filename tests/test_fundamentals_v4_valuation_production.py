@@ -15,6 +15,8 @@ from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_position.engine import (
     MODEL_FINGERPRINT as RELATIVE_POSITION_MODEL_FINGERPRINT,
 )
+from rawcandle.fundamentals.delta.engine import MODEL_FINGERPRINT as DELTA_MODEL_FINGERPRINT
+from rawcandle.fundamentals.delta.persistence import LAYOUT_FINGERPRINT, PERSISTENCE_VERSION
 from rawcandle.fundamentals.valuation import production
 
 
@@ -61,6 +63,9 @@ def test_score_pipeline_cli_is_also_dry_run_and_explicitly_gated() -> None:
     args = score_parser().parse_args([
         "--repo-root", "/home/kalle/projects/rawcandle",
         "--valuation-model-fingerprint", MODEL_FINGERPRINT,
+        "--delta-model-fingerprint", DELTA_MODEL_FINGERPRINT,
+        "--delta-persistence-version", PERSISTENCE_VERSION,
+        "--delta-layout-fingerprint", LAYOUT_FINGERPRINT,
         "--relative-position-model-fingerprint", RELATIVE_POSITION_MODEL_FINGERPRINT,
         "--full-universe",
     ])

@@ -295,12 +295,43 @@ def quick_check(conn: sqlite3.Connection, *, model_fingerprint: str, authoritati
         details.append("READY_CODE_MISSING")
     else:
         for prefix in ("qoq", "two_quarter", "yoy"):
-            bad = int(conn.execute(f"SELECT COUNT(*) FROM {p.TOTAL_TABLE} WHERE package_id=? AND (({prefix}_status_id=? AND ({prefix}_delta IS NULL OR {prefix}_prior_score_result_id IS NULL)) OR ({prefix}_status_id<>? AND {prefix}_delta IS NOT NULL))", (target_package_id,ready[0],ready[0])).fetchone()[0])
+            bad = int(conn.execute(f"SELECT COUNT(*) FROM {p.TOTAL_TABLE} WHERE package_id=? AND (({prefix}_status_id=? AND ({prefix}_delta IS NULL OR {prefix}_prior_score_result_id IS NULL OR ABS({prefix}_delta)>1.7976931348623157e308)) OR ({prefix}_status_id<>? AND {prefix}_delta IS NOT NULL))", (target_package_id,ready[0],ready[0])).fetchone()[0])
             if bad:
                 details.append(f"{prefix.upper()}_READINESS_INVALID")
             mismatch = conn.execute(f"SELECT 1 FROM {p.TOTAL_TABLE} r JOIN (SELECT endpoint_id,SUM({prefix}_delta) value FROM {p.COMPONENT_TABLE} WHERE {prefix}_status_id=? GROUP BY endpoint_id) c USING(endpoint_id) WHERE r.package_id=? AND r.{prefix}_status_id=? AND ABS(r.{prefix}_delta-c.value)>? LIMIT 1", (ready[0],target_package_id,ready[0],RECONCILIATION_TOLERANCE)).fetchone()
             if mismatch:
                 details.append(f"{prefix.upper()}_RECONCILIATION_FAILED")
+            lag = {"qoq": 1, "two_quarter": 2, "yoy": 4}[prefix]
+            invalid_lag = conn.execute(
+                f"""SELECT 1
+                      FROM {p.TOTAL_TABLE} r
+                      LEFT JOIN {p.TOTAL_TABLE} prior
+                        ON prior.package_id=r.package_id
+                       AND prior.company_id=r.company_id
+                       AND prior.current_score_result_id=r.{prefix}_prior_score_result_id
+                     WHERE r.package_id=? AND r.{prefix}_status_id=?
+                       AND (prior.endpoint_id IS NULL OR prior.fiscal_sequence<>r.fiscal_sequence-?)
+                     LIMIT 1""",
+                (target_package_id, ready[0], lag),
+            ).fetchone()
+            if invalid_lag:
+                details.append(f"{prefix.upper()}_ENDPOINT_LAG_INVALID")
+            invalid_component = conn.execute(
+                f"""SELECT 1 FROM {p.COMPONENT_TABLE} c
+                      JOIN {p.TOTAL_TABLE} r USING(endpoint_id)
+                     WHERE r.package_id=? AND (
+                       (c.{prefix}_status_id=? AND (
+                         c.current_points IS NULL OR c.{prefix}_prior_points IS NULL
+                         OR c.{prefix}_delta IS NULL
+                         OR ABS(c.current_points)>1.7976931348623157e308
+                         OR ABS(c.{prefix}_prior_points)>1.7976931348623157e308
+                         OR ABS(c.{prefix}_delta)>1.7976931348623157e308
+                       )) OR (c.{prefix}_status_id<>? AND c.{prefix}_delta IS NOT NULL)
+                     ) LIMIT 1""",
+                (target_package_id, ready[0], ready[0]),
+            ).fetchone()
+            if invalid_component:
+                details.append(f"{prefix.upper()}_COMPONENT_VALUE_CONTRACT_INVALID")
     if authoritative_package is not None:
         p.validate_package(authoritative_package)
         expected_totals,expected_components,_,_,_=normalized_rows(authoritative_package)

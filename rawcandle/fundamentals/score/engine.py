@@ -432,6 +432,77 @@ def refresh_relative_position_after_valuation(
     ))
 
 
+def refresh_delta_after_valuation(
+    paths: ScorePaths,
+    *,
+    model_fingerprint: str,
+    persistence_version: str,
+    layout_fingerprint: str,
+) -> dict[str, Any]:
+    from rawcandle.fundamentals.delta.engine import MODEL_FINGERPRINT as DELTA_MODEL_FINGERPRINT
+    from rawcandle.fundamentals.delta.persistence import LAYOUT_FINGERPRINT, PERSISTENCE_VERSION
+    from rawcandle.fundamentals.delta.production import refresh_delta
+
+    if model_fingerprint != DELTA_MODEL_FINGERPRINT:
+        raise ValueError("DELTA_MODEL_FINGERPRINT_MISMATCH")
+    if persistence_version != PERSISTENCE_VERSION:
+        raise ValueError("DELTA_PERSISTENCE_VERSION_MISMATCH")
+    if layout_fingerprint != LAYOUT_FINGERPRINT:
+        raise ValueError("DELTA_LAYOUT_FINGERPRINT_MISMATCH")
+    return asdict(refresh_delta(
+        analysis_db=paths.analysis_db,
+        canonical_db=paths.canonical_db,
+        applied_at_utc=utc_now(),
+    ))
+
+
+class PostValuationRefreshError(RuntimeError):
+    def __init__(self, report: dict[str, Any]) -> None:
+        super().__init__("POST_VALUATION_REFRESH_STAGES_FAILED")
+        self.report = report
+
+
+def refresh_delta_then_relative_position(
+    paths: ScorePaths,
+    *,
+    delta_model_fingerprint: str,
+    delta_persistence_version: str,
+    delta_layout_fingerprint: str,
+    relative_position_model_fingerprint: str,
+) -> dict[str, Any]:
+    report: dict[str, Any] = {}
+    failed = []
+    try:
+        delta = refresh_delta_after_valuation(
+            paths,
+            model_fingerprint=delta_model_fingerprint,
+            persistence_version=delta_persistence_version,
+            layout_fingerprint=delta_layout_fingerprint,
+        )
+        report["delta_refresh"] = {"status": "COMPLETE", "scope": "FULL_HISTORY", **delta}
+    except Exception as exc:
+        failed.append("DELTA")
+        report["delta_refresh"] = {
+            "status": "FAILED", "scope": "FULL_HISTORY", "error": str(exc),
+        }
+    try:
+        relative = refresh_relative_position_after_valuation(
+            paths, model_fingerprint=relative_position_model_fingerprint,
+        )
+        report["relative_position_refresh"] = {
+            "status": "COMPLETE", "scope": "FULL_UNIVERSE", **relative,
+        }
+    except Exception as exc:
+        failed.append("RELATIVE_POSITION")
+        report["relative_position_refresh"] = {
+            "status": "FAILED", "scope": "FULL_UNIVERSE", "error": str(exc),
+        }
+    report["failed_stages"] = failed
+    if failed:
+        raise PostValuationRefreshError(report)
+    return report
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
@@ -449,6 +520,9 @@ def run_score(
     *,
     write_production: bool = True,
     production_preflight: Mapping[str, Any] | None = None,
+    delta_model_fingerprint: str | None = None,
+    delta_persistence_version: str | None = None,
+    delta_layout_fingerprint: str | None = None,
     relative_position_model_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     paths.artifact_root.mkdir(parents=True, exist_ok=False)
@@ -550,31 +624,34 @@ def run_score(
             _write_json(paths.artifact_root / "score_v1_summary.json", summary)
             raise RuntimeError("POST_LIFECYCLE_VALUATION_REFRESH_FAILED") from exc
         try:
-            if relative_position_model_fingerprint is None:
-                raise ValueError("RELATIVE_POSITION_MODEL_FINGERPRINT_REQUIRED")
-            summary["relative_position_refresh"] = {
-                "status": "COMPLETE",
-                "scope": "FULL_UNIVERSE",
-                **refresh_relative_position_after_valuation(
-                    paths,
-                    model_fingerprint=relative_position_model_fingerprint,
-                ),
-            }
-            summary["relative_position_writes"] = summary["relative_position_refresh"][
-                "apply"
-            ]["result_rows_inserted"]
-        except Exception as exc:
+            if None in (
+                delta_model_fingerprint, delta_persistence_version,
+                delta_layout_fingerprint, relative_position_model_fingerprint,
+            ):
+                raise ValueError("DELTA_AND_RELATIVE_POSITION_CONTRACT_REQUIRED")
+            post_valuation = refresh_delta_then_relative_position(
+                paths,
+                delta_model_fingerprint=str(delta_model_fingerprint),
+                delta_persistence_version=str(delta_persistence_version),
+                delta_layout_fingerprint=str(delta_layout_fingerprint),
+                relative_position_model_fingerprint=str(relative_position_model_fingerprint),
+            )
+            summary.update(post_valuation)
+            summary["delta_writes"] = (
+                summary["delta_refresh"]["apply"]["total_inserted"]
+                + summary["delta_refresh"]["apply"]["total_updated"]
+                + summary["delta_refresh"]["apply"]["total_deleted"]
+            )
+            summary["relative_position_writes"] = summary["relative_position_refresh"]["apply"]["result_rows_inserted"]
+        except PostValuationRefreshError as exc:
             summary["classification"] = "V4_SCORE_V1_IMPLEMENTATION_BLOCKED"
-            summary["relative_position_refresh"] = {
-                "status": "FAILED",
-                "scope": "FULL_UNIVERSE",
-                "error": str(exc),
-            }
+            summary.update(exc.report)
             _write_json(paths.artifact_root / "score_v1_summary.json", summary)
-            raise RuntimeError("POST_VALUATION_RELATIVE_POSITION_REFRESH_FAILED") from exc
+            raise RuntimeError("POST_VALUATION_REFRESH_FAILED") from exc
     else:
         summary["lifecycle_refresh"] = {"status": "SKIPPED"}
         summary["valuation_refresh"] = {"status": "SKIPPED"}
+        summary["delta_refresh"] = {"status": "SKIPPED"}
         summary["relative_position_refresh"] = {"status": "SKIPPED"}
     _write_json(paths.artifact_root / "score_v1_summary.json", summary)
     _write_json(paths.artifact_root / "score_v1_model_contract.json", MODEL_CONTRACT)
