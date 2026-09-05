@@ -21,6 +21,10 @@ from rawcandle.fundamentals.delta.production import (
     PRODUCTION_PATHS as DELTA_PRODUCTION_PATHS,
     validate_production_request as validate_delta_production_request,
 )
+from rawcandle.fundamentals.diagnostic_flags.production import (
+    PRODUCTION_PATHS as DIAGNOSTIC_PRODUCTION_PATHS,
+    validate_production_request as validate_diagnostic_production_request,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--delta-persistence-version", required=True)
     parser.add_argument("--delta-layout-fingerprint", required=True)
     parser.add_argument("--relative-position-model-fingerprint", required=True)
+    parser.add_argument("--diagnostic-model-fingerprint", required=True)
+    parser.add_argument("--diagnostic-persistence-version", required=True)
+    parser.add_argument("--diagnostic-layout-fingerprint", required=True)
     parser.add_argument("--full-universe", action="store_true")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-production", action="store_true")
@@ -86,6 +93,19 @@ def main(argv: list[str] | None = None) -> int:
         apply=args.apply,
         confirm_production=args.confirm_production,
     )
+    diagnostic_resolved = validate_diagnostic_production_request(
+        analysis_db=paths.analysis_db,
+        canonical_db=paths.canonical_db,
+        provider_db=DIAGNOSTIC_PRODUCTION_PATHS["provider"],
+        market_db=paths.market_db,
+        taxonomy_db=DIAGNOSTIC_PRODUCTION_PATHS["taxonomy"],
+        model_fingerprint=args.diagnostic_model_fingerprint,
+        persistence_version=args.diagnostic_persistence_version,
+        layout_fingerprint=args.diagnostic_layout_fingerprint,
+        full_universe=args.full_universe,
+        apply=args.apply,
+        confirm_production=args.confirm_production,
+    )
     preflight = {
         "mode": "APPLY" if args.apply else "DRY_RUN",
         "resolved_paths": resolved,
@@ -96,6 +116,10 @@ def main(argv: list[str] | None = None) -> int:
         "delta_persistence_version": args.delta_persistence_version,
         "delta_layout_fingerprint": args.delta_layout_fingerprint,
         "delta_resolved_paths": delta_resolved,
+        "diagnostic_model_fingerprint": args.diagnostic_model_fingerprint,
+        "diagnostic_persistence_version": args.diagnostic_persistence_version,
+        "diagnostic_layout_fingerprint": args.diagnostic_layout_fingerprint,
+        "diagnostic_resolved_paths": diagnostic_resolved,
         "scope": "FULL_UNIVERSE",
     }
     print(json.dumps({"production_preflight": preflight}, sort_keys=True), flush=True)
@@ -107,6 +131,9 @@ def main(argv: list[str] | None = None) -> int:
         delta_persistence_version=args.delta_persistence_version,
         delta_layout_fingerprint=args.delta_layout_fingerprint,
         relative_position_model_fingerprint=args.relative_position_model_fingerprint,
+        diagnostic_model_fingerprint=args.diagnostic_model_fingerprint,
+        diagnostic_persistence_version=args.diagnostic_persistence_version,
+        diagnostic_layout_fingerprint=args.diagnostic_layout_fingerprint,
     )
     print(f"classification={summary['classification']}")
     print(f"artifact_root={summary['artifact_root']}")

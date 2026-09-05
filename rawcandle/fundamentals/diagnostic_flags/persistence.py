@@ -276,6 +276,14 @@ def content_fingerprint(conn: sqlite3.Connection, pid: int) -> str:
     return fingerprint([endpoints, evaluations])
 
 
+def package_content_fingerprint(package: DiagnosticPersistencePackage) -> str:
+    endpoints, evaluations, _ = _normalized(package)
+    return fingerprint([
+        [row["result_fingerprint"] for row in endpoints],
+        [row["result_fingerprint"] for row in evaluations],
+    ])
+
+
 def _logical(conn: sqlite3.Connection, pid: int, companies: Sequence[int]) -> tuple[dict[Any, str], dict[Any, str]]:
     where = "package_id=?"; params: list[Any] = [pid]
     if companies:

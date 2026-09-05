@@ -214,7 +214,9 @@ def test_missing_required_measure_is_rejected() -> None:
 def test_pipeline_order_and_explicit_fingerprint_propagation() -> None:
     source = inspect.getsource(score_engine.run_score)
     assert source.index("refresh_lifecycle_after_score") < source.index("refresh_valuation_after_lifecycle")
-    assert source.index("refresh_valuation_after_lifecycle") < source.index("refresh_delta_then_relative_position")
+    assert source.index("refresh_valuation_after_lifecycle") < source.index("refresh_post_valuation_stages")
+    post_all = inspect.getsource(score_engine.refresh_post_valuation_stages)
+    assert post_all.index("refresh_diagnostic_after_valuation") < post_all.index("refresh_delta_then_relative_position")
     post = inspect.getsource(score_engine.refresh_delta_then_relative_position)
     assert post.index("refresh_delta_after_valuation") < post.index("refresh_relative_position_after_valuation")
     hook = inspect.getsource(score_engine.refresh_relative_position_after_valuation)

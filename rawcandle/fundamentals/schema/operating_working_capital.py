@@ -56,10 +56,21 @@ def _storage(conn: sqlite3.Connection, path: Path, stage: str, elapsed: float, l
     }
 
 
-def _validate_destinations(provider_db: Path, canonical_db: Path) -> None:
+def _validate_destinations(
+    provider_db: Path, canonical_db: Path, *, allow_production: bool
+) -> None:
     resolved = {provider_db.resolve(), canonical_db.resolve()}
-    if PRODUCTION_PROVIDER.resolve() in resolved or PRODUCTION_CANONICAL.resolve() in resolved:
+    production_pair = {
+        PRODUCTION_PROVIDER.resolve(), PRODUCTION_CANONICAL.resolve()
+    }
+    if not allow_production and resolved & production_pair:
         raise PermissionError("PHASE6A2_PRODUCTION_OR_ALIAS_DESTINATION_BLOCKED")
+    if allow_production and (
+        provider_db != PRODUCTION_PROVIDER
+        or canonical_db != PRODUCTION_CANONICAL
+        or resolved != production_pair
+    ):
+        raise PermissionError("PHASE6A2_EXACT_PRODUCTION_PAIR_REQUIRED")
     if provider_db.resolve() == canonical_db.resolve():
         raise ValueError("PROVIDER_AND_CANONICAL_DESTINATIONS_MUST_DIFFER")
     if provider_db.is_symlink() or canonical_db.is_symlink():
@@ -77,9 +88,12 @@ def migrate_and_backfill_operating_working_capital(
     *,
     company_ids: Iterable[int] | None = None,
     inject_failure_at: str | None = None,
+    allow_production: bool = False,
 ) -> dict[str, Any]:
     """Add and backfill the five endpoint fields on explicit non-production copies."""
-    _validate_destinations(provider_db, canonical_db)
+    _validate_destinations(
+        provider_db, canonical_db, allow_production=allow_production
+    )
     selected = _selected(company_ids)
     metrics: dict[str, Any] = {
         "provider_columns_added": 0,

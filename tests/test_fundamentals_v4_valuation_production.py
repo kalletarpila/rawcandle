@@ -17,6 +17,13 @@ from rawcandle.fundamentals.relative_position.engine import (
 )
 from rawcandle.fundamentals.delta.engine import MODEL_FINGERPRINT as DELTA_MODEL_FINGERPRINT
 from rawcandle.fundamentals.delta.persistence import LAYOUT_FINGERPRINT, PERSISTENCE_VERSION
+from rawcandle.fundamentals.diagnostic_flags.engine import (
+    MODEL_FINGERPRINT as DIAGNOSTIC_MODEL_FINGERPRINT,
+)
+from rawcandle.fundamentals.diagnostic_flags.persistence import (
+    LAYOUT_FINGERPRINT as DIAGNOSTIC_LAYOUT_FINGERPRINT,
+    PERSISTENCE_VERSION as DIAGNOSTIC_PERSISTENCE_VERSION,
+)
 from rawcandle.fundamentals.valuation import production
 
 
@@ -67,6 +74,9 @@ def test_score_pipeline_cli_is_also_dry_run_and_explicitly_gated() -> None:
         "--delta-persistence-version", PERSISTENCE_VERSION,
         "--delta-layout-fingerprint", LAYOUT_FINGERPRINT,
         "--relative-position-model-fingerprint", RELATIVE_POSITION_MODEL_FINGERPRINT,
+        "--diagnostic-model-fingerprint", DIAGNOSTIC_MODEL_FINGERPRINT,
+        "--diagnostic-persistence-version", DIAGNOSTIC_PERSISTENCE_VERSION,
+        "--diagnostic-layout-fingerprint", DIAGNOSTIC_LAYOUT_FINGERPRINT,
         "--full-universe",
     ])
     assert args.apply is False

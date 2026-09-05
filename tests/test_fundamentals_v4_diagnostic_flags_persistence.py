@@ -169,7 +169,7 @@ def test_phase6c_cli_is_dry_run_by_default_and_has_no_production_confirmation():
     assert "confirm-production" not in parser.format_help()
 
 
-def test_pipeline_plan_is_dependency_safe_but_not_activated():
+def test_phase6c_pipeline_plan_remains_historical_after_phase6d_activation():
     import inspect
     from rawcandle.fundamentals.score import engine as score_engine
     source=inspect.getsource(score_engine)
@@ -177,4 +177,7 @@ def test_pipeline_plan_is_dependency_safe_but_not_activated():
     assert PIPELINE_PLACEMENT["delta_is_prerequisite"] is False
     assert PIPELINE_PLACEMENT["relative_position_is_prerequisite"] is False
     assert PIPELINE_PLACEMENT["phase6c_activation"] is False
-    assert "refresh_diagnostic_flags" not in source
+    assert "refresh_diagnostic_after_valuation" in source
+    assert source.index("refresh_diagnostic_after_valuation") < source.index(
+        "refresh_delta_then_relative_position"
+    )

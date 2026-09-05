@@ -456,6 +456,37 @@ def refresh_delta_after_valuation(
     ))
 
 
+def refresh_diagnostic_after_valuation(
+    paths: ScorePaths,
+    *,
+    model_fingerprint: str,
+    persistence_version: str,
+    layout_fingerprint: str,
+) -> dict[str, Any]:
+    from rawcandle.fundamentals.diagnostic_flags.engine import (
+        MODEL_FINGERPRINT as DIAGNOSTIC_MODEL_FINGERPRINT,
+    )
+    from rawcandle.fundamentals.diagnostic_flags.persistence import (
+        LAYOUT_FINGERPRINT,
+        PERSISTENCE_VERSION,
+    )
+    from rawcandle.fundamentals.diagnostic_flags.production import (
+        refresh_diagnostic_flags,
+    )
+
+    if model_fingerprint != DIAGNOSTIC_MODEL_FINGERPRINT:
+        raise ValueError("DIAGNOSTIC_MODEL_FINGERPRINT_MISMATCH")
+    if persistence_version != PERSISTENCE_VERSION:
+        raise ValueError("DIAGNOSTIC_PERSISTENCE_VERSION_MISMATCH")
+    if layout_fingerprint != LAYOUT_FINGERPRINT:
+        raise ValueError("DIAGNOSTIC_LAYOUT_FINGERPRINT_MISMATCH")
+    return refresh_diagnostic_flags(
+        analysis_db=paths.analysis_db,
+        canonical_db=paths.canonical_db,
+        applied_at_utc=utc_now(),
+    )
+
+
 class PostValuationRefreshError(RuntimeError):
     def __init__(self, report: dict[str, Any]) -> None:
         super().__init__("POST_VALUATION_REFRESH_STAGES_FAILED")
@@ -503,6 +534,57 @@ def refresh_delta_then_relative_position(
     return report
 
 
+def refresh_post_valuation_stages(
+    paths: ScorePaths,
+    *,
+    diagnostic_model_fingerprint: str,
+    diagnostic_persistence_version: str,
+    diagnostic_layout_fingerprint: str,
+    delta_model_fingerprint: str,
+    delta_persistence_version: str,
+    delta_layout_fingerprint: str,
+    relative_position_model_fingerprint: str,
+) -> dict[str, Any]:
+    report: dict[str, Any] = {}
+    failed: list[str] = []
+    try:
+        diagnostic = refresh_diagnostic_after_valuation(
+            paths,
+            model_fingerprint=diagnostic_model_fingerprint,
+            persistence_version=diagnostic_persistence_version,
+            layout_fingerprint=diagnostic_layout_fingerprint,
+        )
+        report["diagnostic_flags_refresh"] = {
+            "status": "COMPLETE",
+            "scope": "FULL_HISTORY",
+            **diagnostic,
+        }
+    except Exception as exc:
+        failed.append("DIAGNOSTIC_FLAGS")
+        report["diagnostic_flags_refresh"] = {
+            "status": "FAILED",
+            "scope": "FULL_HISTORY",
+            "error": str(exc),
+        }
+    try:
+        report.update(
+            refresh_delta_then_relative_position(
+                paths,
+                delta_model_fingerprint=delta_model_fingerprint,
+                delta_persistence_version=delta_persistence_version,
+                delta_layout_fingerprint=delta_layout_fingerprint,
+                relative_position_model_fingerprint=relative_position_model_fingerprint,
+            )
+        )
+    except PostValuationRefreshError as exc:
+        report.update(exc.report)
+        failed.extend(exc.report["failed_stages"])
+    report["failed_stages"] = failed
+    if failed:
+        raise PostValuationRefreshError(report)
+    return report
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
@@ -524,6 +606,9 @@ def run_score(
     delta_persistence_version: str | None = None,
     delta_layout_fingerprint: str | None = None,
     relative_position_model_fingerprint: str | None = None,
+    diagnostic_model_fingerprint: str | None = None,
+    diagnostic_persistence_version: str | None = None,
+    diagnostic_layout_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     paths.artifact_root.mkdir(parents=True, exist_ok=False)
     if production_preflight is not None:
@@ -625,18 +710,32 @@ def run_score(
             raise RuntimeError("POST_LIFECYCLE_VALUATION_REFRESH_FAILED") from exc
         try:
             if None in (
+                diagnostic_model_fingerprint,
+                diagnostic_persistence_version,
+                diagnostic_layout_fingerprint,
                 delta_model_fingerprint, delta_persistence_version,
                 delta_layout_fingerprint, relative_position_model_fingerprint,
             ):
                 raise ValueError("DELTA_AND_RELATIVE_POSITION_CONTRACT_REQUIRED")
-            post_valuation = refresh_delta_then_relative_position(
+            post_valuation = refresh_post_valuation_stages(
                 paths,
+                diagnostic_model_fingerprint=str(diagnostic_model_fingerprint),
+                diagnostic_persistence_version=str(diagnostic_persistence_version),
+                diagnostic_layout_fingerprint=str(diagnostic_layout_fingerprint),
                 delta_model_fingerprint=str(delta_model_fingerprint),
                 delta_persistence_version=str(delta_persistence_version),
                 delta_layout_fingerprint=str(delta_layout_fingerprint),
                 relative_position_model_fingerprint=str(relative_position_model_fingerprint),
             )
             summary.update(post_valuation)
+            summary["diagnostic_flags_writes"] = (
+                summary["diagnostic_flags_refresh"]["apply"]["endpoint_inserted"]
+                + summary["diagnostic_flags_refresh"]["apply"]["endpoint_updated"]
+                + summary["diagnostic_flags_refresh"]["apply"]["endpoint_deleted"]
+                + summary["diagnostic_flags_refresh"]["apply"]["evaluation_inserted"]
+                + summary["diagnostic_flags_refresh"]["apply"]["evaluation_updated"]
+                + summary["diagnostic_flags_refresh"]["apply"]["evaluation_deleted"]
+            )
             summary["delta_writes"] = (
                 summary["delta_refresh"]["apply"]["total_inserted"]
                 + summary["delta_refresh"]["apply"]["total_updated"]
@@ -651,6 +750,7 @@ def run_score(
     else:
         summary["lifecycle_refresh"] = {"status": "SKIPPED"}
         summary["valuation_refresh"] = {"status": "SKIPPED"}
+        summary["diagnostic_flags_refresh"] = {"status": "SKIPPED"}
         summary["delta_refresh"] = {"status": "SKIPPED"}
         summary["relative_position_refresh"] = {"status": "SKIPPED"}
     _write_json(paths.artifact_root / "score_v1_summary.json", summary)
