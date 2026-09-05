@@ -278,6 +278,13 @@ def content_fingerprint(conn: sqlite3.Connection, pid: int) -> str:
 
 def package_content_fingerprint(package: DiagnosticPersistencePackage) -> str:
     endpoints, evaluations, _ = _normalized(package)
+    endpoint_order = {
+        row["endpoint_id"]: index for index, row in enumerate(endpoints)
+    }
+    evaluations = tuple(sorted(
+        evaluations,
+        key=lambda row: (endpoint_order[row["endpoint_id"]], row["flag_id"]),
+    ))
     return fingerprint([
         [row["result_fingerprint"] for row in endpoints],
         [row["result_fingerprint"] for row in evaluations],

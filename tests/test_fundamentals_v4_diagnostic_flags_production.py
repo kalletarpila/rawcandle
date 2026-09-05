@@ -10,6 +10,7 @@ from rawcandle.fundamentals.diagnostic_flags.engine import MODEL_FINGERPRINT
 from rawcandle.fundamentals.diagnostic_flags.persistence import (
     LAYOUT_FINGERPRINT,
     PERSISTENCE_VERSION,
+    package_content_fingerprint,
 )
 from rawcandle.fundamentals.diagnostic_flags import production
 from rawcandle.fundamentals.schema.operating_working_capital import (
@@ -124,6 +125,63 @@ def test_refresh_schema_apply_noop_deep_replay_and_readers(tmp_path: Path):
         analysis_db=paths.analysis_db, calculation=calculation
     )
     assert readers["wrong_fingerprint_rejected"]
+
+
+def test_preapply_content_fingerprint_matches_persisted_company_order(tmp_path: Path):
+    paths = databases(tmp_path)
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute("INSERT INTO security VALUES(2,2,'TEST2')")
+        connection.execute(
+            """INSERT INTO v4_quarter(
+                   quarter_id,company_id,fiscal_year,fiscal_quarter,period_end,
+                   source_availability_date
+               ) SELECT quarter_id+100,company_id+100,2024,'Q1','2024-03-31','2024-05-01'
+                 FROM v4_quarter LIMIT 1"""
+        )
+        connection.execute(
+            """INSERT INTO v4_quarter_financials
+               SELECT quarter_id+100,accounts_receivable,inventory,accounts_payable,
+                      deferred_revenue,total_assets
+                 FROM v4_quarter_financials LIMIT 1"""
+        )
+        connection.execute(
+            """INSERT INTO v4_ttm_values(
+                   ttm_id,company_id,security_id,endpoint_quarter_id,endpoint_fiscal_year,
+                   endpoint_fiscal_quarter,period_end,readiness_status,
+                   ttm_source_available_date,ttm_revenue,ttm_ebit,ttm_net_income_common,
+                   ttm_operating_cashflow,ttm_capex,cash,total_debt,model_version
+               ) SELECT ttm_id+100,2,2,endpoint_quarter_id+100,2024,'Q1',
+                        '2024-03-31',readiness_status,'2024-05-01',ttm_revenue,ttm_ebit,
+                        ttm_net_income_common,ttm_operating_cashflow,ttm_capex,cash,
+                        total_debt,model_version
+                 FROM v4_ttm_values LIMIT 1"""
+        )
+    with sqlite3.connect(paths.analysis_db) as connection:
+        connection.execute("INSERT INTO score_result VALUES(3,101,'score-fp')")
+        connection.execute(
+            "INSERT INTO score_component VALUES(3,'FUNDAMENTAL_TRAJECTORY',8)"
+        )
+        connection.execute(
+            "INSERT INTO lifecycle_revised_result VALUES(101,'STARTUP','READY','life-fp')"
+        )
+        connection.execute(
+            """INSERT INTO valuation_revised_result
+               VALUES(101,'2024-05-02','VALUATION_FULL','READY','SUPPORTED',
+                      .1,.1,.1,'Technology','Software',1000,'val-fp')"""
+        )
+    calculation = production.calculate_production_package(
+        analysis_db=paths.analysis_db, canonical_db=paths.canonical_db
+    )
+    production.migrate_diagnostic_schema(analysis_db=paths.analysis_db)
+    first = production.refresh_diagnostic_flags(
+        analysis_db=paths.analysis_db,
+        canonical_db=paths.canonical_db,
+        applied_at_utc="now",
+        calculation=calculation,
+    )
+    assert package_content_fingerprint(calculation.package) == first[
+        "physical_content_fingerprint"
+    ]
 
 
 def test_working_capital_production_override_requires_exact_pair(tmp_path: Path):
