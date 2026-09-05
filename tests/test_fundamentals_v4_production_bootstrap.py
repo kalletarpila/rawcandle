@@ -137,6 +137,11 @@ def _row(ticker: str, permaticker: str, dimension: str, reportperiod: str, fisca
         "sharesbas": sharesbas,
         "shareswa": "101",
         "shareswadil": "102",
+        "receivables": "11",
+        "inventory": "12",
+        "payables": "13",
+        "deferredrev": "14",
+        "assets": "100",
     }
 
 
@@ -410,10 +415,10 @@ def test_field_coverage_latest_windows_contract(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     _bootstrap(paths)
     overall, latest8, latest4, latest1, summary = field_coverage(paths)
-    assert len(overall) == 13
-    assert len(latest8) == 13
-    assert len(latest4) == 13
-    assert len(latest1) == 13
+    assert len(overall) == len(V4_CANONICAL_FINANCIAL_FIELDS)
+    assert len(latest8) == len(V4_CANONICAL_FINANCIAL_FIELDS)
+    assert len(latest4) == len(V4_CANONICAL_FINANCIAL_FIELDS)
+    assert len(latest1) == len(V4_CANONICAL_FINANCIAL_FIELDS)
     assert "companies_with_8_quarters" in summary
     assert "companies_with_4_quarters" in summary
     assert "companies_with_latest_quarter" in summary

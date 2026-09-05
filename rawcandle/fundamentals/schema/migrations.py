@@ -8,6 +8,7 @@ from rawcandle.fundamentals.schema.contract import SCHEMA_VERSION, V4_CANONICAL_
 from rawcandle.fundamentals.schema.provenance import (
     COMMON_EARNINGS_FIELD,
     COMMON_EARNINGS_PROVENANCE_SCHEMA_SQL,
+    OPERATING_WORKING_CAPITAL_PROVENANCE_SCHEMA_SQL,
     ensure_provenance_schema,
     write_provenance,
     write_provenance_many,
@@ -89,7 +90,12 @@ CREATE TABLE sharadar_fundamental_observation (
     debtnc INTEGER,
     sharesbas INTEGER,
     shareswa INTEGER,
-    shareswadil INTEGER
+    shareswadil INTEGER,
+    receivables INTEGER,
+    inventory INTEGER,
+    payables INTEGER,
+    deferredrev INTEGER,
+    assets INTEGER
 );
 
 CREATE TABLE sharadar_ticker_metadata (
@@ -279,7 +285,12 @@ CREATE TABLE v4_quarter_financials (
     canonical_source_policy TEXT NOT NULL,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
-    net_income_common INTEGER
+    net_income_common INTEGER,
+    accounts_receivable INTEGER,
+    inventory INTEGER,
+    accounts_payable INTEGER,
+    deferred_revenue INTEGER,
+    total_assets INTEGER
 );
 
 CREATE TABLE v4_field_provenance (
@@ -297,7 +308,7 @@ CREATE TABLE v4_field_provenance (
     CHECK (canonical_field IN ('revenue','gross_profit','operating_income','ebit','ebitda','net_income','operating_cashflow','capex','free_cashflow','cash','total_debt','shares_outstanding'))
 );
 
-""" + COMMON_EARNINGS_PROVENANCE_SCHEMA_SQL + """
+""" + COMMON_EARNINGS_PROVENANCE_SCHEMA_SQL + OPERATING_WORKING_CAPITAL_PROVENANCE_SCHEMA_SQL + """
 
 CREATE TABLE v4_ttm_contract (
     quarter_id INTEGER PRIMARY KEY REFERENCES v4_quarter(quarter_id) ON DELETE CASCADE,

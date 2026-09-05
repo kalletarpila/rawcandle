@@ -483,8 +483,8 @@ def insert_production_sharadar_observation(
         INSERT OR IGNORE INTO sharadar_fundamental_observation(
             observation_id, ticker, permaticker, dimension, calendardate, reportperiod, fiscalperiod, date, lastupdated,
             revenue, gp, opinc, ebit, ebitda, netinc, netinccmn, ncfo, capex, fcf, cashneq, debt, debtc, debtnc,
-            sharesbas, shareswa, shareswadil
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            sharesbas, shareswa, shareswadil, receivables, inventory, payables, deferredrev, assets
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             observation_id,
@@ -513,6 +513,11 @@ def insert_production_sharadar_observation(
             int_or_none(row.get("sharesbas")),
             int_or_none(row.get("shareswa")),
             int_or_none(row.get("shareswadil")),
+            int_or_none(row.get("receivables")),
+            int_or_none(row.get("inventory")),
+            int_or_none(row.get("payables")),
+            int_or_none(row.get("deferredrev")),
+            int_or_none(row.get("assets")),
         ),
     )
     return inserted

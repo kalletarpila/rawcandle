@@ -4,7 +4,7 @@ import csv
 import sqlite3
 from pathlib import Path
 
-from rawcandle.fundamentals.schema.contract import SHARADAR_ARQ_FIELD_MAPPING, V4_CANONICAL_FINANCIAL_FIELDS
+from rawcandle.fundamentals.schema.contract import SCHEMA_VERSION, SHARADAR_ARQ_FIELD_MAPPING, V4_CANONICAL_FINANCIAL_FIELDS
 from rawcandle.fundamentals.schema.migrations import (
     ANALYSIS_SCHEMA_SQL,
     CANONICAL_SCHEMA_SQL,
@@ -124,7 +124,7 @@ def test_schema_versions_exist(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     bootstrap_all(paths.provider_db, paths.canonical_db, paths.analysis_db, "now")
     with connect(paths.provider_db) as conn:
-            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == "v4_3c2_additive_provenance"
+            assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_fk_enforcement_works(tmp_path: Path) -> None:

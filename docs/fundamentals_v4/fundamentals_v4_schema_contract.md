@@ -34,6 +34,11 @@ free_cashflow
 cash
 total_debt
 shares_outstanding
+accounts_receivable
+inventory
+accounts_payable
+deferred_revenue
+total_assets
 ```
 
 Every non-null canonical field must have one provenance row pointing back to the accepted provider observation and native provider field. Null canonical values do not create provenance rows. Numeric zero remains distinct from null.
@@ -54,6 +59,11 @@ free_cashflow <- fcf
 cash <- cashneq
 total_debt <- debt
 shares_outstanding <- sharesbas
+accounts_receivable <- receivables
+inventory <- inventory
+accounts_payable <- payables
+deferred_revenue <- deferredrev
+total_assets <- assets
 ```
 
 Sharadar ARQ is the V4-1A canonical source. Sharadar MRQ is retained provider-side and validated, but it does not overwrite ARQ canonical quarterly rows.
@@ -162,6 +172,16 @@ Baseline fingerprints for the production run are stored under:
 ```text
 temp/fundamentals_v4_1b_production_bootstrap/20260830T205438Z/v4_production_baseline_fingerprints.json
 ```
+
+## Phase 6A.2 endpoint expansion
+
+Schema version `v4_6a2_operating_working_capital` adds the five direct mappings listed above. They are observed balance-sheet endpoint values: they are not quarterized, interpolated, forward-filled, averaged, or summed into TTM values. Phase 6B must resolve the current and immediately prior endpoints from `v4_quarter_financials`.
+
+Blank and provider-null values remain NULL, valid numeric zero remains zero, and invalid/non-finite raw values are not coerced to zero. Each non-null value has `DIRECT` provenance in the single restricted `v4_operating_working_capital_provenance` table. The unified provenance API hides the physical split from consumers. The large legacy provenance table is not rebuilt.
+
+The copy-only migration normalizes stored provider JSON and synchronizes canonical values using the existing ARQ winner order. It is atomic across explicit provider and canonical copies, idempotent, company-scope capable, and rejects production paths and aliases.
+
+Provider `workingcapital` is excluded because it is broad current assets less current liabilities, not the selected operating definition. For the later diagnostic both endpoint `total_assets` values must be finite and strictly positive; otherwise the result is not ready. For valid assets the denominator is `max((assets_t + assets_t_minus_1) / 2, 10_000_000)`. Phase 6A.2 does not calculate the diagnostic or change its provisional 10% threshold.
 
 ## V4-2 TTM Contract
 

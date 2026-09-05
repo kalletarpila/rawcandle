@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import math
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass
@@ -107,7 +108,13 @@ def int_or_none(value: Any) -> int | None:
     text = nullable_text(value)
     if text is None:
         return None
-    return int(float(text))
+    try:
+        parsed = float(text)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    return int(parsed)
 
 
 def parse_fiscalperiod(value: Any) -> tuple[int, str]:
@@ -280,8 +287,8 @@ def insert_sharadar_observation(conn: sqlite3.Connection, row: Mapping[str, Any]
         INSERT OR IGNORE INTO sharadar_fundamental_observation(
             observation_id, ticker, permaticker, dimension, calendardate, reportperiod, fiscalperiod, date, lastupdated,
             revenue, gp, opinc, ebit, ebitda, netinc, netinccmn, ncfo, capex, fcf, cashneq, debt, debtc, debtnc,
-            sharesbas, shareswa, shareswadil
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            sharesbas, shareswa, shareswadil, receivables, inventory, payables, deferredrev, assets
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             observation_id,
@@ -310,6 +317,11 @@ def insert_sharadar_observation(conn: sqlite3.Connection, row: Mapping[str, Any]
             int_or_none(row.get("sharesbas")),
             int_or_none(row.get("shareswa")),
             int_or_none(row.get("shareswadil")),
+            int_or_none(row.get("receivables")),
+            int_or_none(row.get("inventory")),
+            int_or_none(row.get("payables")),
+            int_or_none(row.get("deferredrev")),
+            int_or_none(row.get("assets")),
         ),
     )
     return observation_id

@@ -15,6 +15,11 @@ V4_CANONICAL_FINANCIAL_FIELDS: tuple[str, ...] = (
     "cash",
     "total_debt",
     "shares_outstanding",
+    "accounts_receivable",
+    "inventory",
+    "accounts_payable",
+    "deferred_revenue",
+    "total_assets",
 )
 
 SHARADAR_ARQ_FIELD_MAPPING: dict[str, str] = {
@@ -31,6 +36,11 @@ SHARADAR_ARQ_FIELD_MAPPING: dict[str, str] = {
     "cash": "cashneq",
     "total_debt": "debt",
     "shares_outstanding": "sharesbas",
+    "accounts_receivable": "receivables",
+    "inventory": "inventory",
+    "accounts_payable": "payables",
+    "deferred_revenue": "deferredrev",
+    "total_assets": "assets",
 }
 
 SHARADAR_SUPPORT_FIELDS: tuple[str, ...] = (
@@ -47,4 +57,4 @@ SHARADAR_SUPPORT_FIELDS: tuple[str, ...] = (
 
 PROVIDER_NAMES: tuple[str, ...] = ("SHARADAR", "YAHOO", "SEC", "MIGRATED_FROM_V3")
 
-SCHEMA_VERSION = "v4_3c2_additive_provenance"
+SCHEMA_VERSION = "v4_6a2_operating_working_capital"

@@ -17,6 +17,7 @@ from rawcandle.fundamentals.schema.migrations import (
     migrate_canonical_valuation_copy,
 )
 from rawcandle.fundamentals.schema.provenance import read_provenance, write_provenance
+from rawcandle.fundamentals.schema.operating_working_capital import migrate_and_backfill_operating_working_capital
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 
 
@@ -40,7 +41,10 @@ def _fixture(tmp_path: Path, *, filler_rows: int = 0) -> tuple[Path, Path]:
     bootstrap_database(canonical, "fundamentals_v4", CANONICAL_SCHEMA_SQL, "old")
     with connect(canonical) as conn:
         ensure_ttm_schema(conn)
+        conn.execute("DROP TABLE v4_operating_working_capital_provenance")
         conn.execute("DROP TABLE v4_common_earnings_provenance")
+        for field in ("accounts_receivable", "inventory", "accounts_payable", "deferred_revenue", "total_assets"):
+            conn.execute(f"ALTER TABLE v4_quarter_financials DROP COLUMN {field}")
         conn.execute("ALTER TABLE v4_quarter_financials DROP COLUMN net_income_common")
         conn.execute("ALTER TABLE v4_ttm_values DROP COLUMN ttm_net_income_common")
         conn.execute("ALTER TABLE v4_ttm_values DROP COLUMN net_income_common_4q_ready")
@@ -76,6 +80,8 @@ def _fixture(tmp_path: Path, *, filler_rows: int = 0) -> tuple[Path, Path]:
                 (f"F{index}",),
             )
     with connect(provider) as conn:
+        for field in ("receivables", "inventory", "payables", "deferredrev", "assets"):
+            conn.execute(f"ALTER TABLE sharadar_fundamental_observation DROP COLUMN {field}")
         conn.execute("INSERT INTO provider_run(run_id,provider,started_at_utc,status,request_scope) VALUES ('R','SHARADAR','n','OK','TEST')")
         for qid in range(1, 5):
             conn.execute(
@@ -89,7 +95,7 @@ def _fixture(tmp_path: Path, *, filler_rows: int = 0) -> tuple[Path, Path]:
 
 
 def _schema_signature(conn: sqlite3.Connection) -> dict[str, object]:
-    tables = ("v4_field_provenance", "v4_common_earnings_provenance", "v4_quarter_financials", "v4_ttm_values")
+    tables = ("v4_field_provenance", "v4_common_earnings_provenance", "v4_operating_working_capital_provenance", "v4_quarter_financials", "v4_ttm_values")
     return {
         table: {
             "normalized_sql": re.sub(
@@ -184,6 +190,7 @@ def test_additive_upgrade_rolls_back_injected_failure(tmp_path: Path, failure_at
 def test_fresh_and_upgraded_schema_have_matching_active_contract(tmp_path: Path) -> None:
     provider, upgraded = _fixture(tmp_path / "upgrade")
     migrate_canonical_valuation_copy(upgraded, provider, "new")
+    migrate_and_backfill_operating_working_capital(provider, upgraded, "new")
     fresh = tmp_path / "fresh.db"
     bootstrap_database(fresh, "fundamentals_v4", CANONICAL_SCHEMA_SQL, "new")
     with connect(fresh) as conn:
