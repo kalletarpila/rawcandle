@@ -52,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-package-fingerprint", required=True)
     parser.add_argument("--expected-content-fingerprint", required=True)
     parser.add_argument("--full-universe", action="store_true")
+    parser.add_argument("--as-of-date")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-production", action="store_true")
@@ -102,6 +103,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("DIAGNOSTIC_MIGRATION_OPERATION_REQUIRES_APPLY")
     if args.pipeline_smoke and not args.apply:
         raise ValueError("DIAGNOSTIC_PIPELINE_SMOKE_REQUIRES_APPLY")
+    if args.pipeline_smoke and not args.as_of_date:
+        raise ValueError("DIAGNOSTIC_PIPELINE_SMOKE_REQUIRES_AS_OF_DATE")
     resolved = validate_production_request(
         analysis_db=args.analysis_db,
         canonical_db=args.canonical_db,
@@ -201,6 +204,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 delta_persistence_version=DELTA_PERSISTENCE_VERSION,
                 delta_layout_fingerprint=DELTA_LAYOUT_FINGERPRINT,
                 relative_position_model_fingerprint=RELATIVE_FINGERPRINT,
+                relative_position_snapshot_date=args.as_of_date,
             )
     (args.output_dir / "report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True, default=str) + "\n",

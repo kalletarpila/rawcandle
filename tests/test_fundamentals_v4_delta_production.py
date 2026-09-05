@@ -125,6 +125,28 @@ def test_pipeline_runs_delta_before_relative_and_propagates_contract(
     assert report["failed_stages"] == []
 
 
+def test_pipeline_propagates_explicit_relative_snapshot_date(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = []
+    monkeypatch.setattr(
+        score_engine,
+        "refresh_delta_after_valuation",
+        lambda *a, **kw: {"apply": {"outcome": "NO_CHANGE"}},
+    )
+    monkeypatch.setattr(
+        score_engine,
+        "refresh_relative_position_after_valuation",
+        lambda *a, **kw: calls.append(kw) or {"apply": {"result_rows_inserted": 0}},
+    )
+    score_engine.refresh_delta_then_relative_position(
+        paths(tmp_path),
+        **orchestration_args(),
+        relative_position_snapshot_date="2026-09-01",
+    )
+    assert calls[0]["snapshot_date"] == "2026-09-01"
+
+
 def test_delta_failure_still_runs_independent_relative_position(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

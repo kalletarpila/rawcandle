@@ -74,6 +74,22 @@ def test_production_cli_is_dry_run_by_default():
         "--full-universe", "--output-dir", "/tmp/diagnostic-production-test",
     ])
     assert args.apply is args.confirm_production is args.pipeline_smoke is False
+    assert args.as_of_date is None
+
+
+def test_pipeline_smoke_requires_as_of_date(tmp_path: Path):
+    from rawcandle.cli import run_fundamentals_v4_diagnostic_flags_production as cli
+
+    args = type("Args", (), {
+        "provider_compatibility": False,
+        "working_capital": False,
+        "diagnostic_schema": False,
+        "pipeline_smoke": True,
+        "apply": True,
+        "as_of_date": None,
+    })()
+    with pytest.raises(ValueError, match="REQUIRES_AS_OF_DATE"):
+        cli.run(args)
 
 
 def test_refresh_schema_apply_noop_deep_replay_and_readers(tmp_path: Path):

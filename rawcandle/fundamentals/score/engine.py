@@ -418,6 +418,7 @@ def refresh_relative_position_after_valuation(
     paths: ScorePaths,
     *,
     model_fingerprint: str,
+    snapshot_date: str | None = None,
 ) -> dict[str, Any]:
     from rawcandle.fundamentals.relative_position.production import refresh_relative_position
 
@@ -426,7 +427,7 @@ def refresh_relative_position_after_valuation(
         analysis_db=paths.analysis_db,
         market_db=paths.market_db,
         taxonomy_db=paths.repo_root / "data" / "analysis.db",
-        snapshot_date=datetime.now(timezone.utc).date().isoformat(),
+        snapshot_date=snapshot_date or datetime.now(timezone.utc).date().isoformat(),
         model_fingerprint=model_fingerprint,
         applied_at_utc=utc_now(),
     ))
@@ -500,6 +501,7 @@ def refresh_delta_then_relative_position(
     delta_persistence_version: str,
     delta_layout_fingerprint: str,
     relative_position_model_fingerprint: str,
+    relative_position_snapshot_date: str | None = None,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {}
     failed = []
@@ -518,7 +520,9 @@ def refresh_delta_then_relative_position(
         }
     try:
         relative = refresh_relative_position_after_valuation(
-            paths, model_fingerprint=relative_position_model_fingerprint,
+            paths,
+            model_fingerprint=relative_position_model_fingerprint,
+            snapshot_date=relative_position_snapshot_date,
         )
         report["relative_position_refresh"] = {
             "status": "COMPLETE", "scope": "FULL_UNIVERSE", **relative,
@@ -544,6 +548,7 @@ def refresh_post_valuation_stages(
     delta_persistence_version: str,
     delta_layout_fingerprint: str,
     relative_position_model_fingerprint: str,
+    relative_position_snapshot_date: str | None = None,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {}
     failed: list[str] = []
@@ -574,6 +579,7 @@ def refresh_post_valuation_stages(
                 delta_persistence_version=delta_persistence_version,
                 delta_layout_fingerprint=delta_layout_fingerprint,
                 relative_position_model_fingerprint=relative_position_model_fingerprint,
+                relative_position_snapshot_date=relative_position_snapshot_date,
             )
         )
     except PostValuationRefreshError as exc:
