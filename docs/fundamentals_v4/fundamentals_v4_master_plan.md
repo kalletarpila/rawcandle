@@ -269,4 +269,6 @@ Phase 9A completed the read-only EBIT semantics investigation and established th
 
 Phase 9C status: `PURE_PARALLEL_V2_ENGINES_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`. The package `rawcandle.fundamentals.operating_income_v2` provides separately fingerprinted Score, Lifecycle, Valuation, Delta, Relative Position, Diagnostic Flags and Company Snapshot contracts plus a read-only two-pass rehearsal. V1 remains unchanged and active.
 
-Phase 9D is not authorized. It must separately design and rehearse parallel persistence, V2 backfill, coherent reader-bundle activation and rollback before any production migration or write.
+Phase 9D status: `PARALLEL_V2_PERSISTENCE_REHEARSED_NOT_PRODUCTION_ACTIVE`. Additive persistence, a coherent package manifest, explicit V1/V2 readers, WAL-safe snapshots, rollback injection, temporary V2 reports and a production-shaped copy rehearsal are implemented. No production database, default reader, Scheduler setting or production report was changed.
+
+Phase 9E remains separately authorized. It covers production backup, additive migration, V2 backfill, mandatory deep/no-op reconciliation, coherent default-reader and Snapshot activation, smoke tests and rollback. Follow `fundamentals_v4_operating_income_v2_phase9e_runbook.md`.

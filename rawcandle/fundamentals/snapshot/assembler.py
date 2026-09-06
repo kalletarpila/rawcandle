@@ -89,12 +89,9 @@ def assert_source_unchanged(before: Mapping[str, Any], after: Mapping[str, Any])
 def _readonly(path: Path) -> sqlite3.Connection:
     if not path.is_file() or path.is_symlink():
         raise FileNotFoundError(f"SNAPSHOT_SOURCE_NOT_REGULAR_FILE:{path}")
-    wal = Path(f"{path}-wal")
-    if wal.exists() and wal.stat().st_size:
-        raise RuntimeError(f"SNAPSHOT_SOURCE_HAS_NONEMPTY_WAL:{path}")
-    connection = sqlite3.connect(
-        f"file:{path.resolve()}?mode=ro&immutable=1", uri=True
-    )
+    # SQLite's read-only mode includes committed WAL frames without checkpointing
+    # or treating the main database file as an immutable standalone snapshot.
+    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA query_only=ON")
     connection.execute("BEGIN")

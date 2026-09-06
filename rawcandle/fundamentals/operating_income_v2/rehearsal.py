@@ -37,7 +37,7 @@ KEY_TABLES = {
 
 
 def _ro(path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro&immutable=1", uri=True)
+    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA query_only=ON")
     return connection
@@ -89,8 +89,9 @@ def _write_json(path: Path, value: Any) -> None:
 def _load_ttm(canonical: Path) -> list[dict[str, Any]]:
     with _ro(canonical) as connection:
         return [dict(row) for row in connection.execute("""
-            SELECT t.*,s.current_ticker ticker
+            SELECT t.*,s.current_ticker ticker,q.source_availability_date AS quarter_source_available_date
             FROM v4_ttm_values t JOIN security s USING(security_id)
+            JOIN v4_quarter q ON q.quarter_id=t.endpoint_quarter_id
             WHERE t.model_version='V4_TTM_EBIT_FIRST_V1'
             ORDER BY t.company_id,t.endpoint_fiscal_year,
               CASE t.endpoint_fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 ELSE 4 END,t.ttm_id
@@ -232,10 +233,11 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
     for key,row in score_index.items():
         observation = _score_delta_observation(row,ttm_index[key])
         histories[key[0]].append(observation); delta_observations[key] = observation
-    delta_full=[]
+    delta_full=[]; delta_results=[]
     for key in sorted(score_index):
         current=delta_observations[key]
         result=delta.calculate_fundamental_delta(current,histories[key[0]],source_fingerprint="PHASE9C")
+        delta_results.append(result)
         delta_full.append({"company_id":key[0],"quarter_id":key[1],"ticker":score_index[key]["ticker"],**{item["horizon"].value:item["delta_points"] for item in result.horizons}})
     delta_current=[row for row in delta_full if (row["company_id"],row["quarter_id"]) in fresh_keys]
 
@@ -246,12 +248,26 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
         memberships=defaultdict(list)
         for row in connection.execute("SELECT DISTINCT company_id,peer_group_id FROM relative_position_result WHERE snapshot_id=? AND peer_scope='ECOSYSTEM' AND result_status='RELATIVE_POSITION_READY'",(active,)):
             memberships[int(row[0])].append(relative_position.EcosystemMembership(str(row[1]),"CORE"))
+    relative_score_rows={}
+    for row in rows:
+        available=row.get("quarter_source_available_date")
+        if not available or str(available)>AS_OF.isoformat(): continue
+        company_id=int(row["company_id"]); current=relative_score_rows.get(company_id)
+        sequence=int(row["endpoint_fiscal_year"])*4+int(str(row["endpoint_fiscal_quarter"])[1])
+        if current is None or sequence>current[0]: relative_score_rows[company_id]=(sequence,row)
+    relative_valuation_rows={}
+    for key,value in valuation_v2.items():
+        available=value.fundamental_available_date
+        if not available or str(available)>AS_OF.isoformat(): continue
+        sequence=value.fiscal_year*4+int(value.fiscal_quarter[1]); current=relative_valuation_rows.get(key[0])
+        if current is None or sequence>current[0]: relative_valuation_rows[key[0]]=(sequence,key,value)
     relative_observations=[]
-    for row in fresh:
+    for _,row in sorted(relative_score_rows.values(),key=lambda item:int(item[1]["company_id"])):
         key=(int(row["company_id"]),int(row["endpoint_quarter_id"])); ticker=str(row["ticker"]); sector,industry=classes.get(ticker,(None,None)); scored=score_index[key]
-        relative_observations.append(relative_position.RelativeObservation(f"S:{key[0]}",key[0],int(row["security_id"]),ticker,relative_position.RelativeMeasure.FUNDAMENTAL_SCORE,scored["total_score"],scored["readiness_status"],scored["readiness_status"]=="SCORE_FULL",scored["readiness_status"],row["ttm_source_available_date"],score.MODEL_VERSION,score.MODEL_FINGERPRINT,f"S:{key}",sector,industry,tuple(memberships[key[0]])))
-        value=valuation_v2.get(key)
-        if value: relative_observations.append(relative_position.RelativeObservation(f"V:{key[0]}",key[0],int(row["security_id"]),ticker,relative_position.RelativeMeasure.ABSOLUTE_VALUATION_SCORE,value.total_valuation_score,value.valuation_status,value.valuation_status=="VALUATION_FULL",value.reason_code,row["ttm_source_available_date"],valuation.MODEL_VERSION,valuation.MODEL_FINGERPRINT,value.result_fingerprint,sector,industry,tuple(memberships[key[0]])))
+        relative_observations.append(relative_position.RelativeObservation(f"S:{key[0]}",key[0],int(row["security_id"]),ticker,relative_position.RelativeMeasure.FUNDAMENTAL_SCORE,scored["total_score"],scored["readiness_status"],scored["readiness_status"]=="SCORE_FULL",scored["readiness_status"],row["quarter_source_available_date"],score.MODEL_VERSION,score.MODEL_FINGERPRINT,f"S:{key}",sector,industry,tuple(memberships[key[0]])))
+    for company_id,(_,key,value) in sorted(relative_valuation_rows.items()):
+        source=ttm_index[key]; ticker=str(source["ticker"]); sector,industry=classes.get(ticker,(None,None))
+        relative_observations.append(relative_position.RelativeObservation(f"V:{company_id}",company_id,int(source["security_id"]),ticker,relative_position.RelativeMeasure.ABSOLUTE_VALUATION_SCORE,value.total_valuation_score,value.valuation_status,value.valuation_status=="VALUATION_FULL",value.reason_code,value.fundamental_available_date,valuation.MODEL_VERSION,valuation.MODEL_FINGERPRINT,value.result_fingerprint,sector,industry,tuple(memberships[company_id])))
     relative=relative_position.calculate_snapshot(relative_observations,snapshot_date=AS_OF.isoformat(),freshness_days=FRESHNESS_DAYS,classification_fingerprint=fingerprint(classes),taxonomy_fingerprint=fingerprint({k:[asdict(x) for x in v] for k,v in memberships.items()}))
 
     diagnostics_full=[]
@@ -261,7 +277,6 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
     }
     for row in rows:
         key=(int(row["company_id"]),int(row["endpoint_quarter_id"])); sequence=int(row["endpoint_fiscal_year"])*4+int(str(row["endpoint_fiscal_quarter"])[1]); prior=sequence_index.get((key[0],sequence-1))
-        if not prior: continue
         def endpoint(source):
             source_key=(int(source["company_id"]),int(source["endpoint_quarter_id"]))
             val=valuation_v2.get(source_key)
@@ -272,13 +287,14 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
             diagnostic_classification="SUPPORTED" if application.supported is True else "NOT_APPLICABLE" if application.supported is False else None
             seq=int(source["endpoint_fiscal_year"])*4+int(str(source["endpoint_fiscal_quarter"])[1])
             return diagnostic_flags.DiagnosticEndpoint(source_key[0],int(source["endpoint_quarter_id"]),int(source["endpoint_fiscal_year"]),str(source["endpoint_fiscal_quarter"]),seq,str(source["period_end"]),source["ttm_source_available_date"],source["ttm_source_available_date"],source["ttm_source_available_date"],"TTM_READY" if source.get("core_ttm_ready") else "TTM_NOT_READY",source.get("ttm_revenue"),source.get("ttm_operating_income"),source.get("ttm_net_income_common"),source.get("ttm_operating_cashflow"),source.get("ttm_capex"),source.get("cash"),source.get("total_debt"),trajectory=traj,valuation_status=val.valuation_status if val else None,valuation_reason=val.reason_code if val else None,applicability_classification=diagnostic_classification,applicability_reason=application.reason_code,operating_income_yield=val.operating_income_yield if val else None,fcf_yield=val.fcf_yield if val else None,earnings_yield=val.earnings_yield if val else None)
-        current_endpoint=endpoint(row); prior_endpoint=endpoint(prior)
-        for result in diagnostic_flags.evaluate_diagnostic_flags(diagnostic_flags.DiagnosticInput(current_endpoint,prior_endpoint,True)):
-            diagnostics_full.append({"company_id":key[0],"quarter_id":key[1],"ticker":row["ticker"],"flag_name":result.flag_name,"status":result.status.value,"reason_code":result.reason_code,"triggered":result.triggered})
+        current_endpoint=endpoint(row); prior_endpoint=endpoint(prior) if prior else None
+        consecutive=bool(prior and str(prior["period_end"])<str(row["period_end"]) and prior.get("ttm_source_available_date") and row.get("ttm_source_available_date") and str(prior["ttm_source_available_date"])<=str(row["ttm_source_available_date"]))
+        for result in diagnostic_flags.evaluate_diagnostic_flags(diagnostic_flags.DiagnosticInput(current_endpoint,prior_endpoint,consecutive)):
+            diagnostics_full.append({"company_id":key[0],"quarter_id":key[1],"ticker":row["ticker"],"flag_name":result.flag_name,"status":result.status.value,"reason_code":result.reason_code,"triggered":result.triggered,"comparison_quarter_id":result.comparison_quarter_id,"effective_available_date":result.effective_available_date,"evidence":{item.name:item.value for item in result.evidence},"model_version":result.model_version,"model_fingerprint":result.model_fingerprint})
     diagnostics=[row for row in diagnostics_full if (row["company_id"],row["quarter_id"]) in fresh_keys]
 
     snapshot.validate_model_bundle({layer:snapshot.ModelIdentity(*identity) for layer,identity in snapshot.MODEL_CONTRACT["required_models"].items()})
-    outputs={"rows":rows,"fresh":fresh,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
+    outputs={"rows":rows,"fresh":fresh,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_v1_rows":valuation_v1,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
     outputs["fingerprints"]={"score":fingerprint(v2_scores),"lifecycle":fingerprint([asdict(life_v2[key]) for key in sorted(life_v2)]),"valuation":fingerprint([valuation_v2[key].to_dict() for key in sorted(valuation_v2)]),"delta":fingerprint(delta_full),"relative":relative.result_fingerprint,"diagnostic":fingerprint(diagnostics_full)}
     return outputs
 
