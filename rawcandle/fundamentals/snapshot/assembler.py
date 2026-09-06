@@ -42,6 +42,7 @@ from rawcandle.fundamentals.valuation.persistence import ValuationRepository
 REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V1"
 CURRENT_PRICE_LABEL = "INDICATIVE_CURRENT_PRICE_VALUATION"
 PRICE_MAX_AGE_DAYS = 7
+FILING_PRICE_MAX_AGE_DAYS = 3
 HISTORY_MODE_NOTICE = "Currently revised history — not original point-in-time history"
 COMPONENT_LABELS = {
     "REVENUE_GROWTH": "Revenue Growth",
@@ -522,10 +523,220 @@ def _current_price_valuation(
         industry=classification.get("industry"),
     )
     result = calculate_valuation(observation, (selected_bar,)).to_dict()
-    result.update(label=CURRENT_PRICE_LABEL, price_date=selected.price_date,
-                  price_age_calendar_days=selected.price_age_calendar_days,
-                  fundamental_anchor_available_date=anchor.get("ttm_source_available_date"))
+    result.update(
+        label=CURRENT_PRICE_LABEL,
+        price_date=selected.price_date,
+        price_age_calendar_days=selected.price_age_calendar_days,
+        fundamental_anchor_available_date=anchor.get("ttm_source_available_date"),
+        diagnostic_selected_price=selected.selected_price,
+        diagnostic_price_eligible=True,
+    )
     return result
+
+
+def _finite_number(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _presentation_metric(value: float | None, status: str) -> dict[str, Any]:
+    return {"status": status, "value": value if status == "VALUE" else None}
+
+
+def valuation_multiples_context(
+    *,
+    evaluation_point: str,
+    ttm: Mapping[str, Any] | None,
+    valuation: Mapping[str, Any] | None,
+    fiscal_year: int | None,
+    fiscal_quarter: str | None,
+    availability_date: str | None,
+    price_date: str | None,
+    price: Any,
+    price_eligible: bool,
+    price_currency: str | None = None,
+) -> dict[str, Any]:
+    source = valuation or {}
+    fundamentals = ttm or {}
+
+    def source_value(name: str) -> float | None:
+        value = source.get(name)
+        if value is None:
+            value = fundamentals.get(name)
+        return _finite_number(value)
+
+    price_value = _finite_number(price)
+    shares = source_value("shares_outstanding")
+    debt = source_value("total_debt")
+    cash = source_value("cash")
+    revenue = source_value("ttm_revenue")
+    ebit = source_value("ttm_ebit")
+    fcf = source_value("ttm_free_cashflow")
+    common_earnings = source_value("ttm_net_income_common")
+    if fundamentals and not bool(fundamentals.get("net_income_common_4q_ready")):
+        common_earnings = None
+
+    if not price_eligible or price_value is None:
+        market_cap_status, market_cap = "N_A", None
+    elif price_value <= 0 or shares is not None and shares <= 0:
+        market_cap_status, market_cap = "N_M", None
+    elif shares is None:
+        market_cap_status, market_cap = "N_A", None
+    else:
+        calculated = price_value * shares
+        if not math.isfinite(calculated):
+            market_cap_status, market_cap = "N_A", None
+        elif calculated <= 0:
+            market_cap_status, market_cap = "N_M", None
+        else:
+            market_cap_status, market_cap = "VALUE", calculated
+
+    if market_cap_status == "N_A" or debt is None or cash is None:
+        enterprise_value_status, enterprise_value = "N_A", None
+    elif market_cap_status == "N_M":
+        enterprise_value_status, enterprise_value = "N_M", None
+    else:
+        calculated = market_cap + debt - cash
+        if not math.isfinite(calculated):
+            enterprise_value_status, enterprise_value = "N_A", None
+        else:
+            enterprise_value_status, enterprise_value = "VALUE", calculated
+
+    def market_ratio(numerator: float | None, *, reciprocal: bool) -> dict[str, Any]:
+        if market_cap_status == "N_A" or numerator is None:
+            return _presentation_metric(None, "N_A")
+        if market_cap_status != "VALUE" or numerator <= 0:
+            return _presentation_metric(None, "N_M")
+        value = market_cap / numerator if reciprocal else numerator / market_cap
+        return _presentation_metric(value, "VALUE")
+
+    def enterprise_ratio(numerator: float | None, *, reciprocal: bool) -> dict[str, Any]:
+        if enterprise_value_status == "N_A" or numerator is None:
+            return _presentation_metric(None, "N_A")
+        if enterprise_value_status != "VALUE" or enterprise_value <= 0 or numerator <= 0:
+            return _presentation_metric(None, "N_M")
+        value = enterprise_value / numerator if reciprocal else numerator / enterprise_value
+        return _presentation_metric(value, "VALUE")
+
+    metrics = {
+        "market_cap": _presentation_metric(market_cap, market_cap_status),
+        "enterprise_value": _presentation_metric(
+            enterprise_value, enterprise_value_status
+        ),
+        "pe": market_ratio(common_earnings, reciprocal=True),
+        "earnings_yield": market_ratio(common_earnings, reciprocal=False),
+        "p_fcf": market_ratio(fcf, reciprocal=True),
+        "fcf_yield": market_ratio(fcf, reciprocal=False),
+        "ev_ebit": enterprise_ratio(ebit, reciprocal=True),
+        "ebit_yield": enterprise_ratio(ebit, reciprocal=False),
+        "ev_sales": enterprise_ratio(revenue, reciprocal=True),
+        "p_sales": market_ratio(revenue, reciprocal=True),
+    }
+    return {
+        "evaluation_point": evaluation_point,
+        "fiscal_year": fiscal_year,
+        "fiscal_quarter": fiscal_quarter,
+        "fundamental_availability_date": availability_date,
+        "price_date": price_date,
+        "price": price_value,
+        "price_currency": price_currency,
+        "valuation_status": source.get("valuation_status"),
+        "fundamental_quarter_id": fundamentals.get("endpoint_quarter_id"),
+        "source_inputs": {
+            "shares_outstanding": shares,
+            "total_debt": debt,
+            "cash": cash,
+            "ttm_revenue": revenue,
+            "ttm_ebit": ebit,
+            "ttm_free_cashflow": fcf,
+            "ttm_net_income_common": common_earnings,
+        },
+        "authoritative_market_cap": _finite_number(source.get("market_cap")),
+        "authoritative_enterprise_value": _finite_number(
+            source.get("enterprise_value")
+        ),
+        "metrics": metrics,
+    }
+
+
+def three_point_valuation_multiples(
+    *,
+    history: Sequence[Mapping[str, Any]],
+    current_price_valuation: Mapping[str, Any],
+) -> dict[str, Any]:
+    latest = history[-1]
+    previous = history[-2]
+    latest_ttm = latest.get("ttm")
+    previous_ttm = previous.get("ttm")
+    latest_valuation = latest.get("valuation")
+    previous_valuation = previous.get("valuation")
+    current_price = current_price_valuation.get("diagnostic_selected_price")
+    if current_price is None:
+        current_price = current_price_valuation.get("selected_price")
+    if "diagnostic_price_eligible" in current_price_valuation:
+        current_eligible = bool(
+            current_price_valuation.get("diagnostic_price_eligible")
+        )
+    else:
+        current_eligible = (
+            current_price_valuation.get("valuation_status") == "VALUATION_FULL"
+        )
+
+    def filing_context(
+        point: str,
+        slot: Mapping[str, Any],
+        ttm: Mapping[str, Any] | None,
+        valuation: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        price_age = (valuation or {}).get("price_age_calendar_days")
+        price_eligible = (
+            (valuation or {}).get("selected_price") is not None
+            and price_age is not None
+            and 0 <= int(price_age) <= FILING_PRICE_MAX_AGE_DAYS
+        )
+        return valuation_multiples_context(
+            evaluation_point=point,
+            ttm=ttm,
+            valuation=valuation,
+            fiscal_year=int(slot["fiscal_year"]) if ttm else None,
+            fiscal_quarter=str(slot["fiscal_quarter"]) if ttm else None,
+            availability_date=slot.get("availability_date") if ttm else None,
+            price_date=(valuation or {}).get("price_date"),
+            price=(valuation or {}).get("selected_price"),
+            price_eligible=price_eligible,
+        )
+
+    contexts = (
+        valuation_multiples_context(
+            evaluation_point="CURRENT_MOMENT",
+            ttm=latest_ttm,
+            valuation=None,
+            fiscal_year=int(latest["fiscal_year"]) if latest_ttm else None,
+            fiscal_quarter=str(latest["fiscal_quarter"]) if latest_ttm else None,
+            availability_date=latest.get("availability_date") if latest_ttm else None,
+            price_date=current_price_valuation.get("price_date"),
+            price=current_price,
+            price_eligible=current_eligible,
+        ),
+        filing_context(
+            "LATEST_FILING", latest, latest_ttm, latest_valuation
+        ),
+        filing_context(
+            "PREVIOUS_FILING_Q_MINUS_1",
+            previous,
+            previous_ttm,
+            previous_valuation,
+        ),
+    )
+    contexts[0]["valuation_status"] = current_price_valuation.get(
+        "valuation_status"
+    )
+    return {"contexts": contexts}
 
 
 def _relative_position(
@@ -590,6 +801,69 @@ def _reconcile(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
     add("no_future_fundamentals", all(value <= report_day for value in dates))
     price_date = current.get("price_date")
     add("no_future_price", price_date is None or price_date <= report_day)
+    multiple_contexts = snapshot["valuation_multiples"]["contexts"]
+    for context in multiple_contexts:
+        metrics = context["metrics"]
+        for multiple_key, yield_key in (
+            ("pe", "earnings_yield"),
+            ("p_fcf", "fcf_yield"),
+            ("ev_ebit", "ebit_yield"),
+        ):
+            multiple = metrics[multiple_key]
+            yield_value = metrics[yield_key]
+            if multiple["status"] == yield_value["status"] == "VALUE":
+                add(
+                    f"valuation_reciprocal:{context['evaluation_point']}:{multiple_key}",
+                    math.isclose(
+                        multiple["value"] * yield_value["value"],
+                        1.0,
+                        rel_tol=1e-12,
+                    ),
+                )
+        for metric_key, evidence_key in (
+            ("market_cap", "authoritative_market_cap"),
+            ("enterprise_value", "authoritative_enterprise_value"),
+        ):
+            metric = metrics[metric_key]
+            evidence = context.get(evidence_key)
+            if evidence is not None and metric["status"] == "VALUE":
+                add(
+                    f"valuation_evidence:{context['evaluation_point']}:{metric_key}",
+                    math.isclose(metric["value"], evidence, rel_tol=1e-12),
+                )
+    current_context, latest_context, previous_context = multiple_contexts
+    add(
+        "current_uses_latest_fundamentals",
+        current_context["fundamental_quarter_id"]
+        == latest_context["fundamental_quarter_id"]
+        and current_context["source_inputs"] == latest_context["source_inputs"],
+    )
+    expected_previous = snapshot["anchor"]["fiscal_sequence"] - 1
+    previous_sequence = (
+        fiscal_ordinal(
+            previous_context["fiscal_year"], previous_context["fiscal_quarter"]
+        )
+        if previous_context["fiscal_year"] is not None
+        else None
+    )
+    add(
+        "previous_is_exact_fiscal_predecessor_or_unavailable",
+        previous_sequence is None or previous_sequence == expected_previous,
+    )
+    for context in multiple_contexts[1:]:
+        if context["price_date"] is None:
+            continue
+        availability = context["fundamental_availability_date"]
+        age = (
+            date.fromisoformat(availability) - date.fromisoformat(context["price_date"])
+            if availability
+            else None
+        )
+        add(
+            f"filing_price_contract:{context['evaluation_point']}",
+            age is not None
+            and 0 <= age.days <= FILING_PRICE_MAX_AGE_DAYS,
+        )
     relative_date = snapshot["relative_position"].get("metadata", {}).get("snapshot_date") if snapshot["relative_position"].get("metadata") else None
     add("no_future_relative_snapshot", not snapshot["relative_position"]["available"] or relative_date <= report_day)
     return checks
@@ -683,6 +957,10 @@ def assemble_company_snapshot(
             connections["market"], ticker=identity["ticker"], report_date=report_date,
             anchor=anchor, classification=classification,
         )
+        valuation_multiples = three_point_valuation_multiples(
+            history=history,
+            current_price_valuation=current_valuation,
+        )
         relative = _relative_position(
             RelativePositionRepository(analysis), identity["company_id"], report_date,
             int(anchor["endpoint_quarter_id"]),
@@ -738,6 +1016,7 @@ def assemble_company_snapshot(
             "valuation_four_observation_average": valuation_average,
             "valuation_four_observation_count": sum(value is not None for value in filing_values),
             "current_price_valuation": current_valuation,
+            "valuation_multiples": valuation_multiples,
             "relative_position": relative,
             "diagnostic": diagnostic,
             "diagnostic_counts": diagnostic_counts,

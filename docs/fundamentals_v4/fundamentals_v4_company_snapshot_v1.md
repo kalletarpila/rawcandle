@@ -28,6 +28,39 @@ earnings yield = TTM common earnings / market_cap
 
 Hintaa ja osakemäärää käytetään tuotannon split-yhteensopivassa tallennusmuodossa. Erillistä split-oikaisua ei tehdä. Jos hinta on liian vanha tai laskenta ei ole sovellettavissa, nykyhintavaluation näytetään puuttuvana eikä muuta raporttia estetä.
 
+## Three-point valuation multiples
+
+Raportin Valuation-osio sisältää kuvailevan kolmen pisteen vertailun. Sarakkeet ovat:
+
+1. `Current moment`: viimeisin raporttipäivänä tai sitä ennen kelvollinen markkinahinta yhdistettynä uusimman filing-ankkurin fundamentteihin, osakkeisiin, velkaan ja kassaan. Tämä on indikatiivinen esityslaskelma, ei persisted valuation -havainto.
+2. `Latest filing`: uusimman ankkurin oma persisted Valuation V1 -hinta ja sen todellinen hintapäivä sekä saman ankkurin fundamentit.
+3. `Previous filing (Q−1)`: täsmälleen edeltävä fiscal-havainto `fiscal_sequence - 1`, sen oma saatavuuspäivä, persisted filing-hinta ja omat TTM- ja tasearvot. Lähintä aikaisempaa kalenterihavaintoa, Q−2:ta tai uusimman filingin fundamentteja ei korvata puuttuvan Q−1:n tilalle.
+
+Kontekstitaulukko näyttää jokaiselle pisteelle fiscal-kvartaalin, fundamentin saatavuuspäivän, todellisen hintapäivän, hinnan, valuutan silloin kun validoitu valuuttakenttä on saatavilla sekä authoritative valuation -statuksen. Nykyisissä validoiduissa lähdetauluissa ei ole hintavaluuttaa, joten sitä ei päätellä provider-payloadista vaan se näytetään `N/A`:na.
+
+Taulukossa on täsmälleen nämä kymmenen mittaria, jotka lasketaan pyöristämättömistä lähdearvoista:
+
+```text
+Market Capitalization = price * shares outstanding
+Enterprise Value = Market Capitalization + total debt - cash
+P/E = Market Capitalization / TTM common earnings
+Earnings Yield = TTM common earnings / Market Capitalization
+P/FCF = Market Capitalization / TTM free cash flow
+FCF Yield = TTM free cash flow / Market Capitalization
+EV/EBIT = Enterprise Value / TTM EBIT
+EBIT Yield = TTM EBIT / Enterprise Value
+EV/Sales = Enterprise Value / TTM revenue
+P/S = Market Capitalization / TTM revenue
+```
+
+`N/A` tarkoittaa, että vaadittu lähdearvo tai koko evaluation point puuttuu tai ei ole kelvollinen. `N/M` tarkoittaa, että lähdearvot ovat olemassa mutta suhdeluku ei ole taloudellisesti mielekäs: esimerkiksi earnings, FCF, EBIT tai revenue on enintään nolla, Market Cap ei ole positiivinen tai EV-pohjaisen suhdeluvun EV ei ole positiivinen. Puuttuvaa arvoa ei muuteta nollaksi eikä imputoida. Negatiivinen EV voidaan näyttää absoluuttisena tasekäsitteenä, mutta EV-pohjaiset suhdeluvut ovat silloin `N/M`.
+
+Market Cap ja EV esitetään lyhennetyssä rahaformaatissa, multiplet `x`-muodossa ja yieldit prosentteina. Hyvin pienille positiivisille yieldeille säilytetään lisädesimaaleja. Näyttöpyöristyksen negatiivinen nolla normalisoidaan nollaksi. Laskentaa ei koskaan tehdä pyöristetyistä näyttöarvoista tai pyöristetyn yieldin käänteislukuna.
+
+Rekonsiliaatio tarkistaa pyöristämättömistä arvoista `P/E * Earnings Yield`, `P/FCF * FCF Yield` ja `EV/EBIT * EBIT Yield` vasten yhtä. Latest filingin ja Q−1:n uudelleen lasketut Market Cap ja EV täsmäytetään persisted valuation -evidenssiin. Lisäksi tarkistetaan latest/current-fundamenttipohjan identtisyys, exact fiscal Q−1, current-hinnan yläraja ja filing-hintojen Valuation V1 -fallback-ikkuna.
+
+Current momentin ja Latest filingin ero johtuu pääosin hinnasta, koska fundamenttipohja on sama. Latest filingin ja Q−1:n ero yhdistää hinnan, osakemäärän, taseen ja TTM-fundamenttien muutokset, joten taulukko ei ole puhdas valuation-trendin dekompositio. Mittarit ovat kuvailevia eivätkä muuta Valuation Scorea, sen sovellettavuutta, pisteitä tai fingerprintiä. P/B:tä, P/TBV:tä, PEG:iä, EV/EBITDA:ta, EV/FCF:ää, osinkotuottoa tai forward-multipleita ei lasketa.
+
 Filing-date valuation käyttää kunkin fundamenttihavainnon saatavuuspäivään valittua markkinahintaa. Indicative current-price valuation käyttää viimeisintä raporttipäivälle kelvollista hintaa mutta pitää anchor-fundamentit vakiona. Raportti näyttää näiden hinnat, päivät, absoluuttisen ja prosentuaalisen hintaeron sekä Score-eron. Filing-historian hintamuutokset näytetään QoQ-, 2Q- ja YoY-horisonteilla. Filing-date Valuation Scoren muutos voi johtua sekä fundamenttien että filing-hinnan muutoksesta, joten sitä ei tulkita puhtaaksi trendiksi.
 
 ## Lifecycle-esitys

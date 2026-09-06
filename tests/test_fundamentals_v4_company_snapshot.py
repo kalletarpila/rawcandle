@@ -20,6 +20,8 @@ from rawcandle.fundamentals.snapshot.assembler import (
     lifecycle_presentation,
     lifecycle_transition_status,
     strict_fiscal_slots,
+    three_point_valuation_multiples,
+    valuation_multiples_context,
 )
 from rawcandle.fundamentals.snapshot.renderer import render_snapshot, verify_rendered_report
 from rawcandle.fundamentals.snapshot.writer import publish_report, report_filename
@@ -43,6 +45,7 @@ def _valuation(total: float, price: float) -> dict[str, object]:
         "valuation_status": "VALUATION_FULL",
         "reason_code": "VALUATION_FULL",
         "price_date": "2026-08-14",
+        "price_age_calendar_days": 0,
         "selected_price": price,
         "ebit_yield": 0.08,
         "fcf_yield": 0.07,
@@ -127,6 +130,40 @@ def _snapshot() -> dict[str, object]:
         "shares_outstanding": 100_000_000.0,
     }
     diagnostics = _diagnostics()
+    current_price_valuation = {
+        **_valuation(60.0, 12.0),
+        "label": CURRENT_PRICE_LABEL,
+        "price_date": "2026-09-04",
+        "price_age_calendar_days": 2,
+        "diagnostic_selected_price": 12.0,
+        "diagnostic_price_eligible": True,
+    }
+    for slot, values in zip(history, (current_values,) * len(history)):
+        slot["ttm"] = {
+            **values,
+            "endpoint_quarter_id": history.index(slot) + 1,
+            "blocker_codes_json": "[]",
+            "net_income_common_4q_ready": 1,
+        }
+        slot["valuation"].update(
+            shares_outstanding=values["shares_outstanding"],
+            total_debt=values["total_debt"],
+            cash=values["cash"],
+            ttm_ebit=values["ttm_ebit"],
+            ttm_free_cashflow=values["ttm_free_cashflow"],
+            ttm_net_income_common=values["ttm_net_income_common"],
+            market_cap=slot["valuation"]["selected_price"]
+            * values["shares_outstanding"],
+        )
+        slot["valuation"]["enterprise_value"] = (
+            slot["valuation"]["market_cap"]
+            + values["total_debt"]
+            - values["cash"]
+        )
+    valuation_multiples = three_point_valuation_multiples(
+        history=history,
+        current_price_valuation=current_price_valuation,
+    )
     return {
         "report_contract": REPORT_CONTRACT,
         "report_date": "2026-09-06",
@@ -148,7 +185,8 @@ def _snapshot() -> dict[str, object]:
         },
         "valuation_four_observation_average": 52.5,
         "valuation_four_observation_count": 4,
-        "current_price_valuation": {**_valuation(60.0, 12.0), "label": CURRENT_PRICE_LABEL, "price_date": "2026-09-04", "price_age_calendar_days": 2},
+        "current_price_valuation": current_price_valuation,
+        "valuation_multiples": valuation_multiples,
         "relative_position": {"available": True, "rows": [
             {"measure": measure, "peer_scope": scope, "percentile": 75.0, "peer_count": 100, "peer_group_id": "ALL" if scope == "UNIVERSE" else "Technology", "snapshot_date": "2026-09-01"}
             for measure in ("FUNDAMENTAL_SCORE", "ABSOLUTE_VALUATION_SCORE")
@@ -211,7 +249,8 @@ def test_renderer_contains_all_contract_sections_components_raw_values_and_statu
         "Absoluuttiset fundamenttiarvot", "Lifecycle-historia",
         "Filing-date Valuation Score -historia", "Valuation-komponenttien pistehistoria",
         "Valuation raw-yield -historia", "Filing-date Valuation comparisons",
-        "Indicative current-price valuation", "Relative Position", "Diagnostic Flags",
+        "Indicative current-price valuation", "Three-point valuation multiples",
+        "Relative Position", "Diagnostic Flags",
         "Data readiness ja rajoitteet", "Tekninen liite",
     ):
         assert f"## {heading}" in rendered.markdown
@@ -221,6 +260,12 @@ def test_renderer_contains_all_contract_sections_components_raw_values_and_statu
     assert "Capex spend" in rendered.markdown
     assert "FCF / Market Cap" in rendered.markdown
     assert "Positive components" in rendered.markdown
+    for metric in (
+        "Market Capitalization", "Enterprise Value", "P/E", "Earnings Yield",
+        "P/FCF", "FCF Yield", "EV/EBIT", "EBIT Yield", "EV/Sales", "P/S",
+    ):
+        assert f"| {metric} |" in rendered.markdown
+    assert "1.20 B" in rendered.markdown
     assert "3/3" in rendered.markdown
     assert "Ei aktiivista ekosysteemijäsenyyttä" in rendered.markdown
     assert "Currently revised history — not original point-in-time history" in rendered.markdown
@@ -266,6 +311,33 @@ def test_renderer_handles_required_presentation_edge_cases() -> None:
     assert "| AI | Accelerators | CORE |" in markdown
     assert "| Data Center | Power | EXTENDED |" in markdown
     assert "-0.00" not in markdown and "+0.00" not in markdown
+
+
+def test_three_point_renderer_distinguishes_na_nm_and_preserves_small_yield() -> None:
+    snapshot = _snapshot()
+    current, latest, previous = snapshot["valuation_multiples"]["contexts"]
+    current["metrics"]["earnings_yield"] = {
+        "status": "VALUE",
+        "value": 0.00000123,
+    }
+    latest["metrics"]["p_fcf"] = {"status": "N_M", "value": None}
+    previous["metrics"]["p_fcf"] = {"status": "N_A", "value": None}
+
+    markdown = render_snapshot(snapshot).markdown
+
+    assert "0.0001 %" in markdown
+    assert "| P/FCF |" in markdown and "N/M" in markdown and "N/A" in markdown
+    assert "-0.00x" not in markdown and "-0.00 %" not in markdown
+
+
+def test_three_point_section_is_part_of_report_content_fingerprint() -> None:
+    snapshot = _snapshot()
+    before = render_snapshot(snapshot)
+    snapshot["valuation_multiples"]["contexts"][0]["metrics"]["pe"]["value"] += 1.0
+    after = render_snapshot(snapshot)
+
+    assert before.content_fingerprint != after.content_fingerprint
+    assert before.markdown != after.markdown
 
 
 def test_renderer_marks_missing_filing_price_comparison_endpoint() -> None:
@@ -316,6 +388,172 @@ def test_current_price_preserves_not_applicable_and_nonpositive_ev() -> None:
     assert reit["valuation_status"] == "VALUATION_NOT_APPLICABLE"
     negative_ev = _current_price_valuation(market, ticker="TEST", report_date="2026-09-06", anchor=_anchor(cash=2_000.0, total_debt=0.0), classification={"sector": "Technology", "industry": "Software"})
     assert negative_ev["reason_code"] == "ENTERPRISE_VALUE_NONPOSITIVE"
+
+
+def _multiples_context(**changes: object) -> dict[str, object]:
+    ttm = {
+        "endpoint_quarter_id": 5,
+        "shares_outstanding": 100.0,
+        "total_debt": 20.0,
+        "cash": 10.0,
+        "ttm_revenue": 500.0,
+        "ttm_ebit": 100.0,
+        "ttm_free_cashflow": 80.0,
+        "ttm_net_income_common": 50.0,
+        "net_income_common_4q_ready": 1,
+    }
+    ttm.update(changes)
+    return valuation_multiples_context(
+        evaluation_point="TEST",
+        ttm=ttm,
+        valuation=None,
+        fiscal_year=2026,
+        fiscal_quarter="Q2",
+        availability_date="2026-08-14",
+        price_date="2026-08-14",
+        price=10.0,
+        price_eligible=True,
+    )
+
+
+def test_three_point_metric_formulas_and_reciprocals_use_unrounded_inputs() -> None:
+    context = _multiples_context()
+    metrics = context["metrics"]
+
+    assert metrics["market_cap"] == {"status": "VALUE", "value": 1_000.0}
+    assert metrics["enterprise_value"] == {"status": "VALUE", "value": 1_010.0}
+    assert metrics["pe"]["value"] == pytest.approx(20.0)
+    assert metrics["earnings_yield"]["value"] == pytest.approx(0.05)
+    assert metrics["p_fcf"]["value"] == pytest.approx(12.5)
+    assert metrics["fcf_yield"]["value"] == pytest.approx(0.08)
+    assert metrics["ev_ebit"]["value"] == pytest.approx(10.1)
+    assert metrics["ebit_yield"]["value"] == pytest.approx(100 / 1_010)
+    assert metrics["ev_sales"]["value"] == pytest.approx(1_010 / 500)
+    assert metrics["p_sales"]["value"] == pytest.approx(2.0)
+    for multiple, yield_name in (
+        ("pe", "earnings_yield"),
+        ("p_fcf", "fcf_yield"),
+        ("ev_ebit", "ebit_yield"),
+    ):
+        assert metrics[multiple]["value"] * metrics[yield_name]["value"] == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    ("field", "metric_names"),
+    (
+        ("ttm_net_income_common", ("pe", "earnings_yield")),
+        ("ttm_free_cashflow", ("p_fcf", "fcf_yield")),
+        ("ttm_ebit", ("ev_ebit", "ebit_yield")),
+        ("ttm_revenue", ("ev_sales", "p_sales")),
+    ),
+)
+@pytest.mark.parametrize("value", (0.0, -1.0))
+def test_nonpositive_fundamental_is_not_meaningful(
+    field: str, metric_names: tuple[str, str], value: float
+) -> None:
+    metrics = _multiples_context(**{field: value})["metrics"]
+    assert [metrics[name]["status"] for name in metric_names] == ["N_M", "N_M"]
+
+
+def test_missing_inputs_are_na_and_nonpositive_ev_blocks_ev_ratios_only() -> None:
+    missing_debt = _multiples_context(total_debt=None)["metrics"]
+    assert missing_debt["market_cap"]["status"] == "VALUE"
+    assert missing_debt["enterprise_value"]["status"] == "N_A"
+    assert missing_debt["ev_ebit"]["status"] == "N_A"
+    assert missing_debt["pe"]["status"] == "VALUE"
+
+    nonpositive_ev = _multiples_context(cash=2_000.0, total_debt=0.0)["metrics"]
+    assert nonpositive_ev["enterprise_value"]["value"] == -1_000.0
+    assert nonpositive_ev["ev_ebit"]["status"] == "N_M"
+    assert nonpositive_ev["ev_sales"]["status"] == "N_M"
+
+    net_cash = _multiples_context(cash=200.0, total_debt=0.0)["metrics"]
+    assert net_cash["enterprise_value"] == {"status": "VALUE", "value": 800.0}
+    assert net_cash["ev_ebit"]["status"] == "VALUE"
+
+
+def test_three_points_use_latest_base_and_exact_q_minus_one_base() -> None:
+    snapshot = _snapshot()
+    history = snapshot["history"]
+    history[-2]["ttm"]["ttm_revenue"] = 321.0
+    history[-2]["valuation"]["ttm_ebit"] = 42.0
+    history[-1]["ttm"]["ttm_revenue"] = 654.0
+    history[-1]["ttm"]["ttm_ebit"] = 84.0
+    history[-1]["valuation"]["ttm_ebit"] = 84.0
+    current = snapshot["current_price_valuation"]
+    current["diagnostic_selected_price"] = 20.0
+
+    contexts = three_point_valuation_multiples(
+        history=history, current_price_valuation=current
+    )["contexts"]
+
+    assert contexts[0]["source_inputs"] == contexts[1]["source_inputs"]
+    assert contexts[0]["price"] == 20.0
+    assert contexts[1]["price"] == history[-1]["valuation"]["selected_price"]
+    assert contexts[2]["source_inputs"]["ttm_revenue"] == 321.0
+    assert contexts[2]["source_inputs"]["ttm_ebit"] == 42.0
+    assert contexts[2]["fiscal_quarter"] == history[-2]["fiscal_quarter"]
+
+
+def test_missing_exact_q_minus_one_is_not_substituted() -> None:
+    snapshot = _snapshot()
+    snapshot["history"][-2]["ttm"] = None
+    snapshot["history"][-2]["valuation"] = None
+
+    previous = three_point_valuation_multiples(
+        history=snapshot["history"],
+        current_price_valuation=snapshot["current_price_valuation"],
+    )["contexts"][2]
+
+    assert previous["fiscal_year"] is None
+    assert all(metric["status"] == "N_A" for metric in previous["metrics"].values())
+
+
+def test_not_ready_filing_and_stale_current_price_do_not_produce_price_metrics() -> None:
+    snapshot = _snapshot()
+    snapshot["history"][-2]["valuation"]["price_age_calendar_days"] = 4
+    snapshot["current_price_valuation"].update(
+        valuation_status="VALUATION_NOT_READY",
+        diagnostic_price_eligible=False,
+    )
+
+    current, _latest, previous = three_point_valuation_multiples(
+        history=snapshot["history"],
+        current_price_valuation=snapshot["current_price_valuation"],
+    )["contexts"]
+
+    assert all(metric["status"] == "N_A" for metric in current["metrics"].values())
+    assert all(metric["status"] == "N_A" for metric in previous["metrics"].values())
+
+
+def test_not_applicable_status_is_preserved_for_valid_diagnostic_multiples() -> None:
+    snapshot = _snapshot()
+    latest = snapshot["history"][-1]
+    latest["valuation"]["valuation_status"] = "VALUATION_NOT_APPLICABLE"
+
+    context = three_point_valuation_multiples(
+        history=snapshot["history"],
+        current_price_valuation=snapshot["current_price_valuation"],
+    )["contexts"][1]
+
+    assert context["valuation_status"] == "VALUATION_NOT_APPLICABLE"
+    assert context["metrics"]["market_cap"]["status"] == "VALUE"
+    assert context["metrics"]["pe"]["status"] == "VALUE"
+
+
+def test_exact_predecessor_uses_fiscal_identity_across_fiscal_year_boundary() -> None:
+    snapshot = _snapshot()
+    history = snapshot["history"]
+    history[-2].update(fiscal_year=2026, fiscal_quarter="Q4")
+    history[-1].update(fiscal_year=2027, fiscal_quarter="Q1")
+
+    contexts = three_point_valuation_multiples(
+        history=history,
+        current_price_valuation=snapshot["current_price_valuation"],
+    )["contexts"]
+
+    assert (contexts[1]["fiscal_year"], contexts[1]["fiscal_quarter"]) == (2027, "Q1")
+    assert (contexts[2]["fiscal_year"], contexts[2]["fiscal_quarter"]) == (2026, "Q4")
 
 
 def test_ticker_resolution_is_case_insensitive_alias_aware_and_ambiguous_safe() -> None:

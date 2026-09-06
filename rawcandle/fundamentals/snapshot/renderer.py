@@ -108,6 +108,40 @@ def _price(value: Any) -> str:
     return "—" if not math.isfinite(number) else f"{number:.2f}"
 
 
+def _valuation_metric(
+    context: Mapping[str, Any], key: str, formatter: Any
+) -> str:
+    metric = context["metrics"][key]
+    if metric["status"] == "N_A":
+        return "N/A"
+    if metric["status"] == "N_M":
+        return "N/M"
+    rendered = formatter(metric["value"])
+    currency = context.get("price_currency")
+    if key in {"market_cap", "enterprise_value"} and currency:
+        return f"{rendered} {currency}"
+    return rendered
+
+
+def _valuation_context_quarter(context: Mapping[str, Any]) -> str:
+    if context.get("fiscal_year") is None or not context.get("fiscal_quarter"):
+        return "N/A"
+    return f"FY{context['fiscal_year']} {context['fiscal_quarter']}"
+
+
+def _valuation_yield(value: Any) -> str:
+    if value is None:
+        return "—"
+    number = float(value)
+    if not math.isfinite(number):
+        return "—"
+    percentage = number * 100
+    decimals = 4 if 0 < abs(percentage) < 0.01 else 2
+    if abs(percentage) < 0.5 * 10 ** (-decimals):
+        percentage = 0.0
+    return f"{percentage:.{decimals}f} %"
+
+
 def _signed_score(value: Any) -> str:
     if value is None:
         return "—"
@@ -350,6 +384,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         current_price_change = float(current_price["selected_price"]) - filing_price
         current_price_change_pct = current_price_change / filing_price if filing_price > 0 else None
     current_absolute = snapshot["absolute_values"]["current"]
+    valuation_contexts = snapshot["valuation_multiples"]["contexts"]
+    current_multiple, latest_multiple, previous_multiple = valuation_contexts
     net_debt = current_absolute.get("net_debt")
     debt_label = "Net cash" if net_debt is not None and float(net_debt) < 0 else "Net debt"
     debt_value = abs(float(net_debt)) if net_debt is not None and float(net_debt) < 0 else net_debt
@@ -574,6 +610,64 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "> Shares, debt and cash come from the latest fundamental filing and may differ from their true current-date values.",
         "",
         "Nykyhintalaskenta pitää anchor-fundamentit vakiona. Nykyhintapersentiiliä ei lasketa eikä esitetä.",
+        "",
+        "## Three-point valuation multiples",
+        "",
+        _table(
+            (
+                "Evaluation point",
+                "Fiscal quarter",
+                "Fundamental availability",
+                "Price date",
+                "Market price",
+                "Currency",
+                "Valuation status",
+            ),
+            tuple(
+                (
+                    label,
+                    _valuation_context_quarter(context),
+                    _text(context.get("fundamental_availability_date")),
+                    _text(context.get("price_date")),
+                    _price(context.get("price")) if context.get("price") is not None else "N/A",
+                    context.get("price_currency") or "N/A",
+                    _text(context.get("valuation_status")),
+                )
+                for label, context in (
+                    ("Current moment", current_multiple),
+                    ("Latest filing", latest_multiple),
+                    ("Previous filing (Q−1)", previous_multiple),
+                )
+            ),
+            ("left", "left", "left", "left", "right", "left", "left"),
+        ),
+        "",
+        _table(
+            ("Metric", "Current moment", "Latest filing", "Previous filing (Q−1)"),
+            tuple(
+                (
+                    label,
+                    _valuation_metric(current_multiple, key, formatter),
+                    _valuation_metric(latest_multiple, key, formatter),
+                    _valuation_metric(previous_multiple, key, formatter),
+                )
+                for key, label, formatter in (
+                    ("market_cap", "Market Capitalization", _money),
+                    ("enterprise_value", "Enterprise Value", _money),
+                    ("pe", "P/E", _multiple),
+                    ("earnings_yield", "Earnings Yield", _valuation_yield),
+                    ("p_fcf", "P/FCF", _multiple),
+                    ("fcf_yield", "FCF Yield", _valuation_yield),
+                    ("ev_ebit", "EV/EBIT", _multiple),
+                    ("ebit_yield", "EBIT Yield", _valuation_yield),
+                    ("ev_sales", "EV/Sales", _multiple),
+                    ("p_sales", "P/S", _multiple),
+                )
+            ),
+            ("left", "right", "right", "right"),
+        ),
+        "",
+        "> Current moment versus Latest filing mainly reflects the market-price change because both use the latest filing's fundamental base. Latest filing versus Previous filing (Q−1) combines changes in price, shares, balance sheet, and TTM fundamentals, so this is not a pure valuation trend decomposition. The metrics are descriptive and do not alter Valuation Score. Current-moment metrics are indicative because they combine a current market price with the latest available filing fundamentals.",
         "",
         "## Relative Position",
         "",
