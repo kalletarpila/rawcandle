@@ -262,3 +262,11 @@ The never-deployed Phase 5C V1 layout was retired after Phase 5C.1 measured appr
 V2 persists 50,585 compact totals and 354,095 narrow `WITHOUT ROWID` components. Lifecycle and Valuation contexts are calculated on demand from targeted authoritative revised histories; no Delta-owned context rows or Valuation JSON exist. The first apply, identical no-op, complete-company change/removal/restore and six rollback boundaries passed. Production-copy growth was 68,038,656 bytes, close to the approximately 64.46 MB prototype target and about 88.69% below V1.
 
 Phase 5C.2 changed no real production database, active pipeline or provider operation. Phase 5D subsequently deployed the exact V2 layout on 2026-09-02, retained a verified backup, activated Delta after Valuation and before Relative Position, and completed the no-provider smoke test. See `fundamentals_v4_delta_v1_phase5d_deployment.md`.
+
+## Operating-Income V2 Phases 9A-9C
+
+Phase 9A completed the read-only EBIT semantics investigation and established that Sharadar `ebit` is mathematically valid but unsuitable as the operating-profit concept. Phase 9B locked `Sharadar opinc -> operating_income -> ttm_operating_income`, retained all affected absolute anchors, weights, Lifecycle thresholds and state-machine rules, and authorized pure implementation only.
+
+Phase 9C status: `PURE_PARALLEL_V2_ENGINES_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`. The package `rawcandle.fundamentals.operating_income_v2` provides separately fingerprinted Score, Lifecycle, Valuation, Delta, Relative Position, Diagnostic Flags and Company Snapshot contracts plus a read-only two-pass rehearsal. V1 remains unchanged and active.
+
+Phase 9D is not authorized. It must separately design and rehearse parallel persistence, V2 backfill, coherent reader-bundle activation and rollback before any production migration or write.
