@@ -166,10 +166,16 @@ def _v1_state(conn: sqlite3.Connection) -> dict[str, Any]:
     }
     counts = {name: conn.execute(sql, (fp,)).fetchone()[0] for name, (sql, fp) in queries.items()}
     digest = hashlib.sha256()
+    def columns(table: str, excluded: frozenset[str] = frozenset()) -> str:
+        names = [str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})") if str(row[1]) not in excluded]
+        return ",".join(f'"{name}"' for name in names)
+
+    lifecycle_columns = columns("lifecycle_revised_result", frozenset({"operating_margin_ttm", "operating_margin_direction"}))
+    valuation_columns = columns("valuation_revised_result", frozenset({"ttm_operating_income", "operating_income_yield", "operating_income_points"}))
     content_queries = (
         ("score", "SELECT r.*,c.* FROM score_result r LEFT JOIN score_component c USING(score_result_id) WHERE r.model_fingerprint=? ORDER BY r.company_id,r.quarter_id,c.component_name", SCORE_V1),
-        ("lifecycle", "SELECT * FROM lifecycle_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", LIFECYCLE_V1),
-        ("valuation", "SELECT * FROM valuation_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", VALUATION_V1),
+        ("lifecycle", f"SELECT {lifecycle_columns} FROM lifecycle_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", LIFECYCLE_V1),
+        ("valuation", f"SELECT {valuation_columns} FROM valuation_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", VALUATION_V1),
         ("delta", "SELECT r.*,c.* FROM fundamental_delta_result r JOIN fundamental_delta_package p USING(package_id) LEFT JOIN fundamental_delta_component c USING(endpoint_id) WHERE p.model_fingerprint=? ORDER BY r.company_id,r.fiscal_sequence,c.component_id", DELTA_V1),
         ("diagnostic", "SELECT e.*,v.* FROM diagnostic_flag_endpoint e JOIN diagnostic_flag_package p USING(package_id) LEFT JOIN diagnostic_flag_evaluation v USING(endpoint_id) WHERE p.model_fingerprint=? ORDER BY e.company_id,e.fiscal_sequence,v.flag_id", DIAGNOSTIC_V1),
         ("relative", "SELECT r.* FROM relative_position_result r JOIN relative_position_snapshot s USING(snapshot_id) WHERE s.model_fingerprint=? ORDER BY r.measure,r.peer_scope,r.peer_group_id,r.company_id", RELATIVE_V1),
