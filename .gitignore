@@ -101,6 +101,7 @@ temp/
 exports/
 canonical_reports/
 swing_reports/
+fundamental_reports/
 data_backup_*/
 /scheduler_config.json
 
