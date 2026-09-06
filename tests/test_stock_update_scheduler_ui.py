@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -42,6 +43,7 @@ from dev_tools.stock_update_scheduler_ui import (
     scheduler_skip_button_state,
     scheduler_skip_next_run_label,
     taxonomy_confirmation_key,
+    top_level_route_index,
     update_systemd_timer_on_calendar,
 )
 from rawcandle.datacenter_taxonomy_replacement import ensure_taxonomy_replacement_schema
@@ -651,7 +653,7 @@ def test_run_datacenter_ui_command_updates_fields(tmp_path):
     assert page.update_count == 1
 
 
-def test_run_app_exposes_scheduler_and_taxonomy_controls_without_old_datacenter_tab(tmp_path, monkeypatch):
+def test_run_app_exposes_scheduler_taxonomy_and_fundamentals_top_level_tabs(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     _write_config(config_path)
     monkeypatch.setattr(
@@ -664,12 +666,49 @@ def test_run_app_exposes_scheduler_and_taxonomy_controls_without_old_datacenter_
 
     assert page.title == "RawCandle stock update scheduler"
     assert page.technical_relevance_checkbox.value is False
-    tabs = page.controls[0].tabs
-    assert [tab.text for tab in tabs] == ["Scheduler", "Taxonomy"]
+    tabs = page.top_level_tabs
+    assert [tab.text for tab in tabs.tabs] == ["Scheduler", "Taxonomy", "Fundamentals"]
+    assert tabs.selected_index == 0
+    assert page.fundamentals_content is tabs.tabs[2].content
+    assert page.fundamentals_overwrite_checkbox.value is False
     assert page.taxonomy_prepare_button is not None
     assert not hasattr(page, "datacenter_plan_button")
     assert not hasattr(page, "datacenter_dashboard_content")
     assert page.running_status_text.value == "Scheduler status: not running"
+
+
+@pytest.mark.parametrize(
+    ("route", "index"),
+    (("/", 0), ("/scheduler", 0), ("/taxonomy", 1), ("/fundamentals", 2), ("/unknown", 0)),
+)
+def test_top_level_routes_have_stable_active_tab(route, index):
+    assert top_level_route_index(route) == index
+
+
+def test_run_app_fundamentals_route_is_active_without_affecting_other_tabs(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing"},
+    )
+    page = _FakePage()
+    page.route = "/fundamentals"
+
+    run_app(page, str(config_path))
+
+    assert page.top_level_tabs.selected_index == 2
+    assert page.scheduler_content is page.top_level_tabs.tabs[0].content
+    assert page.taxonomy_content is page.top_level_tabs.tabs[1].content
+    assert page.fundamentals_content is page.top_level_tabs.tabs[2].content
+
+    page.on_route_change(SimpleNamespace(route="/taxonomy"))
+    assert page.top_level_tabs.selected_index == 1
+
+    page.top_level_tabs.selected_index = 2
+    page.top_level_tabs.on_change(SimpleNamespace(control=page.top_level_tabs))
+    assert page.route == "/fundamentals"
+    assert page.top_level_tabs.selected_index == 2
 
 
 def test_run_app_loads_current_style_local_config_with_legacy_dashboard_keys(

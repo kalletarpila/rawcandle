@@ -16,6 +16,10 @@ from urllib.parse import quote
 
 import flet as ft
 
+from dev_tools.fundamentals_snapshot_page import (
+    FUNDAMENTALS_ROUTE,
+    build_fundamentals_page,
+)
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -86,6 +90,18 @@ _SWINGMASTER_LOG_FILENAME_RE = re.compile(
 )
 _TIMER_PATH = Path.home() / ".config/systemd/user/stock-update-scheduler.timer"
 _TAXONOMY_EVIDENCE_ROOT = "temp/datacenter_taxonomy_changes"
+TOP_LEVEL_ROUTES = ("/scheduler", "/taxonomy", FUNDAMENTALS_ROUTE)
+
+
+def top_level_route_index(route: str | None) -> int:
+    normalized = str(route or "").split("?", 1)[0].rstrip("/") or "/"
+    if normalized in {"/", "/scheduler"}:
+        return 0
+    if normalized == "/taxonomy":
+        return 1
+    if normalized == FUNDAMENTALS_ROUTE:
+        return 2
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1748,6 +1764,11 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         spacing=12,
         expand=True,
     )
+    fundamentals_controls = build_fundamentals_page(
+        page=page,
+        timezone_name=config.timezone,
+        service=getattr(page, "fundamentals_snapshot_service", None),
+    )
 
     refresh_logs_view(config.log_dir)
     try:
@@ -1800,16 +1821,51 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.taxonomy_download_log_button = taxonomy_download_log_button
     page.taxonomy_download_evidence_button = taxonomy_download_evidence_button
     page.taxonomy_confirmation_state = taxonomy_confirmation_state
+    page.fundamentals_content = fundamentals_controls.content
+    page.fundamentals_ticker_field = fundamentals_controls.ticker_field
+    page.fundamentals_report_date_field = fundamentals_controls.report_date_field
+    page.fundamentals_overwrite_checkbox = fundamentals_controls.overwrite_checkbox
+    page.fundamentals_generate_button = fundamentals_controls.generate_button
+    page.fundamentals_status_field = fundamentals_controls.status_field
+    page.fundamentals_recent_reports_column = fundamentals_controls.recent_reports_column
 
-    page.add(
-        ft.Tabs(
-            tabs=[
-                ft.Tab(text="Scheduler", content=scheduler_content),
-                ft.Tab(text="Taxonomy", content=taxonomy_content),
-            ],
-            expand=True,
-        )
+    tabs = ft.Tabs(
+        tabs=[
+            ft.Tab(text="Scheduler", content=scheduler_content),
+            ft.Tab(text="Taxonomy", content=taxonomy_content),
+            ft.Tab(text="Fundamentals", content=fundamentals_controls.content),
+        ],
+        selected_index=top_level_route_index(getattr(page, "route", "/")),
+        expand=True,
     )
+
+    def on_top_level_tab_change(event: Any) -> None:
+        selected = int(getattr(event.control, "selected_index", 0) or 0)
+        selected = selected if 0 <= selected < len(TOP_LEVEL_ROUTES) else 0
+        route = TOP_LEVEL_ROUTES[selected]
+        if hasattr(page, "go"):
+            outcome = page.go(route)
+            if inspect.isawaitable(outcome) and hasattr(page, "run_task"):
+                async def _await_navigation() -> None:
+                    await outcome
+
+                page.run_task(_await_navigation)
+        else:
+            page.route = route
+        tabs.selected_index = selected
+        if hasattr(page, "update"):
+            page.update()
+
+    def on_top_level_route_change(event: Any) -> None:
+        route = getattr(event, "route", None) or getattr(page, "route", "/")
+        tabs.selected_index = top_level_route_index(route)
+        if hasattr(page, "update"):
+            page.update()
+
+    tabs.on_change = on_top_level_tab_change
+    page.on_route_change = on_top_level_route_change
+    page.top_level_tabs = tabs
+    page.add(tabs)
 
 
 def main(argv: list[str] | None = None) -> None:
