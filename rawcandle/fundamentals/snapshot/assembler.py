@@ -46,7 +46,7 @@ HISTORY_MODE_NOTICE = "Currently revised history — not original point-in-time 
 COMPONENT_LABELS = {
     "REVENUE_GROWTH": "Revenue Growth",
     "EBIT_PROFITABILITY": "EBIT Profitability",
-    "EBIT_MARGIN_DIRECTION": "EBIT Margin Direction",
+    "EBIT_MARGIN_DIRECTION": "EBIT Margin Direction (YoY)",
     "FCF_MARGIN": "FCF Margin",
     "BALANCE_SHEET_RESILIENCE": "Balance Sheet",
     "DILUTION": "Dilution",
@@ -133,6 +133,89 @@ def strict_fiscal_slots(
             "row": by_ordinal.get(ordinal),
         })
     return result
+
+
+def lifecycle_transition_status(
+    row: Mapping[str, Any] | None,
+    previous: Mapping[str, Any] | None,
+) -> str:
+    if row is None:
+        return "NO_LIFECYCLE_OBSERVATION"
+    if row.get("lifecycle_status") == "LIFECYCLE_NOT_READY":
+        if row.get("raw_state") == "UNCLASSIFIED" and previous and previous.get("candidate_count") == 1:
+            return "CANDIDATE_CLEARED_BY_UNCLASSIFIED"
+        return "LIFECYCLE_NOT_READY"
+    candidate = row.get("candidate_state")
+    if row.get("candidate_count") == 1 and candidate:
+        replaced = previous.get("candidate_state") if previous and previous.get("candidate_count") == 1 else None
+        suffix = f"; REPLACED_{replaced}" if replaced and replaced != candidate else ""
+        return f"PENDING_{candidate}_1_OF_2{suffix}"
+    final_state = row.get("final_state")
+    raw_state = row.get("raw_state")
+    previous_final = previous.get("final_state") if previous else None
+    if final_state == "DISTRESSED" and raw_state == "DISTRESSED" and previous_final != "DISTRESSED":
+        return "IMMEDIATE_DISTRESSED_ENTRY"
+    if (
+        final_state
+        and raw_state == final_state
+        and previous
+        and previous.get("candidate_state") == final_state
+        and previous.get("candidate_count") == 1
+    ):
+        return f"CONFIRMED_{final_state}_2_OF_2"
+    return "NO_PENDING_TRANSITION"
+
+
+def lifecycle_presentation(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    anchor_year: int,
+    anchor_quarter: str,
+) -> dict[str, Any]:
+    anchor_ordinal = fiscal_ordinal(anchor_year, anchor_quarter)
+    by_ordinal = {
+        fiscal_ordinal(row["fiscal_year"], row["fiscal_quarter"]): dict(row)
+        for row in rows
+    }
+    display = []
+    for ordinal in range(anchor_ordinal - 3, anchor_ordinal + 1):
+        year, quarter_index = divmod(ordinal, 4)
+        row = by_ordinal.get(ordinal)
+        display.append({
+            "fiscal_year": year,
+            "fiscal_quarter": f"Q{quarter_index + 1}",
+            "row": row,
+            "transition_status": lifecycle_transition_status(row, by_ordinal.get(ordinal - 1)),
+        })
+
+    current = by_ordinal.get(anchor_ordinal)
+    tenure = 0
+    active_since = None
+    if current and current.get("lifecycle_status") == "LIFECYCLE_READY" and current.get("final_state"):
+        expected = current["final_state"]
+        ordinal = anchor_ordinal
+        while (
+            (row := by_ordinal.get(ordinal)) is not None
+            and row.get("lifecycle_status") == "LIFECYCLE_READY"
+            and row.get("final_state") == expected
+        ):
+            tenure += 1
+            active_since = row
+            ordinal -= 1
+    lifecycle_ready = bool(
+        current and current.get("lifecycle_status") == "LIFECYCLE_READY"
+    )
+    return {
+        "history": display,
+        "current_status": current.get("lifecycle_status") if current else None,
+        "confirmed_state": current.get("final_state") if lifecycle_ready else None,
+        "tenure_quarters": tenure or None,
+        "active_since_fiscal_year": active_since.get("fiscal_year") if active_since else None,
+        "active_since_fiscal_quarter": active_since.get("fiscal_quarter") if active_since else None,
+        "active_since_available_date": active_since.get("source_available_date") if active_since else None,
+        "candidate_state": current.get("candidate_state") if lifecycle_ready and current.get("candidate_count") == 1 else None,
+        "candidate_count": int(current.get("candidate_count") or 0) if current else 0,
+    }
 
 
 def _resolve_ticker(
@@ -365,7 +448,11 @@ def _score_history(
     return output
 
 
-def _score_raw(score: Mapping[str, Any] | None, ttm: Mapping[str, Any] | None) -> dict[str, Any]:
+def _score_raw(
+    score: Mapping[str, Any] | None,
+    ttm: Mapping[str, Any] | None,
+    yoy_base_ttm: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     components = score.get("components", {}) if score else {}
     def metric(name: str) -> Any:
         return components.get(name, {}).get("evidence", {}).get("metric_value")
@@ -396,6 +483,7 @@ def _score_raw(score: Mapping[str, Any] | None, ttm: Mapping[str, Any] | None) -
         "balance_sheet_value": branch_value,
         "shares_outstanding_yoy_change": metric("DILUTION"),
         "fundamental_trajectory": metric("FUNDAMENTAL_TRAJECTORY"),
+        "revenue_growth_comparison_base": yoy_base_ttm.get("ttm_revenue") if yoy_base_ttm else None,
     }
 
 
@@ -540,6 +628,10 @@ def assemble_company_snapshot(
             {**row, "fiscal_year": row["endpoint_fiscal_year"], "fiscal_quarter": row["endpoint_fiscal_quarter"]}
             for row in canonical_rows
         ]
+        canonical_by_ordinal = {
+            fiscal_ordinal(row["fiscal_year"], row["fiscal_quarter"]): row
+            for row in normalized_canonical
+        }
         slots = strict_fiscal_slots(normalized_canonical, anchor_year=anchor_year, anchor_quarter=anchor_quarter, count=5)
         score_by_quarter = _score_history(analysis, identity["company_id"])
         valuation_repo = ValuationRepository(analysis)
@@ -556,7 +648,9 @@ def assemble_company_snapshot(
             history.append({
                 **slot, "label": label, "ttm": ttm, "quarter_id": quarter_id,
                 "availability_date": ttm.get("ttm_source_available_date") if ttm else None,
-                "score": score, "score_raw": _score_raw(score, ttm), "valuation": valuation,
+                "score": score,
+                "score_raw": _score_raw(score, ttm, canonical_by_ordinal.get(slot["fiscal_sequence"] - 4)),
+                "valuation": valuation,
             })
 
         delta = FundamentalDeltaRepository(analysis).with_components(
@@ -568,11 +662,15 @@ def assemble_company_snapshot(
         lifecycle_rows = RevisedLifecycleRepository(analysis).history(
             identity["company_id"], model_fingerprint=LIFECYCLE_FINGERPRINT
         )
-        lifecycle_by_ordinal = {fiscal_ordinal(row["fiscal_year"], row["fiscal_quarter"]): row for row in lifecycle_rows if row.get("source_available_date") is None or row["source_available_date"] <= report_date}
-        lifecycle = []
-        for ordinal in range(anchor_ordinal - 7, anchor_ordinal + 1):
-            year, quarter_index = divmod(ordinal, 4)
-            lifecycle.append({"fiscal_year": year, "fiscal_quarter": f"Q{quarter_index + 1}", "row": lifecycle_by_ordinal.get(ordinal)})
+        eligible_lifecycle_rows = [
+            row for row in lifecycle_rows
+            if row.get("source_available_date") is None or row["source_available_date"] <= report_date
+        ]
+        lifecycle = lifecycle_presentation(
+            eligible_lifecycle_rows,
+            anchor_year=anchor_year,
+            anchor_quarter=anchor_quarter,
+        )
 
         filing_values = [
             slot["valuation"]["total_valuation_score"]

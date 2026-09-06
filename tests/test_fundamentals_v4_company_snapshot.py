@@ -17,6 +17,8 @@ from rawcandle.fundamentals.snapshot.assembler import (
     assemble_company_snapshot,
     assert_source_unchanged,
     four_observation_average,
+    lifecycle_presentation,
+    lifecycle_transition_status,
     strict_fiscal_slots,
 )
 from rawcandle.fundamentals.snapshot.renderer import render_snapshot, verify_rendered_report
@@ -106,12 +108,13 @@ def _snapshot() -> dict[str, object]:
         {"component_name": name, "qoq_delta": 1.0, "two_quarter_delta": 2.0, "yoy_delta": 4.0}
         for name in COMPONENTS
     ]
-    lifecycle = [
+    lifecycle_history = [
         {"fiscal_year": 2024 + ((index + 2) // 4), "fiscal_quarter": f"Q{(index + 2) % 4 + 1}", "row": {
             "raw_state": "GROWTH", "final_state": "GROWTH",
             "lifecycle_status": "LIFECYCLE_READY", "reason_code": "CLASSIFIED_GROWTH",
-        }}
-        for index in range(8)
+            "source_available_date": "2026-08-15",
+        }, "transition_status": "NO_PENDING_TRANSITION"}
+        for index in range(4)
     ]
     current_values = {
         "ttm_revenue": 500_000_000.0, "ttm_ebit": 100_000_000.0,
@@ -132,7 +135,17 @@ def _snapshot() -> dict[str, object]:
         "anchor": {"company_id": 1, "quarter_id": 5, "fiscal_year": 2026, "fiscal_quarter": "Q2", "period_end": "2026-06-30", "source_availability_date": "2026-08-14", "fundamental_age_days": 23, "ttm_readiness": "TTM_READY"},
         "history": history,
         "delta": {"total": {"qoq_delta": 7.0, "two_quarter_delta": 14.0, "yoy_delta": 28.0, "qoq_status": "DELTA_READY", "two_quarter_status": "DELTA_READY", "yoy_status": "DELTA_READY"}, "components": delta_components},
-        "lifecycle": lifecycle,
+        "lifecycle": {
+            "history": lifecycle_history,
+            "current_status": "LIFECYCLE_READY",
+            "confirmed_state": "GROWTH",
+            "tenure_quarters": 4,
+            "active_since_fiscal_year": 2025,
+            "active_since_fiscal_quarter": "Q3",
+            "active_since_available_date": "2025-11-01",
+            "candidate_state": None,
+            "candidate_count": 0,
+        },
         "valuation_four_observation_average": 52.5,
         "valuation_four_observation_count": 4,
         "current_price_valuation": {**_valuation(60.0, 12.0), "label": CURRENT_PRICE_LABEL, "price_date": "2026-09-04", "price_age_calendar_days": 2},
@@ -203,8 +216,12 @@ def test_renderer_contains_all_contract_sections_components_raw_values_and_statu
     ):
         assert f"## {heading}" in rendered.markdown
     assert "NET_DEBT_TO_EBIT: 1.25x" in rendered.markdown
+    assert "EBIT Margin Direction (YoY)" in rendered.markdown
+    assert "t−4 (YoY comparison)" in rendered.markdown
+    assert "Capex spend" in rendered.markdown
     assert "FCF / Market Cap" in rendered.markdown
     assert "Positive components" in rendered.markdown
+    assert "3/3" in rendered.markdown
     assert "Ei aktiivista ekosysteemijäsenyyttä" in rendered.markdown
     assert "Currently revised history — not original point-in-time history" in rendered.markdown
     assert "TEST_REASON" in rendered.markdown
@@ -220,6 +237,45 @@ def test_renderer_is_byte_deterministic_and_missing_four_average_is_visible() ->
     second = render_snapshot(deepcopy(snapshot))
     assert first == second
     assert "— (3/4)" in first.markdown
+
+
+def test_renderer_handles_required_presentation_edge_cases() -> None:
+    snapshot = _snapshot()
+    snapshot["history"][-1]["score"]["components"]["REVENUE_GROWTH"]["component_score"] = 20.0
+    snapshot["history"][-1]["ttm"]["ttm_revenue"] = 500_000_000.0
+    snapshot["history"][-1]["score_raw"]["revenue_growth_yoy_ttm"] = 1.5
+    snapshot["history"][-1]["score_raw"]["revenue_growth_comparison_base"] = 1_000_000.0
+    snapshot["history"][-1]["score_raw"]["shares_outstanding_yoy_change"] = -0.000001
+    snapshot["history"][-1]["valuation"].update({
+        "total_valuation_score": 100.0,
+        "ebit_points": 40.0,
+        "fcf_points": 40.0,
+        "earnings_points": 20.0,
+    })
+    snapshot["identity"]["taxonomy_memberships"] = [
+        {"ecosystem_name": "AI", "peer_group_name": "Accelerators", "membership_role": "CORE"},
+        {"ecosystem_name": "Data Center", "peer_group_name": "Power", "membership_role": "EXTENDED"},
+    ]
+
+    markdown = render_snapshot(snapshot).markdown
+
+    assert "Pistekatossa nykyisessä endpointissa: Revenue Growth" in markdown
+    assert "Kokonaispiste on 100" in markdown
+    assert "Base effect -huomio:" in markdown and "vertailupohja 1.00 M" in markdown
+    assert "| Net cash | 30.00 M |" in markdown
+    assert "| AI | Accelerators | CORE |" in markdown
+    assert "| Data Center | Power | EXTENDED |" in markdown
+    assert "-0.00" not in markdown and "+0.00" not in markdown
+
+
+def test_renderer_marks_missing_filing_price_comparison_endpoint() -> None:
+    snapshot = _snapshot()
+    snapshot["history"][0]["valuation"] = None
+
+    markdown = render_snapshot(snapshot).markdown
+
+    assert "| Absoluuttinen | +1.00 | +2.00 | — |" in markdown
+    assert "| Prosentuaalinen | 7.69 % | 16.67 % | — |" in markdown
 
 
 def test_current_price_valuation_uses_weekend_close_and_anchor_values() -> None:
@@ -297,6 +353,71 @@ def test_source_change_fails_closed() -> None:
     assert_source_unchanged({"score": [1]}, {"score": [1]})
     with pytest.raises(RuntimeError, match="SNAPSHOT_SOURCE_CHANGED_DURING_GENERATION"):
         assert_source_unchanged({"score": [1]}, {"score": [2]})
+
+
+def _lifecycle_row(
+    raw: str,
+    final: str | None,
+    *,
+    status: str = "LIFECYCLE_READY",
+    candidate: str | None = None,
+    candidate_count: int = 0,
+    last_confirmed: str | None = None,
+) -> dict[str, object]:
+    return {
+        "raw_state": raw,
+        "final_state": final,
+        "lifecycle_status": status,
+        "candidate_state": candidate,
+        "candidate_count": candidate_count,
+        "last_confirmed_state": last_confirmed,
+    }
+
+
+@pytest.mark.parametrize(
+    ("row", "previous", "expected"),
+    (
+        (_lifecycle_row("MATURE", "MATURE"), _lifecycle_row("MATURE", "MATURE"), "NO_PENDING_TRANSITION"),
+        (_lifecycle_row("SCALING", "MATURE", candidate="SCALING", candidate_count=1), _lifecycle_row("MATURE", "MATURE"), "PENDING_SCALING_1_OF_2"),
+        (_lifecycle_row("SCALING", "SCALING"), _lifecycle_row("SCALING", "MATURE", candidate="SCALING", candidate_count=1), "CONFIRMED_SCALING_2_OF_2"),
+        (_lifecycle_row("GROWTH", "MATURE", candidate="GROWTH", candidate_count=1), _lifecycle_row("SCALING", "MATURE", candidate="SCALING", candidate_count=1), "PENDING_GROWTH_1_OF_2; REPLACED_SCALING"),
+        (_lifecycle_row("UNCLASSIFIED", None, status="LIFECYCLE_NOT_READY", last_confirmed="MATURE"), _lifecycle_row("SCALING", "MATURE", candidate="SCALING", candidate_count=1), "CANDIDATE_CLEARED_BY_UNCLASSIFIED"),
+        (_lifecycle_row("DISTRESSED", "DISTRESSED"), _lifecycle_row("MATURE", "MATURE"), "IMMEDIATE_DISTRESSED_ENTRY"),
+        (_lifecycle_row("MATURE", "DISTRESSED", candidate="MATURE", candidate_count=1), _lifecycle_row("DISTRESSED", "DISTRESSED"), "PENDING_MATURE_1_OF_2"),
+    ),
+)
+def test_lifecycle_transition_status_uses_persisted_state_machine_fields(
+    row: dict[str, object], previous: dict[str, object], expected: str
+) -> None:
+    assert lifecycle_transition_status(row, previous) == expected
+
+
+def test_lifecycle_presentation_is_four_quarters_with_tenure_and_no_not_ready_fallback() -> None:
+    rows = [
+        {**_lifecycle_row("MATURE", "MATURE"), "fiscal_year": 2025, "fiscal_quarter": "Q4", "source_available_date": "2026-02-01"},
+        {**_lifecycle_row("MATURE", "MATURE"), "fiscal_year": 2026, "fiscal_quarter": "Q1", "source_available_date": "2026-05-01"},
+        {**_lifecycle_row("MATURE", "MATURE"), "fiscal_year": 2026, "fiscal_quarter": "Q2", "source_available_date": "2026-08-01"},
+    ]
+    ready = lifecycle_presentation(rows, anchor_year=2026, anchor_quarter="Q2")
+    assert len(ready["history"]) == 4
+    assert ready["tenure_quarters"] == 3
+    assert (ready["active_since_fiscal_year"], ready["active_since_fiscal_quarter"]) == (2025, "Q4")
+
+    rows[-1] = {
+        **_lifecycle_row("UNCLASSIFIED", None, status="LIFECYCLE_NOT_READY", last_confirmed="MATURE"),
+        "fiscal_year": 2026, "fiscal_quarter": "Q2", "source_available_date": "2026-08-01",
+    }
+    not_ready = lifecycle_presentation(rows, anchor_year=2026, anchor_quarter="Q2")
+    assert not_ready["current_status"] == "LIFECYCLE_NOT_READY"
+    assert not_ready["confirmed_state"] is None
+    assert not_ready["tenure_quarters"] is None
+
+    rows[-1]["final_state"] = "MATURE"
+    not_ready_with_stale_final = lifecycle_presentation(
+        rows, anchor_year=2026, anchor_quarter="Q2"
+    )
+    assert not_ready_with_stale_final["confirmed_state"] is None
+    assert not_ready_with_stale_final["tenure_quarters"] is None
 
 
 PRODUCTION_DATA = Path(__file__).resolve().parents[1] / "data"
