@@ -12,13 +12,12 @@ def _value(value: Any, digits: int = 2) -> str:
     return "N/A" if value is None else f"{float(value):.{digits}f}"
 
 
-def render_company_report(
+def build_company_report(
     conn: sqlite3.Connection,
     *,
     company_id: int,
     market_db: Path,
-    output: Path,
-) -> Path:
+) -> tuple[str, str, dict[str, Any]]:
     repository=ParallelModelRepository(conn); repository.assert_v2_bundle()
     score_history=repository.score_history(company_id,model_fingerprint=score.MODEL_FINGERPRINT)
     lifecycle_history=repository.lifecycle_history(company_id,model_fingerprint=lifecycle.MODEL_FINGERPRINT)
@@ -74,4 +73,40 @@ def render_company_report(
     lines.extend(f"| {item['flag_name']} | {item['status_text']} | {item['reason_text']} |" for item in (diagnostics or {}).get("evaluations",[]))
     lines.extend(["", "## Model Identities", ""])
     lines.extend(f"- {name}: `{version}` / `{fingerprint}`" for name,(version,fingerprint) in (("Score",(score.MODEL_VERSION,score.MODEL_FINGERPRINT)),("Lifecycle",(lifecycle.MODEL_VERSION,lifecycle.MODEL_FINGERPRINT)),("Valuation",(valuation.MODEL_VERSION,valuation.MODEL_FINGERPRINT)),("Delta",(delta.MODEL_VERSION,delta.MODEL_FINGERPRINT)),("Relative Position",(relative_position.MODEL_VERSION,relative_position.MODEL_FINGERPRINT)),("Diagnostic Flags",(diagnostic_flags.MODEL_VERSION,diagnostic_flags.MODEL_FINGERPRINT)),("Snapshot",(snapshot.MODEL_VERSION,snapshot.MODEL_FINGERPRINT))))
-    output.parent.mkdir(parents=True,exist_ok=True); output.write_text("\n".join(lines)+"\n",encoding="utf-8"); return output
+    markdown = "\n".join(lines) + "\n"
+    metadata = {
+        "identity": {"company_id": company_id, "ticker": ticker},
+        "anchor": {
+            "quarter_id": score_row["quarter_id"],
+            "fiscal_year": life["fiscal_year"],
+            "fiscal_quarter": life["fiscal_quarter"],
+            "period_end": life["period_end"],
+            "source_available_date": life["source_available_date"],
+        },
+        "model_fingerprints": {
+            "family": contract.FAMILY_FINGERPRINT,
+            "score": score.MODEL_FINGERPRINT,
+            "lifecycle": lifecycle.MODEL_FINGERPRINT,
+            "valuation": valuation.MODEL_FINGERPRINT,
+            "delta": delta.MODEL_FINGERPRINT,
+            "relative_position": relative_position.MODEL_FINGERPRINT,
+            "diagnostic_flags": diagnostic_flags.MODEL_FINGERPRINT,
+            "snapshot": snapshot.MODEL_FINGERPRINT,
+        },
+    }
+    return ticker, markdown, metadata
+
+
+def render_company_report(
+    conn: sqlite3.Connection,
+    *,
+    company_id: int,
+    market_db: Path,
+    output: Path,
+) -> Path:
+    _ticker, markdown, _metadata = build_company_report(
+        conn, company_id=company_id, market_db=market_db
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(markdown, encoding="utf-8")
+    return output

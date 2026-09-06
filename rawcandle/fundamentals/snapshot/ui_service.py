@@ -8,10 +8,8 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from rawcandle.fundamentals.snapshot.assembler import (
-    SnapshotPaths,
-    generate_company_snapshot,
-)
+from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
+from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
 from rawcandle.fundamentals.snapshot.writer import report_filename
 
 
@@ -184,7 +182,7 @@ class FundamentalsSnapshotUIService:
         *,
         paths: SnapshotPaths = PRODUCTION_SNAPSHOT_PATHS,
         output_dir: Path = FUNDAMENTAL_REPORTS_DIR,
-        generator: Callable[..., dict[str, Any]] = generate_company_snapshot,
+        generator: Callable[..., dict[str, Any]] = generate_active_company_snapshot,
     ) -> None:
         self.paths = paths
         self.output_dir = output_dir.resolve()

@@ -123,3 +123,39 @@ class ParallelModelRepository:
         required=(("score_result",score.MODEL_FINGERPRINT),("lifecycle_revised_result",lifecycle.MODEL_FINGERPRINT),("valuation_revised_result",valuation.MODEL_FINGERPRINT),("fundamental_delta_package",delta.MODEL_FINGERPRINT),("diagnostic_flag_package",diagnostic_flags.MODEL_FINGERPRINT),("relative_position_snapshot",relative_position.MODEL_FINGERPRINT))
         missing=[name for name,fp in required if not self.conn.execute(f"SELECT 1 FROM {name} WHERE model_fingerprint=? LIMIT 1",(fp,)).fetchone()]
         if missing: raise RuntimeError("OPERATING_INCOME_V2_UPSTREAM_LAYER_MISSING:"+",".join(missing))
+
+
+class ActiveModelRepository:
+    """Default all-layer reader; activation is resolved once and fails closed."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        from .activation import assert_v2_active
+
+        assert_v2_active(conn)
+        self._repository = ParallelModelRepository(conn)
+        self.model_fingerprints = {
+            "score": score.MODEL_FINGERPRINT,
+            "lifecycle": lifecycle.MODEL_FINGERPRINT,
+            "valuation": valuation.MODEL_FINGERPRINT,
+            "delta": delta.MODEL_FINGERPRINT,
+            "relative": relative_position.MODEL_FINGERPRINT,
+            "diagnostic": diagnostic_flags.MODEL_FINGERPRINT,
+        }
+
+    def score_current(self, company_id: int) -> dict[str, Any] | None:
+        return self._repository.score_current(company_id, model_fingerprint=self.model_fingerprints["score"])
+
+    def lifecycle_current(self, company_id: int) -> dict[str, Any] | None:
+        return self._repository.lifecycle_current(company_id, model_fingerprint=self.model_fingerprints["lifecycle"])
+
+    def valuation_current(self, company_id: int) -> dict[str, Any] | None:
+        return self._repository.valuation_current(company_id, model_fingerprint=self.model_fingerprints["valuation"])
+
+    def delta_current(self, company_id: int) -> dict[str, Any] | None:
+        return self._repository.delta_current(company_id, model_fingerprint=self.model_fingerprints["delta"])
+
+    def relative_current(self, company_id: int) -> list[dict[str, Any]]:
+        return self._repository.relative_current(company_id, model_fingerprint=self.model_fingerprints["relative"])
+
+    def diagnostic_current(self, company_id: int) -> dict[str, Any] | None:
+        return self._repository.diagnostic_current(company_id, model_fingerprint=self.model_fingerprints["diagnostic"])

@@ -1,6 +1,6 @@
 # Operating-Income V2 Phase 9E Production Runbook
 
-Status: `NOT_AUTHORIZED`
+Status: `AUTHORIZED FOR PHASE 9E EXECUTION`
 
 This runbook may be executed only after explicit Phase 9E production authorization. Phase 9D commands reject production destinations.
 
@@ -46,7 +46,11 @@ Do not continue if runtime constants differ from this table or the committed pac
 14. Activate Company Snapshot V2, generate temporary smoke reports, then switch production report generation only after coherent bundle validation.
 15. Smoke-test the Scheduler UI and one pipeline cycle with provider fetching disabled.
 
-The authorized Phase 9E implementation must expose a dedicated production command. Do not weaken or reuse Phase 9D's production-path rejection.
+The authorized command is `python3 -m rawcandle.fundamentals.operating_income_v2.phase9e`. It requires exact production paths, the complete set of locked model fingerprints, the package persistence fingerprint, `--full-universe`, and for writes both `--apply` and `--confirm-production`. Phase 9D's production-path rejection remains unchanged.
+
+Activation is one row in `fundamentals_active_model_family`. The row is written only after complete-package persistence, deep reconciliation, and a true second no-op. `ActiveModelRepository` validates that row and the package manifest before returning any default result. Deleting only that activation row rolls defaults back to V1; it does not delete V2 evidence. Explicit reads continue through `ParallelModelRepository` with a required V1 or V2 fingerprint.
+
+V1 is frozen as an auditable historical model at the Phase 9E deployment boundary. Future source refreshes rebuild the coherent active V2 package only; ongoing dual calculation is outside this phase.
 
 ## Post-Deployment Checks
 

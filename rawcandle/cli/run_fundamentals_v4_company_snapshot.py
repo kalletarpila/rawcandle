@@ -6,10 +6,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from rawcandle.fundamentals.snapshot.assembler import (
-    SnapshotPaths,
-    generate_company_snapshot,
-)
+from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
+from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,7 +16,7 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "fundamental_reports"
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate a read-only Fundamentals V4 Company Snapshot V1 Markdown report"
+        description="Generate a read-only Fundamentals V4 active Company Snapshot Markdown report"
     )
     parser.add_argument("--ticker", required=True)
     parser.add_argument("--report-date", type=date.fromisoformat, required=True)
@@ -50,7 +48,7 @@ def _validate(args: argparse.Namespace) -> SnapshotPaths:
 
 def run(args: argparse.Namespace) -> dict[str, object]:
     paths = _validate(args)
-    result = generate_company_snapshot(
+    result = generate_active_company_snapshot(
         paths,
         ticker=args.ticker,
         report_date=args.report_date.isoformat(),

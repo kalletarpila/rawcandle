@@ -15,6 +15,13 @@ from rawcandle.fundamentals.operating_income_v2.persistence import (
 )
 from rawcandle.fundamentals.operating_income_v2.phase9d import deep_reconcile
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
+from rawcandle.fundamentals.operating_income_v2.activation import (
+    activate_v2,
+    active_family,
+    assert_v2_active,
+    deactivate_v2,
+)
+from rawcandle.fundamentals.operating_income_v2.readers import ActiveModelRepository
 from rawcandle.fundamentals.operating_income_v2.reporting import render_company_report
 from rawcandle.fundamentals.operating_income_v2.rehearsal import _ro, _score_delta_observation
 from rawcandle.fundamentals.schema.migrations import ANALYSIS_SCHEMA_SQL
@@ -192,3 +199,31 @@ def test_integrity_comparison_allows_only_byte_identical_shm_mtime() -> None:
     assert compare_production_integrity(before, after)["content_identical"]
     after["taxonomy"]["shm"]["sha256"] = "changed"
     assert not compare_production_integrity(before, after)["content_identical"]
+
+
+def test_activation_is_atomic_coherent_and_reversible(database: sqlite3.Connection) -> None:
+    with pytest.raises(LookupError, match="NOT_ACTIVE"):
+        assert_v2_active(database)
+    apply_package(database, _calculated(), applied_at="2026-09-01T00:00:00Z")
+    database.execute("BEGIN")
+    activated = activate_v2(database, activated_at="2026-09-06T00:00:00Z")
+    database.commit()
+    assert activated.family_version == "OPERATING_INCOME_MODEL_FAMILY_V2"
+    assert active_family(database) == activated
+    active = ActiveModelRepository(database)
+    assert active.score_current(1)["model_fingerprint"] == score.MODEL_FINGERPRINT
+    assert active.lifecycle_current(1)["model_fingerprint"] == lifecycle.MODEL_FINGERPRINT
+    assert active.valuation_current(1)["model_fingerprint"] == valuation.MODEL_FINGERPRINT
+    assert active.delta_current(1)["company_id"] == 1
+    assert database.execute(
+        "SELECT model_fingerprint FROM fundamental_delta_package WHERE model_fingerprint=?",
+        (delta.MODEL_FINGERPRINT,),
+    ).fetchone()[0] == delta.MODEL_FINGERPRINT
+    assert active.diagnostic_current(1)["evaluations"]
+    assert isinstance(active.relative_current(1), list)
+    assert ParallelModelRepository(database).score_current(1, model_fingerprint=SCORE_V1)
+
+    database.execute("BEGIN")
+    deactivate_v2(database)
+    database.commit()
+    assert active_family(database) is None
