@@ -776,17 +776,26 @@ def test_scheduler_ui_port_constant_is_fixed():
     assert SCHEDULER_UI_PORT == 8555
 
 
-def test_scheduler_ui_startup_passes_fixed_port_to_ft_app(tmp_path, monkeypatch):
+def test_scheduler_ui_startup_passes_fixed_port_to_asgi_server(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     _write_config(config_path)
-    app_mock = Mock()
-    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.ft.app", app_mock)
+    application = object()
+    create_mock = Mock(return_value=application)
+    uvicorn_mock = Mock()
+    timer = Mock()
+    timer_mock = Mock(return_value=timer)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.create_scheduler_web_app", create_mock
+    )
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.uvicorn.run", uvicorn_mock)
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.threading.Timer", timer_mock)
 
     main(["--config", str(config_path)])
 
-    assert app_mock.call_args.kwargs["port"] == 8555
-    assert app_mock.call_args.kwargs["view"].value == "web_browser"
-    assert app_mock.call_args.kwargs["assets_dir"] == str(config_path.parent / "logs")
+    create_mock.assert_called_once_with(str(config_path))
+    uvicorn_mock.assert_called_once_with(application, host="127.0.0.1", port=8555)
+    assert timer.daemon is True
+    timer.start.assert_called_once_with()
 
 
 def test_run_app_without_summary_or_logs_shows_clear_messages(tmp_path, monkeypatch):

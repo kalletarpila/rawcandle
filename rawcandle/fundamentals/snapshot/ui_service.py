@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import stat
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -28,6 +29,8 @@ REPORT_NAME_RE = re.compile(
     r"^(?P<ticker>[A-Z0-9]+(?:[.-][A-Z0-9]+)*)_"
     r"(?P<report_date>\d{4}-\d{2}-\d{2})\.md$"
 )
+MAX_BATCH_TICKERS = 25
+TICKER_SEPARATOR_RE = re.compile(r"[,\s]+")
 
 
 @dataclass(frozen=True)
@@ -50,12 +53,47 @@ class RecentFundamentalsReport:
     modified_at_utc: str
 
 
+@dataclass(frozen=True)
+class FundamentalsBatchSummary:
+    requested: int
+    created: int
+    overwritten: int
+    unchanged: int
+    not_generated: int
+
+
+@dataclass(frozen=True)
+class FundamentalsBatchResult:
+    status: str
+    message: str
+    report_date: str | None
+    results: tuple[FundamentalsUIResult, ...]
+    summary: FundamentalsBatchSummary
+
+
 def normalize_ticker(value: str | None) -> str:
     ticker = str(value or "").strip().upper()
     if not ticker:
         raise ValueError("TICKER_REQUIRED")
     report_filename(ticker, "2000-01-01")
     return ticker
+
+
+def parse_ticker_inputs(
+    value: str | None,
+    *,
+    maximum: int = MAX_BATCH_TICKERS,
+) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("TICKERS_REQUIRED")
+    tokens = [token.strip().upper() for token in TICKER_SEPARATOR_RE.split(raw)]
+    tickers = list(dict.fromkeys(token for token in tokens if token))
+    if not tickers:
+        raise ValueError("TICKERS_REQUIRED")
+    if len(tickers) > maximum:
+        raise ValueError("TOO_MANY_TICKERS")
+    return tickers
 
 
 def normalize_report_date(value: str | None) -> str:
@@ -69,6 +107,42 @@ def normalize_report_date(value: str | None) -> str:
     if parsed.isoformat() != raw:
         raise ValueError("INVALID_REPORT_DATE")
     return raw
+
+
+def validate_report_filename(filename: str | None) -> tuple[str, str, str]:
+    raw = str(filename or "")
+    if not raw or "\x00" in raw or raw != Path(raw).name:
+        raise ValueError("INVALID_REPORT_FILENAME")
+    if "/" in raw or "\\" in raw or ".." in raw:
+        raise ValueError("INVALID_REPORT_FILENAME")
+    match = REPORT_NAME_RE.fullmatch(raw)
+    if not match:
+        raise ValueError("INVALID_REPORT_FILENAME")
+    ticker = normalize_ticker(match.group("ticker"))
+    report_date = normalize_report_date(match.group("report_date"))
+    expected = report_filename(ticker, report_date)
+    if expected != raw:
+        raise ValueError("INVALID_REPORT_FILENAME")
+    return ticker, report_date, expected
+
+
+def resolve_report_download(
+    filename: str | None,
+    output_dir: Path = FUNDAMENTAL_REPORTS_DIR,
+) -> Path:
+    _ticker, _report_date, expected = validate_report_filename(filename)
+    directory = output_dir.resolve()
+    candidate = directory / expected
+    try:
+        file_stat = candidate.lstat()
+    except (FileNotFoundError, OSError) as exc:
+        raise FileNotFoundError("REPORT_NOT_FOUND") from exc
+    if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
+        raise FileNotFoundError("REPORT_NOT_FOUND")
+    resolved = candidate.resolve()
+    if resolved.parent != directory or resolved.name != expected:
+        raise FileNotFoundError("REPORT_NOT_FOUND")
+    return resolved
 
 
 def list_recent_fundamentals_reports(
@@ -85,20 +159,16 @@ def list_recent_fundamentals_reports(
     for path in directory.iterdir():
         if path.is_symlink() or not path.is_file():
             continue
-        match = REPORT_NAME_RE.fullmatch(path.name)
-        if not match:
-            continue
         try:
-            normalized_date = normalize_report_date(match.group("report_date"))
-            expected = report_filename(match.group("ticker"), normalized_date)
-        except ValueError:
+            ticker, normalized_date, expected = validate_report_filename(path.name)
+        except (ValueError, FileNotFoundError):
             continue
         if expected != path.name:
             continue
         stat = path.stat()
         modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
         report = RecentFundamentalsReport(
-            ticker=match.group("ticker"),
+            ticker=ticker,
             report_date=normalized_date,
             filename=path.name,
             modified_at_utc=modified,
@@ -130,9 +200,11 @@ class FundamentalsSnapshotUIService:
         try:
             ticker = normalize_ticker(ticker_input)
         except ValueError:
+            rejected = str(ticker_input or "").strip().upper() or None
             return FundamentalsUIResult(
                 status="INVALID_TICKER",
                 message="Enter a valid ticker symbol.",
+                ticker=rejected,
             )
         try:
             report_date = normalize_report_date(report_date_input)
@@ -219,3 +291,67 @@ class FundamentalsSnapshotUIService:
 
     def recent_reports(self, *, limit: int = 10) -> list[RecentFundamentalsReport]:
         return list_recent_fundamentals_reports(self.output_dir, limit=limit)
+
+    def generate_batch(
+        self,
+        *,
+        ticker_input: str | None,
+        report_date_input: str | None,
+        overwrite: bool = False,
+    ) -> FundamentalsBatchResult:
+        try:
+            tickers = parse_ticker_inputs(ticker_input)
+        except ValueError as exc:
+            too_many = str(exc) == "TOO_MANY_TICKERS"
+            return FundamentalsBatchResult(
+                status="INVALID_REQUEST",
+                message=(
+                    f"Enter no more than {MAX_BATCH_TICKERS} unique tickers."
+                    if too_many
+                    else "Enter at least one ticker symbol."
+                ),
+                report_date=None,
+                results=(),
+                summary=FundamentalsBatchSummary(0, 0, 0, 0, 0),
+            )
+        try:
+            report_date = normalize_report_date(report_date_input)
+        except ValueError:
+            return FundamentalsBatchResult(
+                status="INVALID_DATE",
+                message="Enter a valid report date in YYYY-MM-DD format.",
+                report_date=None,
+                results=(),
+                summary=FundamentalsBatchSummary(len(tickers), 0, 0, 0, len(tickers)),
+            )
+
+        results = tuple(
+            self.generate(
+                ticker_input=ticker,
+                report_date_input=report_date,
+                overwrite=overwrite,
+            )
+            for ticker in tickers
+        )
+        created = sum(result.publication_status == "CREATED" for result in results)
+        overwritten = sum(
+            result.publication_status == "OVERWRITTEN" for result in results
+        )
+        unchanged = sum(result.publication_status == "NO_CHANGE" for result in results)
+        generated = created + overwritten + unchanged
+        return FundamentalsBatchResult(
+            status="COMPLETED",
+            message="All tickers were attempted independently.",
+            report_date=report_date,
+            results=results,
+            summary=FundamentalsBatchSummary(
+                requested=len(results),
+                created=created,
+                overwritten=overwritten,
+                unchanged=unchanged,
+                not_generated=len(results) - generated,
+            ),
+        )
+
+    def resolve_download(self, filename: str | None) -> Path:
+        return resolve_report_download(filename, self.output_dir)

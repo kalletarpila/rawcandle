@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import threading
+import webbrowser
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
@@ -15,6 +16,10 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import flet as ft
+import flet.fastapi as flet_fastapi
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from starlette.responses import FileResponse
 
 from dev_tools.fundamentals_snapshot_page import (
     FUNDAMENTALS_ROUTE,
@@ -31,6 +36,10 @@ from rawcandle.scheduler.runner import (
     SchedulerAlreadyRunningError,
     read_scheduler_status,
     run_scheduler_config,
+)
+from rawcandle.fundamentals.snapshot.ui_service import (
+    FUNDAMENTAL_REPORTS_DIR,
+    resolve_report_download,
 )
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
     DATACENTER_ECOSYSTEM_CODE,
@@ -1827,6 +1836,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.fundamentals_overwrite_checkbox = fundamentals_controls.overwrite_checkbox
     page.fundamentals_generate_button = fundamentals_controls.generate_button
     page.fundamentals_status_field = fundamentals_controls.status_field
+    page.fundamentals_batch_results_column = fundamentals_controls.batch_results_column
     page.fundamentals_recent_reports_column = fundamentals_controls.recent_reports_column
 
     tabs = ft.Tabs(
@@ -1870,17 +1880,55 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    initial_config = read_scheduler_config(args.config)
+    app = create_scheduler_web_app(args.config)
+    browser_timer = threading.Timer(
+        1.0,
+        lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/fundamentals"),
+    )
+    browser_timer.daemon = True
+    browser_timer.start()
+    uvicorn.run(app, host="127.0.0.1", port=args.port)
+
+
+def create_scheduler_web_app(
+    config_path: str = "scheduler_config.json",
+    *,
+    report_dir: Path = FUNDAMENTAL_REPORTS_DIR,
+) -> FastAPI:
+    initial_config = read_scheduler_config(config_path)
 
     def _app(page: Any) -> None:
-        run_app(page, args.config)
+        run_app(page, config_path)
 
-    ft.app(
-        target=_app,
-        port=args.port,
-        view=ft.AppView.WEB_BROWSER,
+    application = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    add_fundamentals_download_route(application, report_dir=report_dir)
+
+    flet_application = flet_fastapi.app(
+        session_handler=_app,
         assets_dir=initial_config.log_dir,
     )
+    application.mount("/", flet_application)
+    return application
+
+
+def add_fundamentals_download_route(
+    application: FastAPI,
+    *,
+    report_dir: Path = FUNDAMENTAL_REPORTS_DIR,
+) -> None:
+
+    @application.get("/fundamentals/reports/{filename:path}")
+    async def download_fundamentals_report(filename: str) -> FileResponse:
+        try:
+            report_path = resolve_report_download(filename, report_dir)
+        except (ValueError, FileNotFoundError):
+            raise HTTPException(status_code=404, detail="Report not found.")
+        return FileResponse(
+            report_path,
+            media_type="text/markdown",
+            filename=report_path.name,
+            content_disposition_type="attachment",
+        )
 
 
 if __name__ == "__main__":
