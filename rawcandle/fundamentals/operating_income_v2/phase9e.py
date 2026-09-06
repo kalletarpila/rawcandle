@@ -35,7 +35,7 @@ from .rehearsal import calculate
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_BACKUP_DIR = ROOT / "backups"
-LOCK_PATH = ROOT / ".fundamentals_phase9e.lock"
+LOCK_PATH = ROOT / "temp" / ".fundamentals_phase9e.lock"
 EXPECTED_MODELS = {name: fingerprint for name, (_version, fingerprint) in MODEL_MAP.items()}
 EXPECTED_REFERENCE = {
     "AMZN": (56.08, 18.43), "GOOG": (77.53, 27.82), "NVDA": (96.94, 27.02),
