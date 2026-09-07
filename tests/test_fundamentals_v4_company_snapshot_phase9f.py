@@ -4,18 +4,17 @@ import sqlite3
 
 import pytest
 
-from rawcandle.fundamentals.operating_income_v2.persistence import PACKAGE_FINGERPRINT
+from rawcandle.fundamentals.operating_income_v2 import diagnostic_flags_eight, phase10b
 from rawcandle.fundamentals.operating_income_v2.diagnostic_flags import (
     FLAG_NAMES,
     MODEL_CONTRACT as DIAGNOSTIC_MODEL_CONTRACT,
     REASON_CODES,
     REVENUE_SCALE_FLOOR,
 )
-from rawcandle.fundamentals.operating_income_v2.snapshot import MODEL_FINGERPRINT as SNAPSHOT_MODEL_FINGERPRINT
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
 from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
-from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_CONTRACT
-from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_PRESENTATION_FINGERPRINT
+from rawcandle.fundamentals.snapshot.v2_assembler import CANDIDATE_REPORT_CONTRACT
+from rawcandle.fundamentals.snapshot.v2_assembler import CANDIDATE_REPORT_PRESENTATION_FINGERPRINT
 from rawcandle.fundamentals.snapshot.v2_assembler import _multiples_context
 from rawcandle.fundamentals.snapshot.renderer import (
     ALL_DIAGNOSTICS_CLEAR_TEXT,
@@ -23,13 +22,27 @@ from rawcandle.fundamentals.snapshot.renderer import (
     DIAGNOSTIC_DEFINITIONS,
     DIAGNOSTIC_LABELS,
     DIAGNOSTIC_REASON_EXPLANATIONS,
-    INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT,
     UNKNOWN_DIAGNOSTIC_EXPLANATION,
+    _build_diagnostic_definitions,
+    _zero_diagnostic_text,
     diagnostic_explanation,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CANDIDATE_DIAGNOSTIC_DEFINITIONS = _build_diagnostic_definitions(
+    diagnostic_flags_eight.MODEL_CONTRACT,
+    diagnostic_flags_eight.FLAG_NAMES,
+)
+CANDIDATE_ALL_DIAGNOSTICS_CLEAR_TEXT = _zero_diagnostic_text(
+    tuple({"status": "EVALUATED_CLEAR"} for _ in diagnostic_flags_eight.FLAG_NAMES),
+    diagnostic_flags_eight.FLAG_NAMES,
+)
+CANDIDATE_INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT = _zero_diagnostic_text(
+    ({"status": "FLAG_NOT_READY"},)
+    + tuple({"status": "EVALUATED_CLEAR"} for _ in diagnostic_flags_eight.FLAG_NAMES[1:]),
+    diagnostic_flags_eight.FLAG_NAMES,
+)
 
 
 @pytest.fixture(scope="module")
@@ -71,7 +84,7 @@ def phase9j_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, 
     paths = SnapshotPaths(*(ROOT / "data" / name for name in required))
     output = tmp_path_factory.mktemp("phase9j-edges")
     reports = {}
-    for ticker in ("CRMD", "APD", "AIV", "LEG", "AAT", "AGEN", "BNC", "AAOI", "ILLR"):
+    for ticker in ("A", "CRMD", "APD", "AIV", "LEG", "AAT", "AGEN", "BNC", "AAOI", "ILLR"):
         result = generate_active_company_snapshot(
             paths, ticker=ticker, report_date="2026-09-07", output_dir=output
         )
@@ -82,7 +95,7 @@ def phase9j_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, 
 
 def test_v2_report_restores_compact_fiscal_histories(nvda_report: tuple[str, dict]) -> None:
     report, snapshot = nvda_report
-    assert snapshot["report_contract"] == REPORT_CONTRACT
+    assert snapshot["report_contract"] == CANDIDATE_REPORT_CONTRACT
     assert len(snapshot["history"]) == 5
     assert len(snapshot["lifecycle"]["history"]) == 4
     assert "FY2027 Q2" in report
@@ -108,7 +121,7 @@ def test_v2_report_uses_operating_income_and_ten_three_point_metrics(nvda_report
         "P/S",
     ):
         assert f"| {metric} |" in report
-    assert "EBIT" not in report
+    assert "EBIT" not in report.split("## Diagnostic Flags", maxsplit=1)[0]
     contexts = snapshot["valuation_multiples"]["contexts"]
     assert contexts[1]["fiscal_quarter"] == "Q2"
     assert contexts[2]["fiscal_quarter"] == "Q1"
@@ -133,8 +146,8 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "Datacenter" in report
     assert "Overall eligible universe" in report
     assert "n=2198" in report
-    assert ALL_DIAGNOSTICS_CLEAR_TEXT in report
-    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6" in report
+    assert "Non-Operating Earnings Gap: TARKASTETTAVA EHDOKAS" in report
+    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7" in report
 
 
 def test_v2_report_current_and_filing_valuations_are_distinct(nvda_report: tuple[str, dict]) -> None:
@@ -152,9 +165,9 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
     nvda_report: tuple[str, dict],
 ) -> None:
     _, snapshot = nvda_report
-    assert REPORT_PRESENTATION_FINGERPRINT == "8e88c312548974e14347b3db99853e63482a9dbf295af0e8f57671ca95930bfe"
-    assert snapshot["model_fingerprints"]["snapshot"] == SNAPSHOT_MODEL_FINGERPRINT
-    assert snapshot["source_state"]["active_package"][1] == PACKAGE_FINGERPRINT
+    assert CANDIDATE_REPORT_PRESENTATION_FINGERPRINT == "b539ceb4e4745aa1233b27d9883b442d6106a2a1b4769a7c52bcf099cb55ad87"
+    assert snapshot["model_fingerprints"]["snapshot"] == phase10b.snapshot_eight.MODEL_FINGERPRINT
+    assert snapshot["source_state"]["active_package"][1] == phase10b.PACKAGE_FINGERPRINT
 
 
 def test_phase9j_2_definitions_are_complete_and_engine_reconciled(
@@ -169,8 +182,8 @@ def test_phase9j_2_definitions_are_complete_and_engine_reconciled(
     section = report.split("### Diagnostiikan määritelmät", maxsplit=1)[1].split(
         DIAGNOSTIC_COVERAGE_TEXT, maxsplit=1
     )[0]
-    assert section.count("\n| ") == 9  # header, separator and seven definitions
-    for row in DIAGNOSTIC_DEFINITIONS:
+    assert section.count("\n| ") == 10  # header, separator and eight definitions
+    for row in CANDIDATE_DIAGNOSTIC_DEFINITIONS:
         assert section.count(f"| {DIAGNOSTIC_LABELS[row.flag_name]} |") == 1
 
     rendered = {row.flag_name: row for row in DIAGNOSTIC_DEFINITIONS}
@@ -237,14 +250,15 @@ def test_phase9j_2_zero_flag_wording_preserves_readiness_scope(
     phase9j_edge_reports: dict[str, str],
 ) -> None:
     nvda, snapshot = nvda_report
-    assert {row["status"] for row in snapshot["diagnostic"]["evaluations"]} == {
-        "EVALUATED_CLEAR"
+    assert "EVALUATED_FLAGGED" in {
+        row["status"] for row in snapshot["diagnostic"]["evaluations"]
     }
-    assert ALL_DIAGNOSTICS_CLEAR_TEXT in nvda
-    assert INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT not in nvda
+    assert ALL_DIAGNOSTICS_CLEAR_TEXT not in nvda
+    assert CANDIDATE_ALL_DIAGNOSTICS_CLEAR_TEXT in phase9j_edge_reports["A"]
+    assert CANDIDATE_INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT not in phase9j_edge_reports["A"]
 
     for ticker in ("BNC", "AAT"):
-        assert INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT in phase9j_edge_reports[ticker]
+        assert CANDIDATE_INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT in phase9j_edge_reports[ticker]
         assert ALL_DIAGNOSTICS_CLEAR_TEXT not in phase9j_edge_reports[ticker]
     assert "FLAG_NOT_READY" in phase9j_edge_reports["BNC"]
     assert "EVALUATED_CLEAR" in phase9j_edge_reports["BNC"]
@@ -258,7 +272,7 @@ def test_phase9j_2_active_flags_remain_candidates_with_limited_scope(
         report = phase9j_edge_reports[ticker]
         assert "TARKASTETTAVA EHDOKAS" in report
         assert ALL_DIAGNOSTICS_CLEAR_TEXT not in report
-        assert INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT not in report
+        assert CANDIDATE_INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT not in report
         assert DIAGNOSTIC_COVERAGE_TEXT in report
         assert "eikä vahvista kirjanpitotapahtumia" in report
 

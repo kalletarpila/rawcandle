@@ -308,11 +308,16 @@ diagnostic coverage to the documented numeric checks. No diagnostic model,
 economic identity, package or production artifact changed.
 
 Phase 10A selected the provider EBIT versus Operating Income gap as an
-incremental review diagnostic. Phase 10B status:
-`EIGHT_FLAG_PACKAGE_IMPLEMENTED_AND_REHEARSED_NOT_PRODUCTION_ACTIVE`. The new
-candidate uses `abs(TTM EBIT - TTM Operating Income) / max(TTM Revenue, $10M)`
+incremental review diagnostic. Phase 10B implemented and rehearsed the new
+candidate, which uses `abs(TTM EBIT - TTM Operating Income) / max(TTM Revenue, $10M)`
 with an inclusive 10% boundary, explicit direction and strict readiness. The
 50,585 x 8 history, Phase 10A distribution, archived reader, copy persistence,
-idempotency, rollback and candidate Snapshot V7 reports reconcile. Production
-remains on the seven-flag package `a36d6903...`; Phase 10C deployment requires
-separate authorization.
+idempotency, rollback and candidate Snapshot V7 reports reconcile.
+
+Phase 10C status: `EIGHT_FLAG_PACKAGE_PRODUCTION_ACTIVE`. Production now
+resolves package `0e269e52a63500342df8a08ee2f91552fdc8fb216fa68cfe469bafb6aa8e3c30`
+and Diagnostic model `0ac66c6749afc889cf553c47436757a54f644b6a81febd161cf947885e444904`.
+The archived seven-flag package `a36d6903...` remains coherent, explicitly
+readable and activation-only rollback capable. The protected second production
+command was a byte-identical `NO_CHANGE`; provider-disabled pipeline, Snapshot,
+UI, backup and rollback-copy validation passed.

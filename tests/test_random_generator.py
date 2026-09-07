@@ -7,15 +7,16 @@ from analysis.downtrend_generator import generate_random_findings, DowntrendGene
 from analysis.database_manager import DatabaseManager
 
 
-def test_generate_random_findings_returns_tuple():
+def test_generate_random_findings_returns_tuple(tmp_path):
     """Testi: generate_random_findings palauttaa tuplen (count, errors)."""
     # Testataan että funktio palauttaa oikean tyyppisen vastauksen
-    # Käytetään todellisia tietokantapolkuja, mutta pieni määrä
+    # Markkinadataa luetaan tuotantokannasta, mutta löydökset kirjoitetaan
+    # aina testikohtaiseen väliaikaiseen kantaan.
     result = generate_random_findings(
         num_tickers=1,
         events_per_ticker=1,
         stock_db_path="data/osakedata.db",
-        analysis_db_path="data/analysis.db",
+        analysis_db_path=str(tmp_path / "analysis.db"),
     )
 
     # Tarkista että palautusarvo on tuple
