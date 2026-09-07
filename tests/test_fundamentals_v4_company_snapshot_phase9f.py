@@ -39,6 +39,29 @@ def nvda_report(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, dict]:
     return Path(first["output_path"]).read_text(encoding="utf-8"), first["snapshot"]
 
 
+@pytest.fixture(scope="module")
+def phase9i_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
+    required = (
+        "fundamentals_v4.db",
+        "fundamentals_analysis.db",
+        "osakedata.db",
+        "analysis.db",
+        "fundamentals_provider.db",
+    )
+    if not all((ROOT / "data" / name).exists() for name in required):
+        pytest.skip("production-shaped read-only fixture databases are unavailable")
+    paths = SnapshotPaths(*(ROOT / "data" / name for name in required))
+    output = tmp_path_factory.mktemp("phase9i-edges")
+    reports = {}
+    for ticker in ("CRMD", "APD", "AIV", "LEG", "AAT"):
+        result = generate_active_company_snapshot(
+            paths, ticker=ticker, report_date="2026-09-07", output_dir=output
+        )
+        assert result["status"] == "CREATED"
+        reports[ticker] = Path(result["output_path"]).read_text(encoding="utf-8")
+    return reports
+
+
 def test_v2_report_restores_compact_fiscal_histories(nvda_report: tuple[str, dict]) -> None:
     report, snapshot = nvda_report
     assert snapshot["report_contract"] == REPORT_CONTRACT
@@ -57,8 +80,8 @@ def test_v2_report_uses_operating_income_and_ten_three_point_metrics(nvda_report
     for metric in (
         "Market Capitalization",
         "Enterprise Value",
-        "P/E",
-        "Earnings Yield",
+        "P/E (Reported Common Earnings)",
+        "Reported Common Earnings Yield",
         "P/FCF",
         "FCF Yield",
         "EV / Operating Income",
@@ -73,6 +96,13 @@ def test_v2_report_uses_operating_income_and_ten_three_point_metrics(nvda_report
     assert contexts[2]["fiscal_quarter"] == "Q1"
     assert contexts[1]["fundamental_availability_date"] == "2026-08-26"
     assert contexts[2]["fundamental_availability_date"] == "2026-05-20"
+    assert contexts[0]["ttm_period_end"] == contexts[1]["ttm_period_end"]
+    assert contexts[2]["ttm_period_end"] != contexts[1]["ttm_period_end"]
+    assert "### Valuation basis" in report
+    assert "Reported Common Earnings TTM" in report
+    assert "Reported common-shareholder earnings are a GAAP-based measure" in report
+    assert "They are not normalized" in report
+    assert "estimated adjusted earnings" not in report.lower()
 
 
 def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, dict]) -> None:
@@ -86,7 +116,7 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "Overall eligible universe" in report
     assert "n=2198" in report
     assert "No active diagnostic flags" in report
-    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V2" in report
+    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3" in report
 
 
 def test_v2_report_current_and_filing_valuations_are_distinct(nvda_report: tuple[str, dict]) -> None:
@@ -104,7 +134,7 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
     nvda_report: tuple[str, dict],
 ) -> None:
     _, snapshot = nvda_report
-    assert REPORT_PRESENTATION_FINGERPRINT == "bc4b4a3b355063697f1fe3182a105342d804a59bb41a86ec40ef6fe4364abee2"
+    assert REPORT_PRESENTATION_FINGERPRINT == "e9660690c9ccedc2936c14d8b5d2bb3abc7d62f0d10f11a75d349f770f7fe779"
     assert snapshot["model_fingerprints"]["snapshot"] == SNAPSHOT_MODEL_FINGERPRINT
     assert snapshot["source_state"]["active_package"][1] == PACKAGE_FINGERPRINT
 
@@ -178,3 +208,80 @@ def test_v2_multiple_denominator_contract(
     )
     assert context["metrics"]["market_cap"]["status"] == market_status
     assert context["metrics"]["ev_operating_income"]["status"] == enterprise_ratio_status
+
+
+@pytest.mark.parametrize(
+    ("common_earnings", "ready", "expected_status"),
+    (
+        (25.0, 1, "VALUE"),
+        (0.0, 1, "N_M"),
+        (-25.0, 1, "N_M"),
+        (None, 0, "N_A"),
+    ),
+)
+def test_reported_common_earnings_multiple_contract(
+    common_earnings: float | None,
+    ready: int,
+    expected_status: str,
+) -> None:
+    context = _multiples_context(
+        evaluation_point="CURRENT_MOMENT",
+        ttm={
+            "shares_outstanding": 10.0,
+            "total_debt": 0.0,
+            "cash": 0.0,
+            "ttm_revenue": 100.0,
+            "ttm_operating_income": 10.0,
+            "ttm_free_cashflow": 10.0,
+            "ttm_net_income_common": common_earnings,
+            "net_income_common_4q_ready": ready,
+        },
+        persisted=None,
+        fiscal_year=2026,
+        fiscal_quarter="Q2",
+        period_end="2026-06-30",
+        availability_date="2026-08-01",
+        price_date="2026-09-01",
+        price=10.0,
+        price_eligible=True,
+    )
+    assert context["source_inputs"]["ttm_net_income_common"] == common_earnings
+    assert context["ttm_period_end"] == "2026-06-30"
+    assert context["metrics"]["earnings_yield"]["status"] == expected_status
+    assert context["metrics"]["pe"]["status"] == expected_status
+    if expected_status == "VALUE":
+        assert context["metrics"]["earnings_yield"]["value"] == 0.25
+        assert context["metrics"]["pe"]["value"] == 4.0
+    assert all(check["ok"] for check in context["reconciliation"])
+
+
+def test_nvda_three_context_common_earnings_reconciles_at_full_precision(
+    nvda_report: tuple[str, dict],
+) -> None:
+    _, snapshot = nvda_report
+    current, latest, previous = snapshot["valuation_multiples"]["contexts"]
+    assert current["source_inputs"]["ttm_net_income_common"] == pytest.approx(
+        192_879_000_000.0, rel=0, abs=0
+    )
+    assert current["source_inputs"]["ttm_net_income_common"] == latest["source_inputs"]["ttm_net_income_common"]
+    assert current["price_date"] != latest["price_date"]
+    assert current["metrics"]["market_cap"]["value"] != latest["metrics"]["market_cap"]["value"]
+    assert previous["fiscal_quarter"] == "Q1"
+    for context in (current, latest, previous):
+        assert all(check["ok"] for check in context["reconciliation"])
+
+
+def test_phase9i_edge_reports_preserve_na_nm_stale_and_not_applicable(
+    phase9i_edge_reports: dict[str, str],
+) -> None:
+    assert "| Reported Common Earnings Yield | 28.49% | 29.50% | 29.10% |" in phase9i_edge_reports["CRMD"]
+    assert "| Reported Common Earnings TTM | −47.30M | −47.30M | 2.11B |" in phase9i_edge_reports["APD"]
+    assert "| P/E (Reported Common Earnings) | N/M | N/M | 31.71x |" in phase9i_edge_reports["APD"]
+    assert "| Reported Common Earnings TTM | N/A | N/A | 554.01M |" in phase9i_edge_reports["AIV"]
+    assert "CURRENT_PRICE_FALLBACK_TOO_OLD" in phase9i_edge_reports["LEG"]
+    assert "| Market cap used | N/A | 1.31B | 1.41B |" in phase9i_edge_reports["LEG"]
+    assert "VALUATION_NOT_APPLICABLE" in phase9i_edge_reports["AAT"]
+    for report in phase9i_edge_reports.values():
+        assert "company_id" not in report
+        assert "quarter_id" not in report
+        assert "167.522" not in report

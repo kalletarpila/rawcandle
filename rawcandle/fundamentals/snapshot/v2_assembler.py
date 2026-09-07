@@ -23,7 +23,7 @@ from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepo
 from rawcandle.fundamentals.snapshot import assembler as v1
 
 
-REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V2"
+REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3"
 REPORT_CONTRACT_SPEC = {
     "version": REPORT_CONTRACT,
     "model_family": contract.FAMILY_FINGERPRINT,
@@ -33,6 +33,12 @@ REPORT_CONTRACT_SPEC = {
         "market_cap", "enterprise_value", "pe", "earnings_yield", "p_fcf",
         "fcf_yield", "ev_operating_income", "operating_income_yield", "ev_sales", "p_sales",
     ),
+    "valuation_basis": (
+        "fiscal_quarter", "ttm_period_end", "fundamental_availability_date",
+        "price_date", "price", "shares_outstanding", "market_cap",
+        "ttm_net_income_common",
+    ),
+    "common_earnings_display": "REPORTED_GAAP_COMMON_SHAREHOLDER_EARNINGS_NOT_NORMALIZED",
     "diagnostic_rendering": "READABLE_SUMMARY_PLUS_COMPLETE_AUDIT_TABLE",
     "lifecycle_rendering": "FOUR_ENDPOINTS_WITH_STATUS_CANDIDATE_AND_OPERATING_MARGIN_EVIDENCE",
     "context": "CURRENT_PRICE_AND_ACTIVE_V2_PACKAGE_IDENTITY",
@@ -64,6 +70,16 @@ def _component_map(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
         components[str(component["component_name"])] = component
     output["components"] = components
     return output
+
+
+def _finite_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _score_raw(
@@ -152,6 +168,7 @@ def _multiples_context(
     persisted: Mapping[str, Any] | None, fiscal_year: int | None,
     fiscal_quarter: str | None, availability_date: str | None,
     price_date: str | None, price: Any, price_eligible: bool,
+    period_end: str | None = None,
 ) -> dict[str, Any]:
     source = persisted or {}
     fundamentals = ttm or {}
@@ -223,13 +240,15 @@ def _multiples_context(
             return metric(None, "N_M")
         return metric(enterprise_value / numerator if reciprocal else numerator / enterprise_value, "VALUE")
 
-    return {
+    context = {
         "evaluation_point": evaluation_point,
         "fiscal_year": fiscal_year,
         "fiscal_quarter": fiscal_quarter,
+        "ttm_period_end": period_end,
         "fundamental_availability_date": availability_date,
         "price_date": price_date,
         "price": price_value,
+        "price_eligible": price_eligible,
         "price_currency": None,
         "valuation_status": source.get("valuation_status"),
         "source_inputs": {
@@ -241,6 +260,9 @@ def _multiples_context(
             "ttm_free_cashflow": fcf,
             "ttm_net_income_common": common_earnings,
         },
+        "authoritative_ttm_net_income_common": finite(
+            fundamentals.get("ttm_net_income_common")
+        ),
         "authoritative_market_cap": finite(source.get("market_cap")),
         "authoritative_enterprise_value": finite(source.get("enterprise_value")),
         "metrics": {
@@ -256,6 +278,8 @@ def _multiples_context(
             "p_sales": market_ratio(revenue, reciprocal=True),
         },
     }
+    context["reconciliation"] = _valuation_context_reconciliation(context)
+    return context
 
 
 def _three_point_multiples(history: list[dict[str, Any]], current: Mapping[str, Any]) -> dict[str, Any]:
@@ -269,6 +293,7 @@ def _three_point_multiples(history: list[dict[str, Any]], current: Mapping[str, 
             evaluation_point=point, ttm=slot.get("ttm"), persisted=persisted,
             fiscal_year=slot["fiscal_year"] if slot.get("ttm") else None,
             fiscal_quarter=slot["fiscal_quarter"] if slot.get("ttm") else None,
+            period_end=(slot.get("ttm") or {}).get("period_end"),
             availability_date=slot.get("availability_date") if slot.get("ttm") else None,
             price_date=persisted.get("price_date"), price=persisted.get("selected_price"),
             price_eligible=eligible,
@@ -279,11 +304,81 @@ def _three_point_multiples(history: list[dict[str, Any]], current: Mapping[str, 
         evaluation_point="CURRENT_MOMENT", ttm=latest.get("ttm"), persisted=None,
         fiscal_year=latest["fiscal_year"] if latest.get("ttm") else None,
         fiscal_quarter=latest["fiscal_quarter"] if latest.get("ttm") else None,
+        period_end=(latest.get("ttm") or {}).get("period_end"),
         availability_date=latest.get("availability_date"), price_date=current.get("price_date"),
         price=selected_price, price_eligible=bool(current.get("diagnostic_price_eligible")),
     )
     current_context["valuation_status"] = current.get("valuation_status")
-    return {"contexts": (current_context, filing("LATEST_FILING", latest), filing("PREVIOUS_FILING_Q_MINUS_1", previous))}
+    current_context["authoritative_market_cap"] = _finite_value(current.get("market_cap"))
+    current_context["authoritative_enterprise_value"] = _finite_value(current.get("enterprise_value"))
+    current_context["reconciliation"] = _valuation_context_reconciliation(current_context)
+    contexts = (
+        current_context,
+        filing("LATEST_FILING", latest),
+        filing("PREVIOUS_FILING_Q_MINUS_1", previous),
+    )
+    return {"contexts": contexts}
+
+
+def _valuation_context_reconciliation(context: Mapping[str, Any]) -> list[dict[str, Any]]:
+    inputs = context["source_inputs"]
+    metrics = context["metrics"]
+    price = _finite_value(context.get("price"))
+    shares = _finite_value(inputs.get("shares_outstanding"))
+    common = _finite_value(inputs.get("ttm_net_income_common"))
+    authoritative_common = _finite_value(
+        context.get("authoritative_ttm_net_income_common")
+    )
+
+    def same(left: float | None, right: float | None) -> bool:
+        if left is None or right is None:
+            return left is right
+        return math.isclose(left, right, rel_tol=1e-12, abs_tol=1e-12)
+
+    checks: list[dict[str, Any]] = []
+
+    def add(name: str, actual: Any, expected: Any, ok: bool) -> None:
+        checks.append({"name": name, "actual": actual, "expected": expected, "ok": ok})
+
+    add("reported_common_earnings_ttm", common, authoritative_common, same(common, authoritative_common))
+
+    market_metric = metrics["market_cap"]
+    expected_market_cap = (
+        price * shares
+        if bool(context.get("price_eligible"))
+        and price is not None and shares is not None and price > 0 and shares > 0
+        else None
+    )
+    add(
+        "market_cap_price_times_shares",
+        market_metric.get("value"),
+        expected_market_cap,
+        same(_finite_value(market_metric.get("value")), expected_market_cap),
+    )
+    authoritative_market_cap = _finite_value(context.get("authoritative_market_cap"))
+    add(
+        "market_cap_authoritative",
+        market_metric.get("value"),
+        authoritative_market_cap,
+        authoritative_market_cap is None
+        or same(_finite_value(market_metric.get("value")), authoritative_market_cap),
+    )
+
+    for metric_name, reciprocal in (("earnings_yield", False), ("pe", True)):
+        metric = metrics[metric_name]
+        expected = None
+        expected_status = "N_A" if common is None or expected_market_cap is None else "N_M"
+        if common is not None and common > 0 and expected_market_cap is not None:
+            expected_status = "VALUE"
+            expected = expected_market_cap / common if reciprocal else common / expected_market_cap
+        add(
+            f"reported_common_earnings_{metric_name}",
+            {"status": metric.get("status"), "value": metric.get("value")},
+            {"status": expected_status, "value": expected},
+            metric.get("status") == expected_status
+            and same(_finite_value(metric.get("value")), expected),
+        )
+    return checks
 
 
 def _delta(analysis: sqlite3.Connection, company_id: int, fiscal_year: int, fiscal_quarter: str, model_fingerprint: str) -> dict[str, Any] | None:
@@ -417,6 +512,12 @@ def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report
             if scored and scored["readiness_status"] == "SCORE_FULL":
                 total = sum(item["component_score"] for item in scored["components"].values())
                 base["reconciliation"].append({"name": f"v2_score:{slot['fiscal_year']}:{slot['fiscal_quarter']}", "ok": math.isclose(total, scored["total_score"], abs_tol=1e-9)})
+        for context in base["valuation_multiples"]["contexts"]:
+            for check in context["reconciliation"]:
+                base["reconciliation"].append({
+                    "name": f"v2_valuation:{context['evaluation_point']}:{check['name']}",
+                    "ok": check["ok"],
+                })
         if any(not row["ok"] for row in base["reconciliation"]):
             raise RuntimeError("SNAPSHOT_V2_RECONCILIATION_FAILED")
     return base

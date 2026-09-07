@@ -17,6 +17,7 @@ from rawcandle.fundamentals.snapshot.assembler import (
 SUPPORTED_REPORT_CONTRACTS = {
     REPORT_CONTRACT,
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V2",
+    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3",
 }
 
 
@@ -138,6 +139,14 @@ def _valuation_context_quarter(context: Mapping[str, Any]) -> str:
     if context.get("fiscal_year") is None or not context.get("fiscal_quarter"):
         return "N/A"
     return f"FY{context['fiscal_year']} {context['fiscal_quarter']}"
+
+
+def _basis_text(value: Any) -> str:
+    return "N/A" if value is None or value == "" else _text(value)
+
+
+def _basis_number(value: Any, formatter: Any) -> str:
+    return "N/A" if value is None else formatter(value)
 
 
 def _valuation_yield(value: Any) -> str:
@@ -264,7 +273,13 @@ def _valuation_ceiling_components(valuation: Mapping[str, Any]) -> list[str]:
         for key, maximum, label in (
             (operating_key, 40.0, operating_label),
             ("fcf_points", 40.0, "FCF / Market Cap"),
-            ("earnings_points", 20.0, "Common earnings / Market Cap"),
+            (
+                "earnings_points",
+                20.0,
+                "Reported Common Earnings / Market Cap"
+                if operating_key.startswith("operating")
+                else "Common earnings / Market Cap",
+            ),
         )
         if _at_ceiling(valuation.get(key), maximum)
     ]
@@ -416,6 +431,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
     operating_multiple = "ev_operating_income" if is_v2 else "ev_ebit"
     operating_value = "ttm_operating_income" if is_v2 else "ttm_ebit"
     operating_label = "Operating Income" if is_v2 else "EBIT"
+    common_earnings_label = "Reported Common Earnings" if is_v2 else "Common earnings"
     pp = lambda value: _pp(value, signed=is_v2)
     identity = snapshot["identity"]
     anchor = snapshot["anchor"]
@@ -579,7 +595,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
                 for values in (snapshot["absolute_values"]["yoy_base"], snapshot["absolute_values"]["previous"], snapshot["absolute_values"]["current"])
             )),
             *((label, _money(snapshot["absolute_values"]["yoy_base"].get(key)), _money(snapshot["absolute_values"]["previous"].get(key)), _money(snapshot["absolute_values"]["current"].get(key))) for key, label in (
-                ("ttm_free_cashflow", "Free cash flow TTM"), ("ttm_net_income_common", "Common earnings TTM"),
+                ("ttm_free_cashflow", "Free cash flow TTM"),
+                ("ttm_net_income_common", f"{common_earnings_label} TTM"),
             )),
         )),
         "",
@@ -649,7 +666,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         _table(("Komponentti", "Maks.", *HISTORY_HEADERS), (
             (f"{operating_label} / EV", "40.00", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get(operating_points)))),
             ("FCF / Market Cap", "40.00", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("fcf_points")))),
-            ("Common earnings / Market Cap", "20.00", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("earnings_points")))),
+            (f"{common_earnings_label} / Market Cap", "20.00", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("earnings_points")))),
             ("**Valuation Score**", "**100.00**", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("total_valuation_score")))),
         )),
         "",
@@ -663,7 +680,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         _table(("Raw-mittari", *HISTORY_HEADERS), (
             (f"{operating_label} / EV", *_history_values(snapshot, lambda slot: _percentage((slot.get("valuation") or {}).get(operating_yield)))),
             ("FCF / Market Cap", *_history_values(snapshot, lambda slot: _percentage((slot.get("valuation") or {}).get("fcf_yield")))),
-            ("Common earnings / Market Cap", *_history_values(snapshot, lambda slot: _percentage((slot.get("valuation") or {}).get("earnings_yield")))),
+            (f"{common_earnings_label} / Market Cap", *_history_values(snapshot, lambda slot: _percentage((slot.get("valuation") or {}).get("earnings_yield")))),
             ("Positive components", *_history_values(snapshot, lambda slot: "—" if not slot.get("valuation") else f"{sum((slot['valuation'].get(key) or 0) > 0 for key in (operating_yield, 'fcf_yield', 'earnings_yield'))}/3")),
         )),
         "",
@@ -671,7 +688,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         _table(("Komponentti", "QoQ", "2Q", "YoY"), tuple(
             (label, _signed_score(_filing_delta(history, key, 1)), _signed_score(_filing_delta(history, key, 2)), _signed_score(_filing_delta(history, key, 4)))
-            for key, label in ((operating_points, f"{operating_label} / EV"), ("fcf_points", "FCF / Market Cap"), ("earnings_points", "Common earnings / Market Cap"), ("total_valuation_score", "Valuation Score"))
+            for key, label in ((operating_points, f"{operating_label} / EV"), ("fcf_points", "FCF / Market Cap"), ("earnings_points", f"{common_earnings_label} / Market Cap"), ("total_valuation_score", "Valuation Score"))
         )),
         "",
         _table(("Filing-price-muutos", "QoQ", "2Q", "YoY"), (
@@ -692,7 +709,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Valuation Score", _score(current_valuation.get("total_valuation_score")), _score(current_price.get("total_valuation_score")), _signed_score(current_change)),
             (f"{operating_label} / EV", _percentage(current_valuation.get(operating_yield)), _percentage(current_price.get(operating_yield)), pp(None if current_valuation.get(operating_yield) is None or current_price.get(operating_yield) is None else current_price[operating_yield] - current_valuation[operating_yield])),
             ("FCF / Market Cap", _percentage(current_valuation.get("fcf_yield")), _percentage(current_price.get("fcf_yield")), pp(None if current_valuation.get("fcf_yield") is None or current_price.get("fcf_yield") is None else current_price["fcf_yield"] - current_valuation["fcf_yield"])),
-            ("Common earnings / Market Cap", _percentage(current_valuation.get("earnings_yield")), _percentage(current_price.get("earnings_yield")), pp(None if current_valuation.get("earnings_yield") is None or current_price.get("earnings_yield") is None else current_price["earnings_yield"] - current_valuation["earnings_yield"])),
+            (f"{common_earnings_label} / Market Cap", _percentage(current_valuation.get("earnings_yield")), _percentage(current_price.get("earnings_yield")), pp(None if current_valuation.get("earnings_yield") is None or current_price.get("earnings_yield") is None else current_price["earnings_yield"] - current_valuation["earnings_yield"])),
         )),
         "",
         "> Shares, debt and cash come from the latest fundamental filing and may differ from their true current-date values.",
@@ -701,33 +718,22 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         "## Three-point valuation multiples",
         "",
+        "### Valuation basis",
+        "",
         _table(
+            ("Basis", "Current moment", "Latest filing", "Previous filing (Q−1)"),
             (
-                "Evaluation point",
-                "Fiscal quarter",
-                "Fundamental availability",
-                "Price date",
-                "Market price",
-                "Currency",
-                "Valuation status",
+                ("Fiscal quarter", *(_valuation_context_quarter(context) for context in valuation_contexts)),
+                ("TTM period end", *(_basis_text(context.get("ttm_period_end")) for context in valuation_contexts)),
+                ("Source availability / filing date", *(_basis_text(context.get("fundamental_availability_date")) for context in valuation_contexts)),
+                ("Price date", *(_basis_text(context.get("price_date")) for context in valuation_contexts)),
+                ("Price used", *(_basis_number(context.get("price"), _price) for context in valuation_contexts)),
+                ("Shares used", *(_basis_number(context["source_inputs"].get("shares_outstanding"), _money) for context in valuation_contexts)),
+                ("Market cap used", *(_valuation_metric(context, "market_cap", _money) for context in valuation_contexts)),
+                ("Reported Common Earnings TTM", *(_basis_number(context["source_inputs"].get("ttm_net_income_common"), _money) for context in valuation_contexts)),
+                ("Valuation status", *(_basis_text(context.get("valuation_status")) for context in valuation_contexts)),
             ),
-            tuple(
-                (
-                    label,
-                    _valuation_context_quarter(context),
-                    _text(context.get("fundamental_availability_date")),
-                    _text(context.get("price_date")),
-                    _price(context.get("price")) if context.get("price") is not None else "N/A",
-                    context.get("price_currency") or "N/A",
-                    _text(context.get("valuation_status")),
-                )
-                for label, context in (
-                    ("Current moment", current_multiple),
-                    ("Latest filing", latest_multiple),
-                    ("Previous filing (Q−1)", previous_multiple),
-                )
-            ),
-            ("left", "left", "left", "left", "right", "left", "left"),
+            ("left", "right", "right", "right"),
         ),
         "",
         "Currency: N/A (source currency not available in the validated contract)" if is_v2 and not any(context.get("price_currency") for context in valuation_contexts) else "",
@@ -744,8 +750,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
                 for key, label, formatter in (
                     ("market_cap", "Market Capitalization", _money),
                     ("enterprise_value", "Enterprise Value", _money),
-                    ("pe", "P/E", _multiple),
-                    ("earnings_yield", "Earnings Yield", _valuation_yield),
+                    ("pe", "P/E (Reported Common Earnings)" if is_v2 else "P/E", _multiple),
+                    ("earnings_yield", "Reported Common Earnings Yield" if is_v2 else "Earnings Yield", _valuation_yield),
                     ("p_fcf", "P/FCF", _multiple),
                     ("fcf_yield", "FCF Yield", _valuation_yield),
                     (operating_multiple, f"EV / {operating_label}" if is_v2 else "EV/EBIT", _multiple),
@@ -757,6 +763,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("left", "right", "right", "right"),
         ),
         "",
+        "> Reported common-shareholder earnings are a GAAP-based measure. They may include recognized investment gains and losses and other non-operating items included in reported earnings. They are not normalized." if is_v2 else "",
+        "" if is_v2 else "",
         "> Current moment versus Latest filing mainly reflects the market-price change because both use the latest filing's fundamental base. Latest filing versus Previous filing (Q−1) combines changes in price, shares, balance sheet, and TTM fundamentals, so this is not a pure valuation trend decomposition. The metrics are descriptive and do not alter Valuation Score. Current-moment metrics are indicative because they combine a current market price with the latest available filing fundamentals.",
         "",
         "## Relative Position",

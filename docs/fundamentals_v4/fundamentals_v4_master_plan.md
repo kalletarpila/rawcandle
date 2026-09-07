@@ -280,3 +280,9 @@ copy persistence, idempotency, rollback, readers, and temporary snapshots pass.
 Phase 9H persisted and atomically activated package `a36d6903...`, preserved the
 pre-9G package in versioned manifest history, and passed the independent second
 production no-op, pipeline, Snapshot and UI checks.
+
+Phase 9I status: `REPORTING_TRANSPARENCY_COMPLETE_NOT_PRODUCTION_DATA_CHANGE`.
+Company Snapshot V2 presentation V3 explicitly labels Reported Common Earnings
+and exposes the complete three-context valuation basis. Economic model and
+package identities remain unchanged; only presentation and per-report content
+fingerprints change.

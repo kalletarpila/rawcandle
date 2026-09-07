@@ -8,7 +8,10 @@ The report remains a currently revised view, not an original point-in-time recon
 
 ## Active report contract
 
-The V2 report presentation contract is `CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V2`. Its deterministic presentation fingerprint is defined by `REPORT_CONTRACT_SPEC` in `snapshot/v2_assembler.py`.
+Phase 9I superseded the original Phase 9F presentation contract with
+`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3`. Its deterministic
+presentation fingerprint is defined by `REPORT_CONTRACT_SPEC` in
+`snapshot/v2_assembler.py`. The Snapshot economic model remains unchanged.
 
 Phase 9H activated economic Snapshot fingerprint `1b4963c3b968008dd753d86c9a95c5f21737956113ea5c70f481b2ee96757f64` and package fingerprint `a36d6903c3d640da5e9bd7034faee700b7b064e74ea871880c1bfa2348f4964d`. The report presentation fingerprint remains unchanged and separate from these economic identities.
 
@@ -26,7 +29,19 @@ The report uses authoritative fiscal year and fiscal quarter labels. Database pr
 - Delta: current QoQ, 2Q, and YoY totals and component contributions.
 - Three-point valuation: indicative current moment, latest filing, and exact previous fiscal Q-1. A missing Q-1 is not replaced by an older endpoint.
 
-The three-point table contains Market Capitalization, Enterprise Value, P/E, Earnings Yield, P/FCF, FCF Yield, EV / Operating Income, Operating Income / EV, EV/Sales, and P/S. Current and filing-date valuation scores are labelled separately. Current calculations hold the latest filing fundamentals fixed and use the latest eligible close.
+The three-point table contains Market Capitalization, Enterprise Value, P/E
+(Reported Common Earnings), Reported Common Earnings Yield, P/FCF, FCF Yield,
+EV / Operating Income, Operating Income / EV, EV/Sales, and P/S. A separate
+Valuation basis table exposes the fiscal quarter, TTM period end, availability
+date, price date, price, shares, market cap and Reported Common Earnings TTM for
+all three contexts. Current calculations hold the latest filing fundamentals
+fixed and use the latest eligible close.
+
+Reported Common Earnings are GAAP-based common-shareholder earnings and are not
+normalized. They affect only the common-earnings portion of Valuation Score V2
+and the related displayed ratios; they do not directly affect Fundamental Score
+V2 or Operating Income / EV. See
+`fundamentals_v4_company_snapshot_v2_phase9i.md`.
 
 Percentages, percentage-point changes, multiples, and compact monetary amounts are formatted only after calculation. Missing values remain `N/A`, economically non-meaningful multiples remain `N/M`, and zero remains zero. No currency is invented when the validated source contract lacks one.
 
