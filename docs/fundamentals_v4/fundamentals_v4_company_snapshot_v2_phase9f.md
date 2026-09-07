@@ -8,12 +8,12 @@ The report remains a currently revised view, not an original point-in-time recon
 
 ## Active report contract
 
-Phase 9I superseded the original Phase 9F presentation contract with
-`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3`. Its deterministic
+Phase 9J superseded the original Phase 9F presentation contract with
+`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4`. Its deterministic
 presentation fingerprint is defined by `REPORT_CONTRACT_SPEC` in
 `snapshot/v2_assembler.py`. The Snapshot economic model remains unchanged.
 
-Phase 9H activated economic Snapshot fingerprint `1b4963c3b968008dd753d86c9a95c5f21737956113ea5c70f481b2ee96757f64` and package fingerprint `a36d6903c3d640da5e9bd7034faee700b7b064e74ea871880c1bfa2348f4964d`. The report presentation fingerprint remains unchanged and separate from these economic identities.
+Phase 9H activated economic Snapshot fingerprint `1b4963c3b968008dd753d86c9a95c5f21737956113ea5c70f481b2ee96757f64` and package fingerprint `a36d6903c3d640da5e9bd7034faee700b7b064e74ea871880c1bfa2348f4964d`. Phase 9J changed the report presentation fingerprint while keeping it separate from these unchanged economic identities.
 
 Score, Lifecycle, Valuation, Delta and Relative Position fingerprints remain
 unchanged. Phase 9H changed only the Diagnostic Flags and dependent Snapshot
@@ -24,18 +24,23 @@ economic fingerprints shown above.
 The report uses authoritative fiscal year and fiscal quarter labels. Database primary keys, endpoint IDs, quarter IDs, and fiscal sequence values are not rendered.
 
 - Fundamental Score: five exact fiscal endpoints, oldest to newest, including total, readiness, all seven components, and component evidence.
-- Filing-date Valuation: five exact fiscal endpoints, oldest to newest, including persisted score, status, filing price date, component points, and raw yields.
+- Availability-date Valuation: five exact fiscal endpoints, oldest to newest, including persisted score, status, availability-date price, component points, and raw yields.
 - Lifecycle: four exact fiscal endpoints with raw state, confirmed state, status, candidate confirmation count, Operating Margin, Operating Margin Direction, and transition state.
 - Delta: current QoQ, 2Q, and YoY totals and component contributions.
-- Three-point valuation: indicative current moment, latest filing, and exact previous fiscal Q-1. A missing Q-1 is not replaced by an older endpoint.
+- Three-point valuation: indicative current moment, latest availability-date endpoint, and exact previous fiscal Q-1 availability-date endpoint. A missing Q-1 is not replaced by an older endpoint.
 
 The three-point table contains Market Capitalization, Enterprise Value, P/E
 (Reported Common Earnings), Reported Common Earnings Yield, P/FCF, FCF Yield,
 EV / Operating Income, Operating Income / EV, EV/Sales, and P/S. A separate
 Valuation basis table exposes the fiscal quarter, TTM period end, availability
 date, price date, price, shares, market cap and Reported Common Earnings TTM for
-all three contexts. Current calculations hold the latest filing fundamentals
+all three contexts. Current calculations hold the latest endpoint fundamentals
 fixed and use the latest eligible close.
+
+The availability date is RawCandle's authoritative source-availability date; it
+is not automatically asserted to be a legally verified filing timestamp.
+Valuation comparison tables show component-score and total-score changes in
+points. Raw-yield percentage points and market-price percentages remain separate.
 
 Reported Common Earnings are GAAP-based common-shareholder earnings and are not
 normalized. They affect only the common-earnings portion of Valuation Score V2
@@ -55,7 +60,7 @@ Phase 9F reconciles the complete active chain:
 
 The full deterministic replay covers 50,585 endpoints and 354,095 evaluations. Each endpoint must have exactly seven evaluations. Statuses, reason codes, comparison endpoints, effective dates, triggered values, and all persisted numeric evidence are compared against the pure engine. Numeric comparison uses relative and absolute tolerance `1e-12`.
 
-The Markdown report includes a readable active-flag explanation with the calculated value and threshold and retains a complete seven-row technical audit table. `FLAG_NOT_READY`, `FLAG_NOT_APPLICABLE`, `EVALUATED_CLEAR`, and `EVALUATED_FLAGGED` remain distinct.
+The Markdown report includes a readable active-flag explanation with the calculated value and threshold and retains a complete seven-row status table. Phase 9J renders deterministic Finnish explanations instead of internal reason-code identifiers. `FLAG_NOT_READY`, `FLAG_NOT_APPLICABLE`, `EVALUATED_CLEAR`, and `EVALUATED_FLAGGED` remain distinct; persisted reason codes and evidence remain unchanged.
 
 ## Historical audit findings (corrected in Phase 9G and deployed in Phase 9H)
 

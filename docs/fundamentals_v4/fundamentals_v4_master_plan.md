@@ -286,3 +286,10 @@ Company Snapshot V2 presentation V3 explicitly labels Reported Common Earnings
 and exposes the complete three-context valuation basis. Economic model and
 package identities remain unchanged; only presentation and per-report content
 fingerprints change.
+
+Phase 9J status: `PRESENTATION_TERMINOLOGY_COMPLETE_NOT_PRODUCTION_DATA_CHANGE`.
+Company Snapshot V2 presentation V4 uses precise source-availability-date
+terminology, identifies Valuation comparisons as score-point changes, renders
+all supported Diagnostic Flags V2 reasons as readable Finnish explanations, and
+keeps package identities only in the technical appendix. Economic model,
+persisted reason codes, active package and production artifacts remain unchanged.

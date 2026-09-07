@@ -48,14 +48,18 @@ The three contexts remain:
 | Context | Fundamentals | Price |
 |---|---|---|
 | Current moment | latest eligible TTM | latest eligible current close |
-| Latest filing | same latest TTM | that endpoint's availability-date price |
-| Previous filing (Q-1) | exact fiscal Q-1 TTM | exact Q-1 availability-date price |
+| Latest endpoint (availability date) | same latest TTM | that endpoint's availability-date price |
+| Previous endpoint (exact Q-1 availability date) | exact fiscal Q-1 TTM | exact Q-1 availability-date price |
 
 There is no substitute when exact fiscal Q-1 is unavailable. Valuation basis
-shows fiscal year/quarter, TTM period end, source availability/filing date,
+shows fiscal year/quarter, TTM period end, source availability date,
 price date, price, shares, calculated market cap and Reported Common Earnings
 TTM for every context. Currency remains `N/A` because no validated currency
 field belongs to the report contract.
+
+Phase 9J clarified that this is RawCandle's source-availability date, not an
+automatic claim about a legally verified filing timestamp. It did not alter the
+date values or selection logic.
 
 Operating measures retain explicit Operating Income terminology. Reported
 Common Earnings affect only the 20-point common-earnings portion of Absolute
@@ -88,7 +92,7 @@ availability date 2026-08-26. Authoritative Reported Common Earnings TTM is
 `192879000000`, not a hardcoded estimate. Current uses price
 `230.36000061035156` dated 2026-09-04 and market cap
 `5551676014709.473`, yielding `0.03474248127753789` and `28.783206127725013x`.
-Latest filing uses price `209.66000366210938` dated 2026-08-26 and market cap
+The latest availability-date endpoint uses price `209.66000366210938` dated 2026-08-26 and market cap
 `5052806088256.836`, yielding `0.038172650331519294` and
 `26.196766305594885x`. The TTM numerator is identical; only price and market cap
 differ. Exact Q-1 is FY2027 Q1, period end 2026-04-26, with its own TTM amount
@@ -147,6 +151,14 @@ allowed by the Phase 9I test policy. No optional tool was installed.
 
 The report remains currently revised rather than PIT. Reported Common Earnings
 remain unnormalized GAAP earnings, and current-price valuation continues to use
-the latest filing's shares and balance sheet. A current descriptive multiple can
+the latest endpoint's shares and balance sheet. A current descriptive multiple can
 be calculable while the model status is `VALUATION_NOT_APPLICABLE`; the status
 is displayed separately and is not converted into readiness or model eligibility.
+
+## Phase 9J presentation follow-up
+
+Phase 9J introduced presentation contract V4. It replaced ambiguous filing-date
+labels with source-availability terminology, identified Valuation comparison
+values as score-point changes, rendered readable diagnostic explanations, and
+moved package identities from the opening summary to the technical appendix.
+The Phase 9I economic contract and all values documented above remain unchanged.

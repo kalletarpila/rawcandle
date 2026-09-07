@@ -18,6 +18,7 @@ SUPPORTED_REPORT_CONTRACTS = {
     REPORT_CONTRACT,
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V2",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3",
+    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4",
 }
 
 
@@ -345,6 +346,43 @@ DIAGNOSTIC_LABELS = {
     "WORKING_CAPITAL_SHIFT_CANDIDATE": "Working Capital Shift",
 }
 
+DIAGNOSTIC_REASON_EXPLANATIONS = {
+    "ABRUPT_SHIFT_THRESHOLD_MET": "Fundamentaalisen muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas.",
+    "ABRUPT_SHIFT_BELOW_THRESHOLD": "Fundamentaalinen muutos jäi tarkastusrajan alle.",
+    "EARNINGS_CASH_DIVERGENCE_THRESHOLD_MET": "Tulos- ja kassavirtamuutosten eron tarkastusraja täyttyi; havainto on tarkastettava ehdokas.",
+    "EARNINGS_CASH_DIVERGENCE_BELOW_THRESHOLD": "Tulos- ja kassavirtamuutosten ero jäi tarkastusrajan alle.",
+    "CAPEX_INTENSITY_SHIFT_THRESHOLD_MET": "CAPEX-intensiteetin muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas.",
+    "CAPEX_INTENSITY_SHIFT_BELOW_THRESHOLD": "CAPEX-intensiteetin muutos jäi tarkastusrajan alle.",
+    "NET_DEBT_SHIFT_THRESHOLD_MET": "Nettovelan muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas.",
+    "NET_DEBT_SHIFT_BELOW_THRESHOLD": "Nettovelan muutos jäi tarkastusrajan alle.",
+    "VALUATION_YIELD_OUTLIER_THRESHOLD_MET": "Vähintään yksi valuation-yieldin poikkeamaraja täyttyi; havainto on tarkastettava ehdokas.",
+    "VALUATION_YIELDS_BELOW_THRESHOLDS": "Valuation-yieldit jäivät poikkeamarajojen alle.",
+    "VALUATION_YIELD_NON_FINITE": "Vähintään yksi tarvittava valuation-yield ei ole äärellinen.",
+    "VALUATION_YIELDS_MISSING": "Vähintään yksi tarvittava valuation-yield puuttuu.",
+    "VALUATION_SOURCE_NOT_READY": "Valuation-lähdetulos ei ole laskentavalmis.",
+    "VALUATION_NOT_APPLICABLE": "Valuation-malli ei sovellu tähän kirjanpitoluokkaan.",
+    "RECENT_MARGIN_DECELERATION_THRESHOLD_MET": "Trajectory- ja marginaaliehdot täyttyivät yhdessä; havainto on tarkastettava ehdokas.",
+    "RECENT_MARGIN_DECELERATION_CONDITION_CLEAR": "Trajectory- ja marginaaliehdot eivät yhdessä täyttäneet tarkastusehtoa.",
+    "WORKING_CAPITAL_SHIFT_THRESHOLD_MET": "Käyttöpääoman muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas.",
+    "WORKING_CAPITAL_SHIFT_BELOW_THRESHOLD": "Käyttöpääoman muutos jäi tarkastusrajan alle.",
+    "PRIOR_FISCAL_ENDPOINT_MISSING": "Tarkkaan edeltävä fiscal-endpoint puuttuu.",
+    "NON_CONSECUTIVE_FISCAL_CHAIN": "Fiscal-ketju ei ole katkeamaton.",
+    "REQUIRED_INPUT_MISSING": "Vähintään yksi lipun vaatima lähdearvo puuttuu.",
+    "REQUIRED_INPUT_NON_FINITE": "Vähintään yksi lipun vaatima lähdearvo ei ole äärellinen.",
+    "NONPOSITIVE_REVENUE": "Lippu ei sovellu, koska vaadittu liikevaihdon nimittäjä ei ole positiivinen.",
+    "TOTAL_ASSETS_NOT_STRICTLY_POSITIVE": "Laskentaa ei voida tehdä, koska taseen loppusumma ei ole aidosti positiivinen.",
+    "ACCOUNTING_CLASS_NOT_APPLICABLE": "Lippu ei sovellu tähän tuettujen mallien ulkopuoliseen kirjanpitoluokkaan.",
+    "APPLICABILITY_NOT_READY": "Soveltuvuusluokitus ei ole käytettävissä.",
+}
+
+UNKNOWN_DIAGNOSTIC_EXPLANATION = "Tarkempaa käyttäjäselitettä ei ole saatavilla."
+
+
+def diagnostic_explanation(evaluation: Mapping[str, Any]) -> str:
+    return DIAGNOSTIC_REASON_EXPLANATIONS.get(
+        str(evaluation.get("reason_code")), UNKNOWN_DIAGNOSTIC_EXPLANATION
+    )
+
 
 def _diagnostic_evidence(evaluation: Mapping[str, Any]) -> str:
     evidence = evaluation.get("evidence", {})
@@ -396,7 +434,7 @@ def _diagnostic_summary(evaluation: Mapping[str, Any]) -> str:
     label = DIAGNOSTIC_LABELS.get(evaluation["flag_name"], evaluation["flag_name"])
     metric = _diagnostic_metric(evaluation)
     threshold = _diagnostic_threshold(evaluation)
-    return f"{label}: ACTIVE — {metric} versus {threshold} threshold"
+    return f"{label}: TARKASTETTAVA EHDOKAS — {metric} suhteessa rajaan {threshold}"
 
 
 def _missing_sections(snapshot: Mapping[str, Any]) -> list[str]:
@@ -480,7 +518,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         f"**{snapshot['history_notice']}**",
         "",
-        "> Tulkinta: historia sisältää nykyisin revisioidut fundamentit, ei alkuperäistä PIT-rekonstruktiota. Nykyhintavaluation pitää viimeisimmän filing-endpointin fundamentit vakiona.",
+        "> Tulkinta: historia sisältää nykyisin revisioidut fundamentit, ei alkuperäistä PIT-rekonstruktiota. Nykyhintavaluation pitää viimeisimmän saatavilla olevan endpointin fundamentit vakiona.",
         "",
         _table(("Kenttä", "Arvo"), (
             ("Ticker", identity["ticker"]), ("Yhtiö", identity["company_name"]),
@@ -494,7 +532,6 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Markkinahinnan ikä", "—" if current_price.get("price_age_calendar_days") is None else f"{current_price['price_age_calendar_days']} pv"),
             *((
                 ("Nykyhinta", _price(current_price.get("selected_price"))),
-                ("Aktiivinen V2-paketti", " / ".join(str(value) for value in (snapshot.get("source_state", {}).get("active_package") or ("N/A",)))),
             ) if is_v2 else ()),
         ), ("left", "left")),
         "",
@@ -520,15 +557,15 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Vahvistettu Lifecycle", _text(lifecycle.get("confirmed_state"))),
             ("Lifecycle candidate", lifecycle_candidate),
             ("Vahvistetun tilan tenure", "—" if lifecycle.get("tenure_quarters") is None else f"{lifecycle['tenure_quarters']} kvartaalia"),
-            ("Latest-filing Valuation Score / price date", f"{_score(current_valuation.get('total_valuation_score'))} / {_text(current_valuation.get('price_date'))}"),
+            ("Viimeisimmän endpointin Valuation Score / hintapäivä", f"{_score(current_valuation.get('total_valuation_score'))} / {_text(current_valuation.get('price_date'))}"),
             ("Valuation 4 havainnon keskiarvo", f"{_score(valuation_average)} ({snapshot['valuation_four_observation_count']}/4)"),
-            ("Filing valuation vs 4Q average", _signed_score(filing_vs_average)),
+            ("Saatavuuspäivän Valuation Score vs 4Q keskiarvo (pistettä)", _signed_score(filing_vs_average)),
             ("Indicative current-price Valuation Score", _score(current_price.get("total_valuation_score"))),
-            ("Indicative current-price Valuation Score vs filing-date Valuation Score", _signed_score(current_change)),
+            ("Indicative current-price Valuation Score vs saatavuuspäivän Valuation Score (pistettä)", _signed_score(current_change)),
             ("Fundamental-universumipersentiili", score_universe),
             ("Valuation-universumipersentiili", valuation_universe),
             ("Aktiivisia diagnostiikkalippuja", snapshot["diagnostic_counts"]["EVALUATED_FLAGGED"]),
-            ("Viimeisin filing Score / saatavuuspäivä", f"{_score(current_score.get('total_score'))} / {_text(anchor.get('source_availability_date'))}"),
+            ("Viimeisin Fundamental Score / saatavuuspäivä", f"{_score(current_score.get('total_score'))} / {_text(anchor.get('source_availability_date'))}"),
             ("Nykyhintavaluation / hintapäivä", f"{_score(current_price.get('total_valuation_score'))} / {_text(current_price.get('price_date'))}"),
             (f"{operating_label} TTM", _money(current_absolute.get(operating_value))),
             (f"{operating_label} Margin TTM", _percentage((history[-1].get('score_raw') or {}).get('operating_margin_ttm') if is_v2 else (history[-1].get('score_raw') or {}).get('ebit_margin_ttm'))),
@@ -649,12 +686,12 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         "`UNCLASSIFIED` säilyy julkisesti `LIFECYCLE_NOT_READY`-tilana; sitä ei korvata viimeksi vahvistetulla tilalla.",
         "",
-        "## Filing-date Valuation Score -historia",
+        "## Saatavuuspäivän Valuation Score -historia",
         "",
         _table(("Havainto", *HISTORY_HEADERS), (
             ("Fiscal quarter", *_history_values(snapshot, lambda slot: f"FY{slot['fiscal_year']} {slot['fiscal_quarter']}")),
             ("Valuation price date", *_history_values(snapshot, lambda slot: _text((slot.get("valuation") or {}).get("price_date")))),
-            ("Filing-date price", *_history_values(snapshot, lambda slot: _price((slot.get("valuation") or {}).get("selected_price")))),
+            ("Saatavuuspäivän hinta", *_history_values(snapshot, lambda slot: _price((slot.get("valuation") or {}).get("selected_price")))),
             ("Valuation Score", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("total_valuation_score")))),
             ("Status", *_history_values(snapshot, lambda slot: _text((slot.get("valuation") or {}).get("valuation_status")))),
         )),
@@ -671,9 +708,9 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         )),
         "",
         (
-            f"Valuation-pistekatossa nykyisessä filing-endpointissa: {', '.join(valuation_ceilings)}. "
+            f"Valuation-pistekatossa nykyisessä saatavuuspäivän endpointissa: {', '.join(valuation_ceilings)}. "
             + ("Kokonaispiste on 100, joten raw-yieldit voivat edelleen parantua ilman pisteiden nousua yli 100:n." if _at_ceiling(current_valuation.get("total_valuation_score"), 100.0) else "Raw-yield voi edelleen parantua ilman kyseisen komponentin pisteiden nousua.")
-        ) if valuation_ceilings else "Yksikään Valuation-komponentti ei ole nykyisessä filing-endpointissa pistekatossa.",
+        ) if valuation_ceilings else "Yksikään Valuation-komponentti ei ole nykyisessä saatavuuspäivän endpointissa pistekatossa.",
         "",
         "## Valuation raw-yield -historia",
         "",
@@ -684,35 +721,37 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Positive components", *_history_values(snapshot, lambda slot: "—" if not slot.get("valuation") else f"{sum((slot['valuation'].get(key) or 0) > 0 for key in (operating_yield, 'fcf_yield', 'earnings_yield'))}/3")),
         )),
         "",
-        "## Filing-date Valuation comparisons",
+        "## Valuation-komponenttien pistemuutokset",
         "",
-        _table(("Komponentti", "QoQ", "2Q", "YoY"), tuple(
+        _table(("Komponentti", "QoQ (pistettä)", "2Q (pistettä)", "YoY (pistettä)"), tuple(
             (label, _signed_score(_filing_delta(history, key, 1)), _signed_score(_filing_delta(history, key, 2)), _signed_score(_filing_delta(history, key, 4)))
             for key, label in ((operating_points, f"{operating_label} / EV"), ("fcf_points", "FCF / Market Cap"), ("earnings_points", f"{common_earnings_label} / Market Cap"), ("total_valuation_score", "Valuation Score"))
         )),
         "",
-        _table(("Filing-price-muutos", "QoQ", "2Q", "YoY"), (
+        "Taulukon arvot ovat Valuation-komponenttien ja kokonaispisteen muutoksia pisteinä. Ne eivät ole raw-yieldien prosenttiyksikkömuutoksia.",
+        "",
+        _table(("Saatavuuspäivän hinnan muutos", "QoQ", "2Q", "YoY"), (
             ("Absoluuttinen", *(_signed_score(_filing_price_change(history, lag)[0]) for lag in (1, 2, 4))),
             ("Prosentuaalinen", *(_percentage(_filing_price_change(history, lag)[1]) for lag in (1, 2, 4))),
         )),
         "",
-        "> Valuation Score history is not a pure price trend or pure fundamental trend. Each observation combines the fundamentals and the market price used on that filing’s valuation date.",
+        "> Valuation Score -historia ei ole puhdas hinta- tai fundamenttitrendi. Jokainen havainto yhdistää endpointin fundamentit ja sen lähteen saatavuuspäivälle valitun markkinahinnan.",
         "",
         "## Indicative current-price valuation",
         "",
         f"Tila: `{CURRENT_PRICE_LABEL}` / `{_text(current_price.get('valuation_status'))}` / `{_text(current_price.get('reason_code'))}`",
         "",
-        _table(("Mittari", "Viimeisin filing-päivä", "Nykyhinta", "Muutos"), (
+        _table(("Mittari", "Viimeisin saatavuuspäivä", "Nykyhinta", "Muutos"), (
             ("Price date", _text(current_valuation.get("price_date")), _text(current_price.get("price_date")), "—"),
             ("Price", _price(current_valuation.get("selected_price")), _price(current_price.get("selected_price")), _signed_score(current_price_change)),
             ("Price change %", "—", "—", _percentage(current_price_change_pct)),
-            ("Valuation Score", _score(current_valuation.get("total_valuation_score")), _score(current_price.get("total_valuation_score")), _signed_score(current_change)),
+            ("Valuation Score (muutos pistettä)", _score(current_valuation.get("total_valuation_score")), _score(current_price.get("total_valuation_score")), _signed_score(current_change)),
             (f"{operating_label} / EV", _percentage(current_valuation.get(operating_yield)), _percentage(current_price.get(operating_yield)), pp(None if current_valuation.get(operating_yield) is None or current_price.get(operating_yield) is None else current_price[operating_yield] - current_valuation[operating_yield])),
             ("FCF / Market Cap", _percentage(current_valuation.get("fcf_yield")), _percentage(current_price.get("fcf_yield")), pp(None if current_valuation.get("fcf_yield") is None or current_price.get("fcf_yield") is None else current_price["fcf_yield"] - current_valuation["fcf_yield"])),
             (f"{common_earnings_label} / Market Cap", _percentage(current_valuation.get("earnings_yield")), _percentage(current_price.get("earnings_yield")), pp(None if current_valuation.get("earnings_yield") is None or current_price.get("earnings_yield") is None else current_price["earnings_yield"] - current_valuation["earnings_yield"])),
         )),
         "",
-        "> Shares, debt and cash come from the latest fundamental filing and may differ from their true current-date values.",
+        "> Osakemäärä, velka ja kassa tulevat viimeisimmästä saatavilla olevasta fundamentti-endpointista ja voivat poiketa nykyhetken arvoista.",
         "",
         "Nykyhintalaskenta pitää anchor-fundamentit vakiona. Nykyhintapersentiiliä ei lasketa eikä esitetä.",
         "",
@@ -721,11 +760,11 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "### Valuation basis",
         "",
         _table(
-            ("Basis", "Current moment", "Latest filing", "Previous filing (Q−1)"),
+            ("Basis", "Current moment", "Latest endpoint (availability date)", "Previous endpoint (exact Q−1 availability date)"),
             (
                 ("Fiscal quarter", *(_valuation_context_quarter(context) for context in valuation_contexts)),
                 ("TTM period end", *(_basis_text(context.get("ttm_period_end")) for context in valuation_contexts)),
-                ("Source availability / filing date", *(_basis_text(context.get("fundamental_availability_date")) for context in valuation_contexts)),
+                ("Source availability date", *(_basis_text(context.get("fundamental_availability_date")) for context in valuation_contexts)),
                 ("Price date", *(_basis_text(context.get("price_date")) for context in valuation_contexts)),
                 ("Price used", *(_basis_number(context.get("price"), _price) for context in valuation_contexts)),
                 ("Shares used", *(_basis_number(context["source_inputs"].get("shares_outstanding"), _money) for context in valuation_contexts)),
@@ -736,10 +775,12 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("left", "right", "right", "right"),
         ),
         "",
+        "Fiscal quarter ja TTM period end yksilöivät taloudellisen kauden. Source availability date kertoo, milloin RawCandle käsittelee tiedon saatavilla olevana; se ei automaattisesti ole oikeudellisesti varmennettu filing-ajankohta. Price date kertoo käytetyn markkinahinnan päivän ja raporttipäivä snapshotin muodostusajankohdan.",
+        "",
         "Currency: N/A (source currency not available in the validated contract)" if is_v2 and not any(context.get("price_currency") for context in valuation_contexts) else "",
         "" if is_v2 and not any(context.get("price_currency") for context in valuation_contexts) else "",
         _table(
-            ("Metric", "Current moment", "Latest filing", "Previous filing (Q−1)"),
+            ("Metric", "Current moment", "Latest endpoint (availability date)", "Previous endpoint (exact Q−1 availability date)"),
             tuple(
                 (
                     label,
@@ -765,7 +806,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         "> Reported common-shareholder earnings are a GAAP-based measure. They may include recognized investment gains and losses and other non-operating items included in reported earnings. They are not normalized." if is_v2 else "",
         "" if is_v2 else "",
-        "> Current moment versus Latest filing mainly reflects the market-price change because both use the latest filing's fundamental base. Latest filing versus Previous filing (Q−1) combines changes in price, shares, balance sheet, and TTM fundamentals, so this is not a pure valuation trend decomposition. The metrics are descriptive and do not alter Valuation Score. Current-moment metrics are indicative because they combine a current market price with the latest available filing fundamentals.",
+        "> Current moment versus Latest endpoint mainly reflects the market-price change because both use the latest endpoint's fundamental base. Latest endpoint versus Previous endpoint (exact Q−1) combines changes in price, shares, balance sheet, and TTM fundamentals, so this is not a pure valuation trend decomposition. The metrics are descriptive and do not alter Valuation Score. Current-moment metrics are indicative because they combine a current market price with the latest available endpoint fundamentals.",
         "",
         "## Relative Position",
         "",
@@ -773,7 +814,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         _table(("Mittari", "Universe", "Sector", "Industry", "Ecosystem"), (
             ("Fundamental Score", *(_relative_cell(relative, "FUNDAMENTAL_SCORE", scope) for scope in ("UNIVERSE", "SECTOR", "INDUSTRY", "ECOSYSTEM"))),
-            ("Filing-date Valuation", *(_relative_cell(relative, "ABSOLUTE_VALUATION_SCORE", scope) for scope in ("UNIVERSE", "SECTOR", "INDUSTRY", "ECOSYSTEM"))),
+            ("Saatavuuspäivän Valuation", *(_relative_cell(relative, "ABSOLUTE_VALUATION_SCORE", scope) for scope in ("UNIVERSE", "SECTOR", "INDUSTRY", "ECOSYSTEM"))),
         ), ("left", "left", "left", "left", "left")),
         "",
         "Pientä peer-ryhmää ei korvata laajemmalla ryhmällä. Taxonomy-jäsenyys, percentile-kelpoisuus sekä toteutunut percentile ja peer count näytetään toisistaan erillään.",
@@ -795,8 +836,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         "### Kaikki seitsemän statusta",
         "",
-        _table(("Lippu", "Status", "Reason code", "Arvo", "Raja"), tuple(
-            (DIAGNOSTIC_LABELS.get(row["flag_name"], row["flag_name"]), row["status"], row["reason_code"], _diagnostic_metric(row), _diagnostic_threshold(row))
+        _table(("Lippu", "Status", "Tulkinta", "Arvo", "Raja"), tuple(
+            (DIAGNOSTIC_LABELS.get(row["flag_name"], row["flag_name"]), row["status"], diagnostic_explanation(row), _diagnostic_metric(row), _diagnostic_threshold(row))
             for row in evaluations
         ), ("left", "left", "left", "right", "right")),
         "",
@@ -841,8 +882,13 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Report contract", snapshot["report_contract"]),
             ("Report date", snapshot["report_date"]),
             ("Anchor identity", f"FY{anchor['fiscal_year']} {anchor['fiscal_quarter']}; period_end={anchor['period_end']}; available={anchor['source_availability_date']}") if is_v2 else ("Anchor identity", f"company_id={anchor['company_id']}; quarter_id={anchor['quarter_id']}; FY{anchor['fiscal_year']} {anchor['fiscal_quarter']}"),
+            *(([
+                ("Active package fingerprint", _text((snapshot.get("source_state", {}).get("active_package") or [None, None])[1])),
+                ("Model-family fingerprint", _text((snapshot.get("source_state", {}).get("active_package") or [None, None])[0])),
+                ("Snapshot economic fingerprint", _text(snapshot.get("model_fingerprints", {}).get("snapshot"))),
+            ] if is_v2 else [])),
             *(([("Report presentation fingerprint", snapshot.get("report_presentation_fingerprint"))] if is_v2 else [])),
-            *((f"Model fingerprint: {name}", value) for name, value in snapshot["model_fingerprints"].items()),
+            *((f"Model fingerprint: {name}", value) for name, value in snapshot["model_fingerprints"].items() if not is_v2 or name not in {"family", "snapshot"}),
             ("Delta fundamental source fingerprint", _text(_source_item(snapshot, "delta", 0))),
             ("Delta fundamental result fingerprint", _text(_source_item(snapshot, "delta", 1))),
             ("Delta lifecycle source fingerprint", _text(_source_item(snapshot, "delta", 2))),

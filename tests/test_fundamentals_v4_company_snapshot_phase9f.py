@@ -1,14 +1,21 @@
 from pathlib import Path
+import sqlite3
 
 import pytest
 
 from rawcandle.fundamentals.operating_income_v2.persistence import PACKAGE_FINGERPRINT
+from rawcandle.fundamentals.operating_income_v2.diagnostic_flags import REASON_CODES
 from rawcandle.fundamentals.operating_income_v2.snapshot import MODEL_FINGERPRINT as SNAPSHOT_MODEL_FINGERPRINT
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
 from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
 from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_CONTRACT
 from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_PRESENTATION_FINGERPRINT
 from rawcandle.fundamentals.snapshot.v2_assembler import _multiples_context
+from rawcandle.fundamentals.snapshot.renderer import (
+    DIAGNOSTIC_REASON_EXPLANATIONS,
+    UNKNOWN_DIAGNOSTIC_EXPLANATION,
+    diagnostic_explanation,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +47,7 @@ def nvda_report(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, dict]:
 
 
 @pytest.fixture(scope="module")
-def phase9i_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
+def phase9j_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     required = (
         "fundamentals_v4.db",
         "fundamentals_analysis.db",
@@ -51,9 +58,9 @@ def phase9i_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, 
     if not all((ROOT / "data" / name).exists() for name in required):
         pytest.skip("production-shaped read-only fixture databases are unavailable")
     paths = SnapshotPaths(*(ROOT / "data" / name for name in required))
-    output = tmp_path_factory.mktemp("phase9i-edges")
+    output = tmp_path_factory.mktemp("phase9j-edges")
     reports = {}
-    for ticker in ("CRMD", "APD", "AIV", "LEG", "AAT"):
+    for ticker in ("CRMD", "APD", "AIV", "LEG", "AAT", "AGEN", "BNC", "AAOI", "ILLR"):
         result = generate_active_company_snapshot(
             paths, ticker=ticker, report_date="2026-09-07", output_dir=output
         )
@@ -116,7 +123,7 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "Overall eligible universe" in report
     assert "n=2198" in report
     assert "No active diagnostic flags" in report
-    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3" in report
+    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4" in report
 
 
 def test_v2_report_current_and_filing_valuations_are_distinct(nvda_report: tuple[str, dict]) -> None:
@@ -125,7 +132,7 @@ def test_v2_report_current_and_filing_valuations_are_distinct(nvda_report: tuple
     indicative = snapshot["current_price_valuation"]
     assert filing["price_date"] == "2026-08-26"
     assert indicative["price_date"] == "2026-09-04"
-    assert "Latest filing" in report
+    assert "Latest endpoint (availability date)" in report
     assert "Current moment" in report
     assert "Indicative current-price Valuation Score" in report
 
@@ -134,7 +141,7 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
     nvda_report: tuple[str, dict],
 ) -> None:
     _, snapshot = nvda_report
-    assert REPORT_PRESENTATION_FINGERPRINT == "e9660690c9ccedc2936c14d8b5d2bb3abc7d62f0d10f11a75d349f770f7fe779"
+    assert REPORT_PRESENTATION_FINGERPRINT == "783c00b8d88cb9cf7715e867f41a7dd673618ab10d92bb4451559c2c9cab6aec"
     assert snapshot["model_fingerprints"]["snapshot"] == SNAPSHOT_MODEL_FINGERPRINT
     assert snapshot["source_state"]["active_package"][1] == PACKAGE_FINGERPRINT
 
@@ -272,16 +279,116 @@ def test_nvda_three_context_common_earnings_reconciles_at_full_precision(
 
 
 def test_phase9i_edge_reports_preserve_na_nm_stale_and_not_applicable(
-    phase9i_edge_reports: dict[str, str],
+    phase9j_edge_reports: dict[str, str],
 ) -> None:
-    assert "| Reported Common Earnings Yield | 28.49% | 29.50% | 29.10% |" in phase9i_edge_reports["CRMD"]
-    assert "| Reported Common Earnings TTM | −47.30M | −47.30M | 2.11B |" in phase9i_edge_reports["APD"]
-    assert "| P/E (Reported Common Earnings) | N/M | N/M | 31.71x |" in phase9i_edge_reports["APD"]
-    assert "| Reported Common Earnings TTM | N/A | N/A | 554.01M |" in phase9i_edge_reports["AIV"]
-    assert "CURRENT_PRICE_FALLBACK_TOO_OLD" in phase9i_edge_reports["LEG"]
-    assert "| Market cap used | N/A | 1.31B | 1.41B |" in phase9i_edge_reports["LEG"]
-    assert "VALUATION_NOT_APPLICABLE" in phase9i_edge_reports["AAT"]
-    for report in phase9i_edge_reports.values():
+    assert "| Reported Common Earnings Yield | 28.49% | 29.50% | 29.10% |" in phase9j_edge_reports["CRMD"]
+    assert "| Reported Common Earnings TTM | −47.30M | −47.30M | 2.11B |" in phase9j_edge_reports["APD"]
+    assert "| P/E (Reported Common Earnings) | N/M | N/M | 31.71x |" in phase9j_edge_reports["APD"]
+    assert "| Reported Common Earnings TTM | N/A | N/A | 554.01M |" in phase9j_edge_reports["AIV"]
+    assert "CURRENT_PRICE_FALLBACK_TOO_OLD" in phase9j_edge_reports["LEG"]
+    assert "| Market cap used | N/A | 1.31B | 1.41B |" in phase9j_edge_reports["LEG"]
+    assert "VALUATION_NOT_APPLICABLE" in phase9j_edge_reports["AAT"]
+    for report in phase9j_edge_reports.values():
         assert "company_id" not in report
         assert "quarter_id" not in report
         assert "167.522" not in report
+
+
+def test_phase9j_uses_precise_availability_and_score_point_terminology(
+    nvda_report: tuple[str, dict],
+) -> None:
+    report, _ = nvda_report
+    assert "Source availability date" in report
+    assert "Source availability / filing date" not in report
+    assert "Latest filing" not in report
+    assert "Previous filing" not in report
+    assert "Filing-date Valuation" not in report
+    assert "## Valuation-komponenttien pistemuutokset" in report
+    assert "QoQ (pistettä)" in report
+    assert "eivät ole raw-yieldien prosenttiyksikkömuutoksia" in report
+    assert "Saatavuuspäivän hinnan muutos" in report
+    assert "Price change %" in report
+
+
+def test_phase9j_diagnostic_explanations_cover_engine_and_production_contract() -> None:
+    assert set(DIAGNOSTIC_REASON_EXPLANATIONS) == set(REASON_CODES)
+    analysis = ROOT / "data" / "fundamentals_analysis.db"
+    if not analysis.exists():
+        pytest.skip("production-shaped read-only fixture database is unavailable")
+    connection = sqlite3.connect(f"file:{analysis.resolve()}?mode=ro", uri=True)
+    try:
+        connection.execute("PRAGMA query_only=ON")
+        production_combinations = set(
+            connection.execute(
+                "SELECT DISTINCT f.flag_name,s.status_text,r.reason_text "
+                "FROM diagnostic_flag_evaluation e "
+                "JOIN diagnostic_flag_endpoint ep USING(endpoint_id) "
+                "JOIN diagnostic_flag_package p USING(package_id) "
+                "JOIN diagnostic_flag_type f USING(flag_id) "
+                "JOIN diagnostic_flag_status s USING(status_id) "
+                "JOIN diagnostic_flag_reason r USING(reason_id) "
+                "WHERE p.model_fingerprint=?",
+                ("7f6291bf04e69cf22944ea3f81e07b284ccffd8edbd0edea4190ddc79050b031",),
+            )
+        )
+    finally:
+        connection.close()
+    production_reasons = {row[2] for row in production_combinations}
+    assert len(production_combinations) == 50
+    assert production_reasons <= set(DIAGNOSTIC_REASON_EXPLANATIONS)
+    for _, _, reason in production_combinations:
+        explanation = diagnostic_explanation({"reason_code": reason})
+        assert explanation != UNKNOWN_DIAGNOSTIC_EXPLANATION
+        assert reason not in explanation
+
+
+def test_phase9j_unknown_diagnostic_reason_is_neutral_and_does_not_leak_code() -> None:
+    unknown = "FUTURE_INTERNAL_REASON_CODE"
+    explanation = diagnostic_explanation({"reason_code": unknown})
+    assert explanation == UNKNOWN_DIAGNOSTIC_EXPLANATION
+    assert unknown not in explanation
+
+
+def test_phase9j_package_identifiers_exist_only_in_technical_appendix(
+    nvda_report: tuple[str, dict],
+) -> None:
+    report, snapshot = nvda_report
+    analysis, technical = report.split("## Tekninen liite", maxsplit=1)
+    family_fingerprint, package_fingerprint = snapshot["source_state"]["active_package"]
+    assert package_fingerprint not in analysis
+    assert family_fingerprint not in analysis
+    assert "Aktiivinen V2-paketti" not in analysis
+    assert technical.count(package_fingerprint) == 1
+    assert technical.count(family_fingerprint) == 1
+    assert "Active package fingerprint" in technical
+    assert "Model-family fingerprint" in technical
+    assert "Snapshot economic fingerprint" in technical
+
+
+def test_phase9j_main_report_does_not_render_diagnostic_reason_codes(
+    phase9j_edge_reports: dict[str, str],
+) -> None:
+    for report in phase9j_edge_reports.values():
+        analysis = report.split("## Tekninen liite", maxsplit=1)[0]
+        assert "| Lippu | Status | Tulkinta | Arvo | Raja |" in analysis
+        assert "Reason code" not in analysis
+        assert all(
+            reason not in analysis
+            for reason in REASON_CODES
+            if reason != "VALUATION_NOT_APPLICABLE"
+        )
+
+
+def test_phase9j_explanations_keep_diagnostic_statuses_distinct(
+    phase9j_edge_reports: dict[str, str],
+) -> None:
+    assert "Käyttöpääoman muutos jäi tarkastusrajan alle." in phase9j_edge_reports["CRMD"]
+    assert "Käyttöpääoman muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas." in phase9j_edge_reports["AGEN"]
+    assert "CAPEX-intensiteetin muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas." in phase9j_edge_reports["AAOI"]
+    assert "Vähintään yksi lipun vaatima lähdearvo puuttuu." in phase9j_edge_reports["BNC"]
+    assert "Fiscal-ketju ei ole katkeamaton." in phase9j_edge_reports["ILLR"]
+    assert "Lippu ei sovellu tähän tuettujen mallien ulkopuoliseen kirjanpitoluokkaan." in phase9j_edge_reports["AAT"]
+    assert "EVALUATED_CLEAR" in phase9j_edge_reports["CRMD"]
+    assert "EVALUATED_FLAGGED" in phase9j_edge_reports["AGEN"]
+    assert "FLAG_NOT_READY" in phase9j_edge_reports["BNC"]
+    assert "FLAG_NOT_APPLICABLE" in phase9j_edge_reports["AAT"]

@@ -247,8 +247,8 @@ def test_renderer_contains_all_contract_sections_components_raw_values_and_statu
         "Fundamental Score -historia", "Fundamental-komponenttien pistehistoria",
         "Fundamental raw -mittarihistoria", "Fundamental Delta ja komponenttien kontribuutiot",
         "Absoluuttiset fundamenttiarvot", "Lifecycle-historia",
-        "Filing-date Valuation Score -historia", "Valuation-komponenttien pistehistoria",
-        "Valuation raw-yield -historia", "Filing-date Valuation comparisons",
+        "Saatavuuspäivän Valuation Score -historia", "Valuation-komponenttien pistehistoria",
+        "Valuation raw-yield -historia", "Valuation-komponenttien pistemuutokset",
         "Indicative current-price valuation", "Three-point valuation multiples",
         "Relative Position", "Diagnostic Flags",
         "Data readiness ja rajoitteet", "Tekninen liite",
@@ -269,7 +269,8 @@ def test_renderer_contains_all_contract_sections_components_raw_values_and_statu
     assert "3/3" in rendered.markdown
     assert "Ei aktiivista ekosysteemijäsenyyttä" in rendered.markdown
     assert "Currently revised history — not original point-in-time history" in rendered.markdown
-    assert "TEST_REASON" in rendered.markdown
+    assert "Tarkempaa käyttäjäselitettä ei ole saatavilla." in rendered.markdown
+    assert "TEST_REASON" not in rendered.markdown
     assert "None" not in rendered.markdown and "NaN" not in rendered.markdown
     assert "GAAP disruption" not in rendered.markdown
 
