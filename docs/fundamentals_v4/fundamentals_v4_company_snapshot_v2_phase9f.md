@@ -8,8 +8,8 @@ The report remains a currently revised view, not an original point-in-time recon
 
 ## Active report contract
 
-Phase 9J.1 superseded the original Phase 9F presentation contract with
-`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5`. Its deterministic
+Phase 9J.2 superseded the original Phase 9F presentation contract with
+`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6`. Its deterministic
 presentation fingerprint is defined by `REPORT_CONTRACT_SPEC` in
 `snapshot/v2_assembler.py`. The Snapshot economic model remains unchanged.
 

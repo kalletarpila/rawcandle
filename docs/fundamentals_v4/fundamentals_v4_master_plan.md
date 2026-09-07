@@ -299,3 +299,10 @@ Company Snapshot V2 presentation V5 labels mixed-table score levels as
 `Valuation Score`, adds `p` only to the score-difference cell, and uses
 `Saatavuuspäivä` in the Finnish history table. No economic identity or result
 changed.
+
+Phase 9J.2 status: `DIAGNOSTIC_DEFINITIONS_AND_SCOPE_COMPLETE_NOT_PRODUCTION_DATA_CHANGE`.
+Company Snapshot V2 presentation V6 adds seven engine-reconciled diagnostic
+definitions and distinguishes seven-clear from zero-active results containing
+NOT_READY or NOT_APPLICABLE evaluations. The report explicitly limits the
+diagnostic coverage to the documented numeric checks. No diagnostic model,
+economic identity, package or production artifact changed.

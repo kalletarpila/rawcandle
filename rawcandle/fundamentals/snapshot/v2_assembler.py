@@ -23,7 +23,7 @@ from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepo
 from rawcandle.fundamentals.snapshot import assembler as v1
 
 
-REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5"
+REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6"
 REPORT_CONTRACT_SPEC = {
     "version": REPORT_CONTRACT,
     "model_family": contract.FAMILY_FINGERPRINT,
@@ -44,6 +44,8 @@ REPORT_CONTRACT_SPEC = {
     "diagnostic_reason_rendering": "EXHAUSTIVE_READABLE_FINNISH_WITH_NEUTRAL_UNKNOWN_FALLBACK",
     "active_package_rendering": "TECHNICAL_APPENDIX_ONLY",
     "diagnostic_rendering": "READABLE_SUMMARY_PLUS_COMPLETE_AUDIT_TABLE",
+    "diagnostic_definition_rendering": "SEVEN_ENGINE_RECONCILED_COMPACT_DEFINITIONS",
+    "zero_flag_scope": "ALL_CLEAR_DISTINCT_FROM_NOT_READY_AND_NOT_APPLICABLE",
     "lifecycle_rendering": "FOUR_ENDPOINTS_WITH_STATUS_CANDIDATE_AND_OPERATING_MARGIN_EVIDENCE",
     "context": "CURRENT_PRICE_AND_ACTIVE_V2_PACKAGE_IDENTITY",
     "formatting": "COMPACT_MONEY_PERCENT_PP_MULTIPLE_AND_EXPLICIT_CURRENCY_NA",

@@ -1,10 +1,16 @@
+import csv
 from pathlib import Path
 import sqlite3
 
 import pytest
 
 from rawcandle.fundamentals.operating_income_v2.persistence import PACKAGE_FINGERPRINT
-from rawcandle.fundamentals.operating_income_v2.diagnostic_flags import REASON_CODES
+from rawcandle.fundamentals.operating_income_v2.diagnostic_flags import (
+    FLAG_NAMES,
+    MODEL_CONTRACT as DIAGNOSTIC_MODEL_CONTRACT,
+    REASON_CODES,
+    REVENUE_SCALE_FLOOR,
+)
 from rawcandle.fundamentals.operating_income_v2.snapshot import MODEL_FINGERPRINT as SNAPSHOT_MODEL_FINGERPRINT
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
 from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
@@ -12,7 +18,12 @@ from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_CONTRACT
 from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_PRESENTATION_FINGERPRINT
 from rawcandle.fundamentals.snapshot.v2_assembler import _multiples_context
 from rawcandle.fundamentals.snapshot.renderer import (
+    ALL_DIAGNOSTICS_CLEAR_TEXT,
+    DIAGNOSTIC_COVERAGE_TEXT,
+    DIAGNOSTIC_DEFINITIONS,
+    DIAGNOSTIC_LABELS,
     DIAGNOSTIC_REASON_EXPLANATIONS,
+    INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT,
     UNKNOWN_DIAGNOSTIC_EXPLANATION,
     diagnostic_explanation,
 )
@@ -122,8 +133,8 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "Datacenter" in report
     assert "Overall eligible universe" in report
     assert "n=2198" in report
-    assert "No active diagnostic flags" in report
-    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5" in report
+    assert ALL_DIAGNOSTICS_CLEAR_TEXT in report
+    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6" in report
 
 
 def test_v2_report_current_and_filing_valuations_are_distinct(nvda_report: tuple[str, dict]) -> None:
@@ -141,9 +152,115 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
     nvda_report: tuple[str, dict],
 ) -> None:
     _, snapshot = nvda_report
-    assert REPORT_PRESENTATION_FINGERPRINT == "8af475ace78803aa6ea4e703cb85c2cd19b3090081340fff7228bfe432671153"
+    assert REPORT_PRESENTATION_FINGERPRINT == "8e88c312548974e14347b3db99853e63482a9dbf295af0e8f57671ca95930bfe"
     assert snapshot["model_fingerprints"]["snapshot"] == SNAPSHOT_MODEL_FINGERPRINT
     assert snapshot["source_state"]["active_package"][1] == PACKAGE_FINGERPRINT
+
+
+def test_phase9j_2_definitions_are_complete_and_engine_reconciled(
+    nvda_report: tuple[str, dict],
+) -> None:
+    report, _ = nvda_report
+    assert tuple(row.flag_name for row in DIAGNOSTIC_DEFINITIONS) == FLAG_NAMES
+    assert len({row.flag_name for row in DIAGNOSTIC_DEFINITIONS}) == 7
+    assert set(DIAGNOSTIC_MODEL_CONTRACT["definitions"]) == set(FLAG_NAMES)
+    assert REVENUE_SCALE_FLOOR == 10_000_000.0
+
+    section = report.split("### Diagnostiikan määritelmät", maxsplit=1)[1].split(
+        DIAGNOSTIC_COVERAGE_TEXT, maxsplit=1
+    )[0]
+    assert section.count("\n| ") == 9  # header, separator and seven definitions
+    for row in DIAGNOSTIC_DEFINITIONS:
+        assert section.count(f"| {DIAGNOSTIC_LABELS[row.flag_name]} |") == 1
+
+    rendered = {row.flag_name: row for row in DIAGNOSTIC_DEFINITIONS}
+    assert "tarkka fiscal Q−1" in rendered[FLAG_NAMES[0]].comparison
+    assert "|Δ liikevaihto|/R" in rendered[FLAG_NAMES[0]].measurement
+    assert "|Δ Operating Income|/R" in rendered[FLAG_NAMES[0]].measurement
+    assert "≥ 20 %" in rendered[FLAG_NAMES[0]].trigger
+    assert "10 M$" in rendered[FLAG_NAMES[0]].measurement
+
+    assert "Reported Common Earnings" in rendered[FLAG_NAMES[1]].measurement
+    assert "operating cash flow" in rendered[FLAG_NAMES[1]].measurement
+    assert "≥ 20 %" in rendered[FLAG_NAMES[1]].trigger
+
+    assert "|CAPEX|/max(liikevaihto, 10 M$)" in rendered[FLAG_NAMES[2]].measurement
+    assert "≥ 10 pp" in rendered[FLAG_NAMES[2]].trigger
+
+    assert "|Δ(kokonaisvelka − kassa)|/R" in rendered[FLAG_NAMES[3]].measurement
+    assert "≥ 50 %" in rendered[FLAG_NAMES[3]].trigger
+
+    assert "ei Q−1-vertailua" in rendered[FLAG_NAMES[4]].comparison
+    assert "Operating Income/EV" in rendered[FLAG_NAMES[4]].measurement
+    assert "FCF/Market Cap" in rendered[FLAG_NAMES[4]].measurement
+    assert "mediaani ≥ 25 % TAI maksimi ≥ 50 %" in rendered[FLAG_NAMES[4]].trigger
+
+    assert "Operating Margin" in rendered[FLAG_NAMES[5]].measurement
+    assert "Trajectory ≥ 7 JA muutos ≤ −2 pp" in rendered[FLAG_NAMES[5]].trigger
+    assert "Operating Income saa olla negatiivinen" in rendered[FLAG_NAMES[5]].trigger
+
+    assert "canonical-kausi vs tarkka fiscal Q−1" in rendered[FLAG_NAMES[6]].comparison
+    assert "|ΔONWC|/max(keskimääräinen taseen loppusumma, 10 M$)" in rendered[FLAG_NAMES[6]].measurement
+    assert "myyntisaamiset + varasto − ostovelat − saadut ennakot" in rendered[FLAG_NAMES[6]].measurement
+    assert "≥ 10 %" in rendered[FLAG_NAMES[6]].trigger
+    assert "molemmat taseen loppusummat > 0" in rendered[FLAG_NAMES[6]].trigger
+
+    for row in DIAGNOSTIC_DEFINITIONS:
+        definition = DIAGNOSTIC_MODEL_CONTRACT["definitions"][row.flag_name]
+        operators = definition.get("operators", (definition.get("operator"),))
+        thresholds = definition.get("thresholds", (definition.get("threshold"),))
+        assert all(operator in {">=", "<="} for operator in operators)
+        assert all(threshold is not None for threshold in thresholds)
+
+
+def test_phase9j_2_definition_audit_covers_exact_engine_contract() -> None:
+    audit_path = (
+        ROOT
+        / "docs"
+        / "fundamentals_v4"
+        / "fundamentals_v4_company_snapshot_v2_phase9j_2_definition_audit.csv"
+    )
+    with audit_path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert tuple(row["flag_identifier"] for row in rows) == FLAG_NAMES
+    assert len(rows) == 7
+    assert all(
+        row["authoritative_rule"].endswith(definition.engine_rule)
+        for row, definition in zip(rows, DIAGNOSTIC_DEFINITIONS)
+    )
+    assert all(row["threshold_and_operator"] for row in rows)
+    assert all(row["rendered_finnish_definition"] for row in rows)
+
+
+def test_phase9j_2_zero_flag_wording_preserves_readiness_scope(
+    nvda_report: tuple[str, dict],
+    phase9j_edge_reports: dict[str, str],
+) -> None:
+    nvda, snapshot = nvda_report
+    assert {row["status"] for row in snapshot["diagnostic"]["evaluations"]} == {
+        "EVALUATED_CLEAR"
+    }
+    assert ALL_DIAGNOSTICS_CLEAR_TEXT in nvda
+    assert INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT not in nvda
+
+    for ticker in ("BNC", "AAT"):
+        assert INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT in phase9j_edge_reports[ticker]
+        assert ALL_DIAGNOSTICS_CLEAR_TEXT not in phase9j_edge_reports[ticker]
+    assert "FLAG_NOT_READY" in phase9j_edge_reports["BNC"]
+    assert "EVALUATED_CLEAR" in phase9j_edge_reports["BNC"]
+    assert "FLAG_NOT_APPLICABLE" in phase9j_edge_reports["AAT"]
+
+
+def test_phase9j_2_active_flags_remain_candidates_with_limited_scope(
+    phase9j_edge_reports: dict[str, str],
+) -> None:
+    for ticker in ("AGEN", "APD", "AAOI", "ILLR", "CRMD"):
+        report = phase9j_edge_reports[ticker]
+        assert "TARKASTETTAVA EHDOKAS" in report
+        assert ALL_DIAGNOSTICS_CLEAR_TEXT not in report
+        assert INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT not in report
+        assert DIAGNOSTIC_COVERAGE_TEXT in report
+        assert "eikä vahvista kirjanpitotapahtumia" in report
 
 
 @pytest.mark.parametrize(

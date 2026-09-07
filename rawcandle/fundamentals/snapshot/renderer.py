@@ -6,6 +6,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from rawcandle.fundamentals.operating_income_v2.diagnostic_flags import (
+    FLAG_NAMES as DIAGNOSTIC_FLAG_NAMES,
+    MODEL_CONTRACT as DIAGNOSTIC_MODEL_CONTRACT,
+    REVENUE_SCALE_FLOOR,
+)
 from rawcandle.fundamentals.score.engine import COMPONENTS
 from rawcandle.fundamentals.snapshot.assembler import (
     COMPONENT_LABELS,
@@ -20,6 +25,7 @@ SUPPORTED_REPORT_CONTRACTS = {
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5",
+    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6",
 }
 
 
@@ -351,6 +357,131 @@ DIAGNOSTIC_LABELS = {
     "RECENT_MARGIN_DECELERATION_REVIEW": "Recent Margin Deceleration",
     "WORKING_CAPITAL_SHIFT_CANDIDATE": "Working Capital Shift",
 }
+
+
+@dataclass(frozen=True)
+class DiagnosticDefinition:
+    flag_name: str
+    comparison: str
+    measurement: str
+    trigger: str
+    engine_rule: str
+
+
+def _definition_percent(value: float) -> str:
+    return f"{value * 100:g} %".replace("-", "−")
+
+
+def _definition_operator(value: str) -> str:
+    return {">=": "≥", "<=": "≤"}.get(value, value)
+
+
+def _build_diagnostic_definitions() -> tuple[DiagnosticDefinition, ...]:
+    definitions = DIAGNOSTIC_MODEL_CONTRACT["definitions"]
+    abrupt = definitions["ABRUPT_FUNDAMENTAL_SHIFT"]
+    earnings_cash = definitions["EARNINGS_CASH_DIVERGENCE_CANDIDATE"]
+    capex = definitions["CAPEX_INTENSITY_SHIFT_CANDIDATE"]
+    net_debt = definitions["NET_DEBT_SHIFT_CANDIDATE"]
+    valuation = definitions["VALUATION_YIELD_OUTLIER"]
+    margin = definitions["RECENT_MARGIN_DECELERATION_REVIEW"]
+    working_capital = definitions["WORKING_CAPITAL_SHIFT_CANDIDATE"]
+    floor_millions = REVENUE_SCALE_FLOOR / 1_000_000
+
+    rows = (
+        DiagnosticDefinition(
+            "ABRUPT_FUNDAMENTAL_SHIFT",
+            "Nykyinen TTM vs tarkka fiscal Q−1",
+            "Suurempi arvoista |Δ liikevaihto|/R ja |Δ Operating Income|/R; "
+            f"R = max(keskimääräinen |liikevaihto|, {floor_millions:g} M$)",
+            f"{_definition_operator(abrupt['operator'])} {_definition_percent(abrupt['threshold'])}; "
+            "jompikumpi muutos, liikevaihdot > 0 ja tuettu operatiivinen malli",
+            "_abrupt",
+        ),
+        DiagnosticDefinition(
+            "EARNINGS_CASH_DIVERGENCE_CANDIDATE",
+            "Nykyinen TTM vs tarkka fiscal Q−1",
+            "|Δ Reported Common Earnings − Δ operating cash flow|/R; "
+            f"R = max(keskimääräinen |liikevaihto|, {floor_millions:g} M$)",
+            f"{_definition_operator(earnings_cash['operator'])} {_definition_percent(earnings_cash['threshold'])}; "
+            "liikevaihdot > 0 ja tuettu operatiivinen malli",
+            "_earnings_cash",
+        ),
+        DiagnosticDefinition(
+            "CAPEX_INTENSITY_SHIFT_CANDIDATE",
+            "Nykyinen TTM vs tarkka fiscal Q−1",
+            "Intensiteettien itseisarvoero; intensiteetti = "
+            f"|CAPEX|/max(liikevaihto, {floor_millions:g} M$) kummallekin kaudelle",
+            f"{_definition_operator(capex['operator'])} {_definition_percent(capex['threshold']).replace(' %', ' pp')}; "
+            "liikevaihdot > 0 ja tuettu operatiivinen malli",
+            "_capex",
+        ),
+        DiagnosticDefinition(
+            "NET_DEBT_SHIFT_CANDIDATE",
+            "Nykyinen TTM vs tarkka fiscal Q−1",
+            "|Δ(kokonaisvelka − kassa)|/R; "
+            f"R = max(keskimääräinen |liikevaihto|, {floor_millions:g} M$)",
+            f"{_definition_operator(net_debt['operator'])} {_definition_percent(net_debt['threshold'])}; "
+            "liikevaihdot > 0 ja tuettu operatiivinen malli",
+            "_net_debt",
+        ),
+        DiagnosticDefinition(
+            "VALUATION_YIELD_OUTLIER",
+            "Nykyinen valuation-endpoint; ei Q−1-vertailua",
+            "Saatavilla olevien raw-yieldien mediaani ja maksimi: Operating Income/EV, "
+            "FCF/Market Cap ja Reported Common Earnings/Market Cap",
+            f"mediaani {_definition_operator(valuation['operators'][0])} {_definition_percent(valuation['thresholds'][0])} TAI "
+            f"maksimi {_definition_operator(valuation['operators'][1])} {_definition_percent(valuation['thresholds'][1])}; "
+            "VALUATION_FULL ja soveltuva luokitus",
+            "_valuation",
+        ),
+        DiagnosticDefinition(
+            "RECENT_MARGIN_DECELERATION_REVIEW",
+            "Nykyinen TTM vs tarkka fiscal Q−1",
+            "Suunnallinen muutos Operating Marginissa "
+            "(Operating Income/liikevaihto); nykyinen Trajectory",
+            f"Trajectory {_definition_operator(margin['operators'][0])} {margin['thresholds'][0]:g} JA muutos "
+            f"{_definition_operator(margin['operators'][1])} {_definition_percent(margin['thresholds'][1]).replace(' %', ' pp')}; "
+            "liikevaihdot > 0, Operating Income saa olla negatiivinen, tuettu operatiivinen malli",
+            "_margin",
+        ),
+        DiagnosticDefinition(
+            "WORKING_CAPITAL_SHIFT_CANDIDATE",
+            "Nykyinen canonical-kausi vs tarkka fiscal Q−1",
+            "|ΔONWC|/max(keskimääräinen taseen loppusumma, "
+            f"{floor_millions:g} M$); ONWC = myyntisaamiset + varasto − ostovelat − saadut ennakot",
+            f"{_definition_operator(working_capital['operator'])} {_definition_percent(working_capital['threshold'])}; "
+            "molemmat taseen loppusummat > 0 ja tuettu operatiivinen malli",
+            "_working_capital",
+        ),
+    )
+    if tuple(row.flag_name for row in rows) != DIAGNOSTIC_FLAG_NAMES:
+        raise RuntimeError("DIAGNOSTIC_DEFINITION_FLAG_CONTRACT_MISMATCH")
+    return rows
+
+
+DIAGNOSTIC_DEFINITIONS = _build_diagnostic_definitions()
+
+ALL_DIAGNOSTICS_CLEAR_TEXT = (
+    "Mikään seitsemästä arvioidusta tarkastusehdosta ei täyty. Tämä ei tarkoita, "
+    "ettei yhtiössä olisi muita analysoitavia riskejä tai poikkeavia eriä."
+)
+INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT = (
+    "Yksikään laskentavalmis tarkastusehto ei täyty. Kaikkia seitsemää ehtoa ei "
+    "voitu välttämättä arvioida tai ne eivät kaikki sovellu tähän yhtiöön. Tämä ei "
+    "tarkoita, ettei yhtiössä olisi muita analysoitavia riskejä tai poikkeavia eriä."
+)
+DIAGNOSTIC_COVERAGE_TEXT = (
+    "Diagnostiikka kattaa vain alla määritellyt numeeriset tarkastusehdot eikä ole "
+    "täydellinen kirjanpito- tai riskianalyysi."
+)
+
+
+def _zero_diagnostic_text(evaluations: Sequence[Mapping[str, Any]]) -> str:
+    all_clear = (
+        len(evaluations) == len(DIAGNOSTIC_FLAG_NAMES)
+        and all(row.get("status") == "EVALUATED_CLEAR" for row in evaluations)
+    )
+    return ALL_DIAGNOSTICS_CLEAR_TEXT if all_clear else INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT
 
 DIAGNOSTIC_REASON_EXPLANATIONS = {
     "ABRUPT_SHIFT_THRESHOLD_MET": "Fundamentaalisen muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas.",
@@ -833,7 +964,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
     evaluations = (snapshot.get("diagnostic") or {}).get("evaluations", [])
     flagged = [row for row in evaluations if row["status"] == "EVALUATED_FLAGGED"]
     sections.extend([
-        *( ["**" + _diagnostic_summary(row) + "**" for row in flagged] if flagged else ["No active diagnostic flags"] ),
+        *( ["**" + _diagnostic_summary(row) + "**" for row in flagged] if flagged else [_zero_diagnostic_text(evaluations)] ),
         "",
         _table(("Lippu", "Status", "Keskeinen evidenssi", "Laskettu arvo", "Raja"), tuple(
             (DIAGNOSTIC_LABELS.get(row["flag_name"], row["flag_name"]), row["status"], _diagnostic_evidence(row), _diagnostic_metric(row), _diagnostic_threshold(row))
@@ -846,6 +977,15 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             (DIAGNOSTIC_LABELS.get(row["flag_name"], row["flag_name"]), row["status"], diagnostic_explanation(row), _diagnostic_metric(row), _diagnostic_threshold(row))
             for row in evaluations
         ), ("left", "left", "left", "right", "right")),
+        "",
+        "### Diagnostiikan määritelmät",
+        "",
+        _table(("Lippu", "Vertailu", "Mittaus ja skaalaus", "Tarkastusehto"), tuple(
+            (DIAGNOSTIC_LABELS[row.flag_name], row.comparison, row.measurement, row.trigger)
+            for row in DIAGNOSTIC_DEFINITIONS
+        ), ("left", "left", "left", "left")),
+        "",
+        DIAGNOSTIC_COVERAGE_TEXT,
         "",
         "Liput ovat numeerisia review-candidate-havaintoja. Raportti ei päättele niiden syitä eikä vahvista kirjanpitotapahtumia.",
         "",
