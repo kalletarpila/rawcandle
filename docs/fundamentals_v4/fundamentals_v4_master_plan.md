@@ -273,8 +273,10 @@ Phase 9D status: `PARALLEL_V2_PERSISTENCE_REHEARSED_NOT_PRODUCTION_ACTIVE`. Addi
 
 Phase 9E remains separately authorized. It covers production backup, additive migration, V2 backfill, mandatory deep/no-op reconciliation, coherent default-reader and Snapshot activation, smoke tests and rollback. Follow `fundamentals_v4_operating_income_v2_phase9e_runbook.md`.
 
-Phase 9G status: `IMPLEMENTED_AND_REHEARSED_NOT_PRODUCTION_DEPLOYED`. The
+Phase 9G status: `DEPLOYED_AND_ACTIVE_VIA_PHASE_9H`. The
 Diagnostic Flags V2 Working Capital endpoint wiring and native Operating Income
 engine are corrected. Full history, V1/V2 WC equivalence, unaffected layers,
 copy persistence, idempotency, rollback, readers, and temporary snapshots pass.
-The active production package remains the pre-9G Phase 9E package.
+Phase 9H persisted and atomically activated package `a36d6903...`, preserved the
+pre-9G package in versioned manifest history, and passed the independent second
+production no-op, pipeline, Snapshot and UI checks.

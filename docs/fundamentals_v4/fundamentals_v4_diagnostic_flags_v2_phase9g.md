@@ -1,6 +1,6 @@
 # Fundamentals V4 Diagnostic Flags V2 Phase 9G
 
-Status: `IMPLEMENTED_AND_REHEARSED_NOT_PRODUCTION_DEPLOYED`
+Status: `DEPLOYED_AND_ACTIVE_VIA_PHASE_9H`
 
 ## Scope and root cause
 
@@ -94,9 +94,11 @@ BNC. Reader evidence and Markdown status matched.
 
 ## Safety
 
-Production databases and existing `fundamental_reports` were not modified.
+Phase 9G itself did not modify production databases or existing
+`fundamental_reports`. Phase 9H deployed the rehearsed correction on 2026-09-07;
+see `fundamentals_v4_operating_income_v2_phase9h_deployment.md`.
 The only sidecar difference was a byte-identical taxonomy SHM mtime update from
-read-only SQLite access. Phase 9G does not deploy or activate the correction.
+read-only SQLite access during the Phase 9G rehearsal.
 
 Verification passed 11 focused Phase 9G tests, all 741 Fundamentals V4/UI
 tests, 79 final activation/snapshot regressions, compileall, and

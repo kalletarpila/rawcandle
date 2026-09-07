@@ -1,6 +1,6 @@
 # Fundamentals V4 Operating-Income V2 Specification
 
-Status: `ACTIVE_PRE_PHASE9G_PACKAGE; PHASE9G_CORRECTION_REHEARSED_NOT_DEPLOYED`
+Status: `ACTIVE_WITH_PHASE9G_DIAGNOSTIC_CORRECTION_DEPLOYED_BY_PHASE9H`
 
 Model family: `OPERATING_INCOME_MODEL_FAMILY_V2`
 
@@ -79,5 +79,6 @@ Operating Income V2 engine and wires endpoint Working Capital observations from
 `v4_quarter_financials`. The fields are joined by exact endpoint
 `quarter_id`; they are not TTM values. The corrected Diagnostic fingerprint
 is `7f6291bf04e69cf22944ea3f81e07b284ccffd8edbd0edea4190ddc79050b031`.
-The corrected package is rehearsed but not production-deployed. See
-`fundamentals_v4_diagnostic_flags_v2_phase9g.md`.
+The corrected package was deployed and activated in Phase 9H on 2026-09-07.
+See `fundamentals_v4_diagnostic_flags_v2_phase9g.md` and
+`fundamentals_v4_operating_income_v2_phase9h_deployment.md`.
