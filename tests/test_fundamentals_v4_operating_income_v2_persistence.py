@@ -219,6 +219,7 @@ def test_activation_is_atomic_coherent_and_reversible(database: sqlite3.Connecti
     database.commit()
     assert activated.family_version == "OPERATING_INCOME_MODEL_FAMILY_V2"
     assert active_family(database) == activated
+    assert activate_v2(database, activated_at="later") == activated
     active = ActiveModelRepository(database)
     assert active.score_current(1)["model_fingerprint"] == score.MODEL_FINGERPRINT
     assert active.lifecycle_current(1)["model_fingerprint"] == lifecycle.MODEL_FINGERPRINT

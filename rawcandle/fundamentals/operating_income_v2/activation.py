@@ -103,6 +103,9 @@ def activate_v2(conn: sqlite3.Connection, *, activated_at: str) -> ActiveFamily:
     manifest = repository.package_manifest()
     if manifest["status"] != "COMPLETE":
         raise RuntimeError("OPERATING_INCOME_V2_PACKAGE_INCOMPLETE")
+    current = active_family(conn)
+    if current is not None and current.persistence_fingerprint == PACKAGE_FINGERPRINT:
+        return assert_v2_active(conn)
     ensure_activation_schema(conn)
     conn.execute(
         f"INSERT OR REPLACE INTO {ACTIVATION_TABLE} VALUES(1,?,?,?,?,?)",

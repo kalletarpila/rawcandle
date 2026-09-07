@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from rawcandle.fundamentals.operating_income_v2.persistence import PACKAGE_FINGERPRINT
+from rawcandle.fundamentals.operating_income_v2.snapshot import MODEL_FINGERPRINT as SNAPSHOT_MODEL_FINGERPRINT
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
 from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
 from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_CONTRACT
@@ -103,8 +105,8 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
 ) -> None:
     _, snapshot = nvda_report
     assert REPORT_PRESENTATION_FINGERPRINT == "bc4b4a3b355063697f1fe3182a105342d804a59bb41a86ec40ef6fe4364abee2"
-    assert snapshot["model_fingerprints"]["snapshot"] == "7bfa88aa64f3897ea610894a1b7a3613abfc7881d9b9ea8e26912ef0426e7ee8"
-    assert snapshot["source_state"]["active_package"][1] == "cf4ce8134c362399ea94667e4659e27a32b1e8b9de199eaaba32c91b450a51bc"
+    assert snapshot["model_fingerprints"]["snapshot"] == SNAPSHOT_MODEL_FINGERPRINT
+    assert snapshot["source_state"]["active_package"][1] == PACKAGE_FINGERPRINT
 
 
 @pytest.mark.parametrize(
