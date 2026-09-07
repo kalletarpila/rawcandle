@@ -12,7 +12,7 @@ from rawcandle.fundamentals.score.engine import MODEL_FINGERPRINT as SCORE_V1
 from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_V1
 
 from . import contract, delta, diagnostic_flags, lifecycle, relative_position, score, valuation
-from .persistence import DIAGNOSTIC_HISTORY_MODE, EVIDENCE_FIELD_TABLE, HISTORY_MODE, MANIFEST_TABLE, MODEL_MAP, PACKAGE_FINGERPRINT
+from .persistence import DIAGNOSTIC_HISTORY_MODE, EVIDENCE_FIELD_TABLE, HISTORY_MODE, MANIFEST_HISTORY_TABLE, MANIFEST_TABLE, MODEL_MAP, PACKAGE_FINGERPRINT
 
 
 PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT = "d5434e139b68ee8af44dffce34cb9225538f0badb61d5d1074fb976a4de3185d"
@@ -41,8 +41,28 @@ class ParallelModelRepository:
         self.conn = conn
         self.conn.row_factory = sqlite3.Row
 
-    def package_manifest(self) -> dict[str, Any]:
-        row=self.conn.execute(f"SELECT * FROM {MANIFEST_TABLE}").fetchone()
+    def package_manifest(self, persistence_fingerprint: str | None = None) -> dict[str, Any]:
+        if persistence_fingerprint is None:
+            row = self.conn.execute(f"SELECT * FROM {MANIFEST_TABLE}").fetchone()
+        else:
+            history_exists = self.conn.execute(
+                "SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?",
+                (MANIFEST_HISTORY_TABLE,),
+            ).fetchone()
+            row = None
+            if history_exists:
+                row = self.conn.execute(
+                    f"SELECT family_fingerprint,family_version,persistence_version,"
+                    "persistence_fingerprint,model_manifest_json,economic_result_fingerprint,"
+                    "physical_content_fingerprint,status,applied_at_utc "
+                    f"FROM {MANIFEST_HISTORY_TABLE} WHERE persistence_fingerprint=?",
+                    (persistence_fingerprint,),
+                ).fetchone()
+            if row is None:
+                row = self.conn.execute(
+                    f"SELECT * FROM {MANIFEST_TABLE} WHERE persistence_fingerprint=?",
+                    (persistence_fingerprint,),
+                ).fetchone()
         if row is None: raise LookupError("OPERATING_INCOME_V2_PACKAGE_NOT_FOUND")
         return dict(row)
 

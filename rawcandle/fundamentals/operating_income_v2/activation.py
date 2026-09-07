@@ -86,7 +86,7 @@ def assert_v2_active(conn: sqlite3.Connection) -> ActiveFamily:
     expected_manifest = KNOWN_PACKAGES.get(active.persistence_fingerprint)
     if manifest != expected_manifest:
         raise ValueError("OPERATING_INCOME_V2_ACTIVE_PACKAGE_MISMATCH")
-    package = ParallelModelRepository(conn).package_manifest()
+    package = ParallelModelRepository(conn).package_manifest(active.persistence_fingerprint)
     if (
         package["persistence_fingerprint"] != active.persistence_fingerprint
         or json.loads(package["model_manifest_json"])

@@ -11,7 +11,8 @@ from rawcandle.fundamentals.lifecycle import revised_history
 from rawcandle.fundamentals.operating_income_v2 import delta, diagnostic_flags, lifecycle
 from rawcandle.fundamentals.operating_income_v2 import relative_position, score, valuation
 from rawcandle.fundamentals.operating_income_v2.persistence import (
-    MANIFEST_TABLE, apply_package, ensure_schema, migrate_copy, physical_fingerprint,
+    MANIFEST_HISTORY_TABLE, MANIFEST_TABLE, apply_package, ensure_schema, migrate_copy,
+    physical_fingerprint,
 )
 from rawcandle.fundamentals.operating_income_v2.phase9d import deep_reconcile
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
@@ -121,6 +122,14 @@ def test_complete_parallel_apply_noop_readers_and_v1_coexistence(database: sqlit
     assert first.rows["diagnostic_evaluation"] == 7
     assert second.outcome == "NO_CHANGE" and second.logical_changes == 0
     assert first.physical_content_fingerprint == second.physical_content_fingerprint
+    current_manifest = database.execute(f"SELECT persistence_fingerprint FROM {MANIFEST_TABLE}").fetchone()[0]
+    assert database.execute(
+        f"SELECT persistence_fingerprint FROM {MANIFEST_HISTORY_TABLE} WHERE persistence_fingerprint=?",
+        (current_manifest,),
+    ).fetchone()[0] == current_manifest
+    assert ParallelModelRepository(database).package_manifest(current_manifest)[
+        "persistence_fingerprint"
+    ] == current_manifest
     reconciliation = deep_reconcile(database, calculated)
     assert reconciliation["ok"], reconciliation
     assert database.execute("SELECT COUNT(*) FROM score_result WHERE model_fingerprint=?", (SCORE_V1,)).fetchone()[0] == 1

@@ -60,3 +60,21 @@ def test_phase9e_request_rejects_symlink_alias(production_paths: dict[str, Path]
     alias.symlink_to(production_paths["analysis"])
     with pytest.raises(PermissionError, match="EXACT_PRODUCTION_ANALYSIS"):
         phase9e.validate_request(_args(production_paths, analysis_db=alias))
+
+
+def test_phase9e_backup_includes_diagnostic_and_activation_counts(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "analysis.db"
+    tables = (
+        "score_result", "lifecycle_revised_result", "valuation_revised_result",
+        "diagnostic_flag_package", "diagnostic_flag_endpoint",
+        "diagnostic_flag_evaluation", "operating_income_v2_package_manifest",
+        "fundamentals_active_model_family",
+    )
+    with sqlite3.connect(source) as conn:
+        for table in tables:
+            conn.execute(f"CREATE TABLE {table}(id INTEGER)")
+            conn.execute(f"INSERT INTO {table} VALUES(1)")
+    result = phase9e._backup(source, tmp_path / "backups", "test")
+    assert result["key_row_counts"] == {table: 1 for table in tables}

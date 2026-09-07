@@ -83,8 +83,12 @@ and 2,903 not-applicable to:
 | FLAG_NOT_READY | 2,556 |
 | FLAG_NOT_APPLICABLE | 2,903 |
 
-The current-fresh cohort has 2,451 companies: 51 flagged, 2,255 clear, 6 not
-ready, and 139 not applicable. Snapshot checks produced CRMD 1.9700%, APD
+The previously reported 2,451-company distribution (51 flagged, 2,255 clear,
+6 not ready, and 139 not applicable) is the latest endpoint for every company,
+not the current-fresh cohort. Phase 9H verification found 2,431 current-fresh
+companies as of 2026-09-06 using `ttm_source_available_date` and a maximum age
+of 180 calendar days. This terminology correction does not change the complete
+diagnostic history or any economic result. Snapshot checks produced CRMD 1.9700%, APD
 1.8119%, NVDA 9.0264%, active AGEN 11.4504%, not-applicable AAT, and not-ready
 BNC. Reader evidence and Markdown status matched.
 

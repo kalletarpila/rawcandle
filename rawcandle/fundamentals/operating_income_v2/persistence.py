@@ -18,6 +18,7 @@ HISTORY_MODE = "REVISED_HISTORY"
 DIAGNOSTIC_HISTORY_MODE = "CURRENTLY_REVISED_DIAGNOSTIC_FLAGS_HISTORY"
 PERSISTENCE_VERSION = "OPERATING_INCOME_V2_PARALLEL_PERSISTENCE_V1"
 MANIFEST_TABLE = "operating_income_v2_package_manifest"
+MANIFEST_HISTORY_TABLE = "operating_income_v2_package_manifest_history"
 EVIDENCE_FIELD_TABLE = "operating_income_v2_diagnostic_evidence_field"
 NON_NUMERIC_EVIDENCE = {
     "applicability_classification", "applicability_reason",
@@ -52,6 +53,17 @@ CREATE TABLE IF NOT EXISTS {MANIFEST_TABLE}(
  family_version TEXT NOT NULL,
  persistence_version TEXT NOT NULL,
  persistence_fingerprint TEXT NOT NULL,
+ model_manifest_json TEXT NOT NULL,
+ economic_result_fingerprint TEXT NOT NULL,
+ physical_content_fingerprint TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('COMPLETE')),
+ applied_at_utc TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS {MANIFEST_HISTORY_TABLE}(
+ persistence_fingerprint TEXT PRIMARY KEY,
+ family_fingerprint TEXT NOT NULL,
+ family_version TEXT NOT NULL,
+ persistence_version TEXT NOT NULL,
  model_manifest_json TEXT NOT NULL,
  economic_result_fingerprint TEXT NOT NULL,
  physical_content_fingerprint TEXT NOT NULL,
@@ -170,6 +182,18 @@ def _existing_manifest(conn: sqlite3.Connection) -> sqlite3.Row | None:
     if MANIFEST_TABLE not in {row[0] for row in conn.execute("SELECT name FROM sqlite_schema WHERE type='table'")}:
         return None
     return conn.execute(f"SELECT * FROM {MANIFEST_TABLE} WHERE family_fingerprint=?", (contract.FAMILY_FINGERPRINT,)).fetchone()
+
+
+def _archive_current_manifest(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        f"INSERT OR REPLACE INTO {MANIFEST_HISTORY_TABLE}("
+        "persistence_fingerprint,family_fingerprint,family_version,persistence_version,"
+        "model_manifest_json,economic_result_fingerprint,physical_content_fingerprint,"
+        "status,applied_at_utc) "
+        f"SELECT persistence_fingerprint,family_fingerprint,family_version,persistence_version,"
+        "model_manifest_json,economic_result_fingerprint,physical_content_fingerprint,"
+        f"status,applied_at_utc FROM {MANIFEST_TABLE}"
+    )
 
 
 def _score_rows(conn: sqlite3.Connection) -> int:
@@ -369,6 +393,7 @@ def apply_package(conn: sqlite3.Connection, calculated: Mapping[str, Any], *, ap
         return ApplyReport("NO_CHANGE",target,physical,row_counts(conn),0)
     conn.execute("BEGIN IMMEDIATE")
     try:
+        _archive_current_manifest(conn)
         _apply_score(conn,calculated["score_v2"],applied_at)
         if stage_callback: stage_callback("score",conn)
         if inject_failure_at=="score": raise RuntimeError("INJECTED_PHASE9D_SCORE_FAILURE")
@@ -389,6 +414,7 @@ def apply_package(conn: sqlite3.Connection, calculated: Mapping[str, Any], *, ap
         if inject_failure_at in {"relative","activation"}: raise RuntimeError("INJECTED_PHASE9D_RELATIVE_FAILURE")
         physical=physical_fingerprint(conn)
         conn.execute(f"INSERT OR REPLACE INTO {MANIFEST_TABLE} VALUES(?,?,?,?,?,?,?,'COMPLETE',?)",(contract.FAMILY_FINGERPRINT,contract.FAMILY_VERSION,PERSISTENCE_VERSION,PACKAGE_FINGERPRINT,json.dumps(MODEL_MAP,sort_keys=True,separators=(",",":")),target,physical,applied_at))
+        _archive_current_manifest(conn)
         conn.commit()
     except Exception:
         conn.rollback(); raise

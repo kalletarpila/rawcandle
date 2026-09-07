@@ -42,7 +42,7 @@ from .readers import (
     PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT,
     ParallelModelRepository,
 )
-from .rehearsal import AS_OF, calculate
+from .rehearsal import AS_OF, FRESHNESS_DAYS, calculate
 
 
 WC_FLAG = "WORKING_CAPITAL_SHIFT_CANDIDATE"
@@ -282,7 +282,14 @@ def _logical_layer_fingerprints(conn: sqlite3.Connection) -> dict[str, str]:
 def _snapshot_examples(
     output: Path, destination: Path, calculated: Mapping[str, Any]
 ) -> list[dict[str, Any]]:
-    current = _current_rows(calculated["diagnostics_full"])
+    fresh_keys = {
+        (int(row["company_id"]), int(row["endpoint_quarter_id"]))
+        for row in calculated["fresh"]
+    }
+    current = [
+        row for row in calculated["diagnostics_full"]
+        if (int(row["company_id"]), int(row["quarter_id"])) in fresh_keys
+    ]
     ticker_by_company = {
         int(row["company_id"]): str(row["ticker"]) for row in calculated["rows"]
     }
@@ -417,7 +424,15 @@ def run(repo_root: Path, output: Path, destination: Path) -> dict[str, Any]:
         raise AssertionError("PHASE9G_FAILURE_INJECTION_NOT_ROLLED_BACK")
 
     snapshots = _snapshot_examples(output, destination, calculated)
-    current = _current_rows(calculated["diagnostics_full"])
+    latest = _current_rows(calculated["diagnostics_full"])
+    fresh_keys = {
+        (int(row["company_id"]), int(row["endpoint_quarter_id"]))
+        for row in calculated["fresh"]
+    }
+    current = [
+        row for row in calculated["diagnostics_full"]
+        if (int(row["company_id"]), int(row["quarter_id"])) in fresh_keys
+    ]
     after = production_integrity()
     reports_after = _report_inventory(repo_root / "fundamental_reports")
     integrity_comparison = compare_production_integrity(before, after)
@@ -435,6 +450,19 @@ def run(repo_root: Path, output: Path, destination: Path) -> dict[str, Any]:
     _csv(output / "diagnostic_status_distribution_before.csv", before_distribution)
     _csv(output / "diagnostic_status_distribution_after.csv", after_distribution)
     _csv(output / "diagnostic_current_distribution_after.csv", current_distribution)
+    _csv(output / "diagnostic_latest_distribution_after.csv", _status_distribution(latest))
+    _json(output / "current_cohort_definition.json", {
+        "as_of": AS_OF.isoformat(),
+        "freshness_days": FRESHNESS_DAYS,
+        "controlling_date": "ttm_source_available_date",
+        "latest_endpoint_companies": len({int(row["company_id"]) for row in latest}),
+        "current_fresh_companies": len(fresh_keys),
+        "current_fresh_evaluations": len(current),
+        "eligibility": (
+            "Latest endpoint per company with ttm_source_available_date not after "
+            "as_of and no more than freshness_days old."
+        ),
+    })
     _json(output / "diagnostic_full_reconciliation.json", deep)
     _json(output / "working_capital_v1_v2_reconciliation.json", wc_reconciliation)
     _json(output / "unaffected_diagnostic_reconciliation.json", unaffected)

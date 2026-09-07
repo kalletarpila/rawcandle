@@ -149,7 +149,16 @@ def _backup(source: Path, backup_dir: Path, stamp: str) -> dict[str, Any]:
         quick = conn.execute("PRAGMA quick_check").fetchone()[0]
         foreign = [list(row) for row in conn.execute("PRAGMA foreign_key_check")]
         objects = [row[0] for row in conn.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")]
-        counts = {table: conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] for table in ("score_result", "lifecycle_revised_result", "valuation_revised_result")}
+        critical_tables = (
+            "score_result", "lifecycle_revised_result", "valuation_revised_result",
+            "diagnostic_flag_package", "diagnostic_flag_endpoint",
+            "diagnostic_flag_evaluation", "operating_income_v2_package_manifest",
+            "fundamentals_active_model_family",
+        )
+        counts = {
+            table: conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            for table in critical_tables if table in objects
+        }
     if quick != "ok" or foreign:
         raise RuntimeError("PHASE9E_BACKUP_VERIFICATION_FAILED")
     return {"source_path": str(source), "backup_path": str(destination), "source_size": source.stat().st_size, "backup_size": destination.stat().st_size, "sha256": _sha256(destination), "quick_check": quick, "foreign_key_check": foreign, "key_schema_objects": objects, "key_row_counts": counts, "independently_openable": True}
@@ -238,6 +247,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     _assert_write_lock_available(PRODUCTION["analysis"])
     lock_handle = LOCK_PATH.open("w")
     activated = False
+    previous_activation: tuple[Any, ...] | None = None
     try:
         fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
@@ -249,6 +259,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         with sqlite3.connect(PRODUCTION["analysis"]) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA foreign_keys=ON")
+            previous_activation_row = conn.execute(
+                "SELECT * FROM fundamentals_active_model_family WHERE singleton=1"
+            ).fetchone()
+            previous_activation = (
+                tuple(previous_activation_row) if previous_activation_row else None
+            )
             v1_before = _v1_state(conn)
             first = apply_package(conn, calculated, applied_at=stamp)
             deep = deep_reconcile(conn, calculated)
@@ -345,7 +361,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if activated:
             with sqlite3.connect(PRODUCTION["analysis"]) as conn:
                 conn.execute("BEGIN IMMEDIATE")
-                deactivate_v2(conn)
+                if previous_activation is None:
+                    deactivate_v2(conn)
+                else:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO fundamentals_active_model_family "
+                        "VALUES(?,?,?,?,?,?)",
+                        previous_activation,
+                    )
+                    assert_v2_active(conn)
                 conn.commit()
         raise
     finally:
