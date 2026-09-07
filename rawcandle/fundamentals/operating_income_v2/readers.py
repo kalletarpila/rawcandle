@@ -6,6 +6,7 @@ from typing import Any
 
 from rawcandle.fundamentals.delta.engine import MODEL_FINGERPRINT as DELTA_V1
 from rawcandle.fundamentals.diagnostic_flags.engine import MODEL_FINGERPRINT as DIAGNOSTIC_V1
+from rawcandle.fundamentals.diagnostic_flags.persistence import BOOLEAN_FIELDS as V1_BOOLEAN_FIELDS
 from rawcandle.fundamentals.lifecycle.engine import MODEL_FINGERPRINT as LIFECYCLE_V1
 from rawcandle.fundamentals.relative_position.engine import MODEL_FINGERPRINT as RELATIVE_V1
 from rawcandle.fundamentals.score.engine import MODEL_FINGERPRINT as SCORE_V1
@@ -93,13 +94,76 @@ class ParallelModelRepository:
     def diagnostic_history(self, company_id: int, *, model_fingerprint: str) -> list[dict[str,Any]]:
         _require("diagnostic",model_fingerprint)
         endpoints=_rows(self.conn,"SELECT e.* FROM diagnostic_flag_endpoint e JOIN diagnostic_flag_package p USING(package_id) WHERE e.company_id=? AND p.model_fingerprint=? AND p.history_mode=? ORDER BY e.fiscal_sequence",(company_id,model_fingerprint,DIAGNOSTIC_HISTORY_MODE))
+        field_maps = self._diagnostic_field_maps(model_fingerprint)
         for endpoint in endpoints:
             evaluations=_rows(self.conn,"SELECT v.*,f.flag_name,s.status_text,r.reason_text FROM diagnostic_flag_evaluation v JOIN diagnostic_flag_type f USING(flag_id) JOIN diagnostic_flag_status s USING(status_id) JOIN diagnostic_flag_reason r USING(reason_id) WHERE v.endpoint_id=? ORDER BY f.flag_name",(endpoint["endpoint_id"],))
-            if model_fingerprint==diagnostic_flags.MODEL_FINGERPRINT:
-                for item in evaluations:
-                    fields=_rows(self.conn,f"SELECT slot_number,field_name FROM {EVIDENCE_FIELD_TABLE} WHERE model_fingerprint=? AND flag_name=? ORDER BY slot_number",(model_fingerprint,item["flag_name"]))
-                    item["evidence"]={field["field_name"]:item[f"n{field['slot_number']:02d}"] for field in fields}
+            self._decode_diagnostic_evidence(evaluations, model_fingerprint, field_maps)
             endpoint["evaluations"]=evaluations
+        return endpoints
+
+    def _diagnostic_field_maps(self, model_fingerprint: str) -> dict[str, list[dict[str, Any]]]:
+        if model_fingerprint != diagnostic_flags.MODEL_FINGERPRINT:
+            return {}
+        output: dict[str, list[dict[str, Any]]] = {}
+        for row in _rows(
+            self.conn,
+            f"SELECT flag_name,slot_number,field_name FROM {EVIDENCE_FIELD_TABLE} "
+            "WHERE model_fingerprint=? ORDER BY flag_name,slot_number",
+            (model_fingerprint,),
+        ):
+            output.setdefault(str(row["flag_name"]), []).append(row)
+        return output
+
+    @staticmethod
+    def _decode_diagnostic_evidence(
+        evaluations: list[dict[str, Any]],
+        model_fingerprint: str,
+        field_maps: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        if model_fingerprint != diagnostic_flags.MODEL_FINGERPRINT:
+            return
+        for item in evaluations:
+            flag = str(item["flag_name"])
+            evidence = {
+                field["field_name"]: item[f"n{field['slot_number']:02d}"]
+                for field in field_maps.get(flag, [])
+            }
+            boolean_fields = tuple(
+                diagnostic_flags._evidence_name(name)
+                for name in V1_BOOLEAN_FIELDS.get(flag, ())
+            )
+            evidence.update(
+                (name, bool(int(item["bool_mask"]) & (1 << position)))
+                for position, name in enumerate(boolean_fields)
+            )
+            item["evidence"] = evidence
+
+    def diagnostic_all(self, *, model_fingerprint: str) -> list[dict[str, Any]]:
+        """Return the complete diagnostic history with evidence in two bulk queries."""
+        _require("diagnostic", model_fingerprint)
+        endpoints = _rows(
+            self.conn,
+            "SELECT e.* FROM diagnostic_flag_endpoint e JOIN diagnostic_flag_package p USING(package_id) "
+            "WHERE p.model_fingerprint=? AND p.history_mode=? ORDER BY e.company_id,e.fiscal_sequence",
+            (model_fingerprint, DIAGNOSTIC_HISTORY_MODE),
+        )
+        evaluations = _rows(
+            self.conn,
+            "SELECT v.*,f.flag_name,s.status_text,r.reason_text FROM diagnostic_flag_evaluation v "
+            "JOIN diagnostic_flag_endpoint e USING(endpoint_id) JOIN diagnostic_flag_package p USING(package_id) "
+            "JOIN diagnostic_flag_type f USING(flag_id) JOIN diagnostic_flag_status s USING(status_id) "
+            "JOIN diagnostic_flag_reason r USING(reason_id) WHERE p.model_fingerprint=? AND p.history_mode=? "
+            "ORDER BY v.endpoint_id,f.flag_name",
+            (model_fingerprint, DIAGNOSTIC_HISTORY_MODE),
+        )
+        self._decode_diagnostic_evidence(
+            evaluations, model_fingerprint, self._diagnostic_field_maps(model_fingerprint)
+        )
+        by_endpoint: dict[int, list[dict[str, Any]]] = {}
+        for item in evaluations:
+            by_endpoint.setdefault(int(item["endpoint_id"]), []).append(item)
+        for endpoint in endpoints:
+            endpoint["evaluations"] = by_endpoint.get(int(endpoint["endpoint_id"]), [])
         return endpoints
 
     def diagnostic_current(self, company_id: int, *, model_fingerprint: str) -> dict[str,Any] | None:

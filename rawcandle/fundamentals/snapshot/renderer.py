@@ -14,6 +14,12 @@ from rawcandle.fundamentals.snapshot.assembler import (
 )
 
 
+SUPPORTED_REPORT_CONTRACTS = {
+    REPORT_CONTRACT,
+    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V2",
+}
+
+
 FINGERPRINT_PLACEHOLDER = "REPORT_CONTENT_SHA256_V1"
 HISTORY_HEADERS = ("t−4 (YoY comparison)", "t−3", "t−2", "t−1", "Nykyinen")
 
@@ -66,13 +72,18 @@ def _percentile(value: Any) -> str:
     return "—" if not math.isfinite(number) else f"{number:.2f} %"
 
 
-def _pp(value: Any) -> str:
+def _pp(value: Any, *, signed: bool = False) -> str:
     if value is None:
         return "—"
     number = float(value)
     if math.isfinite(number) and abs(number) < 0.00005:
         number = 0.0
-    return "—" if not math.isfinite(number) else f"{number * 100:.2f} pp"
+    if not math.isfinite(number):
+        return "—"
+    if number == 0.0:
+        return "0.00 pp"
+    rendered = f"{number * 100:+.2f} pp" if signed else f"{number * 100:.2f} pp"
+    return rendered.replace("-", "−") if signed else rendered
 
 
 def _multiple(value: Any) -> str:
@@ -180,7 +191,7 @@ def _relative_cell(relative: Mapping[str, Any], measure: str, scope: str) -> str
     rows = [row for row in relative.get("rows", []) if row["measure"] == measure and row["peer_scope"] == scope]
     if rows:
         return "; ".join(
-            f"{_percentile(row['percentile'])} (n={row['peer_count']}; {_text(row['peer_group_id'])}; {row['snapshot_date']})"
+            f"{_percentile(row['percentile'])} (n={row['peer_count']}; {_text(row.get('peer_group_name') or row['peer_group_id'])}; {row['snapshot_date']})"
             for row in rows
         )
     coverage = [row for row in relative.get("coverage", []) if row["measure"] == measure and row["peer_scope"] == scope]
@@ -227,9 +238,17 @@ def _at_ceiling(value: Any, maximum: Any) -> bool:
 def _score_ceiling_components(snapshot: Mapping[str, Any]) -> list[str]:
     score = snapshot["history"][-1].get("score") or {}
     components = score.get("components") or {}
+    names = tuple(snapshot["component_contract"])
+    labels = {
+        **COMPONENT_LABELS,
+        "OPERATING_PROFITABILITY": "Operating Profitability",
+        "OPERATING_MARGIN_DIRECTION": "Operating Margin Direction",
+        "BALANCE_SHEET_RESILIENCE": "Balance Sheet Resilience",
+        "FCF_MARGIN": "FCF Margin",
+    }
     return [
-        COMPONENT_LABELS[name]
-        for name in COMPONENTS
+        labels[name]
+        for name in names
         if _at_ceiling(
             components.get(name, {}).get("component_score"),
             snapshot["component_contract"].get(name),
@@ -238,10 +257,12 @@ def _score_ceiling_components(snapshot: Mapping[str, Any]) -> list[str]:
 
 
 def _valuation_ceiling_components(valuation: Mapping[str, Any]) -> list[str]:
+    operating_key = "operating_income_points" if "operating_income_points" in valuation else "ebit_points"
+    operating_label = "Operating Income / EV" if operating_key.startswith("operating") else "EBIT / EV"
     return [
         label
         for key, maximum, label in (
-            ("ebit_points", 40.0, "EBIT / EV"),
+            (operating_key, 40.0, operating_label),
             ("fcf_points", 40.0, "FCF / Market Cap"),
             ("earnings_points", 20.0, "Common earnings / Market Cap"),
         )
@@ -289,32 +310,49 @@ def _transition_text(status: str) -> str:
 def _balance_raw(raw: Mapping[str, Any]) -> str:
     branch = raw.get("balance_sheet_branch")
     value = raw.get("balance_sheet_value")
-    if branch == "NET_DEBT_TO_EBIT":
+    if branch in {"NET_DEBT_TO_EBIT", "NET_DEBT_TO_OPERATING_INCOME"}:
         if value is not None and float(value) < 0:
-            return f"NET_CASH_TO_EBIT: {_multiple(abs(float(value)))}"
+            label = "NET_CASH_TO_OPERATING_INCOME" if branch.endswith("OPERATING_INCOME") else "NET_CASH_TO_EBIT"
+            return f"{label}: {_multiple(abs(float(value)))}"
         return f"{branch}: {_multiple(value)}"
     if branch:
         return f"{branch}: {_money(value)}"
     return "NOT_READY"
 
 
+DIAGNOSTIC_LABELS = {
+    "ABRUPT_FUNDAMENTAL_SHIFT": "Abrupt Fundamental Shift",
+    "EARNINGS_CASH_DIVERGENCE_CANDIDATE": "Earnings-Cash Divergence",
+    "CAPEX_INTENSITY_SHIFT_CANDIDATE": "Capex Intensity Shift",
+    "NET_DEBT_SHIFT_CANDIDATE": "Net Debt Shift",
+    "VALUATION_YIELD_OUTLIER": "Valuation Yield Outlier",
+    "RECENT_MARGIN_DECELERATION_REVIEW": "Recent Margin Deceleration",
+    "WORKING_CAPITAL_SHIFT_CANDIDATE": "Working Capital Shift",
+}
+
+
 def _diagnostic_evidence(evaluation: Mapping[str, Any]) -> str:
     evidence = evaluation.get("evidence", {})
     flag = evaluation["flag_name"]
+    abrupt_fields = (
+        (("revenue_shift_ratio", "Revenue shift"), ("operating_income_shift_ratio", "Operating Income shift"))
+        if "operating_income_shift_ratio" in evidence
+        else (("revenue_shift_ratio", "Revenue shift"), ("ebit_shift_ratio", "EBIT-muutos"))
+    )
     fields = {
-        "ABRUPT_FUNDAMENTAL_SHIFT": (("revenue_shift_ratio", "Liikevaihdon muutos"), ("ebit_shift_ratio", "EBIT-muutos")),
+        "ABRUPT_FUNDAMENTAL_SHIFT": abrupt_fields,
         "EARNINGS_CASH_DIVERGENCE_CANDIDATE": (("signed_change_difference", "Tulos–OCF-erotus"), ("revenue_scale", "Liikevaihtoskaala")),
         "CAPEX_INTENSITY_SHIFT_CANDIDATE": (("current_capex_intensity", "Nykyinen capex-intensiteetti"), ("prior_capex_intensity", "Edellinen capex-intensiteetti")),
         "NET_DEBT_SHIFT_CANDIDATE": (("signed_net_debt_change", "Nettovelan muutos"), ("revenue_scale", "Liikevaihtoskaala")),
         "VALUATION_YIELD_OUTLIER": (("median_yield", "Mediaanituotto"), ("maximum_yield", "Maksimituotto")),
-        "RECENT_MARGIN_DECELERATION_REVIEW": (("current_trajectory", "Trajectory"), ("signed_margin_change", "EBIT-marginaalimuutos QoQ")),
+        "RECENT_MARGIN_DECELERATION_REVIEW": (("current_trajectory", "Trajectory"), ("signed_margin_change", "Operating Margin change QoQ")),
         "WORKING_CAPITAL_SHIFT_CANDIDATE": (("signed_delta_onwc", "ONWC-muutos"), ("asset_scale", "Taseskaala")),
     }
     output = []
-    percentage_fields = {"revenue_shift_ratio", "ebit_shift_ratio", "current_capex_intensity", "prior_capex_intensity", "median_yield", "maximum_yield"}
+    percentage_fields = {"revenue_shift_ratio", "operating_income_shift_ratio", "ebit_shift_ratio", "current_capex_intensity", "prior_capex_intensity", "median_yield", "maximum_yield"}
     for key, label in fields.get(flag, ()):
         value = evidence.get(key)
-        rendered = _pp(value) if key == "signed_margin_change" else _percentage(value) if key in percentage_fields else _money(value) if key in {"signed_change_difference", "revenue_scale", "signed_net_debt_change", "signed_delta_onwc", "asset_scale"} else _number(value)
+        rendered = _pp(value, signed="current_operating_margin" in evidence) if key == "signed_margin_change" else _percentage(value) if key in percentage_fields else _money(value) if key in {"signed_change_difference", "revenue_scale", "signed_net_debt_change", "signed_delta_onwc", "asset_scale"} else _number(value)
         output.append(f"{label}: {rendered}")
     return "; ".join(output) or "—"
 
@@ -324,7 +362,7 @@ def _diagnostic_metric(evaluation: Mapping[str, Any]) -> str:
     if evaluation["flag_name"] == "VALUATION_YIELD_OUTLIER":
         return f"mediaani {_percentage(evidence.get('median_yield'), 4)}; maksimi {_percentage(evidence.get('maximum_yield'), 4)}"
     if evaluation["flag_name"] == "RECENT_MARGIN_DECELERATION_REVIEW":
-        return _pp(evidence.get("signed_margin_change"))
+        return _pp(evidence.get("signed_margin_change"), signed="current_operating_margin" in evidence)
     return _percentage(evidence.get("metric_value"), 4)
 
 
@@ -335,8 +373,15 @@ def _diagnostic_threshold(evaluation: Mapping[str, Any]) -> str:
     if evaluation["flag_name"] == "VALUATION_YIELD_OUTLIER":
         return f"mediaani {_percentage(evidence.get('median_threshold'))}; maksimi {_percentage(evidence.get('maximum_threshold'))}"
     if evaluation["flag_name"] == "RECENT_MARGIN_DECELERATION_REVIEW":
-        return f"Trajectory ≥ {_number(evidence.get('trajectory_threshold'))}; marginaali ≤ {_pp(evidence.get('margin_change_threshold'))}"
+        return f"Trajectory ≥ {_number(evidence.get('trajectory_threshold'))}; marginaali ≤ {_pp(evidence.get('margin_change_threshold'), signed='current_operating_margin' in evidence)}"
     return "—"
+
+
+def _diagnostic_summary(evaluation: Mapping[str, Any]) -> str:
+    label = DIAGNOSTIC_LABELS.get(evaluation["flag_name"], evaluation["flag_name"])
+    metric = _diagnostic_metric(evaluation)
+    threshold = _diagnostic_threshold(evaluation)
+    return f"{label}: ACTIVE — {metric} versus {threshold} threshold"
 
 
 def _missing_sections(snapshot: Mapping[str, Any]) -> list[str]:
@@ -357,6 +402,21 @@ def _missing_sections(snapshot: Mapping[str, Any]) -> list[str]:
 
 
 def _build_markdown(snapshot: Mapping[str, Any]) -> str:
+    is_v2 = str(snapshot.get("report_contract", "")).startswith("CURRENT_REVISED_COMPANY_SNAPSHOT_V2")
+    component_names = tuple(snapshot["component_contract"])
+    component_labels = {
+        **COMPONENT_LABELS,
+        "OPERATING_PROFITABILITY": "Operating Profitability",
+        "OPERATING_MARGIN_DIRECTION": "Operating Margin Direction",
+        "BALANCE_SHEET_RESILIENCE": "Balance Sheet Resilience",
+        "FCF_MARGIN": "FCF Margin",
+    }
+    operating_points = "operating_income_points" if is_v2 else "ebit_points"
+    operating_yield = "operating_income_yield" if is_v2 else "ebit_yield"
+    operating_multiple = "ev_operating_income" if is_v2 else "ev_ebit"
+    operating_value = "ttm_operating_income" if is_v2 else "ttm_ebit"
+    operating_label = "Operating Income" if is_v2 else "EBIT"
+    pp = lambda value: _pp(value, signed=is_v2)
     identity = snapshot["identity"]
     anchor = snapshot["anchor"]
     history = snapshot["history"]
@@ -394,6 +454,10 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         f"Vahvistus vaatii vielä yhden peräkkäisen {lifecycle['candidate_state']} raw -havainnon."
         if lifecycle.get("candidate_state") else "Ei aktiivista odottavaa Lifecycle-siirtymää."
     )
+    lifecycle_candidate = (
+        f"{lifecycle['candidate_state']} ({lifecycle.get('candidate_count', 1)}/2)"
+        if lifecycle.get("candidate_state") else "None" if is_v2 else "—"
+    )
 
     sections = [
         f"# {identity['ticker']} — Fundamental Snapshot",
@@ -412,6 +476,10 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Fundamenttidatan ikä", f"{anchor['fundamental_age_days']} pv"),
             ("Markkinahinnan päivä", _text(current_price.get("price_date"))),
             ("Markkinahinnan ikä", "—" if current_price.get("price_age_calendar_days") is None else f"{current_price['price_age_calendar_days']} pv"),
+            *((
+                ("Nykyhinta", _price(current_price.get("selected_price"))),
+                ("Aktiivinen V2-paketti", " / ".join(str(value) for value in (snapshot.get("source_state", {}).get("active_package") or ("N/A",)))),
+            ) if is_v2 else ()),
         ), ("left", "left")),
         "",
         "## Taxonomy-jäsenyydet",
@@ -434,8 +502,9 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Fundamental Trajectory", _score((current_score.get("components") or {}).get("FUNDAMENTAL_TRAJECTORY", {}).get("component_score"))),
             ("Lifecycle status", _text(lifecycle.get("current_status"))),
             ("Vahvistettu Lifecycle", _text(lifecycle.get("confirmed_state"))),
+            ("Lifecycle candidate", lifecycle_candidate),
             ("Vahvistetun tilan tenure", "—" if lifecycle.get("tenure_quarters") is None else f"{lifecycle['tenure_quarters']} kvartaalia"),
-            ("Filing-date Absolute Valuation Score", _score(current_valuation.get("total_valuation_score"))),
+            ("Latest-filing Valuation Score / price date", f"{_score(current_valuation.get('total_valuation_score'))} / {_text(current_valuation.get('price_date'))}"),
             ("Valuation 4 havainnon keskiarvo", f"{_score(valuation_average)} ({snapshot['valuation_four_observation_count']}/4)"),
             ("Filing valuation vs 4Q average", _signed_score(filing_vs_average)),
             ("Indicative current-price Valuation Score", _score(current_price.get("total_valuation_score"))),
@@ -443,6 +512,12 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Fundamental-universumipersentiili", score_universe),
             ("Valuation-universumipersentiili", valuation_universe),
             ("Aktiivisia diagnostiikkalippuja", snapshot["diagnostic_counts"]["EVALUATED_FLAGGED"]),
+            ("Viimeisin filing Score / saatavuuspäivä", f"{_score(current_score.get('total_score'))} / {_text(anchor.get('source_availability_date'))}"),
+            ("Nykyhintavaluation / hintapäivä", f"{_score(current_price.get('total_valuation_score'))} / {_text(current_price.get('price_date'))}"),
+            (f"{operating_label} TTM", _money(current_absolute.get(operating_value))),
+            (f"{operating_label} Margin TTM", _percentage((history[-1].get('score_raw') or {}).get('operating_margin_ttm') if is_v2 else (history[-1].get('score_raw') or {}).get('ebit_margin_ttm'))),
+            (f"{operating_label} / EV", _percentage(current_price.get(operating_yield))),
+            (f"EV / {operating_label}", _multiple((current_multiple.get('metrics') or {}).get(operating_multiple, {}).get('value'))),
             ("Data readiness", f"Score={_text(current_score.get('readiness_status'))}; Valuation={_text(current_valuation.get('valuation_status'))}; TTM={anchor['ttm_readiness']}"),
         ), ("left", "left")),
         "",
@@ -460,8 +535,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "## Fundamental-komponenttien pistehistoria",
         "",
         _table(("Komponentti", "Maks.", *HISTORY_HEADERS), tuple(
-            (COMPONENT_LABELS[name], _score(snapshot["component_contract"][name]), *_history_values(snapshot, lambda slot, component=name: _score(((slot.get("score") or {}).get("components") or {}).get(component, {}).get("component_score"))))
-            for name in COMPONENTS
+            (component_labels[name], _score(snapshot["component_contract"][name]), *_history_values(snapshot, lambda slot, component=name: _score(((slot.get("score") or {}).get("components") or {}).get(component, {}).get("component_score"))))
+            for name in component_names
         ) + (("**Yhteensä**", "**100.00**", *_history_values(snapshot, lambda slot: _score((slot.get("score") or {}).get("total_score")))),)),
         "",
         "Näytetty kokonaispistemäärä lasketaan pyöristämättömistä komponenttiarvoista; taulukon kahden desimaalin summassa voi siksi olla pieni esitysero.",
@@ -472,8 +547,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         _table(("Raw-mittari", *HISTORY_HEADERS), (
             ("Revenue growth YoY TTM", *_history_values(snapshot, lambda slot: _percentage(slot["score_raw"]["revenue_growth_yoy_ttm"]))),
-            ("EBIT margin TTM", *_history_values(snapshot, lambda slot: _percentage(slot["score_raw"]["ebit_margin_ttm"]))),
-            ("EBIT margin direction (YoY)", *_history_values(snapshot, lambda slot: _pp(slot["score_raw"]["ebit_margin_direction"]))),
+            (f"{operating_label} Margin TTM", *_history_values(snapshot, lambda slot: _percentage(slot["score_raw"].get("operating_margin_ttm") if is_v2 else slot["score_raw"].get("ebit_margin_ttm")))),
+            (f"{operating_label} Margin Direction (YoY)", *_history_values(snapshot, lambda slot: pp(slot["score_raw"].get("operating_margin_direction") if is_v2 else slot["score_raw"].get("ebit_margin_direction")))),
             ("FCF margin TTM", *_history_values(snapshot, lambda slot: _percentage(slot["score_raw"]["fcf_margin_ttm"]))),
             ("Balance Sheet branch", *_history_values(snapshot, lambda slot: _balance_raw(slot["score_raw"]))),
             ("Shares outstanding YoY", *_history_values(snapshot, lambda slot: _percentage(slot["score_raw"]["shares_outstanding_yoy_change"]))),
@@ -485,8 +560,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "## Fundamental Delta ja komponenttien kontribuutiot",
         "",
         _table(("Komponentti", "QoQ", "2Q", "YoY"), tuple(
-            (COMPONENT_LABELS.get(row["component_name"], row["component_name"]), _signed_score(row.get("qoq_delta")), _signed_score(row.get("two_quarter_delta")), _signed_score(row.get("yoy_delta")))
-            for row in sorted(delta.get("components", []), key=lambda row: COMPONENTS.index(row["component_name"]))
+            (component_labels.get(row["component_name"], row["component_name"]), _signed_score(row.get("qoq_delta")), _signed_score(row.get("two_quarter_delta")), _signed_score(row.get("yoy_delta")))
+            for row in sorted(delta.get("components", []), key=lambda row: component_names.index(row["component_name"]))
         ) + (
             ("**Total Delta**", _signed_score(delta_total.get("qoq_delta")), _signed_score(delta_total.get("two_quarter_delta")), _signed_score(delta_total.get("yoy_delta"))),
             ("Readiness", _text(delta_total.get("qoq_status")), _text(delta_total.get("two_quarter_status")), _text(delta_total.get("yoy_status"))),
@@ -496,7 +571,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         _table(("Mittari", "t−4 (YoY comparison)", "Edellinen", "Nykyinen"), (
             *((label, _money(snapshot["absolute_values"]["yoy_base"].get(key)), _money(snapshot["absolute_values"]["previous"].get(key)), _money(snapshot["absolute_values"]["current"].get(key))) for key, label in (
-                ("ttm_revenue", "Revenue TTM"), ("ttm_ebit", "EBIT TTM"),
+                ("ttm_revenue", "Revenue TTM"), (operating_value, f"{operating_label} TTM"),
                 ("ttm_operating_cashflow", "Operating cash flow TTM"),
             )),
             ("Capex spend", *(
@@ -527,10 +602,23 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         "## Lifecycle-historia",
         "",
-        _table(("Kvartaali", "Saatavuuspäivä", "Raw state", "Vahvistettu final state", "Siirtymätila"), tuple(
-            (f"FY{slot['fiscal_year']} {slot['fiscal_quarter']}", _text((slot.get("row") or {}).get("source_available_date")), _text((slot.get("row") or {}).get("raw_state")), _text((slot.get("row") or {}).get("final_state")), _transition_text(slot["transition_status"]))
+        _table(("Kvartaali", "Saatavuuspäivä", "Raw state", "Vahvistettu final state", "Status", "Candidate", f"{operating_label} Margin", f"{operating_label} Margin Direction", "Siirtymätila"), tuple(
+            (
+                f"FY{slot['fiscal_year']} {slot['fiscal_quarter']}",
+                _text((slot.get("row") or {}).get("source_available_date")),
+                _text((slot.get("row") or {}).get("raw_state")),
+                _text((slot.get("row") or {}).get("final_state")),
+                _text((slot.get("row") or {}).get("lifecycle_status")),
+                (
+                    f"{slot['row']['candidate_state']} ({slot['row'].get('candidate_count', 1)}/2)"
+                    if slot.get("row") and slot["row"].get("candidate_state") else "None" if is_v2 else "—"
+                ),
+                _percentage((slot.get("row") or {}).get("operating_margin_ttm") if is_v2 else (slot.get("row") or {}).get("ebit_margin_ttm")),
+                pp((slot.get("row") or {}).get("operating_margin_direction") if is_v2 else (slot.get("row") or {}).get("ebit_margin_direction")),
+                _transition_text(slot["transition_status"]),
+            )
             for slot in lifecycle["history"]
-        ), ("left", "left", "left", "left", "left")),
+        ), ("left", "left", "left", "left", "left", "left", "right", "right", "left")),
         "",
         _table(("Nykyinen Lifecycle-kenttä", "Arvo"), (
             ("Published status", _text(lifecycle.get("current_status"))),
@@ -559,7 +647,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "## Valuation-komponenttien pistehistoria",
         "",
         _table(("Komponentti", "Maks.", *HISTORY_HEADERS), (
-            ("EBIT / EV", "40.00", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("ebit_points")))),
+            (f"{operating_label} / EV", "40.00", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get(operating_points)))),
             ("FCF / Market Cap", "40.00", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("fcf_points")))),
             ("Common earnings / Market Cap", "20.00", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("earnings_points")))),
             ("**Valuation Score**", "**100.00**", *_history_values(snapshot, lambda slot: _score((slot.get("valuation") or {}).get("total_valuation_score")))),
@@ -573,17 +661,17 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "## Valuation raw-yield -historia",
         "",
         _table(("Raw-mittari", *HISTORY_HEADERS), (
-            ("EBIT / EV", *_history_values(snapshot, lambda slot: _percentage((slot.get("valuation") or {}).get("ebit_yield")))),
+            (f"{operating_label} / EV", *_history_values(snapshot, lambda slot: _percentage((slot.get("valuation") or {}).get(operating_yield)))),
             ("FCF / Market Cap", *_history_values(snapshot, lambda slot: _percentage((slot.get("valuation") or {}).get("fcf_yield")))),
             ("Common earnings / Market Cap", *_history_values(snapshot, lambda slot: _percentage((slot.get("valuation") or {}).get("earnings_yield")))),
-            ("Positive components", *_history_values(snapshot, lambda slot: "—" if not slot.get("valuation") else f"{sum((slot['valuation'].get(key) or 0) > 0 for key in ('ebit_yield', 'fcf_yield', 'earnings_yield'))}/3")),
+            ("Positive components", *_history_values(snapshot, lambda slot: "—" if not slot.get("valuation") else f"{sum((slot['valuation'].get(key) or 0) > 0 for key in (operating_yield, 'fcf_yield', 'earnings_yield'))}/3")),
         )),
         "",
         "## Filing-date Valuation comparisons",
         "",
         _table(("Komponentti", "QoQ", "2Q", "YoY"), tuple(
             (label, _signed_score(_filing_delta(history, key, 1)), _signed_score(_filing_delta(history, key, 2)), _signed_score(_filing_delta(history, key, 4)))
-            for key, label in (("ebit_points", "EBIT / EV"), ("fcf_points", "FCF / Market Cap"), ("earnings_points", "Common earnings / Market Cap"), ("total_valuation_score", "Valuation Score"))
+            for key, label in ((operating_points, f"{operating_label} / EV"), ("fcf_points", "FCF / Market Cap"), ("earnings_points", "Common earnings / Market Cap"), ("total_valuation_score", "Valuation Score"))
         )),
         "",
         _table(("Filing-price-muutos", "QoQ", "2Q", "YoY"), (
@@ -602,9 +690,9 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Price", _price(current_valuation.get("selected_price")), _price(current_price.get("selected_price")), _signed_score(current_price_change)),
             ("Price change %", "—", "—", _percentage(current_price_change_pct)),
             ("Valuation Score", _score(current_valuation.get("total_valuation_score")), _score(current_price.get("total_valuation_score")), _signed_score(current_change)),
-            ("EBIT / EV", _percentage(current_valuation.get("ebit_yield")), _percentage(current_price.get("ebit_yield")), _pp(None if current_valuation.get("ebit_yield") is None or current_price.get("ebit_yield") is None else current_price["ebit_yield"] - current_valuation["ebit_yield"])),
-            ("FCF / Market Cap", _percentage(current_valuation.get("fcf_yield")), _percentage(current_price.get("fcf_yield")), _pp(None if current_valuation.get("fcf_yield") is None or current_price.get("fcf_yield") is None else current_price["fcf_yield"] - current_valuation["fcf_yield"])),
-            ("Common earnings / Market Cap", _percentage(current_valuation.get("earnings_yield")), _percentage(current_price.get("earnings_yield")), _pp(None if current_valuation.get("earnings_yield") is None or current_price.get("earnings_yield") is None else current_price["earnings_yield"] - current_valuation["earnings_yield"])),
+            (f"{operating_label} / EV", _percentage(current_valuation.get(operating_yield)), _percentage(current_price.get(operating_yield)), pp(None if current_valuation.get(operating_yield) is None or current_price.get(operating_yield) is None else current_price[operating_yield] - current_valuation[operating_yield])),
+            ("FCF / Market Cap", _percentage(current_valuation.get("fcf_yield")), _percentage(current_price.get("fcf_yield")), pp(None if current_valuation.get("fcf_yield") is None or current_price.get("fcf_yield") is None else current_price["fcf_yield"] - current_valuation["fcf_yield"])),
+            ("Common earnings / Market Cap", _percentage(current_valuation.get("earnings_yield")), _percentage(current_price.get("earnings_yield")), pp(None if current_valuation.get("earnings_yield") is None or current_price.get("earnings_yield") is None else current_price["earnings_yield"] - current_valuation["earnings_yield"])),
         )),
         "",
         "> Shares, debt and cash come from the latest fundamental filing and may differ from their true current-date values.",
@@ -642,6 +730,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("left", "left", "left", "left", "right", "left", "left"),
         ),
         "",
+        "Currency: N/A (source currency not available in the validated contract)" if is_v2 and not any(context.get("price_currency") for context in valuation_contexts) else "",
+        "" if is_v2 and not any(context.get("price_currency") for context in valuation_contexts) else "",
         _table(
             ("Metric", "Current moment", "Latest filing", "Previous filing (Q−1)"),
             tuple(
@@ -658,8 +748,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
                     ("earnings_yield", "Earnings Yield", _valuation_yield),
                     ("p_fcf", "P/FCF", _multiple),
                     ("fcf_yield", "FCF Yield", _valuation_yield),
-                    ("ev_ebit", "EV/EBIT", _multiple),
-                    ("ebit_yield", "EBIT Yield", _valuation_yield),
+                    (operating_multiple, f"EV / {operating_label}" if is_v2 else "EV/EBIT", _multiple),
+                    (operating_yield, f"{operating_label} / EV" if is_v2 else "EBIT Yield", _valuation_yield),
                     ("ev_sales", "EV/Sales", _multiple),
                     ("p_sales", "P/S", _multiple),
                 )
@@ -688,15 +778,17 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
     evaluations = (snapshot.get("diagnostic") or {}).get("evaluations", [])
     flagged = [row for row in evaluations if row["status"] == "EVALUATED_FLAGGED"]
     sections.extend([
+        *( ["**" + _diagnostic_summary(row) + "**" for row in flagged] if flagged else ["No active diagnostic flags"] ),
+        "",
         _table(("Lippu", "Status", "Keskeinen evidenssi", "Laskettu arvo", "Raja"), tuple(
-            (row["flag_name"], row["status"], _diagnostic_evidence(row), _diagnostic_metric(row), _diagnostic_threshold(row))
+            (DIAGNOSTIC_LABELS.get(row["flag_name"], row["flag_name"]), row["status"], _diagnostic_evidence(row), _diagnostic_metric(row), _diagnostic_threshold(row))
             for row in flagged
         ) or (("—", "Ei aktiivisia lippuja", "—", "—", "—"),), ("left", "left", "left", "right", "right")),
         "",
         "### Kaikki seitsemän statusta",
         "",
         _table(("Lippu", "Status", "Reason code", "Arvo", "Raja"), tuple(
-            (row["flag_name"], row["status"], row["reason_code"], _diagnostic_metric(row), _diagnostic_threshold(row))
+            (DIAGNOSTIC_LABELS.get(row["flag_name"], row["flag_name"]), row["status"], row["reason_code"], _diagnostic_metric(row), _diagnostic_threshold(row))
             for row in evaluations
         ), ("left", "left", "left", "right", "right")),
         "",
@@ -705,7 +797,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "## Data readiness ja rajoitteet",
         "",
     ])
-    missing_components = [name for name in COMPONENTS if ((current_score.get("components") or {}).get(name, {}).get("component_score") is None)]
+    missing_components = [name for name in component_names if ((current_score.get("components") or {}).get(name, {}).get("component_score") is None)]
     blockers = []
     if history[-1].get("ttm"):
         try:
@@ -740,7 +832,8 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         _table(("Kenttä", "Arvo"), (
             ("Report contract", snapshot["report_contract"]),
             ("Report date", snapshot["report_date"]),
-            ("Anchor identity", f"company_id={anchor['company_id']}; quarter_id={anchor['quarter_id']}; FY{anchor['fiscal_year']} {anchor['fiscal_quarter']}"),
+            ("Anchor identity", f"FY{anchor['fiscal_year']} {anchor['fiscal_quarter']}; period_end={anchor['period_end']}; available={anchor['source_availability_date']}") if is_v2 else ("Anchor identity", f"company_id={anchor['company_id']}; quarter_id={anchor['quarter_id']}; FY{anchor['fiscal_year']} {anchor['fiscal_quarter']}"),
+            *(([("Report presentation fingerprint", snapshot.get("report_presentation_fingerprint"))] if is_v2 else [])),
             *((f"Model fingerprint: {name}", value) for name, value in snapshot["model_fingerprints"].items()),
             ("Delta fundamental source fingerprint", _text(_source_item(snapshot, "delta", 0))),
             ("Delta fundamental result fingerprint", _text(_source_item(snapshot, "delta", 1))),
@@ -753,7 +846,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Diagnostic source fingerprint", _text((snapshot["source_state"].get("diagnostic") or [None] * 5)[0])),
             ("Diagnostic economic result fingerprint", _text((snapshot["source_state"].get("diagnostic") or [None] * 5)[1])),
             ("Diagnostic physical content fingerprint", _text((snapshot["source_state"].get("diagnostic") or [None] * 5)[2])),
-            ("Relative snapshot ID", _text((snapshot["source_state"].get("relative") or [None] * 5)[0])),
+            *(([] if is_v2 else [("Relative snapshot ID", _text((snapshot["source_state"].get("relative") or [None] * 5)[0]))])),
             ("Relative snapshot date", _text((snapshot["source_state"].get("relative") or [None] * 5)[1])),
             ("Relative calculation source fingerprint", _text((snapshot["source_state"].get("relative") or [None] * 5)[2])),
             ("Relative source content fingerprint", _text((snapshot["source_state"].get("relative") or [None] * 5)[3])),
@@ -767,18 +860,24 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "Raportti on koonti- ja tarkastelutyökalu. Se ei ole tuottoennuste, tekninen entry-raportti eikä BUY/SELL-suositus.",
         "",
     ])
-    return "\n".join(sections)
+    rendered = "\n".join(sections)
+    if is_v2:
+        rendered = re.sub(r"(-?\d+(?:\.\d+)?) %", r"\1%", rendered)
+        rendered = re.sub(r"(-?\d+(?:\.\d+)?) ([BM])\b", r"\1\2", rendered)
+        rendered = re.sub(r"(?<![\w\d])-(?=\d)", "−", rendered)
+    return rendered
 
 
 def render_snapshot(snapshot: Mapping[str, Any]) -> RenderedSnapshot:
-    if snapshot.get("report_contract") != REPORT_CONTRACT:
+    if snapshot.get("report_contract") not in SUPPORTED_REPORT_CONTRACTS:
         raise ValueError("SNAPSHOT_REPORT_CONTRACT_MISMATCH")
     template = _build_markdown(snapshot)
     if template.count(FINGERPRINT_PLACEHOLDER) != 1:
         raise RuntimeError("SNAPSHOT_FINGERPRINT_PLACEHOLDER_INVALID")
     content_fingerprint = hashlib.sha256(template.encode("utf-8")).hexdigest()
     markdown = template.replace(FINGERPRINT_PLACEHOLDER, content_fingerprint)
-    if re.search(r"(?<![A-Za-z])(?:None|NaN|nan)(?![A-Za-z])", markdown):
+    forbidden = r"(?<![A-Za-z])(?:NaN|nan)(?![A-Za-z])" if str(snapshot.get("report_contract", "")).startswith("CURRENT_REVISED_COMPANY_SNAPSHOT_V2") else r"(?<![A-Za-z])(?:None|NaN|nan)(?![A-Za-z])"
+    if re.search(forbidden, markdown):
         raise RuntimeError("SNAPSHOT_UNFORMATTED_INTERNAL_VALUE")
     return RenderedSnapshot(markdown=markdown, content_fingerprint=content_fingerprint)
 

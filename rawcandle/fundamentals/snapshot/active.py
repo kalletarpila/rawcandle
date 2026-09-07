@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from rawcandle.fundamentals.operating_income_v2.activation import active_family, assert_v2_active
-from rawcandle.fundamentals.operating_income_v2.reporting import build_company_report
 from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.renderer import render_snapshot
+from rawcandle.fundamentals.snapshot.v2_assembler import assemble_company_snapshot_v2
 from rawcandle.fundamentals.snapshot.writer import publish_report
 
 
@@ -38,19 +38,10 @@ def generate_active_company_snapshot(
                 overwrite=overwrite,
             )
         assert_v2_active(conn)
-        row = conn.execute(
-            "SELECT company_id FROM lifecycle_revised_result "
-            "WHERE model_fingerprint=(SELECT json_extract(model_manifest_json,'$.lifecycle[1]') "
-            "FROM fundamentals_active_model_family WHERE singleton=1) AND ticker=? "
-            "ORDER BY fiscal_sequence DESC LIMIT 1",
-            (ticker.strip().upper(),),
-        ).fetchone()
-        if row is None:
-            raise LookupError(f"OPERATING_INCOME_V2_REPORT_TICKER_NOT_FOUND:{ticker}")
-        canonical_ticker, markdown, metadata = build_company_report(
-            conn, company_id=int(row[0]), market_db=paths.market_db
-        )
-    markdown = markdown.replace("\n\n", f"\n\nReport date: `{report_date}`\n\n", 1)
+    snapshot = assemble_company_snapshot_v2(paths, ticker=ticker, report_date=report_date)
+    rendered = render_snapshot(snapshot)
+    canonical_ticker = snapshot["identity"]["ticker"]
+    markdown = rendered.markdown
     published = publish_report(
         output_dir=output_dir,
         ticker=canonical_ticker,
@@ -58,16 +49,9 @@ def generate_active_company_snapshot(
         markdown=markdown,
         overwrite=overwrite,
     )
-    fingerprint = hashlib.sha256(markdown.encode("utf-8")).hexdigest()
-    snapshot = {
-        **metadata,
-        "report_date": report_date,
-        "source_state": {"analysis": str(paths.analysis_db.resolve())},
-        "source_state_fingerprint": fingerprint,
-    }
     return {
         "status": published.status,
         "output_path": str(published.path),
-        "report_content_fingerprint": fingerprint,
+        "report_content_fingerprint": rendered.content_fingerprint,
         "snapshot": snapshot,
     }
