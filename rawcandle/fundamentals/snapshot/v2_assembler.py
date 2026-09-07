@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from rawcandle.fundamentals.operating_income_v2 import (
     contract,
+    diagnostic_flags_eight,
     score,
     valuation,
 )
@@ -498,8 +499,8 @@ def _assemble_company_snapshot_v2(
 ) -> dict[str, Any]:
     base = v1.assemble_company_snapshot(paths, ticker=ticker, report_date=report_date)
     with _readonly(paths.analysis_db) as analysis, _readonly(paths.market_db) as market:
-        is_candidate = candidate_model_map is not None
-        if is_candidate:
+        is_explicit_candidate = candidate_model_map is not None
+        if is_explicit_candidate:
             if candidate_package_fingerprint is None or diagnostic_model_contract is None:
                 raise ValueError("CANDIDATE_SNAPSHOT_IDENTITY_INCOMPLETE")
             model_map = dict(candidate_model_map)
@@ -515,6 +516,10 @@ def _assemble_company_snapshot_v2(
                     "SELECT persistence_fingerprint FROM fundamentals_active_model_family WHERE singleton=1"
                 ).fetchone()[0]
             )
+        uses_eight_flags = (
+            model_map["diagnostic_flags"][1]
+            == diagnostic_flags_eight.MODEL_FINGERPRINT
+        )
         repository = ParallelModelRepository(analysis)
         company_id = int(base["identity"]["company_id"])
         score_rows = {int(row["quarter_id"]): _component_map(row) for row in repository.score_history(company_id, model_fingerprint=model_map["score"][1])}
@@ -553,17 +558,18 @@ def _assemble_company_snapshot_v2(
         base["component_contract"] = {name: score.MODEL_CONTRACT["components"][name]["maximum"] for name in contract.COMPONENTS}
         base["model_fingerprints"] = {name: identity[1] for name, identity in model_map.items()}
         base["model_fingerprints"]["family"] = contract.FAMILY_FINGERPRINT
-        base["report_contract"] = CANDIDATE_REPORT_CONTRACT if is_candidate else REPORT_CONTRACT
+        base["report_contract"] = CANDIDATE_REPORT_CONTRACT if uses_eight_flags else REPORT_CONTRACT
         base["report_presentation_fingerprint"] = (
             CANDIDATE_REPORT_PRESENTATION_FINGERPRINT
-            if is_candidate else REPORT_PRESENTATION_FINGERPRINT
+            if uses_eight_flags else REPORT_PRESENTATION_FINGERPRINT
         )
-        if is_candidate:
-            base["diagnostic_model_contract"] = dict(diagnostic_model_contract)
-            base["diagnostic_flag_names"] = list(diagnostic_model_contract["flags"])
+        if uses_eight_flags:
+            active_diagnostic_contract = diagnostic_model_contract or diagnostic_flags_eight.MODEL_CONTRACT
+            base["diagnostic_model_contract"] = dict(active_diagnostic_contract)
+            base["diagnostic_flag_names"] = list(active_diagnostic_contract["flags"])
         base["source_state"] = _source_state(
             analysis, base["source_state"], model_map, package_fingerprint,
-            candidate=is_candidate,
+            candidate=is_explicit_candidate,
         )
         base["source_state_fingerprint"] = hashlib.sha256(json.dumps(base["source_state"], sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
         base["reconciliation"] = []

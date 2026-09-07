@@ -184,9 +184,9 @@ def test_candidate_snapshot_definitions_are_contract_driven() -> None:
     assert "10 %" in definitions[-1].trigger
 
 
-def test_candidate_has_new_identities_but_is_not_activation_eligible() -> None:
+def test_candidate_has_new_identities_and_is_activation_eligible() -> None:
     assert eight.MODEL_FINGERPRINT != seven.MODEL_FINGERPRINT
     assert snapshot_eight.MODEL_FINGERPRINT != persistence.MODEL_MAP["snapshot"][1]
     assert phase10b.PACKAGE_FINGERPRINT != persistence.PACKAGE_FINGERPRINT
-    assert phase10b.PACKAGE_FINGERPRINT not in activation.KNOWN_PACKAGES
+    assert phase10b.PACKAGE_FINGERPRINT in activation.known_packages()
     assert persistence.PACKAGE_FINGERPRINT == phase10b.ACTIVE_PACKAGE_FINGERPRINT

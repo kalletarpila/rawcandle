@@ -26,6 +26,12 @@ KNOWN_PACKAGES = {
     PRE_PHASE9G_PACKAGE_FINGERPRINT: PRE_PHASE9G_MODEL_MAP,
     PACKAGE_FINGERPRINT: MODEL_MAP,
 }
+
+
+def known_packages() -> dict[str, dict[str, tuple[str, str]]]:
+    from .phase10b import MODEL_MAP as PHASE10B_MODEL_MAP, PACKAGE_FINGERPRINT as PHASE10B_PACKAGE
+
+    return {**KNOWN_PACKAGES, PHASE10B_PACKAGE: PHASE10B_MODEL_MAP}
 ACTIVATION_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {ACTIVATION_TABLE}(
  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -83,7 +89,7 @@ def assert_v2_active(conn: sqlite3.Connection) -> ActiveFamily:
     ):
         raise ValueError("OPERATING_INCOME_V2_ACTIVE_PACKAGE_MISMATCH")
     manifest = active_model_manifest(conn)
-    expected_manifest = KNOWN_PACKAGES.get(active.persistence_fingerprint)
+    expected_manifest = known_packages().get(active.persistence_fingerprint)
     if manifest != expected_manifest:
         raise ValueError("OPERATING_INCOME_V2_ACTIVE_PACKAGE_MISMATCH")
     package = ParallelModelRepository(conn).package_manifest(active.persistence_fingerprint)
@@ -100,13 +106,28 @@ def assert_v2_active(conn: sqlite3.Connection) -> ActiveFamily:
 
 
 def activate_v2(conn: sqlite3.Connection, *, activated_at: str) -> ActiveFamily:
+    return activate_package(conn, PACKAGE_FINGERPRINT, activated_at=activated_at)
+
+
+def activate_package(
+    conn: sqlite3.Connection,
+    package_fingerprint: str,
+    *,
+    activated_at: str,
+) -> ActiveFamily:
+    packages = known_packages()
+    if package_fingerprint not in packages:
+        raise ValueError("OPERATING_INCOME_V2_UNKNOWN_PACKAGE")
     repository = ParallelModelRepository(conn)
-    repository.assert_v2_bundle()
-    manifest = repository.package_manifest()
+    model_map = packages[package_fingerprint]
+    repository.assert_v2_bundle(
+        model_map, persistence_fingerprint=package_fingerprint
+    )
+    manifest = repository.package_manifest(package_fingerprint)
     if manifest["status"] != "COMPLETE":
         raise RuntimeError("OPERATING_INCOME_V2_PACKAGE_INCOMPLETE")
     current = active_family(conn)
-    if current is not None and current.persistence_fingerprint == PACKAGE_FINGERPRINT:
+    if current is not None and current.persistence_fingerprint == package_fingerprint:
         return assert_v2_active(conn)
     ensure_activation_schema(conn)
     conn.execute(
@@ -114,8 +135,8 @@ def activate_v2(conn: sqlite3.Connection, *, activated_at: str) -> ActiveFamily:
         (
             contract.FAMILY_VERSION,
             contract.FAMILY_FINGERPRINT,
-            PACKAGE_FINGERPRINT,
-            json.dumps(MODEL_MAP, sort_keys=True, separators=(",", ":")),
+            package_fingerprint,
+            json.dumps(model_map, sort_keys=True, separators=(",", ":")),
             activated_at,
         ),
     )
