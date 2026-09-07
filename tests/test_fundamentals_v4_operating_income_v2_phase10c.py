@@ -85,3 +85,8 @@ def test_phase10c_locked_source_identities_match_candidate() -> None:
     assert phase10c.EXPECTED_MODELS == {
         name: identity[1] for name, identity in phase10b.MODEL_MAP.items()
     }
+
+
+def test_phase10c_ui_smoke_uses_public_recent_reports_api() -> None:
+    assert hasattr(phase10c.FundamentalsSnapshotUIService, "recent_reports")
+    assert not hasattr(phase10c.FundamentalsSnapshotUIService, "list_recent_reports")

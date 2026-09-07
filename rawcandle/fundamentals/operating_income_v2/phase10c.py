@@ -318,7 +318,7 @@ def _smoke_reports(calculated: Mapping[str, Any], output: Path) -> dict[str, Any
         "reports": results, "batch_status": batch.status,
         "created_or_unchanged": len(successful),
         "not_generated": batch.summary.not_generated,
-        "recent_reports": len(service.list_recent_reports()),
+        "recent_reports": len(service.recent_reports()),
         "secure_download": True, "traversal_rejected": traversal_rejected,
         "symlink_rejected": symlink_rejected,
     }
