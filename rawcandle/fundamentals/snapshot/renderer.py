@@ -19,6 +19,7 @@ SUPPORTED_REPORT_CONTRACTS = {
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V2",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4",
+    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5",
 }
 
 
@@ -172,6 +173,11 @@ def _signed_score(value: Any) -> str:
     if abs(number) < 0.005:
         return "0.00"
     return f"{number:+.2f}"
+
+
+def _score_point_change(value: Any) -> str:
+    rendered = _signed_score(value)
+    return rendered if rendered == "—" else f"{rendered} p"
 
 
 def _table(headers: Sequence[str], rows: Sequence[Sequence[Any]], aligns: Sequence[str] | None = None) -> str:
@@ -580,7 +586,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         _table(("Havainto", *HISTORY_HEADERS), (
             ("Fiscal quarter", *_history_values(snapshot, lambda slot: f"FY{slot['fiscal_year']} {slot['fiscal_quarter']}")),
-            ("Availability date", *_history_values(snapshot, lambda slot: _text(slot.get("availability_date")))),
+            ("Saatavuuspäivä", *_history_values(snapshot, lambda slot: _text(slot.get("availability_date")))),
             ("Fundamental Score", *_history_values(snapshot, lambda slot: _score((slot.get("score") or {}).get("total_score")))),
             ("Status", *_history_values(snapshot, lambda slot: _text((slot.get("score") or {}).get("readiness_status")))),
         )),
@@ -745,7 +751,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Price date", _text(current_valuation.get("price_date")), _text(current_price.get("price_date")), "—"),
             ("Price", _price(current_valuation.get("selected_price")), _price(current_price.get("selected_price")), _signed_score(current_price_change)),
             ("Price change %", "—", "—", _percentage(current_price_change_pct)),
-            ("Valuation Score (muutos pistettä)", _score(current_valuation.get("total_valuation_score")), _score(current_price.get("total_valuation_score")), _signed_score(current_change)),
+            ("Valuation Score", _score(current_valuation.get("total_valuation_score")), _score(current_price.get("total_valuation_score")), _score_point_change(current_change)),
             (f"{operating_label} / EV", _percentage(current_valuation.get(operating_yield)), _percentage(current_price.get(operating_yield)), pp(None if current_valuation.get(operating_yield) is None or current_price.get(operating_yield) is None else current_price[operating_yield] - current_valuation[operating_yield])),
             ("FCF / Market Cap", _percentage(current_valuation.get("fcf_yield")), _percentage(current_price.get("fcf_yield")), pp(None if current_valuation.get("fcf_yield") is None or current_price.get("fcf_yield") is None else current_price["fcf_yield"] - current_valuation["fcf_yield"])),
             (f"{common_earnings_label} / Market Cap", _percentage(current_valuation.get("earnings_yield")), _percentage(current_price.get("earnings_yield")), pp(None if current_valuation.get("earnings_yield") is None or current_price.get("earnings_yield") is None else current_price["earnings_yield"] - current_valuation["earnings_yield"])),

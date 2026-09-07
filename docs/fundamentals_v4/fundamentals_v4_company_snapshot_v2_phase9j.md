@@ -138,3 +138,14 @@ This is still a currently revised snapshot, not an original point-in-time
 reconstruction. Source availability is RawCandle's availability contract, not a
 legal filing-time verification. Readable diagnostic explanations do not infer
 causes, normalize earnings or convert candidates into confirmed events.
+
+## Phase 9J.1 follow-up
+
+Phase 9J.1 superseded presentation V4 with V5. The mixed-unit current-price
+table now labels the row `Valuation Score`; only its difference cell carries the
+score-point suffix `p`. Score levels remain plain values, while price changes
+retain price units or `%` and raw-yield changes retain `pp`. The remaining
+Finnish history-table label `Availability date` is now `Saatavuuspäivä`.
+
+No economic value, date selection, diagnostic presentation or economic identity
+changed. See `fundamentals_v4_company_snapshot_v2_phase9j_1.md`.

@@ -123,7 +123,7 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "Overall eligible universe" in report
     assert "n=2198" in report
     assert "No active diagnostic flags" in report
-    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4" in report
+    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5" in report
 
 
 def test_v2_report_current_and_filing_valuations_are_distinct(nvda_report: tuple[str, dict]) -> None:
@@ -141,7 +141,7 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
     nvda_report: tuple[str, dict],
 ) -> None:
     _, snapshot = nvda_report
-    assert REPORT_PRESENTATION_FINGERPRINT == "783c00b8d88cb9cf7715e867f41a7dd673618ab10d92bb4451559c2c9cab6aec"
+    assert REPORT_PRESENTATION_FINGERPRINT == "8af475ace78803aa6ea4e703cb85c2cd19b3090081340fff7228bfe432671153"
     assert snapshot["model_fingerprints"]["snapshot"] == SNAPSHOT_MODEL_FINGERPRINT
     assert snapshot["source_state"]["active_package"][1] == PACKAGE_FINGERPRINT
 
@@ -308,6 +308,32 @@ def test_phase9j_uses_precise_availability_and_score_point_terminology(
     assert "eivät ole raw-yieldien prosenttiyksikkömuutoksia" in report
     assert "Saatavuuspäivän hinnan muutos" in report
     assert "Price change %" in report
+
+
+def test_phase9j_1_mixed_unit_table_labels_only_score_difference_as_points(
+    nvda_report: tuple[str, dict],
+    phase9j_edge_reports: dict[str, str],
+) -> None:
+    report, snapshot = nvda_report
+    assert "| Mittari | Viimeisin saatavuuspäivä | Nykyhinta | Muutos |" in report
+    assert "| Valuation Score | 27.02 | 24.15 | −2.87 p |" in report
+    assert "Valuation Score (muutos pistettä)" not in report
+    assert "| Price | 209.66 | 230.36 | +20.70 |" in report
+    assert "| Price change % | — | — | 9.87% |" in report
+    assert "| Operating Income / EV | 3.90% | 3.55% | −0.35 pp |" in report
+    assert "| Valuation Score | — | — | — |" in phase9j_edge_reports["AAT"]
+    assert "| Valuation Score | — | — | — p |" not in phase9j_edge_reports["AAT"]
+    assert snapshot["history"][-1]["valuation"]["total_valuation_score"] == pytest.approx(27.02, abs=0.005)
+    assert snapshot["current_price_valuation"]["total_valuation_score"] == pytest.approx(24.15, abs=0.005)
+
+
+def test_phase9j_1_finnish_history_tables_use_saatavuuspaiva(
+    nvda_report: tuple[str, dict],
+) -> None:
+    report, snapshot = nvda_report
+    assert "| Saatavuuspäivä | 2025-08-27 | 2025-11-19 | 2026-02-25 | 2026-05-20 | 2026-08-26 |" in report
+    assert "| Availability date |" not in report
+    assert snapshot["history"][-1]["availability_date"] == "2026-08-26"
 
 
 def test_phase9j_diagnostic_explanations_cover_engine_and_production_contract() -> None:

@@ -23,7 +23,7 @@ from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepo
 from rawcandle.fundamentals.snapshot import assembler as v1
 
 
-REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4"
+REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5"
 REPORT_CONTRACT_SPEC = {
     "version": REPORT_CONTRACT,
     "model_family": contract.FAMILY_FINGERPRINT,
@@ -39,8 +39,8 @@ REPORT_CONTRACT_SPEC = {
         "ttm_net_income_common",
     ),
     "common_earnings_display": "REPORTED_GAAP_COMMON_SHAREHOLDER_EARNINGS_NOT_NORMALIZED",
-    "availability_date_terminology": "SOURCE_AVAILABILITY_DATE_NOT_VERIFIED_LEGAL_FILING_DATE",
-    "valuation_change_units": "COMPONENT_SCORE_POINTS",
+    "availability_date_terminology": "SOURCE_AVAILABILITY_DATE_WITH_FINNISH_HISTORY_LABEL",
+    "valuation_change_units": "COMPONENT_SCORE_POINTS_AND_MIXED_TABLE_SCORE_CHANGE_CELL_POINTS",
     "diagnostic_reason_rendering": "EXHAUSTIVE_READABLE_FINNISH_WITH_NEUTRAL_UNKNOWN_FALLBACK",
     "active_package_rendering": "TECHNICAL_APPENDIX_ONLY",
     "diagnostic_rendering": "READABLE_SUMMARY_PLUS_COMPLETE_AUDIT_TABLE",

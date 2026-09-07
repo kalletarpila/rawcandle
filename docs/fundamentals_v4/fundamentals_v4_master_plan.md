@@ -293,3 +293,9 @@ terminology, identifies Valuation comparisons as score-point changes, renders
 all supported Diagnostic Flags V2 reasons as readable Finnish explanations, and
 keeps package identities only in the technical appendix. Economic model,
 persisted reason codes, active package and production artifacts remain unchanged.
+
+Phase 9J.1 status: `PRESENTATION_UNIT_LABEL_CORRECTED_NOT_PRODUCTION_DATA_CHANGE`.
+Company Snapshot V2 presentation V5 labels mixed-table score levels as
+`Valuation Score`, adds `p` only to the score-difference cell, and uses
+`Saatavuuspäivä` in the Finnish history table. No economic identity or result
+changed.
