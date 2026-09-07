@@ -273,14 +273,14 @@ def _apply_diagnostics(conn: sqlite3.Connection, calculated: Mapping[str, Any], 
     grouped={}
     for row in calculated["diagnostics_full"]: grouped.setdefault((row["company_id"],row["quarter_id"]),[]).append(row)
     ttm={(int(r["company_id"]),int(r["endpoint_quarter_id"])):r for r in calculated["rows"]}
-    flag_ids={}; status_ids={}; reason_ids={}; source_ids={}
+    flag_ids={}; status_ids={}; reason_ids={}; source_ids={}; applicability_ids={}
     for row in calculated["diagnostics_full"]:
         flag_ids[row["flag_name"]]=_code_id(conn,diagnostic_v1.FLAG_TABLE,"flag_id","flag_name",row["flag_name"])
         status_ids[row["status"]]=_code_id(conn,diagnostic_v1.STATUS_TABLE,"status_id","status_text",row["status"])
         reason_ids[row["reason_code"]]=_code_id(conn,diagnostic_v1.REASON_TABLE,"reason_id","reason_text",row["reason_code"])
     endpoint_rows=[]; evaluation_rows=[]
-    evidence_layout={flag:tuple(diagnostic_flags._evidence_name(name) for name in diagnostic_v1.EVIDENCE_FIELDS[flag]) for flag in sorted(flag_ids)}
-    boolean_layout={flag:tuple(diagnostic_flags._evidence_name(name) for name in diagnostic_v1.BOOLEAN_FIELDS.get(flag,())) for flag in sorted(flag_ids)}
+    evidence_layout={flag:diagnostic_flags.EVIDENCE_FIELDS[flag] for flag in sorted(flag_ids)}
+    boolean_layout={flag:diagnostic_flags.BOOLEAN_FIELDS.get(flag,()) for flag in sorted(flag_ids)}
     for key in sorted(grouped):
         source=ttm[key]; sequence=int(source["endpoint_fiscal_year"])*4+int(str(source["endpoint_fiscal_quarter"])[1]); eid=_id((diagnostic_flags.MODEL_FINGERPRINT,key[0],sequence)); source_status="TTM_READY" if source.get("core_ttm_ready") else "TTM_NOT_READY"; source_ids[source_status]=_code_id(conn,diagnostic_v1.SOURCE_STATUS_TABLE,"source_status_id","source_status_text",source_status)
         endpoint_rows.append((eid,pid,key[0],key[1],source["endpoint_fiscal_year"],int(str(source["endpoint_fiscal_quarter"])[1]),sequence,source["period_end"],source.get("ttm_source_available_date"),source.get("ttm_source_available_date"),source_ids[source_status],_hash((key,source_status))))
@@ -292,11 +292,19 @@ def _apply_diagnostics(conn: sqlite3.Connection, calculated: Mapping[str, Any], 
             if unknown: raise ValueError(f"OPERATING_INCOME_V2_DIAGNOSTIC_EVIDENCE_UNMAPPED:{row['flag_name']}:{sorted(unknown)}")
             numbers=[row["evidence"].get(name) for name in fields]+[None]*(16-len(fields))
             bool_mask=sum((1<<index) for index,name in enumerate(boolean_fields) if row["evidence"].get(name) is True)
+            classification=row["evidence"].get("applicability_classification")
             application=None
+            if classification is not None:
+                applicability_ids[classification]=_code_id(
+                    conn,diagnostic_v1.APPLICABILITY_TABLE,
+                    "applicability_id","applicability_text",classification,
+                )
+                application=applicability_ids[classification]
             evaluation=[eid,flag_ids[row["flag_name"]],status_ids[row["status"]],reason_ids[row["reason_code"]],application,row["comparison_quarter_id"],row["effective_available_date"],None if row["triggered"] is None else int(row["triggered"]),bool_mask,*numbers]
             evaluation.append(_hash(evaluation)); evaluation_rows.append(evaluation)
     economic=_hash(calculated["diagnostics_full"]); physical=_hash((endpoint_rows,evaluation_rows))
-    values=(pid,PERSISTENCE_VERSION,_hash(evidence_layout),diagnostic_flags.MODEL_VERSION,diagnostic_flags.MODEL_FINGERPRINT,"CURRENTLY_REVISED_DIAGNOSTIC_FLAGS",DIAGNOSTIC_HISTORY_MODE,diagnostic_flags.EVIDENCE_SCHEMA_VERSION,_hash("diagnostic-source"),economic,physical,len(endpoint_rows),len(evaluation_rows),applied_at)
+    source_fingerprint=calculated.get("diagnostic_source_fingerprint",_hash(calculated["rows"]))
+    values=(pid,PERSISTENCE_VERSION,_hash(evidence_layout),diagnostic_flags.MODEL_VERSION,diagnostic_flags.MODEL_FINGERPRINT,"CURRENTLY_REVISED_DIAGNOSTIC_FLAGS",DIAGNOSTIC_HISTORY_MODE,diagnostic_flags.EVIDENCE_SCHEMA_VERSION,source_fingerprint,economic,physical,len(endpoint_rows),len(evaluation_rows),applied_at)
     conn.execute(f"INSERT INTO {diagnostic_v1.PACKAGE_TABLE} VALUES({','.join('?' for _ in values)})",values)
     conn.executemany(f"INSERT INTO {diagnostic_v1.ENDPOINT_TABLE} VALUES({','.join('?' for _ in range(12))})",endpoint_rows)
     conn.executemany(f"INSERT INTO {diagnostic_v1.EVALUATION_TABLE} VALUES({','.join('?' for _ in range(26))})",evaluation_rows)

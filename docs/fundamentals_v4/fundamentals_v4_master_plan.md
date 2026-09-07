@@ -272,3 +272,9 @@ Phase 9C status: `PURE_PARALLEL_V2_ENGINES_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`. T
 Phase 9D status: `PARALLEL_V2_PERSISTENCE_REHEARSED_NOT_PRODUCTION_ACTIVE`. Additive persistence, a coherent package manifest, explicit V1/V2 readers, WAL-safe snapshots, rollback injection, temporary V2 reports and a production-shaped copy rehearsal are implemented. No production database, default reader, Scheduler setting or production report was changed.
 
 Phase 9E remains separately authorized. It covers production backup, additive migration, V2 backfill, mandatory deep/no-op reconciliation, coherent default-reader and Snapshot activation, smoke tests and rollback. Follow `fundamentals_v4_operating_income_v2_phase9e_runbook.md`.
+
+Phase 9G status: `IMPLEMENTED_AND_REHEARSED_NOT_PRODUCTION_DEPLOYED`. The
+Diagnostic Flags V2 Working Capital endpoint wiring and native Operating Income
+engine are corrected. Full history, V1/V2 WC equivalence, unaffected layers,
+copy persistence, idempotency, rollback, readers, and temporary snapshots pass.
+The active production package remains the pre-9G Phase 9E package.

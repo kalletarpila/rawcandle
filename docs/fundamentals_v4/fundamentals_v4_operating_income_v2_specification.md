@@ -1,6 +1,6 @@
 # Fundamentals V4 Operating-Income V2 Specification
 
-Status: `PURE_ENGINES_IMPLEMENTED_NOT_PRODUCTION_ACTIVE`
+Status: `ACTIVE_PRE_PHASE9G_PACKAGE; PHASE9G_CORRECTION_REHEARSED_NOT_DEPLOYED`
 
 Model family: `OPERATING_INCOME_MODEL_FAMILY_V2`
 
@@ -71,3 +71,13 @@ Every calculated V2 layer has a distinct deterministic fingerprint under one fam
 | Company Snapshot V2 | `7bfa88aa64f3897ea610894a1b7a3613abfc7881d9b9ea8e26912ef0426e7ee8` |
 
 Phase 9C contains no schema, persistence, backfill, production reader, pipeline, Scheduler UI or production report activation. Those remain Phase 9D work requiring separate authorization.
+
+## Phase 9G diagnostic correction
+
+Phase 9G replaces the internal V1 EBIT-named diagnostic adapter with a native
+Operating Income V2 engine and wires endpoint Working Capital observations from
+`v4_quarter_financials`. The fields are joined by exact endpoint
+`quarter_id`; they are not TTM values. The corrected Diagnostic fingerprint
+is `7f6291bf04e69cf22944ea3f81e07b284ccffd8edbd0edea4190ddc79050b031`.
+The corrected package is rehearsed but not production-deployed. See
+`fundamentals_v4_diagnostic_flags_v2_phase9g.md`.

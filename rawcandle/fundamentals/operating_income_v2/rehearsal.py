@@ -89,9 +89,12 @@ def _write_json(path: Path, value: Any) -> None:
 def _load_ttm(canonical: Path) -> list[dict[str, Any]]:
     with _ro(canonical) as connection:
         return [dict(row) for row in connection.execute("""
-            SELECT t.*,s.current_ticker ticker,q.source_availability_date AS quarter_source_available_date
+            SELECT t.*,s.current_ticker ticker,q.source_availability_date AS quarter_source_available_date,
+              f.accounts_receivable,f.inventory,f.accounts_payable,
+              f.deferred_revenue,f.total_assets
             FROM v4_ttm_values t JOIN security s USING(security_id)
             JOIN v4_quarter q ON q.quarter_id=t.endpoint_quarter_id
+            LEFT JOIN v4_quarter_financials f ON f.quarter_id=t.endpoint_quarter_id
             WHERE t.model_version='V4_TTM_EBIT_FIRST_V1'
             ORDER BY t.company_id,t.endpoint_fiscal_year,
               CASE t.endpoint_fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 ELSE 4 END,t.ttm_id
@@ -132,6 +135,52 @@ def _load_lifecycle(analysis: Path) -> dict[tuple[int, int], dict[str, Any]]:
 def _load_valuations(analysis: Path) -> list[dict[str, Any]]:
     with _ro(analysis) as connection:
         return [dict(row) for row in connection.execute("SELECT * FROM valuation_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", (VALUATION_V1_FINGERPRINT,))]
+
+
+def _diagnostic_endpoint(
+    source: Mapping[str, Any],
+    *,
+    valuation_result: valuation.ValuationResult | None,
+    trajectory: float | None,
+    applicability_classification: str | None,
+    applicability_reason: str | None,
+) -> diagnostic_flags.DiagnosticEndpoint:
+    company_id = int(source["company_id"])
+    quarter_id = int(source["endpoint_quarter_id"])
+    fiscal_year = int(source["endpoint_fiscal_year"])
+    fiscal_quarter = str(source["endpoint_fiscal_quarter"])
+    return diagnostic_flags.DiagnosticEndpoint(
+        company_id=company_id,
+        quarter_id=quarter_id,
+        fiscal_year=fiscal_year,
+        fiscal_quarter=fiscal_quarter,
+        fiscal_sequence=fiscal_year * 4 + int(fiscal_quarter[1]),
+        period_end=str(source["period_end"]),
+        source_available_date=source["quarter_source_available_date"],
+        ttm_available_date=source["ttm_source_available_date"],
+        valuation_available_date=source["ttm_source_available_date"],
+        ttm_status="TTM_READY" if source.get("core_ttm_ready") else "TTM_NOT_READY",
+        revenue=source.get("ttm_revenue"),
+        operating_income=source.get("ttm_operating_income"),
+        common_earnings=source.get("ttm_net_income_common"),
+        operating_cashflow=source.get("ttm_operating_cashflow"),
+        capex=source.get("ttm_capex"),
+        cash=source.get("cash"),
+        total_debt=source.get("total_debt"),
+        accounts_receivable=source.get("accounts_receivable"),
+        inventory=source.get("inventory"),
+        accounts_payable=source.get("accounts_payable"),
+        deferred_revenue=source.get("deferred_revenue"),
+        total_assets=source.get("total_assets"),
+        trajectory=trajectory,
+        valuation_status=valuation_result.valuation_status if valuation_result else None,
+        valuation_reason=valuation_result.reason_code if valuation_result else None,
+        applicability_classification=applicability_classification,
+        applicability_reason=applicability_reason,
+        operating_income_yield=valuation_result.operating_income_yield if valuation_result else None,
+        fcf_yield=valuation_result.fcf_yield if valuation_result else None,
+        earnings_yield=valuation_result.earnings_yield if valuation_result else None,
+    )
 
 
 def _fresh(rows: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
@@ -271,6 +320,7 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
     relative=relative_position.calculate_snapshot(relative_observations,snapshot_date=AS_OF.isoformat(),freshness_days=FRESHNESS_DAYS,classification_fingerprint=fingerprint(classes),taxonomy_fingerprint=fingerprint({k:[asdict(x) for x in v] for k,v in memberships.items()}))
 
     diagnostics_full=[]
+    diagnostic_source_rows=[]
     sequence_index = {
         (int(row["company_id"]), int(row["endpoint_fiscal_year"])*4+int(str(row["endpoint_fiscal_quarter"])[1])): row
         for row in rows
@@ -284,17 +334,25 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
             traj=next((item["component_score"] for item in scored["components"] if item["component_name"]=="FUNDAMENTAL_TRAJECTORY"),None)
             valuation_source = valuation_v1_index.get(source_key, {})
             application=valuation.classify_applicability(valuation_source.get("sector"), valuation_source.get("industry"))
-            diagnostic_classification="SUPPORTED" if application.supported is True else "NOT_APPLICABLE" if application.supported is False else None
-            seq=int(source["endpoint_fiscal_year"])*4+int(str(source["endpoint_fiscal_quarter"])[1])
-            return diagnostic_flags.DiagnosticEndpoint(source_key[0],int(source["endpoint_quarter_id"]),int(source["endpoint_fiscal_year"]),str(source["endpoint_fiscal_quarter"]),seq,str(source["period_end"]),source["ttm_source_available_date"],source["ttm_source_available_date"],source["ttm_source_available_date"],"TTM_READY" if source.get("core_ttm_ready") else "TTM_NOT_READY",source.get("ttm_revenue"),source.get("ttm_operating_income"),source.get("ttm_net_income_common"),source.get("ttm_operating_cashflow"),source.get("ttm_capex"),source.get("cash"),source.get("total_debt"),trajectory=traj,valuation_status=val.valuation_status if val else None,valuation_reason=val.reason_code if val else None,applicability_classification=diagnostic_classification,applicability_reason=application.reason_code,operating_income_yield=val.operating_income_yield if val else None,fcf_yield=val.fcf_yield if val else None,earnings_yield=val.earnings_yield if val else None)
+            diagnostic_classification="SUPPORTED" if application.supported is True else "NOT_APPLICABLE" if application.supported is False else "NOT_READY"
+            return _diagnostic_endpoint(
+                source,
+                valuation_result=val,
+                trajectory=traj,
+                applicability_classification=diagnostic_classification,
+                applicability_reason=application.reason_code,
+            )
         current_endpoint=endpoint(row); prior_endpoint=endpoint(prior) if prior else None
+        diagnostic_source_rows.append(asdict(current_endpoint))
         consecutive=bool(prior and str(prior["period_end"])<str(row["period_end"]) and prior.get("ttm_source_available_date") and row.get("ttm_source_available_date") and str(prior["ttm_source_available_date"])<=str(row["ttm_source_available_date"]))
-        for result in diagnostic_flags.evaluate_diagnostic_flags(diagnostic_flags.DiagnosticInput(current_endpoint,prior_endpoint,consecutive)):
+        canonical_consecutive=bool(prior and str(prior["period_end"])<str(row["period_end"]) and prior.get("quarter_source_available_date") and row.get("quarter_source_available_date") and str(prior["quarter_source_available_date"])<=str(row["quarter_source_available_date"]))
+        diagnostic_input=diagnostic_flags.DiagnosticInput(current_endpoint,prior_endpoint,consecutive,canonical_consecutive)
+        for result in diagnostic_flags.evaluate_diagnostic_flags(diagnostic_input):
             diagnostics_full.append({"company_id":key[0],"quarter_id":key[1],"ticker":row["ticker"],"flag_name":result.flag_name,"status":result.status.value,"reason_code":result.reason_code,"triggered":result.triggered,"comparison_quarter_id":result.comparison_quarter_id,"effective_available_date":result.effective_available_date,"evidence":{item.name:item.value for item in result.evidence},"model_version":result.model_version,"model_fingerprint":result.model_fingerprint})
     diagnostics=[row for row in diagnostics_full if (row["company_id"],row["quarter_id"]) in fresh_keys]
 
     snapshot.validate_model_bundle({layer:snapshot.ModelIdentity(*identity) for layer,identity in snapshot.MODEL_CONTRACT["required_models"].items()})
-    outputs={"rows":rows,"fresh":fresh,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_v1_rows":valuation_v1,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
+    outputs={"rows":rows,"fresh":fresh,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_v1_rows":valuation_v1,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostic_source_fingerprint":fingerprint(diagnostic_source_rows),"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
     outputs["fingerprints"]={"score":fingerprint(v2_scores),"lifecycle":fingerprint([asdict(life_v2[key]) for key in sorted(life_v2)]),"valuation":fingerprint([valuation_v2[key].to_dict() for key in sorted(valuation_v2)]),"delta":fingerprint(delta_full),"relative":relative.result_fingerprint,"diagnostic":fingerprint(diagnostics_full)}
     return outputs
 

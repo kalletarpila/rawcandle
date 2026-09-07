@@ -6,7 +6,6 @@ from typing import Any
 
 from rawcandle.fundamentals.delta.engine import MODEL_FINGERPRINT as DELTA_V1
 from rawcandle.fundamentals.diagnostic_flags.engine import MODEL_FINGERPRINT as DIAGNOSTIC_V1
-from rawcandle.fundamentals.diagnostic_flags.persistence import BOOLEAN_FIELDS as V1_BOOLEAN_FIELDS
 from rawcandle.fundamentals.lifecycle.engine import MODEL_FINGERPRINT as LIFECYCLE_V1
 from rawcandle.fundamentals.relative_position.engine import MODEL_FINGERPRINT as RELATIVE_V1
 from rawcandle.fundamentals.score.engine import MODEL_FINGERPRINT as SCORE_V1
@@ -16,12 +15,13 @@ from . import contract, delta, diagnostic_flags, lifecycle, relative_position, s
 from .persistence import DIAGNOSTIC_HISTORY_MODE, EVIDENCE_FIELD_TABLE, HISTORY_MODE, MANIFEST_TABLE, MODEL_MAP, PACKAGE_FINGERPRINT
 
 
+PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT = "d5434e139b68ee8af44dffce34cb9225538f0badb61d5d1074fb976a4de3185d"
 KNOWN = {
     "score": {SCORE_V1, score.MODEL_FINGERPRINT},
     "lifecycle": {LIFECYCLE_V1, lifecycle.MODEL_FINGERPRINT},
     "valuation": {VALUATION_V1, valuation.MODEL_FINGERPRINT},
     "delta": {DELTA_V1, delta.MODEL_FINGERPRINT},
-    "diagnostic": {DIAGNOSTIC_V1, diagnostic_flags.MODEL_FINGERPRINT},
+    "diagnostic": {DIAGNOSTIC_V1, PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT, diagnostic_flags.MODEL_FINGERPRINT},
     "relative": {RELATIVE_V1, relative_position.MODEL_FINGERPRINT},
 }
 
@@ -102,7 +102,7 @@ class ParallelModelRepository:
         return endpoints
 
     def _diagnostic_field_maps(self, model_fingerprint: str) -> dict[str, list[dict[str, Any]]]:
-        if model_fingerprint != diagnostic_flags.MODEL_FINGERPRINT:
+        if model_fingerprint == DIAGNOSTIC_V1:
             return {}
         output: dict[str, list[dict[str, Any]]] = {}
         for row in _rows(
@@ -120,7 +120,7 @@ class ParallelModelRepository:
         model_fingerprint: str,
         field_maps: dict[str, list[dict[str, Any]]],
     ) -> None:
-        if model_fingerprint != diagnostic_flags.MODEL_FINGERPRINT:
+        if model_fingerprint == DIAGNOSTIC_V1:
             return
         for item in evaluations:
             flag = str(item["flag_name"])
@@ -128,10 +128,7 @@ class ParallelModelRepository:
                 field["field_name"]: item[f"n{field['slot_number']:02d}"]
                 for field in field_maps.get(flag, [])
             }
-            boolean_fields = tuple(
-                diagnostic_flags._evidence_name(name)
-                for name in V1_BOOLEAN_FIELDS.get(flag, ())
-            )
+            boolean_fields = diagnostic_flags.BOOLEAN_FIELDS.get(flag, ())
             evidence.update(
                 (name, bool(int(item["bool_mask"]) & (1 << position)))
                 for position, name in enumerate(boolean_fields)
@@ -176,15 +173,18 @@ class ParallelModelRepository:
         _require("relative",model_fingerprint)
         return _rows(self.conn,"SELECT r.* FROM relative_position_result r JOIN relative_position_active_snapshot a USING(snapshot_id) WHERE a.model_fingerprint=? AND r.model_fingerprint=? AND r.company_id=? ORDER BY r.measure,r.peer_scope,r.peer_group_id",(model_fingerprint,model_fingerprint,company_id))
 
-    def assert_v2_bundle(self) -> None:
+    def assert_v2_bundle(
+        self, model_map: dict[str, tuple[str, str]] | None = None
+    ) -> None:
+        expected_map = MODEL_MAP if model_map is None else model_map
         manifest=self.package_manifest()
         if manifest["family_fingerprint"] != contract.FAMILY_FINGERPRINT:
             raise ValueError("OPERATING_INCOME_V2_PACKAGE_FAMILY_MISMATCH")
-        if manifest["persistence_fingerprint"] != PACKAGE_FINGERPRINT:
+        if model_map is None and manifest["persistence_fingerprint"] != PACKAGE_FINGERPRINT:
             raise ValueError("OPERATING_INCOME_V2_PACKAGE_PERSISTENCE_MISMATCH")
-        if json.loads(manifest["model_manifest_json"]) != {key: list(value) for key,value in MODEL_MAP.items()}:
+        if json.loads(manifest["model_manifest_json"]) != {key: list(value) for key,value in expected_map.items()}:
             raise ValueError("OPERATING_INCOME_V2_PACKAGE_MODEL_MANIFEST_MISMATCH")
-        required=(("score_result",score.MODEL_FINGERPRINT),("lifecycle_revised_result",lifecycle.MODEL_FINGERPRINT),("valuation_revised_result",valuation.MODEL_FINGERPRINT),("fundamental_delta_package",delta.MODEL_FINGERPRINT),("diagnostic_flag_package",diagnostic_flags.MODEL_FINGERPRINT),("relative_position_snapshot",relative_position.MODEL_FINGERPRINT))
+        required=(("score_result",expected_map["score"][1]),("lifecycle_revised_result",expected_map["lifecycle"][1]),("valuation_revised_result",expected_map["valuation"][1]),("fundamental_delta_package",expected_map["delta"][1]),("diagnostic_flag_package",expected_map["diagnostic_flags"][1]),("relative_position_snapshot",expected_map["relative_position"][1]))
         missing=[name for name,fp in required if not self.conn.execute(f"SELECT 1 FROM {name} WHERE model_fingerprint=? LIMIT 1",(fp,)).fetchone()]
         if missing: raise RuntimeError("OPERATING_INCOME_V2_UPSTREAM_LAYER_MISSING:"+",".join(missing))
 
@@ -193,17 +193,18 @@ class ActiveModelRepository:
     """Default all-layer reader; activation is resolved once and fails closed."""
 
     def __init__(self, conn: sqlite3.Connection) -> None:
-        from .activation import assert_v2_active
+        from .activation import active_model_manifest, assert_v2_active
 
         assert_v2_active(conn)
         self._repository = ParallelModelRepository(conn)
+        manifest = active_model_manifest(conn)
         self.model_fingerprints = {
-            "score": score.MODEL_FINGERPRINT,
-            "lifecycle": lifecycle.MODEL_FINGERPRINT,
-            "valuation": valuation.MODEL_FINGERPRINT,
-            "delta": delta.MODEL_FINGERPRINT,
-            "relative": relative_position.MODEL_FINGERPRINT,
-            "diagnostic": diagnostic_flags.MODEL_FINGERPRINT,
+            "score": manifest["score"][1],
+            "lifecycle": manifest["lifecycle"][1],
+            "valuation": manifest["valuation"][1],
+            "delta": manifest["delta"][1],
+            "relative": manifest["relative_position"][1],
+            "diagnostic": manifest["diagnostic_flags"][1],
         }
 
     def score_current(self, company_id: int) -> dict[str, Any] | None:

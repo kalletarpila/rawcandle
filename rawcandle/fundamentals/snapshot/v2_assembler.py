@@ -9,18 +9,15 @@ from typing import Any, Mapping
 
 from rawcandle.fundamentals.operating_income_v2 import (
     contract,
-    delta,
-    diagnostic_flags,
-    lifecycle,
-    relative_position,
     score,
     valuation,
 )
-from rawcandle.fundamentals.operating_income_v2.activation import assert_v2_active
+from rawcandle.fundamentals.operating_income_v2.activation import (
+    active_model_manifest,
+    assert_v2_active,
+)
 from rawcandle.fundamentals.operating_income_v2.persistence import (
     HISTORY_MODE,
-    MODEL_MAP,
-    PACKAGE_FINGERPRINT,
 )
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
 from rawcandle.fundamentals.snapshot import assembler as v1
@@ -289,8 +286,8 @@ def _three_point_multiples(history: list[dict[str, Any]], current: Mapping[str, 
     return {"contexts": (current_context, filing("LATEST_FILING", latest), filing("PREVIOUS_FILING_Q_MINUS_1", previous))}
 
 
-def _delta(analysis: sqlite3.Connection, company_id: int, fiscal_year: int, fiscal_quarter: str) -> dict[str, Any] | None:
-    package = analysis.execute("SELECT package_id FROM fundamental_delta_package WHERE model_fingerprint=? AND history_mode=?", (delta.MODEL_FINGERPRINT, HISTORY_MODE)).fetchone()
+def _delta(analysis: sqlite3.Connection, company_id: int, fiscal_year: int, fiscal_quarter: str, model_fingerprint: str) -> dict[str, Any] | None:
+    package = analysis.execute("SELECT package_id FROM fundamental_delta_package WHERE model_fingerprint=? AND history_mode=?", (model_fingerprint, HISTORY_MODE)).fetchone()
     if not package:
         return None
     row = analysis.execute(
@@ -313,8 +310,8 @@ def _delta(analysis: sqlite3.Connection, company_id: int, fiscal_year: int, fisc
     return {"total": total, "components": components}
 
 
-def _diagnostic(repository: ParallelModelRepository, company_id: int, fiscal_year: int, fiscal_quarter: str) -> dict[str, Any] | None:
-    row = repository.diagnostic_quarter(company_id, fiscal_year, int(fiscal_quarter[1]), model_fingerprint=diagnostic_flags.MODEL_FINGERPRINT)
+def _diagnostic(repository: ParallelModelRepository, company_id: int, fiscal_year: int, fiscal_quarter: str, model_fingerprint: str) -> dict[str, Any] | None:
+    row = repository.diagnostic_quarter(company_id, fiscal_year, int(fiscal_quarter[1]), model_fingerprint=model_fingerprint)
     if not row:
         return None
     output = dict(row)
@@ -325,10 +322,10 @@ def _diagnostic(repository: ParallelModelRepository, company_id: int, fiscal_yea
     return output
 
 
-def _relative(analysis: sqlite3.Connection, company_id: int, report_date: str) -> dict[str, Any]:
+def _relative(analysis: sqlite3.Connection, company_id: int, report_date: str, model_fingerprint: str) -> dict[str, Any]:
     metadata = analysis.execute(
         "SELECT s.* FROM relative_position_active_snapshot a JOIN relative_position_snapshot s USING(snapshot_id) WHERE a.model_fingerprint=?",
-        (relative_position.MODEL_FINGERPRINT,),
+        (model_fingerprint,),
     ).fetchone()
     if not metadata or str(metadata["snapshot_date"]) > report_date:
         return {"available": False, "reason": "RELATIVE_SNAPSHOT_MISSING_OR_FUTURE", "metadata": dict(metadata) if metadata else None, "rows": [], "coverage": []}
@@ -350,15 +347,15 @@ def _relative(analysis: sqlite3.Connection, company_id: int, report_date: str) -
     return {"available": True, "reason": None, "metadata": dict(metadata), "rows": rows, "coverage": coverage}
 
 
-def _source_state(analysis: sqlite3.Connection, base: Mapping[str, Any]) -> dict[str, Any]:
+def _source_state(analysis: sqlite3.Connection, base: Mapping[str, Any], model_map: Mapping[str, tuple[str, str]], package_fingerprint: str) -> dict[str, Any]:
     state = dict(base)
-    state["score"] = list(analysis.execute("SELECT COUNT(*),MAX(generated_at_utc),MAX(run_id) FROM score_result WHERE model_fingerprint=?", (score.MODEL_FINGERPRINT,)).fetchone())
-    state["lifecycle"] = list(analysis.execute("SELECT COUNT(*),MAX(generated_at_utc) FROM lifecycle_revised_result WHERE model_fingerprint=?", (lifecycle.MODEL_FINGERPRINT,)).fetchone())
-    state["valuation"] = list(analysis.execute("SELECT COUNT(*),MAX(calculated_at_utc) FROM valuation_revised_result WHERE model_fingerprint=?", (valuation.MODEL_FINGERPRINT,)).fetchone())
-    state["delta"] = list(analysis.execute("SELECT fundamental_source_fingerprint,fundamental_result_fingerprint,lifecycle_source_fingerprint,lifecycle_result_fingerprint,valuation_source_fingerprint,valuation_result_fingerprint,economic_package_fingerprint,physical_content_fingerprint,total_row_count,component_row_count FROM fundamental_delta_package WHERE model_fingerprint=?", (delta.MODEL_FINGERPRINT,)).fetchone())
-    state["relative"] = list(analysis.execute("SELECT s.snapshot_id,s.snapshot_date,s.calculation_source_fingerprint,s.source_content_fingerprint,s.result_fingerprint FROM relative_position_active_snapshot a JOIN relative_position_snapshot s USING(snapshot_id) WHERE a.model_fingerprint=?", (relative_position.MODEL_FINGERPRINT,)).fetchone())
-    state["diagnostic"] = list(analysis.execute("SELECT source_fingerprint,economic_result_fingerprint,physical_content_fingerprint,endpoint_count,evaluation_count FROM diagnostic_flag_package WHERE model_fingerprint=?", (diagnostic_flags.MODEL_FINGERPRINT,)).fetchone())
-    state["active_package"] = [contract.FAMILY_FINGERPRINT, PACKAGE_FINGERPRINT]
+    state["score"] = list(analysis.execute("SELECT COUNT(*),MAX(generated_at_utc),MAX(run_id) FROM score_result WHERE model_fingerprint=?", (model_map["score"][1],)).fetchone())
+    state["lifecycle"] = list(analysis.execute("SELECT COUNT(*),MAX(generated_at_utc) FROM lifecycle_revised_result WHERE model_fingerprint=?", (model_map["lifecycle"][1],)).fetchone())
+    state["valuation"] = list(analysis.execute("SELECT COUNT(*),MAX(calculated_at_utc) FROM valuation_revised_result WHERE model_fingerprint=?", (model_map["valuation"][1],)).fetchone())
+    state["delta"] = list(analysis.execute("SELECT fundamental_source_fingerprint,fundamental_result_fingerprint,lifecycle_source_fingerprint,lifecycle_result_fingerprint,valuation_source_fingerprint,valuation_result_fingerprint,economic_package_fingerprint,physical_content_fingerprint,total_row_count,component_row_count FROM fundamental_delta_package WHERE model_fingerprint=?", (model_map["delta"][1],)).fetchone())
+    state["relative"] = list(analysis.execute("SELECT s.snapshot_id,s.snapshot_date,s.calculation_source_fingerprint,s.source_content_fingerprint,s.result_fingerprint FROM relative_position_active_snapshot a JOIN relative_position_snapshot s USING(snapshot_id) WHERE a.model_fingerprint=?", (model_map["relative_position"][1],)).fetchone())
+    state["diagnostic"] = list(analysis.execute("SELECT source_fingerprint,economic_result_fingerprint,physical_content_fingerprint,endpoint_count,evaluation_count FROM diagnostic_flag_package WHERE model_fingerprint=?", (model_map["diagnostic_flags"][1],)).fetchone())
+    state["active_package"] = [contract.FAMILY_FINGERPRINT, package_fingerprint]
     return state
 
 
@@ -366,10 +363,16 @@ def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report
     base = v1.assemble_company_snapshot(paths, ticker=ticker, report_date=report_date)
     with _readonly(paths.analysis_db) as analysis, _readonly(paths.market_db) as market:
         assert_v2_active(analysis)
+        model_map = active_model_manifest(analysis)
+        package_fingerprint = str(
+            analysis.execute(
+                "SELECT persistence_fingerprint FROM fundamentals_active_model_family WHERE singleton=1"
+            ).fetchone()[0]
+        )
         repository = ParallelModelRepository(analysis)
         company_id = int(base["identity"]["company_id"])
-        score_rows = {int(row["quarter_id"]): _component_map(row) for row in repository.score_history(company_id, model_fingerprint=score.MODEL_FINGERPRINT)}
-        value_rows = {int(row["quarter_id"]): dict(row) for row in repository.valuation_history(company_id, model_fingerprint=valuation.MODEL_FINGERPRINT)}
+        score_rows = {int(row["quarter_id"]): _component_map(row) for row in repository.score_history(company_id, model_fingerprint=model_map["score"][1])}
+        value_rows = {int(row["quarter_id"]): dict(row) for row in repository.valuation_history(company_id, model_fingerprint=model_map["valuation"][1])}
         canonical_by_sequence = {slot["fiscal_sequence"]: slot.get("ttm") for slot in base["history"] if slot.get("ttm")}
         for slot in base["history"]:
             qid = slot.get("quarter_id")
@@ -381,13 +384,13 @@ def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report
 
         anchor = base["anchor"]
         canonical_anchor = base["history"][-1]["ttm"]
-        lifecycle_rows = [row for row in repository.lifecycle_history(company_id, model_fingerprint=lifecycle.MODEL_FINGERPRINT) if not row.get("source_available_date") or row["source_available_date"] <= report_date]
+        lifecycle_rows = [row for row in repository.lifecycle_history(company_id, model_fingerprint=model_map["lifecycle"][1]) if not row.get("source_available_date") or row["source_available_date"] <= report_date]
         base["lifecycle"] = v1.lifecycle_presentation(lifecycle_rows, anchor_year=anchor["fiscal_year"], anchor_quarter=anchor["fiscal_quarter"])
-        base["delta"] = _delta(analysis, company_id, anchor["fiscal_year"], anchor["fiscal_quarter"])
+        base["delta"] = _delta(analysis, company_id, anchor["fiscal_year"], anchor["fiscal_quarter"], model_map["delta"][1])
         base["current_price_valuation"] = _current_price_valuation(market, ticker=base["identity"]["ticker"], report_date=report_date, anchor=canonical_anchor, classification=base["identity"])
         base["valuation_multiples"] = _three_point_multiples(base["history"], base["current_price_valuation"])
-        base["relative_position"] = _relative(analysis, company_id, report_date)
-        base["diagnostic"] = _diagnostic(repository, company_id, anchor["fiscal_year"], anchor["fiscal_quarter"])
+        base["relative_position"] = _relative(analysis, company_id, report_date, model_map["relative_position"][1])
+        base["diagnostic"] = _diagnostic(repository, company_id, anchor["fiscal_year"], anchor["fiscal_quarter"], model_map["diagnostic_flags"][1])
         base["diagnostic_counts"] = {status: 0 for status in ("EVALUATED_FLAGGED", "EVALUATED_CLEAR", "FLAG_NOT_READY", "FLAG_NOT_APPLICABLE")}
         for item in (base["diagnostic"] or {}).get("evaluations", []):
             base["diagnostic_counts"][item["status"]] = base["diagnostic_counts"].get(item["status"], 0) + 1
@@ -402,11 +405,11 @@ def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report
         base["valuation_four_observation_average"] = v1.four_observation_average(filing_values)
         base["valuation_four_observation_count"] = sum(value is not None for value in filing_values)
         base["component_contract"] = {name: score.MODEL_CONTRACT["components"][name]["maximum"] for name in contract.COMPONENTS}
-        base["model_fingerprints"] = {name: identity[1] for name, identity in MODEL_MAP.items()}
+        base["model_fingerprints"] = {name: identity[1] for name, identity in model_map.items()}
         base["model_fingerprints"]["family"] = contract.FAMILY_FINGERPRINT
         base["report_contract"] = REPORT_CONTRACT
         base["report_presentation_fingerprint"] = REPORT_PRESENTATION_FINGERPRINT
-        base["source_state"] = _source_state(analysis, base["source_state"])
+        base["source_state"] = _source_state(analysis, base["source_state"], model_map, package_fingerprint)
         base["source_state_fingerprint"] = hashlib.sha256(json.dumps(base["source_state"], sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
         base["reconciliation"] = []
         for slot in base["history"]:

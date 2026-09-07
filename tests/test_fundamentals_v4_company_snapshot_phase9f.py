@@ -7,8 +7,6 @@ from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
 from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_CONTRACT
 from rawcandle.fundamentals.snapshot.v2_assembler import REPORT_PRESENTATION_FINGERPRINT
 from rawcandle.fundamentals.snapshot.v2_assembler import _multiples_context
-from rawcandle.fundamentals.operating_income_v2.persistence import PACKAGE_FINGERPRINT
-from rawcandle.fundamentals.operating_income_v2.snapshot import MODEL_FINGERPRINT as SNAPSHOT_FINGERPRINT
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,10 +98,13 @@ def test_v2_report_current_and_filing_valuations_are_distinct(nvda_report: tuple
     assert "Indicative current-price Valuation Score" in report
 
 
-def test_presentation_identity_is_separate_from_unchanged_economic_bundle() -> None:
+def test_presentation_identity_is_separate_from_active_economic_bundle(
+    nvda_report: tuple[str, dict],
+) -> None:
+    _, snapshot = nvda_report
     assert REPORT_PRESENTATION_FINGERPRINT == "bc4b4a3b355063697f1fe3182a105342d804a59bb41a86ec40ef6fe4364abee2"
-    assert SNAPSHOT_FINGERPRINT == "7bfa88aa64f3897ea610894a1b7a3613abfc7881d9b9ea8e26912ef0426e7ee8"
-    assert PACKAGE_FINGERPRINT == "cf4ce8134c362399ea94667e4659e27a32b1e8b9de199eaaba32c91b450a51bc"
+    assert snapshot["model_fingerprints"]["snapshot"] == "7bfa88aa64f3897ea610894a1b7a3613abfc7881d9b9ea8e26912ef0426e7ee8"
+    assert snapshot["source_state"]["active_package"][1] == "cf4ce8134c362399ea94667e4659e27a32b1e8b9de199eaaba32c91b450a51bc"
 
 
 @pytest.mark.parametrize(

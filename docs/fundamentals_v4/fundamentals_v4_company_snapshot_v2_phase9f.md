@@ -54,6 +54,13 @@ No Diagnostic Flags V2 source query reads `ebit` or `ttm_ebit`, and no EBIT/EBIT
 
 The corrective phase should replace this adapter with a native Operating-Income implementation and prove identical intended behavior before introducing any newly fingerprinted economic correction.
 
+## Phase 9G follow-up
+
+Both findings are corrected and fully rehearsed in Phase 9G. They remain in
+the currently deployed pre-9G package until a separately authorized deployment.
+Active readers resolve that package from its persisted manifest, so staged
+fingerprints do not interrupt the current report service.
+
 ## Safety and artifacts
 
 The Phase 9F audit opens production databases with URI `mode=ro`, `PRAGMA query_only=ON`, and WAL-aware reads. It records database hashes, schema hashes, key row counts, quick checks, foreign-key checks, and WAL/SHM state before and after. Verification reports are written only below `temp/fundamentals_v4_company_snapshot_phase9f/`.
