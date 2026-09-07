@@ -278,7 +278,7 @@ def _smoke_reports(calculated: Mapping[str, Any], output: Path) -> dict[str, Any
         markdown = Path(generated["output_path"]).read_text(encoding="utf-8")
         required = (
             "### Kaikki kahdeksan statusta", "Non-Operating Earnings Gap",
-            "Reported Common Earnings", "10.00%",
+            "Reported Common Earnings", "≥ 10%",
         )
         if len(generated["snapshot"]["diagnostic"]["evaluations"]) != 8 or not all(value in markdown for value in required):
             raise RuntimeError(f"PHASE10C_SNAPSHOT_SMOKE_FAILED:{ticker}")
