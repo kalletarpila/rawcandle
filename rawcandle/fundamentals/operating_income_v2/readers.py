@@ -194,13 +194,20 @@ class ParallelModelRepository:
         return _rows(self.conn,"SELECT r.* FROM relative_position_result r JOIN relative_position_active_snapshot a USING(snapshot_id) WHERE a.model_fingerprint=? AND r.model_fingerprint=? AND r.company_id=? ORDER BY r.measure,r.peer_scope,r.peer_group_id",(model_fingerprint,model_fingerprint,company_id))
 
     def assert_v2_bundle(
-        self, model_map: dict[str, tuple[str, str]] | None = None
+        self,
+        model_map: dict[str, tuple[str, str]] | None = None,
+        *,
+        persistence_fingerprint: str | None = None,
     ) -> None:
         expected_map = MODEL_MAP if model_map is None else model_map
-        manifest=self.package_manifest()
+        manifest = self.package_manifest(persistence_fingerprint)
         if manifest["family_fingerprint"] != contract.FAMILY_FINGERPRINT:
             raise ValueError("OPERATING_INCOME_V2_PACKAGE_FAMILY_MISMATCH")
-        if model_map is None and manifest["persistence_fingerprint"] != PACKAGE_FINGERPRINT:
+        if (
+            model_map is None
+            and persistence_fingerprint is None
+            and manifest["persistence_fingerprint"] != PACKAGE_FINGERPRINT
+        ):
             raise ValueError("OPERATING_INCOME_V2_PACKAGE_PERSISTENCE_MISMATCH")
         if json.loads(manifest["model_manifest_json"]) != {key: list(value) for key,value in expected_map.items()}:
             raise ValueError("OPERATING_INCOME_V2_PACKAGE_MODEL_MANIFEST_MISMATCH")

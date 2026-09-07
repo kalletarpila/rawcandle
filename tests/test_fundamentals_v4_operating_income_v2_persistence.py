@@ -11,8 +11,8 @@ from rawcandle.fundamentals.lifecycle import revised_history
 from rawcandle.fundamentals.operating_income_v2 import delta, diagnostic_flags, lifecycle
 from rawcandle.fundamentals.operating_income_v2 import relative_position, score, valuation
 from rawcandle.fundamentals.operating_income_v2.persistence import (
-    MANIFEST_HISTORY_TABLE, MANIFEST_TABLE, apply_package, ensure_schema, migrate_copy,
-    physical_fingerprint,
+    MANIFEST_HISTORY_TABLE, MANIFEST_TABLE, MODEL_MAP, apply_package, ensure_schema,
+    migrate_copy, physical_fingerprint,
 )
 from rawcandle.fundamentals.operating_income_v2.phase9d import deep_reconcile
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
@@ -210,7 +210,9 @@ def test_integrity_comparison_allows_only_byte_identical_shm_mtime() -> None:
     assert not compare_production_integrity(before, after)["content_identical"]
 
 
-def test_activation_is_atomic_coherent_and_reversible(database: sqlite3.Connection) -> None:
+def test_activation_is_atomic_coherent_and_reversible(
+    database: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     with pytest.raises(LookupError, match="NOT_ACTIVE"):
         assert_v2_active(database)
     apply_package(database, _calculated(), applied_at="2026-09-01T00:00:00Z")
@@ -232,6 +234,29 @@ def test_activation_is_atomic_coherent_and_reversible(database: sqlite3.Connecti
     assert active.diagnostic_current(1)["evaluations"]
     assert isinstance(active.relative_current(1), list)
     assert ParallelModelRepository(database).score_current(1, model_fingerprint=SCORE_V1)
+
+    archived = "archived-package"
+    database.execute(
+        f"INSERT INTO {MANIFEST_HISTORY_TABLE} "
+        "SELECT ?,family_fingerprint,family_version,persistence_version,model_manifest_json,"
+        "economic_result_fingerprint,physical_content_fingerprint,status,applied_at_utc "
+        f"FROM {MANIFEST_TABLE}",
+        (archived,),
+    )
+    monkeypatch.setitem(
+        __import__(
+            "rawcandle.fundamentals.operating_income_v2.activation",
+            fromlist=["KNOWN_PACKAGES"],
+        ).KNOWN_PACKAGES,
+        archived,
+        MODEL_MAP,
+    )
+    database.execute(
+        "UPDATE fundamentals_active_model_family SET persistence_fingerprint=?",
+        (archived,),
+    )
+    assert assert_v2_active(database).persistence_fingerprint == archived
+    database.commit()
 
     database.execute("BEGIN")
     deactivate_v2(database)

@@ -93,7 +93,9 @@ def assert_v2_active(conn: sqlite3.Connection) -> ActiveFamily:
         != {name: list(identity) for name, identity in manifest.items()}
     ):
         raise ValueError("OPERATING_INCOME_V2_ACTIVE_PACKAGE_MISMATCH")
-    ParallelModelRepository(conn).assert_v2_bundle(manifest)
+    ParallelModelRepository(conn).assert_v2_bundle(
+        manifest, persistence_fingerprint=active.persistence_fingerprint
+    )
     return active
 
 
