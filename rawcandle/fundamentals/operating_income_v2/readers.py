@@ -11,7 +11,7 @@ from rawcandle.fundamentals.relative_position.engine import MODEL_FINGERPRINT as
 from rawcandle.fundamentals.score.engine import MODEL_FINGERPRINT as SCORE_V1
 from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_V1
 
-from . import contract, delta, diagnostic_flags, lifecycle, relative_position, score, valuation
+from . import contract, delta, diagnostic_flags, diagnostic_flags_eight, lifecycle, relative_position, score, valuation
 from .persistence import DIAGNOSTIC_HISTORY_MODE, EVIDENCE_FIELD_TABLE, HISTORY_MODE, MANIFEST_HISTORY_TABLE, MANIFEST_TABLE, MODEL_MAP, PACKAGE_FINGERPRINT
 
 
@@ -21,7 +21,7 @@ KNOWN = {
     "lifecycle": {LIFECYCLE_V1, lifecycle.MODEL_FINGERPRINT},
     "valuation": {VALUATION_V1, valuation.MODEL_FINGERPRINT},
     "delta": {DELTA_V1, delta.MODEL_FINGERPRINT},
-    "diagnostic": {DIAGNOSTIC_V1, PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT, diagnostic_flags.MODEL_FINGERPRINT},
+    "diagnostic": {DIAGNOSTIC_V1, PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT, diagnostic_flags.MODEL_FINGERPRINT, diagnostic_flags_eight.MODEL_FINGERPRINT},
     "relative": {RELATIVE_V1, relative_position.MODEL_FINGERPRINT},
 }
 
@@ -148,11 +148,21 @@ class ParallelModelRepository:
                 field["field_name"]: item[f"n{field['slot_number']:02d}"]
                 for field in field_maps.get(flag, [])
             }
-            boolean_fields = diagnostic_flags.BOOLEAN_FIELDS.get(flag, ())
+            boolean_contract = (
+                diagnostic_flags_eight.BOOLEAN_FIELDS
+                if model_fingerprint == diagnostic_flags_eight.MODEL_FINGERPRINT
+                else diagnostic_flags.BOOLEAN_FIELDS
+            )
+            boolean_fields = boolean_contract.get(flag, ())
             evidence.update(
                 (name, bool(int(item["bool_mask"]) & (1 << position)))
                 for position, name in enumerate(boolean_fields)
             )
+            if flag == diagnostic_flags_eight.FLAG_NAME:
+                code = evidence.get("gap_direction_code")
+                evidence["gap_direction"] = {
+                    1.0: "UPLIFT", -1.0: "DRAG", 0.0: "ZERO",
+                }.get(code)
             item["evidence"] = evidence
 
     def diagnostic_all(self, *, model_fingerprint: str) -> list[dict[str, Any]]:

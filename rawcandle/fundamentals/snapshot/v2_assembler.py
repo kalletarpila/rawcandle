@@ -55,6 +55,18 @@ REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
     json.dumps(REPORT_CONTRACT_SPEC, sort_keys=True, separators=(",", ":")).encode("ascii")
 ).hexdigest()
 
+CANDIDATE_REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7"
+CANDIDATE_REPORT_CONTRACT_SPEC = {
+    **REPORT_CONTRACT_SPEC,
+    "version": CANDIDATE_REPORT_CONTRACT,
+    "diagnostic_definition_rendering": "EIGHT_ENGINE_RECONCILED_COMPACT_DEFINITIONS",
+    "diagnostic_zero_flag_scope": "EIGHT_FLAGS_WITH_EXPLICIT_INCOMPLETE_COVERAGE",
+    "diagnostic_gap_rendering": "SIGNED_AMOUNT_DIRECTION_ABSOLUTE_REVENUE_RATIO_AND_THRESHOLD",
+}
+CANDIDATE_REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
+    json.dumps(CANDIDATE_REPORT_CONTRACT_SPEC, sort_keys=True, separators=(",", ":")).encode("ascii")
+).hexdigest()
+
 
 def _readonly(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
@@ -448,7 +460,14 @@ def _relative(analysis: sqlite3.Connection, company_id: int, report_date: str, m
     return {"available": True, "reason": None, "metadata": dict(metadata), "rows": rows, "coverage": coverage}
 
 
-def _source_state(analysis: sqlite3.Connection, base: Mapping[str, Any], model_map: Mapping[str, tuple[str, str]], package_fingerprint: str) -> dict[str, Any]:
+def _source_state(
+    analysis: sqlite3.Connection,
+    base: Mapping[str, Any],
+    model_map: Mapping[str, tuple[str, str]],
+    package_fingerprint: str,
+    *,
+    candidate: bool = False,
+) -> dict[str, Any]:
     state = dict(base)
     state["score"] = list(analysis.execute("SELECT COUNT(*),MAX(generated_at_utc),MAX(run_id) FROM score_result WHERE model_fingerprint=?", (model_map["score"][1],)).fetchone())
     state["lifecycle"] = list(analysis.execute("SELECT COUNT(*),MAX(generated_at_utc) FROM lifecycle_revised_result WHERE model_fingerprint=?", (model_map["lifecycle"][1],)).fetchone())
@@ -456,20 +475,46 @@ def _source_state(analysis: sqlite3.Connection, base: Mapping[str, Any], model_m
     state["delta"] = list(analysis.execute("SELECT fundamental_source_fingerprint,fundamental_result_fingerprint,lifecycle_source_fingerprint,lifecycle_result_fingerprint,valuation_source_fingerprint,valuation_result_fingerprint,economic_package_fingerprint,physical_content_fingerprint,total_row_count,component_row_count FROM fundamental_delta_package WHERE model_fingerprint=?", (model_map["delta"][1],)).fetchone())
     state["relative"] = list(analysis.execute("SELECT s.snapshot_id,s.snapshot_date,s.calculation_source_fingerprint,s.source_content_fingerprint,s.result_fingerprint FROM relative_position_active_snapshot a JOIN relative_position_snapshot s USING(snapshot_id) WHERE a.model_fingerprint=?", (model_map["relative_position"][1],)).fetchone())
     state["diagnostic"] = list(analysis.execute("SELECT source_fingerprint,economic_result_fingerprint,physical_content_fingerprint,endpoint_count,evaluation_count FROM diagnostic_flag_package WHERE model_fingerprint=?", (model_map["diagnostic_flags"][1],)).fetchone())
-    state["active_package"] = [contract.FAMILY_FINGERPRINT, package_fingerprint]
+    if candidate:
+        state["candidate_package"] = [contract.FAMILY_FINGERPRINT, package_fingerprint]
+        active = analysis.execute(
+            "SELECT family_fingerprint,persistence_fingerprint "
+            "FROM fundamentals_active_model_family WHERE singleton=1"
+        ).fetchone()
+        state["active_package"] = list(active) if active else None
+    else:
+        state["active_package"] = [contract.FAMILY_FINGERPRINT, package_fingerprint]
     return state
 
 
-def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report_date: str) -> dict[str, Any]:
+def _assemble_company_snapshot_v2(
+    paths: v1.SnapshotPaths,
+    *,
+    ticker: str,
+    report_date: str,
+    candidate_model_map: Mapping[str, tuple[str, str]] | None = None,
+    candidate_package_fingerprint: str | None = None,
+    diagnostic_model_contract: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     base = v1.assemble_company_snapshot(paths, ticker=ticker, report_date=report_date)
     with _readonly(paths.analysis_db) as analysis, _readonly(paths.market_db) as market:
-        assert_v2_active(analysis)
-        model_map = active_model_manifest(analysis)
-        package_fingerprint = str(
-            analysis.execute(
-                "SELECT persistence_fingerprint FROM fundamentals_active_model_family WHERE singleton=1"
-            ).fetchone()[0]
-        )
+        is_candidate = candidate_model_map is not None
+        if is_candidate:
+            if candidate_package_fingerprint is None or diagnostic_model_contract is None:
+                raise ValueError("CANDIDATE_SNAPSHOT_IDENTITY_INCOMPLETE")
+            model_map = dict(candidate_model_map)
+            package_fingerprint = candidate_package_fingerprint
+            ParallelModelRepository(analysis).assert_v2_bundle(
+                model_map, persistence_fingerprint=package_fingerprint
+            )
+        else:
+            assert_v2_active(analysis)
+            model_map = active_model_manifest(analysis)
+            package_fingerprint = str(
+                analysis.execute(
+                    "SELECT persistence_fingerprint FROM fundamentals_active_model_family WHERE singleton=1"
+                ).fetchone()[0]
+            )
         repository = ParallelModelRepository(analysis)
         company_id = int(base["identity"]["company_id"])
         score_rows = {int(row["quarter_id"]): _component_map(row) for row in repository.score_history(company_id, model_fingerprint=model_map["score"][1])}
@@ -508,9 +553,18 @@ def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report
         base["component_contract"] = {name: score.MODEL_CONTRACT["components"][name]["maximum"] for name in contract.COMPONENTS}
         base["model_fingerprints"] = {name: identity[1] for name, identity in model_map.items()}
         base["model_fingerprints"]["family"] = contract.FAMILY_FINGERPRINT
-        base["report_contract"] = REPORT_CONTRACT
-        base["report_presentation_fingerprint"] = REPORT_PRESENTATION_FINGERPRINT
-        base["source_state"] = _source_state(analysis, base["source_state"], model_map, package_fingerprint)
+        base["report_contract"] = CANDIDATE_REPORT_CONTRACT if is_candidate else REPORT_CONTRACT
+        base["report_presentation_fingerprint"] = (
+            CANDIDATE_REPORT_PRESENTATION_FINGERPRINT
+            if is_candidate else REPORT_PRESENTATION_FINGERPRINT
+        )
+        if is_candidate:
+            base["diagnostic_model_contract"] = dict(diagnostic_model_contract)
+            base["diagnostic_flag_names"] = list(diagnostic_model_contract["flags"])
+        base["source_state"] = _source_state(
+            analysis, base["source_state"], model_map, package_fingerprint,
+            candidate=is_candidate,
+        )
         base["source_state_fingerprint"] = hashlib.sha256(json.dumps(base["source_state"], sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
         base["reconciliation"] = []
         for slot in base["history"]:
@@ -527,3 +581,26 @@ def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report
         if any(not row["ok"] for row in base["reconciliation"]):
             raise RuntimeError("SNAPSHOT_V2_RECONCILIATION_FAILED")
     return base
+
+
+def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report_date: str) -> dict[str, Any]:
+    return _assemble_company_snapshot_v2(paths, ticker=ticker, report_date=report_date)
+
+
+def assemble_company_snapshot_v2_candidate(
+    paths: v1.SnapshotPaths,
+    *,
+    ticker: str,
+    report_date: str,
+    model_map: Mapping[str, tuple[str, str]],
+    package_fingerprint: str,
+    diagnostic_model_contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    return _assemble_company_snapshot_v2(
+        paths,
+        ticker=ticker,
+        report_date=report_date,
+        candidate_model_map=model_map,
+        candidate_package_fingerprint=package_fingerprint,
+        diagnostic_model_contract=diagnostic_model_contract,
+    )

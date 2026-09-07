@@ -26,6 +26,7 @@ SUPPORTED_REPORT_CONTRACTS = {
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6",
+    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7",
 }
 
 
@@ -356,6 +357,7 @@ DIAGNOSTIC_LABELS = {
     "VALUATION_YIELD_OUTLIER": "Valuation Yield Outlier",
     "RECENT_MARGIN_DECELERATION_REVIEW": "Recent Margin Deceleration",
     "WORKING_CAPITAL_SHIFT_CANDIDATE": "Working Capital Shift",
+    "NON_OPERATING_EARNINGS_GAP_CANDIDATE": "Non-Operating Earnings Gap",
 }
 
 
@@ -376,8 +378,11 @@ def _definition_operator(value: str) -> str:
     return {">=": "≥", "<=": "≤"}.get(value, value)
 
 
-def _build_diagnostic_definitions() -> tuple[DiagnosticDefinition, ...]:
-    definitions = DIAGNOSTIC_MODEL_CONTRACT["definitions"]
+def _build_diagnostic_definitions(
+    model_contract: Mapping[str, Any] = DIAGNOSTIC_MODEL_CONTRACT,
+    flag_names: Sequence[str] = DIAGNOSTIC_FLAG_NAMES,
+) -> tuple[DiagnosticDefinition, ...]:
+    definitions = model_contract["definitions"]
     abrupt = definitions["ABRUPT_FUNDAMENTAL_SHIFT"]
     earnings_cash = definitions["EARNINGS_CASH_DIVERGENCE_CANDIDATE"]
     capex = definitions["CAPEX_INTENSITY_SHIFT_CANDIDATE"]
@@ -387,7 +392,7 @@ def _build_diagnostic_definitions() -> tuple[DiagnosticDefinition, ...]:
     working_capital = definitions["WORKING_CAPITAL_SHIFT_CANDIDATE"]
     floor_millions = REVENUE_SCALE_FLOOR / 1_000_000
 
-    rows = (
+    rows = [
         DiagnosticDefinition(
             "ABRUPT_FUNDAMENTAL_SHIFT",
             "Nykyinen TTM vs tarkka fiscal Q−1",
@@ -453,10 +458,22 @@ def _build_diagnostic_definitions() -> tuple[DiagnosticDefinition, ...]:
             "molemmat taseen loppusummat > 0 ja tuettu operatiivinen malli",
             "_working_capital",
         ),
-    )
-    if tuple(row.flag_name for row in rows) != DIAGNOSTIC_FLAG_NAMES:
+    ]
+    if "NON_OPERATING_EARNINGS_GAP_CANDIDATE" in flag_names:
+        gap = definitions["NON_OPERATING_EARNINGS_GAP_CANDIDATE"]
+        rows.append(DiagnosticDefinition(
+            "NON_OPERATING_EARNINGS_GAP_CANDIDATE",
+            "Nykyinen yhtenäinen TTM-endpoint; ei Q−1-vertailua",
+            "|TTM EBIT − TTM Operating Income| / "
+            f"max(TTM-liikevaihto, {floor_millions:g} M$); suunnallinen erotus säilytetään",
+            f"{_definition_operator(gap['operator'])} {_definition_percent(gap['threshold'])}; "
+            "TTM-liikevaihto > 0 ja tuettu operatiivinen malli",
+            "_non_operating_gap",
+        ))
+    rows_tuple = tuple(rows)
+    if tuple(row.flag_name for row in rows_tuple) != tuple(flag_names):
         raise RuntimeError("DIAGNOSTIC_DEFINITION_FLAG_CONTRACT_MISMATCH")
-    return rows
+    return rows_tuple
 
 
 DIAGNOSTIC_DEFINITIONS = _build_diagnostic_definitions()
@@ -476,11 +493,23 @@ DIAGNOSTIC_COVERAGE_TEXT = (
 )
 
 
-def _zero_diagnostic_text(evaluations: Sequence[Mapping[str, Any]]) -> str:
+def _zero_diagnostic_text(
+    evaluations: Sequence[Mapping[str, Any]],
+    flag_names: Sequence[str] = DIAGNOSTIC_FLAG_NAMES,
+) -> str:
     all_clear = (
-        len(evaluations) == len(DIAGNOSTIC_FLAG_NAMES)
+        len(evaluations) == len(flag_names)
         and all(row.get("status") == "EVALUATED_CLEAR" for row in evaluations)
     )
+    if len(flag_names) == 8:
+        return (
+            "Mikään kahdeksasta arvioidusta tarkastusehdosta ei täyty. Tämä ei sulje pois "
+            "muita riskejä tai ehtoja, joita ei voitu arvioida."
+            if all_clear else
+            "Yksikään laskentavalmis tarkastusehto ei täyty. Kaikkia kahdeksaa ehtoa ei "
+            "voitu välttämättä arvioida tai ne eivät kaikki sovellu tähän yhtiöön. Tämä ei "
+            "sulje pois muita riskejä tai ehtoja, joita ei voitu arvioida."
+        )
     return ALL_DIAGNOSTICS_CLEAR_TEXT if all_clear else INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT
 
 DIAGNOSTIC_REASON_EXPLANATIONS = {
@@ -512,12 +541,28 @@ DIAGNOSTIC_REASON_EXPLANATIONS = {
     "APPLICABILITY_NOT_READY": "Soveltuvuusluokitus ei ole käytettävissä.",
 }
 
+CANDIDATE_DIAGNOSTIC_REASON_EXPLANATIONS = {
+    "NON_OPERATING_EARNINGS_GAP_THRESHOLD_MET": "EBITin ja Operating Incomen välinen suhteellinen ero täytti tarkastusrajan; erittely on tarkastettava ennen nettotulospohjaisen arvostuksen tulkintaa.",
+    "NON_OPERATING_EARNINGS_GAP_BELOW_THRESHOLD": "EBITin ja Operating Incomen välinen suhteellinen ero jäi tarkastusrajan alle.",
+    "TTM_EBIT_MISSING": "TTM EBIT puuttuu.",
+    "TTM_EBIT_NON_FINITE": "TTM EBIT ei ole äärellinen.",
+    "TTM_OPERATING_INCOME_MISSING": "TTM Operating Income puuttuu.",
+    "TTM_OPERATING_INCOME_NON_FINITE": "TTM Operating Income ei ole äärellinen.",
+    "TTM_REVENUE_MISSING": "TTM-liikevaihto puuttuu.",
+    "TTM_REVENUE_NON_FINITE": "TTM-liikevaihto ei ole äärellinen.",
+    "TTM_REVENUE_NONPOSITIVE": "Lippu ei ole laskentavalmis, koska TTM-liikevaihto ei ole aidosti positiivinen.",
+    "TTM_ENDPOINT_INCOHERENT": "TTM-tulosluvut eivät kuulu samaan yhtenäiseen endpointiin.",
+}
+
 UNKNOWN_DIAGNOSTIC_EXPLANATION = "Tarkempaa käyttäjäselitettä ei ole saatavilla."
 
 
 def diagnostic_explanation(evaluation: Mapping[str, Any]) -> str:
+    reason = str(evaluation.get("reason_code"))
     return DIAGNOSTIC_REASON_EXPLANATIONS.get(
-        str(evaluation.get("reason_code")), UNKNOWN_DIAGNOSTIC_EXPLANATION
+        reason, CANDIDATE_DIAGNOSTIC_REASON_EXPLANATIONS.get(
+            reason, UNKNOWN_DIAGNOSTIC_EXPLANATION
+        )
     )
 
 
@@ -537,12 +582,13 @@ def _diagnostic_evidence(evaluation: Mapping[str, Any]) -> str:
         "VALUATION_YIELD_OUTLIER": (("median_yield", "Mediaanituotto"), ("maximum_yield", "Maksimituotto")),
         "RECENT_MARGIN_DECELERATION_REVIEW": (("current_trajectory", "Trajectory"), ("signed_margin_change", "Operating Margin change QoQ")),
         "WORKING_CAPITAL_SHIFT_CANDIDATE": (("signed_delta_onwc", "ONWC-muutos"), ("asset_scale", "Taseskaala")),
+        "NON_OPERATING_EARNINGS_GAP_CANDIDATE": (("gap_amount", "EBIT − Operating Income"), ("gap_direction", "Suunta"), ("gap_abs_to_revenue", "Absoluuttinen ero/liikevaihto")),
     }
     output = []
-    percentage_fields = {"revenue_shift_ratio", "operating_income_shift_ratio", "ebit_shift_ratio", "current_capex_intensity", "prior_capex_intensity", "median_yield", "maximum_yield"}
+    percentage_fields = {"revenue_shift_ratio", "operating_income_shift_ratio", "ebit_shift_ratio", "current_capex_intensity", "prior_capex_intensity", "median_yield", "maximum_yield", "gap_abs_to_revenue"}
     for key, label in fields.get(flag, ()):
         value = evidence.get(key)
-        rendered = _pp(value, signed="current_operating_margin" in evidence) if key == "signed_margin_change" else _percentage(value) if key in percentage_fields else _money(value) if key in {"signed_change_difference", "revenue_scale", "signed_net_debt_change", "signed_delta_onwc", "asset_scale"} else _number(value)
+        rendered = _pp(value, signed="current_operating_margin" in evidence) if key == "signed_margin_change" else _percentage(value) if key in percentage_fields else _money(value) if key in {"signed_change_difference", "revenue_scale", "signed_net_debt_change", "signed_delta_onwc", "asset_scale", "gap_amount"} else _text(value) if key == "gap_direction" else _number(value)
         output.append(f"{label}: {rendered}")
     return "; ".join(output) or "—"
 
@@ -553,6 +599,8 @@ def _diagnostic_metric(evaluation: Mapping[str, Any]) -> str:
         return f"mediaani {_percentage(evidence.get('median_yield'), 4)}; maksimi {_percentage(evidence.get('maximum_yield'), 4)}"
     if evaluation["flag_name"] == "RECENT_MARGIN_DECELERATION_REVIEW":
         return _pp(evidence.get("signed_margin_change"), signed="current_operating_margin" in evidence)
+    if evaluation["flag_name"] == "NON_OPERATING_EARNINGS_GAP_CANDIDATE":
+        return _percentage(evidence.get("gap_abs_to_revenue"), 4)
     return _percentage(evidence.get("metric_value"), 4)
 
 
@@ -560,6 +608,8 @@ def _diagnostic_threshold(evaluation: Mapping[str, Any]) -> str:
     evidence = evaluation.get("evidence", {})
     if "threshold" in evidence:
         return _percentage(evidence["threshold"])
+    if "activation_threshold" in evidence:
+        return _percentage(evidence["activation_threshold"])
     if evaluation["flag_name"] == "VALUATION_YIELD_OUTLIER":
         return f"mediaani {_percentage(evidence.get('median_threshold'))}; maksimi {_percentage(evidence.get('maximum_threshold'))}"
     if evaluation["flag_name"] == "RECENT_MARGIN_DECELERATION_REVIEW":
@@ -571,6 +621,13 @@ def _diagnostic_summary(evaluation: Mapping[str, Any]) -> str:
     label = DIAGNOSTIC_LABELS.get(evaluation["flag_name"], evaluation["flag_name"])
     metric = _diagnostic_metric(evaluation)
     threshold = _diagnostic_threshold(evaluation)
+    if evaluation["flag_name"] == "NON_OPERATING_EARNINGS_GAP_CANDIDATE":
+        evidence = evaluation.get("evidence", {})
+        return (
+            f"{label}: TARKASTETTAVA EHDOKAS — {_text(evidence.get('gap_direction'))}, "
+            f"erotus {_money(evidence.get('gap_amount'))}, absoluuttinen suhde {metric} "
+            f"rajaan {threshold}"
+        )
     return f"{label}: TARKASTETTAVA EHDOKAS — {metric} suhteessa rajaan {threshold}"
 
 
@@ -607,6 +664,11 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
     operating_value = "ttm_operating_income" if is_v2 else "ttm_ebit"
     operating_label = "Operating Income" if is_v2 else "EBIT"
     common_earnings_label = "Reported Common Earnings" if is_v2 else "Common earnings"
+    diagnostic_flag_names = tuple(snapshot.get("diagnostic_flag_names") or DIAGNOSTIC_FLAG_NAMES)
+    diagnostic_definitions = _build_diagnostic_definitions(
+        snapshot.get("diagnostic_model_contract") or DIAGNOSTIC_MODEL_CONTRACT,
+        diagnostic_flag_names,
+    )
     pp = lambda value: _pp(value, signed=is_v2)
     identity = snapshot["identity"]
     anchor = snapshot["anchor"]
@@ -964,14 +1026,14 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
     evaluations = (snapshot.get("diagnostic") or {}).get("evaluations", [])
     flagged = [row for row in evaluations if row["status"] == "EVALUATED_FLAGGED"]
     sections.extend([
-        *( ["**" + _diagnostic_summary(row) + "**" for row in flagged] if flagged else [_zero_diagnostic_text(evaluations)] ),
+        *( ["**" + _diagnostic_summary(row) + "**" for row in flagged] if flagged else [_zero_diagnostic_text(evaluations, diagnostic_flag_names)] ),
         "",
         _table(("Lippu", "Status", "Keskeinen evidenssi", "Laskettu arvo", "Raja"), tuple(
             (DIAGNOSTIC_LABELS.get(row["flag_name"], row["flag_name"]), row["status"], _diagnostic_evidence(row), _diagnostic_metric(row), _diagnostic_threshold(row))
             for row in flagged
         ) or (("—", "Ei aktiivisia lippuja", "—", "—", "—"),), ("left", "left", "left", "right", "right")),
         "",
-        "### Kaikki seitsemän statusta",
+        f"### Kaikki {'kahdeksan' if len(diagnostic_flag_names) == 8 else 'seitsemän'} statusta",
         "",
         _table(("Lippu", "Status", "Tulkinta", "Arvo", "Raja"), tuple(
             (DIAGNOSTIC_LABELS.get(row["flag_name"], row["flag_name"]), row["status"], diagnostic_explanation(row), _diagnostic_metric(row), _diagnostic_threshold(row))
@@ -982,7 +1044,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         _table(("Lippu", "Vertailu", "Mittaus ja skaalaus", "Tarkastusehto"), tuple(
             (DIAGNOSTIC_LABELS[row.flag_name], row.comparison, row.measurement, row.trigger)
-            for row in DIAGNOSTIC_DEFINITIONS
+            for row in diagnostic_definitions
         ), ("left", "left", "left", "left")),
         "",
         DIAGNOSTIC_COVERAGE_TEXT,
@@ -1029,6 +1091,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             ("Report date", snapshot["report_date"]),
             ("Anchor identity", f"FY{anchor['fiscal_year']} {anchor['fiscal_quarter']}; period_end={anchor['period_end']}; available={anchor['source_availability_date']}") if is_v2 else ("Anchor identity", f"company_id={anchor['company_id']}; quarter_id={anchor['quarter_id']}; FY{anchor['fiscal_year']} {anchor['fiscal_quarter']}"),
             *(([
+                *(([("Candidate package fingerprint", _text((snapshot.get("source_state", {}).get("candidate_package") or [None, None])[1]))] if snapshot.get("source_state", {}).get("candidate_package") else [])),
                 ("Active package fingerprint", _text((snapshot.get("source_state", {}).get("active_package") or [None, None])[1])),
                 ("Model-family fingerprint", _text((snapshot.get("source_state", {}).get("active_package") or [None, None])[0])),
                 ("Snapshot economic fingerprint", _text(snapshot.get("model_fingerprints", {}).get("snapshot"))),
