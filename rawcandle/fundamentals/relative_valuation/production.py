@@ -93,7 +93,9 @@ def _schema_hash(connection: sqlite3.Connection) -> str:
         "SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name"
     )
     return hashlib.sha256(
-        json.dumps(list(rows), separators=(",", ":"), default=str).encode("utf-8")
+        json.dumps(
+            [tuple(row) for row in rows], separators=(",", ":"), default=str
+        ).encode("utf-8")
     ).hexdigest()
 
 
