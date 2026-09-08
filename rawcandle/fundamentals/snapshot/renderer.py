@@ -19,6 +19,7 @@ from rawcandle.fundamentals.snapshot.assembler import (
 )
 from rawcandle.fundamentals.relative_valuation.contract import (
     CANDIDATE_REPORT_CONTRACT as RELATIVE_VALUATION_CANDIDATE_REPORT_CONTRACT,
+    PRODUCTION_REPORT_CONTRACT as RELATIVE_VALUATION_PRODUCTION_REPORT_CONTRACT,
 )
 
 
@@ -31,6 +32,7 @@ SUPPORTED_REPORT_CONTRACTS = {
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7",
     RELATIVE_VALUATION_CANDIDATE_REPORT_CONTRACT,
+    RELATIVE_VALUATION_PRODUCTION_REPORT_CONTRACT,
 }
 
 
@@ -230,6 +232,20 @@ def _relative_cell(relative: Mapping[str, Any], measure: str, scope: str) -> str
 def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
     value = snapshot.get("relative_valuation")
     if not value:
+        unavailable = snapshot.get("relative_valuation_unavailable")
+        if unavailable:
+            active = unavailable.get("active_as_of_date") or "—"
+            return [
+                "## Relative Valuation",
+                "",
+                "Relative Valuation ei ole saatavilla tämän raportin päivämäärälle.",
+                "",
+                f"Status: `{unavailable.get('reason_code')}`. Pyydetty as-of: "
+                f"`{unavailable.get('requested_as_of_date')}`; aktiivinen as-of: `{active}`.",
+                "",
+                "Yksittäinen raporttipyyntö ei käynnistä koko universumin uudelleenlaskentaa.",
+                "",
+            ]
         return []
     current = value.get("current_valuation") or {}
     filing = value.get("filing_valuation") or {}
@@ -285,11 +301,23 @@ def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
                 f"{row.get('component_history_status')} / {row.get('reason_code')}",
             )
         )
+    identity = snapshot.get("relative_valuation_identity") or {}
+    production_context = (
+        [
+            f"Relative Valuation snapshot as-of: `{identity.get('as_of_date')}`; "
+            f"source fingerprint: `{identity.get('source_fingerprint')}`; "
+            f"result fingerprint: `{identity.get('result_fingerprint')}`.",
+            "",
+        ]
+        if snapshot.get("report_contract") == RELATIVE_VALUATION_PRODUCTION_REPORT_CONTRACT
+        else []
+    )
     return [
         "## Relative Valuation",
         "",
         f"As-of date: `{snapshot['report_date']}`. Historia on nykyisin revisioitu, ei PIT-rekonstruktio.",
         "",
+        *production_context,
         _table(
             ("Mittari", "Saatavuuspäivän konteksti", "Nykyhintainen", "Muutos"),
             (

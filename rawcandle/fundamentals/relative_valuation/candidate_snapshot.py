@@ -9,7 +9,7 @@ from rawcandle.fundamentals.operating_income_v2 import snapshot_eight
 from rawcandle.fundamentals.snapshot import v2_assembler
 from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
 
-from .contract import CANDIDATE_REPORT_CONTRACT
+from .contract import CANDIDATE_REPORT_CONTRACT, PRODUCTION_REPORT_CONTRACT
 from .engine import MODEL_FINGERPRINT, MODEL_VERSION, RelativeValuationSnapshot
 from .persistence import RelativeValuationRepository
 
@@ -33,6 +33,35 @@ CANDIDATE_REPORT_SPEC = {
 }
 CANDIDATE_REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
     json.dumps(CANDIDATE_REPORT_SPEC, sort_keys=True, separators=(",", ":")).encode("ascii")
+).hexdigest()
+
+PRODUCTION_SNAPSHOT_MODEL_VERSION = (
+    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_RELATIVE_VALUATION_V1"
+)
+PRODUCTION_SNAPSHOT_CONTRACT = {
+    "model_version": PRODUCTION_SNAPSHOT_MODEL_VERSION,
+    "base_snapshot": (snapshot_eight.MODEL_VERSION, snapshot_eight.MODEL_FINGERPRINT),
+    "relative_valuation": (MODEL_VERSION, MODEL_FINGERPRINT),
+    "production_activation": True,
+    "persistence_required": True,
+}
+PRODUCTION_SNAPSHOT_FINGERPRINT = hashlib.sha256(
+    json.dumps(
+        PRODUCTION_SNAPSHOT_CONTRACT, sort_keys=True, separators=(",", ":")
+    ).encode("ascii")
+).hexdigest()
+PRODUCTION_REPORT_SPEC = {
+    "version": PRODUCTION_REPORT_CONTRACT,
+    "base_presentation": v2_assembler.CANDIDATE_REPORT_PRESENTATION_FINGERPRINT,
+    "relative_valuation_model": MODEL_FINGERPRINT,
+    "section": "CURRENT_PEERS_AND_OWN_POSITIVE_YIELD_HISTORY",
+    "production_default": True,
+    "unavailable_state": "EXPLICIT_NO_ON_DEMAND_RECALCULATION",
+}
+PRODUCTION_REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
+    json.dumps(
+        PRODUCTION_REPORT_SPEC, sort_keys=True, separators=(",", ":")
+    ).encode("ascii")
 ).hexdigest()
 
 
@@ -173,3 +202,37 @@ def assemble_persisted_relative_valuation_candidate_snapshot(
         raise ValueError("RELATIVE_VALUATION_CANDIDATE_AS_OF_MISMATCH")
     base = v2_assembler.assemble_company_snapshot_v2(paths, ticker=ticker, report_date=report_date)
     return attach_persisted_relative_valuation_candidate(base, repository)
+
+
+def promote_persisted_relative_valuation_snapshot(
+    snapshot: Mapping[str, Any], repository: RelativeValuationRepository,
+) -> dict[str, Any]:
+    output = attach_persisted_relative_valuation_candidate(snapshot, repository)
+    output["report_contract"] = PRODUCTION_REPORT_CONTRACT
+    output["report_presentation_fingerprint"] = (
+        PRODUCTION_REPORT_PRESENTATION_FINGERPRINT
+    )
+    output["model_fingerprints"] = dict(output["model_fingerprints"])
+    output["model_fingerprints"]["snapshot"] = PRODUCTION_SNAPSHOT_FINGERPRINT
+    return output
+
+
+def attach_relative_valuation_unavailable(
+    snapshot: Mapping[str, Any], *, reason_code: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    output = dict(snapshot)
+    output["relative_valuation_unavailable"] = {
+        "reason_code": reason_code,
+        "requested_as_of_date": snapshot["report_date"],
+        "active_as_of_date": metadata.get("as_of_date") if metadata else None,
+        "model_fingerprint": MODEL_FINGERPRINT,
+    }
+    output["report_contract"] = PRODUCTION_REPORT_CONTRACT
+    output["report_presentation_fingerprint"] = (
+        PRODUCTION_REPORT_PRESENTATION_FINGERPRINT
+    )
+    output["model_fingerprints"] = dict(output["model_fingerprints"])
+    output["model_fingerprints"]["snapshot"] = PRODUCTION_SNAPSHOT_FINGERPRINT
+    output["model_fingerprints"]["relative_valuation"] = MODEL_FINGERPRINT
+    return output

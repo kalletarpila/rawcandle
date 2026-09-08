@@ -5,6 +5,12 @@ import sqlite3
 import pytest
 
 from rawcandle.fundamentals.operating_income_v2 import diagnostic_flags_eight, phase10b
+from rawcandle.fundamentals.relative_valuation.candidate_snapshot import (
+    PRODUCTION_SNAPSHOT_FINGERPRINT as RELATIVE_VALUATION_SNAPSHOT_FINGERPRINT,
+)
+from rawcandle.fundamentals.relative_valuation.contract import (
+    PRODUCTION_REPORT_CONTRACT as RELATIVE_VALUATION_REPORT_CONTRACT,
+)
 from rawcandle.fundamentals.operating_income_v2.diagnostic_flags import (
     FLAG_NAMES,
     MODEL_CONTRACT as DIAGNOSTIC_MODEL_CONTRACT,
@@ -95,7 +101,12 @@ def phase9j_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, 
 
 def test_v2_report_restores_compact_fiscal_histories(nvda_report: tuple[str, dict]) -> None:
     report, snapshot = nvda_report
-    assert snapshot["report_contract"] == CANDIDATE_REPORT_CONTRACT
+    assert snapshot["report_contract"] in {
+        CANDIDATE_REPORT_CONTRACT,
+        RELATIVE_VALUATION_REPORT_CONTRACT,
+    }
+    if snapshot["report_contract"] == RELATIVE_VALUATION_REPORT_CONTRACT:
+        assert "RELATIVE_VALUATION_AS_OF_MISMATCH" in report
     assert len(snapshot["history"]) == 5
     assert len(snapshot["lifecycle"]["history"]) == 4
     assert "FY2027 Q2" in report
@@ -147,7 +158,10 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "Overall eligible universe" in report
     assert "n=2198" in report
     assert "Non-Operating Earnings Gap: TARKASTETTAVA EHDOKAS" in report
-    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7" in report
+    assert (
+        "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7" in report
+        or RELATIVE_VALUATION_REPORT_CONTRACT in report
+    )
 
 
 def test_v2_report_current_and_filing_valuations_are_distinct(nvda_report: tuple[str, dict]) -> None:
@@ -166,7 +180,10 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
 ) -> None:
     _, snapshot = nvda_report
     assert CANDIDATE_REPORT_PRESENTATION_FINGERPRINT == "b539ceb4e4745aa1233b27d9883b442d6106a2a1b4769a7c52bcf099cb55ad87"
-    assert snapshot["model_fingerprints"]["snapshot"] == phase10b.snapshot_eight.MODEL_FINGERPRINT
+    assert snapshot["model_fingerprints"]["snapshot"] in {
+        phase10b.snapshot_eight.MODEL_FINGERPRINT,
+        RELATIVE_VALUATION_SNAPSHOT_FINGERPRINT,
+    }
     assert snapshot["source_state"]["active_package"][1] == phase10b.PACKAGE_FINGERPRINT
 
 

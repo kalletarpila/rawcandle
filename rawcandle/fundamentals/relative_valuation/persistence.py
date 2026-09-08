@@ -433,7 +433,7 @@ def validate_snapshot(snapshot: RelativeValuationSnapshot, inputs: Sequence[Rela
     return content, physical_content_fingerprint(content)
 
 
-def _snapshot_id(snapshot: RelativeValuationSnapshot, physical: str) -> str:
+def snapshot_identity(snapshot: RelativeValuationSnapshot, physical: str) -> str:
     return hashlib.sha256(canonical_json({
         "model": snapshot.model_fingerprint, "layout": LAYOUT_FINGERPRINT,
         "as_of": snapshot.as_of_date, "source": snapshot.source_fingerprint,
@@ -461,7 +461,7 @@ def apply_snapshot(conn: sqlite3.Connection, snapshot: RelativeValuationSnapshot
                    inject_failure_at: str | None = None) -> ApplyReport:
     conn.row_factory = sqlite3.Row
     content, physical = validate_snapshot(snapshot, inputs)
-    snapshot_id = _snapshot_id(snapshot, physical)
+    snapshot_id = snapshot_identity(snapshot, physical)
     existing_table = conn.execute("SELECT 1 FROM sqlite_schema WHERE name='relative_valuation_snapshot'").fetchone()
     active = None
     if existing_table:
@@ -603,6 +603,33 @@ class RelativeValuationRepository:
         target = self.active_snapshot_id(model_fingerprint=model_fingerprint)
         if target is None or scope not in PEER_SCOPES: return []
         return [dict(row) for row in self.connection.execute("SELECT * FROM relative_valuation_peer_position WHERE snapshot_id=? AND scope=? AND group_id=? ORDER BY company_id", (target, scope, group_id))]
+
+
+def set_active_snapshot(
+    conn: sqlite3.Connection, *, model_fingerprint: str, snapshot_id: str,
+    activated_at_utc: str,
+) -> None:
+    row = conn.execute(
+        "SELECT 1 FROM relative_valuation_snapshot "
+        "WHERE snapshot_id=? AND model_fingerprint=? AND status='COMPLETE'",
+        (snapshot_id, model_fingerprint),
+    ).fetchone()
+    if row is None:
+        raise ValueError("RELATIVE_VALUATION_COMPLETE_SNAPSHOT_REQUIRED")
+    conn.execute(
+        "INSERT INTO relative_valuation_active_snapshot VALUES (?,?,?) "
+        "ON CONFLICT(model_fingerprint) DO UPDATE SET "
+        "snapshot_id=excluded.snapshot_id,activated_at_utc=excluded.activated_at_utc",
+        (model_fingerprint, snapshot_id, activated_at_utc),
+    )
+
+
+def deactivate_snapshot(conn: sqlite3.Connection, *, model_fingerprint: str) -> int:
+    cursor = conn.execute(
+        "DELETE FROM relative_valuation_active_snapshot WHERE model_fingerprint=?",
+        (model_fingerprint,),
+    )
+    return int(cursor.rowcount)
 
 
 def quick_check(conn: sqlite3.Connection, *, model_fingerprint: str = MODEL_FINGERPRINT) -> dict[str, Any]:
