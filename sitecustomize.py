@@ -10,6 +10,7 @@ This is a minimal, best-effort shim that won't raise if `flet` is missing.
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 
@@ -66,3 +67,9 @@ except Exception:
     # If flet isn't importable at startup, do nothing. Tests will often
     # patch/mock flet symbols themselves.
     pass
+
+
+if os.environ.get("RAWCANDLE_TEST_DATABASE_GUARD") == "1":
+    from rawcandle.testing.database_isolation import install_sqlite_guard
+
+    install_sqlite_guard()

@@ -9,6 +9,48 @@ import sqlite3
 from pathlib import Path
 import shutil
 
+from rawcandle.testing.database_isolation import (
+    capture_protected_file_inventory,
+    install_sqlite_guard,
+    inventory_differences,
+)
+
+
+_PRODUCTION_DATABASE_INVENTORY = None
+
+
+def pytest_configure(config):
+    """Reject writable production SQLite connections in tests and subprocesses."""
+    root = str(Path(__file__).resolve().parents[1])
+    pythonpath = os.environ.get("PYTHONPATH", "")
+    entries = [entry for entry in pythonpath.split(os.pathsep) if entry]
+    if root not in entries:
+        os.environ["PYTHONPATH"] = os.pathsep.join([root, *entries])
+    os.environ["RAWCANDLE_TEST_DATABASE_GUARD"] = "1"
+    install_sqlite_guard()
+
+
+def pytest_sessionstart(session):
+    """Capture byte identities before any collected test executes."""
+    global _PRODUCTION_DATABASE_INVENTORY
+    _PRODUCTION_DATABASE_INVENTORY = capture_protected_file_inventory()
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Fail the run if a protected production database changed."""
+    if _PRODUCTION_DATABASE_INVENTORY is None:
+        return
+    after = capture_protected_file_inventory()
+    differences = inventory_differences(_PRODUCTION_DATABASE_INVENTORY, after)
+    if not differences:
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_sep("=", "PROTECTED PRODUCTION DATABASE MUTATION")
+        for difference in differences:
+            reporter.write_line(difference)
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
 
 @pytest.fixture
 def temp_db():

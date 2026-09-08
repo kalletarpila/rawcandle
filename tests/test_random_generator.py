@@ -10,12 +10,13 @@ from analysis.database_manager import DatabaseManager
 def test_generate_random_findings_returns_tuple(tmp_path):
     """Testi: generate_random_findings palauttaa tuplen (count, errors)."""
     # Testataan että funktio palauttaa oikean tyyppisen vastauksen
-    # Markkinadataa luetaan tuotantokannasta, mutta löydökset kirjoitetaan
-    # aina testikohtaiseen väliaikaiseen kantaan.
+    stock_db = tmp_path / "osakedata.db"
+    with sqlite3.connect(stock_db) as connection:
+        connection.execute("CREATE TABLE osakedata(osake TEXT,pvm TEXT)")
     result = generate_random_findings(
         num_tickers=1,
         events_per_ticker=1,
-        stock_db_path="data/osakedata.db",
+        stock_db_path=str(stock_db),
         analysis_db_path=str(tmp_path / "analysis.db"),
     )
 

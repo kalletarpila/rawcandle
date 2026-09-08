@@ -117,6 +117,8 @@ def test_refetch_and_mark(monkeypatch, tmp_path):
 
 def test_backfill_dry_run_writes_report(monkeypatch, tmp_path):
     db_path = _make_db(tmp_path)
+    (tmp_path / "data").mkdir()
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(spb, "logger", SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None))
     df = pd.DataFrame(
         {

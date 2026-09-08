@@ -2,6 +2,24 @@
 
 Kattavat testit analysis-sivun toiminnoille.
 
+## Tietokantojen eristys
+
+Kirjoittavan testin on aina käytettävä `tmp_path`-hakemistoa tai
+väliaikaista tietokantafixturea. Testi ei saa käyttää suhteellista
+`data/*.db`-oletusta, puuttuvan asetuksen production-fallbackia eikä avata
+tuotantokantaa tavallisella `sqlite3.connect()`-kutsulla.
+
+Tuotantokannan lukeminen testissä sallitaan vain eksplisiittisellä SQLite
+`file:`-URI:lla ja `mode=ro`-asetuksella. Keskitetty pytest-suojaus
+normalisoi suhteelliset polut, `..`-reitit, symlinkit ja URI:t sekä estää
+suojattujen production-kantojen kirjoitettavat yhteydet. Se tarkistaa lisäksi
+kaikkien suojattujen pää-, WAL- ja SHM-tiedostojen sisällön ennen testisessiota
+ja sen jälkeen.
+
+Kun uusi production-tietokanta lisätään sovelluksen konfiguraatioon, lisää sen
+rooli myös `rawcandle.testing.database_isolation.PROTECTED_DATABASE_ROLES`-
+rekisteriin.
+
 ## 📋 Testien Rakenne
 
 ```
