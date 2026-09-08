@@ -50,13 +50,20 @@ def _args(paths: dict[str, Path], output: Path, **changes: object) -> Namespace:
 
 
 def test_production_parser_defaults_to_dry_run() -> None:
-    help_text = build_parser().format_help()
+    parser = build_parser()
+    help_text = parser.format_help()
     assert "--confirm-production" in help_text
     assert "--full-universe" in help_text
     assert "--expected-physical-fingerprint" in help_text
     assert len(PRODUCTION_SNAPSHOT_FINGERPRINT) == 64
     assert len(PRODUCTION_REPORT_PRESENTATION_FINGERPRINT) == 64
     assert "CANDIDATE" not in PRODUCTION_REPORT_CONTRACT
+    required = {
+        action.dest for action in parser._actions if action.required
+    }
+    assert {
+        "canonical_db", "provider_db", "analysis_db", "market_db", "taxonomy_db"
+    } <= required
 
 
 def test_production_gate_requires_exact_roles_and_confirmation(

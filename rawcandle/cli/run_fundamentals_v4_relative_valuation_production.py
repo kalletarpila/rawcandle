@@ -15,8 +15,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Deploy or refresh the full Relative Valuation production snapshot"
     )
-    for name, path in PRODUCTION_PATHS.items():
-        parser.add_argument(f"--{name}-db", type=Path, default=path)
+    for name in PRODUCTION_PATHS:
+        parser.add_argument(f"--{name}-db", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--backup-dir", type=Path, default=BACKUP_DIR)
     parser.add_argument("--as-of-date", required=True)
