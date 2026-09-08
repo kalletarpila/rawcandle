@@ -25,6 +25,19 @@ from rawcandle.fundamentals.snapshot.assembler import (
 )
 from rawcandle.fundamentals.snapshot.renderer import render_snapshot, verify_rendered_report
 from rawcandle.fundamentals.snapshot.writer import publish_report, report_filename
+from rawcandle.fundamentals.relative_valuation.candidate_snapshot import (
+    CANDIDATE_REPORT_CONTRACT as RELATIVE_VALUATION_REPORT_CONTRACT,
+    CANDIDATE_SNAPSHOT_FINGERPRINT,
+    attach_relative_valuation_candidate,
+)
+from rawcandle.fundamentals.relative_valuation.engine import (
+    MODEL_FINGERPRINT as RELATIVE_VALUATION_FINGERPRINT,
+    MODEL_VERSION as RELATIVE_VALUATION_VERSION,
+    CompanyRelativeValuationResult,
+    ComponentHistoryResult,
+    OwnHistoryResult,
+    RelativeValuationSnapshot,
+)
 
 
 def _score(total: float) -> dict[str, object]:
@@ -691,3 +704,91 @@ def test_production_sample_reconciles_read_only_when_sources_are_available(ticke
         assert snapshot["history"][-1]["score"]["readiness_status"] == "SCORE_NOT_READY"
     if ticker == "LEG":
         assert snapshot["current_price_valuation"]["reason_code"] == "CURRENT_PRICE_FALLBACK_TOO_OLD"
+
+
+def test_relative_valuation_candidate_is_explicit_and_renders_component_evidence() -> None:
+    base = _snapshot()
+    for slot in base["history"]:
+        slot["valuation"]["operating_income_yield"] = slot["valuation"]["ebit_yield"]
+        slot["valuation"]["operating_income_points"] = slot["valuation"]["ebit_points"]
+        slot["ttm"]["ttm_operating_income"] = slot["ttm"]["ttm_ebit"]
+    for context in base["valuation_multiples"]["contexts"]:
+        context["source_inputs"]["ttm_operating_income"] = context["source_inputs"]["ttm_ebit"]
+        context["metrics"]["ev_operating_income"] = context["metrics"]["ev_ebit"]
+        context["metrics"]["operating_income_yield"] = context["metrics"]["ebit_yield"]
+    component_rows = tuple(
+        ComponentHistoryResult(
+            component=name,
+            current_yield=0.08,
+            historical_median_positive_yield=0.05,
+            historical_percentile=75.0,
+            component_observation_count=15,
+            positive_history_count=12,
+            nonpositive_history_count=2,
+            missing_or_invalid_history_count=1,
+            component_first_observation_date="2022-05-01",
+            component_last_observation_date="2026-08-01",
+            positive_history_start_date="2022-08-01",
+            positive_history_end_date="2026-08-01",
+            component_history_status="COMPONENT_HISTORY_READY",
+            reason_code="SUFFICIENT_POSITIVE_HISTORY",
+        )
+        for name in ("OPERATING_YIELD", "FCF_YIELD", "REPORTED_EARNINGS_YIELD")
+    )
+    own = OwnHistoryResult(
+        status="READY",
+        reason_code="SUFFICIENT_POSITIVE_HISTORY",
+        percentile=75.0,
+        window_start_date="2021-09-06",
+        window_end_date="2026-09-06",
+        minimum_component_positive_history_count=12,
+        selected_endpoint_count=15,
+        fiscal_gap_count=1,
+        components=component_rows,
+    )
+    peer_rows = tuple(
+        {
+            "peer_scope": scope,
+            "percentile": 80.0,
+            "peer_count": count,
+            "status": "RELATIVE_POSITION_READY",
+            "reason_code": "RANKED",
+        }
+        for scope, count in (("UNIVERSE", 100), ("SECTOR", 50), ("INDUSTRY", 20))
+    )
+    filing_rows = tuple(
+        {"peer_scope": row["peer_scope"], "percentile": 70.0, "peer_count": row["peer_count"], "result_status": "RELATIVE_POSITION_READY"}
+        for row in peer_rows
+    )
+    company = CompanyRelativeValuationResult(
+        company_id=1,
+        security_id=1,
+        ticker="TEST",
+        endpoint_available_date="2026-08-14",
+        current_fresh=True,
+        current_valuation={"valuation_status": "VALUATION_FULL", "total_valuation_score": 60.0, "price_date": "2026-09-04", "price_age_calendar_days": 2},
+        filing_valuation={"total_valuation_score": 54.0, "price_date": "2026-08-14", "price_age_calendar_days": 0},
+        score_change_due_to_current_price=6.0,
+        current_peer_results=peer_rows,
+        current_peer_coverage=({"peer_scope": "ECOSYSTEM", "status": "NOT_ECOSYSTEM_MEMBER", "reason_code": "NO_QUALIFYING_CORE_OR_EXTENDED_MEMBERSHIP"},),
+        filing_peer_results=filing_rows,
+        own_history=own,
+    )
+    relative = RelativeValuationSnapshot(
+        model_version=RELATIVE_VALUATION_VERSION,
+        model_fingerprint=RELATIVE_VALUATION_FINGERPRINT,
+        semantic_mode="CURRENTLY_REVISED_NOT_PIT",
+        as_of_date="2026-09-06",
+        source_fingerprint="source",
+        result_fingerprint="result",
+        companies=(company,),
+    )
+    candidate = attach_relative_valuation_candidate(base, relative)
+    rendered = render_snapshot(candidate)
+    assert candidate["report_contract"] == RELATIVE_VALUATION_REPORT_CONTRACT
+    assert candidate["model_fingerprints"]["snapshot"] == CANDIDATE_SNAPSHOT_FINGERPRINT
+    assert "## Relative Valuation" in rendered.markdown
+    assert "Own-History Valuation Percentile" in rendered.markdown
+    assert "Reported Common Earnings / Market Cap" in rendered.markdown
+    assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V8" not in render_snapshot(base).markdown
+    assert verify_rendered_report(rendered)

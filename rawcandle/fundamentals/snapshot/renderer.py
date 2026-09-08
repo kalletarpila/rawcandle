@@ -17,6 +17,9 @@ from rawcandle.fundamentals.snapshot.assembler import (
     CURRENT_PRICE_LABEL,
     REPORT_CONTRACT,
 )
+from rawcandle.fundamentals.relative_valuation.contract import (
+    CANDIDATE_REPORT_CONTRACT as RELATIVE_VALUATION_CANDIDATE_REPORT_CONTRACT,
+)
 
 
 SUPPORTED_REPORT_CONTRACTS = {
@@ -27,6 +30,7 @@ SUPPORTED_REPORT_CONTRACTS = {
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V5",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7",
+    RELATIVE_VALUATION_CANDIDATE_REPORT_CONTRACT,
 }
 
 
@@ -221,6 +225,111 @@ def _relative_cell(relative: Mapping[str, Any], measure: str, scope: str) -> str
     if coverage:
         return "; ".join(f"— ({row['coverage_status']}; {row['reason_code']})" for row in coverage)
     return "— (NO_COVERAGE_RECORD)"
+
+
+def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
+    value = snapshot.get("relative_valuation")
+    if not value:
+        return []
+    current = value.get("current_valuation") or {}
+    filing = value.get("filing_valuation") or {}
+    current_results = value.get("current_peer_results") or []
+    current_coverage = value.get("current_peer_coverage") or []
+    filing_results = value.get("filing_peer_results") or []
+
+    def rows_for(rows: Sequence[Mapping[str, Any]], scope: str) -> list[Mapping[str, Any]]:
+        return [row for row in rows if str(row.get("peer_scope")) == scope]
+
+    def peer_cell(scope: str) -> tuple[str, str, str, str]:
+        current_rows = rows_for(current_results, scope)
+        filing_rows = rows_for(filing_results, scope)
+        coverage_rows = rows_for(current_coverage, scope)
+        current_row = current_rows[0] if current_rows else None
+        filing_row = filing_rows[0] if filing_rows else None
+        current_value = current_row.get("percentile") if current_row else None
+        filing_value = filing_row.get("percentile") if filing_row else None
+        difference = (
+            float(current_value) - float(filing_value)
+            if current_value is not None and filing_value is not None
+            else None
+        )
+        if current_row:
+            status = f"{current_row.get('status')} / n={current_row.get('peer_count')}"
+        elif coverage_rows:
+            status = "; ".join(
+                f"{row.get('status')} / {row.get('reason_code')}"
+                for row in coverage_rows
+            )
+        else:
+            status = "NO_COVERAGE_RECORD"
+        return _percentile(filing_value), _percentile(current_value), _signed_score(difference), status
+
+    own = value["own_history"]
+    component_labels = {
+        "OPERATING_YIELD": "Operating Income / EV",
+        "FCF_YIELD": "FCF / Market Cap",
+        "REPORTED_EARNINGS_YIELD": "Reported Common Earnings / Market Cap",
+    }
+    component_rows = []
+    for row in own["components"]:
+        start, end = row.get("positive_history_start_date"), row.get("positive_history_end_date")
+        span = f"{start} – {end}" if start and end else "—"
+        component_rows.append(
+            (
+                component_labels[row["component"]],
+                _percentage(row.get("current_yield")),
+                _percentage(row.get("historical_median_positive_yield")),
+                _percentile(row.get("historical_percentile")),
+                row.get("positive_history_count"),
+                span,
+                f"{row.get('component_history_status')} / {row.get('reason_code')}",
+            )
+        )
+    return [
+        "## Relative Valuation",
+        "",
+        f"As-of date: `{snapshot['report_date']}`. Historia on nykyisin revisioitu, ei PIT-rekonstruktio.",
+        "",
+        _table(
+            ("Mittari", "Saatavuuspäivän konteksti", "Nykyhintainen", "Muutos"),
+            (
+                ("Absolute Valuation Score", _score(filing.get("total_valuation_score")), _score(current.get("total_valuation_score")), _score_point_change(value.get("score_change_due_to_current_price"))),
+                ("Price date", filing.get("price_date"), current.get("price_date"), "—"),
+                ("Price age", filing.get("price_age_calendar_days"), current.get("price_age_calendar_days"), "—"),
+            ),
+        ),
+        "",
+        "### Current-price peer comparison",
+        "",
+        _table(
+            ("Peer scope", "Filing percentile", "Current percentile", "Current − filing", "Current status / peers"),
+            tuple((scope.title(), *peer_cell(scope)) for scope in ("UNIVERSE", "SECTOR", "INDUSTRY", "ECOSYSTEM")),
+            ("left", "right", "right", "right", "left"),
+        ),
+        "",
+        "### Own positive-yield history",
+        "",
+        _table(
+            ("Own-History Valuation Percentile", "Status", "Five-year window", "Minimum positive observations", "Fiscal gaps"),
+            ((
+                _percentile(own.get("percentile")),
+                f"{own.get('status')} / {own.get('reason_code')}",
+                f"{own.get('window_start_date')} – {own.get('window_end_date')}",
+                own.get("minimum_component_positive_history_count"),
+                own.get("fiscal_gap_count"),
+            ),),
+            ("right", "left", "left", "right", "right"),
+        ),
+        "",
+        _table(
+            ("Component", "Current yield", "Positive-history median", "Percentile", "Positive observations", "Positive-history span", "Status"),
+            tuple(component_rows),
+            ("left", "right", "right", "right", "right", "left", "left"),
+        ),
+        "",
+        "> A high peer percentile means the company is cheap relative to current eligible peers under Absolute Valuation Score V2. A high own-history percentile means the company is cheap relative to its own positive and economically comparable historical yield observations. Neither measure implies fundamental strength or predicts a price increase.",
+        "",
+    ]
 
 
 def _filing_delta(history: Sequence[Mapping[str, Any]], key: str, lag: int) -> float | None:
@@ -1007,6 +1116,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "" if is_v2 else "",
         "> Current moment versus Latest endpoint mainly reflects the market-price change because both use the latest endpoint's fundamental base. Latest endpoint versus Previous endpoint (exact Q−1) combines changes in price, shares, balance sheet, and TTM fundamentals, so this is not a pure valuation trend decomposition. The metrics are descriptive and do not alter Valuation Score. Current-moment metrics are indicative because they combine a current market price with the latest available endpoint fundamentals.",
         "",
+        *_relative_valuation_sections(snapshot),
         "## Relative Position",
         "",
         "Alla oleva Ecosystem-sarake kertoo vain aktiivisen Relative Position -snapshotin kelpoisen ekosysteemivertailun tuloksen. Se ei ole taxonomy-layer-ranking eikä jäsenyystaulukon kopio.",
