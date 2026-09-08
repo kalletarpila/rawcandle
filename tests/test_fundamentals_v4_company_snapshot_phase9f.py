@@ -106,7 +106,7 @@ def test_v2_report_restores_compact_fiscal_histories(nvda_report: tuple[str, dic
         RELATIVE_VALUATION_REPORT_CONTRACT,
     }
     if snapshot["report_contract"] == RELATIVE_VALUATION_REPORT_CONTRACT:
-        assert "RELATIVE_VALUATION_AS_OF_MISMATCH" in report
+        assert "RELATIVE_VALUATION_NO_ELIGIBLE_NON_FUTURE_SNAPSHOT" in report
     assert len(snapshot["history"]) == 5
     assert len(snapshot["lifecycle"]["history"]) == 4
     assert "FY2027 Q2" in report

@@ -36,7 +36,7 @@ CANDIDATE_REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
 ).hexdigest()
 
 PRODUCTION_SNAPSHOT_MODEL_VERSION = (
-    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_RELATIVE_VALUATION_V1"
+    "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_RELATIVE_VALUATION_V2"
 )
 PRODUCTION_SNAPSHOT_CONTRACT = {
     "model_version": PRODUCTION_SNAPSHOT_MODEL_VERSION,
@@ -44,6 +44,7 @@ PRODUCTION_SNAPSHOT_CONTRACT = {
     "relative_valuation": (MODEL_VERSION, MODEL_FINGERPRINT),
     "production_activation": True,
     "persistence_required": True,
+    "snapshot_selection": "LATEST_ELIGIBLE_NON_FUTURE_PERSISTED_SNAPSHOT",
 }
 PRODUCTION_SNAPSHOT_FINGERPRINT = hashlib.sha256(
     json.dumps(
@@ -57,6 +58,8 @@ PRODUCTION_REPORT_SPEC = {
     "section": "CURRENT_PEERS_AND_OWN_POSITIVE_YIELD_HISTORY",
     "production_default": True,
     "unavailable_state": "EXPLICIT_NO_ON_DEMAND_RECALCULATION",
+    "snapshot_selection": "LATEST_ELIGIBLE_NON_FUTURE_PERSISTED_SNAPSHOT",
+    "visible_snapshot_date": True,
 }
 PRODUCTION_REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
     json.dumps(
@@ -106,10 +109,19 @@ def assemble_relative_valuation_candidate_snapshot(
 def attach_persisted_relative_valuation_candidate(
     snapshot: Mapping[str, Any], repository: RelativeValuationRepository,
     *, model_fingerprint: str = MODEL_FINGERPRINT,
+    snapshot_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     ticker = str(snapshot["identity"]["ticker"])
-    persisted = repository.company_by_ticker(ticker, model_fingerprint=model_fingerprint)
-    metadata = repository.active_metadata(model_fingerprint=model_fingerprint)
+    metadata = (
+        dict(snapshot_metadata)
+        if snapshot_metadata is not None
+        else repository.active_metadata(model_fingerprint=model_fingerprint)
+    )
+    persisted = repository.company_by_ticker(
+        ticker,
+        model_fingerprint=model_fingerprint,
+        snapshot_id=str(metadata["snapshot_id"]) if metadata else None,
+    )
     if persisted is None or metadata is None:
         raise LookupError(f"RELATIVE_VALUATION_PERSISTED_RESULT_NOT_FOUND:{ticker}")
     current = {
@@ -206,8 +218,11 @@ def assemble_persisted_relative_valuation_candidate_snapshot(
 
 def promote_persisted_relative_valuation_snapshot(
     snapshot: Mapping[str, Any], repository: RelativeValuationRepository,
+    *, snapshot_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    output = attach_persisted_relative_valuation_candidate(snapshot, repository)
+    output = attach_persisted_relative_valuation_candidate(
+        snapshot, repository, snapshot_metadata=snapshot_metadata
+    )
     output["report_contract"] = PRODUCTION_REPORT_CONTRACT
     output["report_presentation_fingerprint"] = (
         PRODUCTION_REPORT_PRESENTATION_FINGERPRINT
@@ -226,6 +241,7 @@ def attach_relative_valuation_unavailable(
         "reason_code": reason_code,
         "requested_as_of_date": snapshot["report_date"],
         "active_as_of_date": metadata.get("as_of_date") if metadata else None,
+        "eligible_snapshot_date": metadata.get("as_of_date") if metadata else None,
         "model_fingerprint": MODEL_FINGERPRINT,
     }
     output["report_contract"] = PRODUCTION_REPORT_CONTRACT

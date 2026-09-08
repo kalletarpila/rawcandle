@@ -73,6 +73,10 @@ identities, `--full-universe`, `--apply`, and `--confirm-production`. V1 uses
 this protected manual refresh after a successful source refresh; no company
 report request or scheduler hook triggers it.
 
-Company Snapshot V2 reads only the active persisted snapshot. It requires an
-exact date match and degrades explicitly when the pointer is absent or the
-requested date differs. It does not perform a one-company recalculation.
+Company Snapshot V2 uses the latest eligible persisted snapshot. The active
+snapshot is used when its date is no later than the report date. For an earlier
+historical report, the reader uses the newest retained complete snapshot no
+later than that report date; otherwise it degrades explicitly. Model,
+persistence, layout, completeness, and company presence are validated. One
+selected snapshot supplies company, peer, own-history, and component rows.
+There is no age threshold and no one-company recalculation.

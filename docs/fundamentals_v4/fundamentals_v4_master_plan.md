@@ -345,10 +345,9 @@ Status: `PRODUCTION_ACTIVE`
 Phase 11D deployed the additive current-snapshot schema and atomically
 activated snapshot
 `b7f786edfa7632a320df5281182761471a15281ca1c518d2d729bbfab36dc5df`
-for as-of 2026-09-08. The production reader now supplies Relative Valuation to
-new Company Snapshot V2 and Fundamentals UI reports only when the report and
-snapshot dates match exactly; missing or stale context is explicit and never
-causes a one-company or full-universe recalculation.
+for as-of 2026-09-08. Its initial exact-date report-selection behavior was
+superseded by Phase 11E. Report generation has never caused a one-company or
+full-universe recalculation.
 
 The first apply persisted 2,448 company, 9,792 peer, 2,448 own-history, and
 7,344 component rows. Current-fresh peer eligibility is 2,245; own-history
@@ -359,3 +358,22 @@ Snapshot/UI, protected-path, complete V4 and 2,729-test repository checks
 passed. Production uses the explicit protected manual refresh command. See
 `fundamentals_v4_relative_valuation_v1_phase11d_deployment.md` and the Phase
 11D runbook.
+
+## Relative Valuation Phase 11E
+
+Status: `REPORT_SELECTION_CORRECTED_NO_PRODUCTION_DATA_CHANGE`
+
+Phase 11E selects the latest eligible persisted Relative Valuation snapshot no
+later than the report date. Later reports display the active snapshot's actual
+date without an age cutoff. Historical reports use a retained non-future
+snapshot when available and otherwise show an explicit unavailable status. All
+Relative Valuation rows come from one selected snapshot, while descriptive
+current valuation and filing Relative Position retain separate contexts.
+
+Snapshot economic/presentation identities advance to
+`7b40558063684256474afa885e60e73d97f01fc01989ae9ffbcae34e74f4dd36` /
+`83f0a959a0b6dd3f03a4497955d3d0e94b687a870efcfa61672b8e5b4d20f6bf`.
+Persistence, production rows, active pointer, economic models, active package,
+and existing reports remain unchanged. Refresh remains the protected manual
+full-universe operation. See
+`fundamentals_v4_relative_valuation_v1_phase11e_reporting.md`.

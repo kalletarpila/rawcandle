@@ -563,8 +563,37 @@ class RelativeValuationRepository:
         snapshot_id = self.active_snapshot_id(model_fingerprint=model_fingerprint)
         return self.snapshot_metadata(snapshot_id, model_fingerprint=model_fingerprint) if snapshot_id else None
 
+    def report_snapshot_metadata(
+        self, report_date: str, *, model_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        active_id = self.active_snapshot_id(model_fingerprint=model_fingerprint)
+        if active_id is None:
+            return None
+        active = self.snapshot_metadata(
+            active_id, model_fingerprint=model_fingerprint
+        )
+        if active is None:
+            raise ValueError("RELATIVE_VALUATION_ACTIVE_SNAPSHOT_INVALID")
+        if (
+            active["persistence_version"] != PERSISTENCE_VERSION
+            or active["layout_fingerprint"] != LAYOUT_FINGERPRINT
+        ):
+            raise ValueError("RELATIVE_VALUATION_ACTIVE_SNAPSHOT_CONTRACT_INVALID")
+        if str(active["as_of_date"]) <= report_date:
+            return active
+        row = self.connection.execute(
+            "SELECT * FROM relative_valuation_snapshot "
+            "WHERE model_fingerprint=? AND persistence_version=? "
+            "AND layout_fingerprint=? AND status='COMPLETE' AND as_of_date<=? "
+            "ORDER BY as_of_date DESC,created_at_utc DESC,snapshot_id DESC LIMIT 1",
+            (model_fingerprint, PERSISTENCE_VERSION, LAYOUT_FINGERPRINT, report_date),
+        ).fetchone()
+        return dict(row) if row else None
+
     def company(self, company_id: int, *, model_fingerprint: str, snapshot_id: str | None = None) -> dict[str, Any] | None:
-        target = snapshot_id or self.active_snapshot_id(model_fingerprint=model_fingerprint)
+        target = snapshot_id or self.active_snapshot_id(
+            model_fingerprint=model_fingerprint
+        )
         if target is None or self.snapshot_metadata(target, model_fingerprint=model_fingerprint) is None:
             return None
         row = self.connection.execute("SELECT * FROM relative_valuation_company_result WHERE snapshot_id=? AND company_id=?", (target, company_id)).fetchone()
@@ -579,8 +608,11 @@ class RelativeValuationRepository:
         )]
         return output
 
-    def company_by_ticker(self, ticker: str, *, model_fingerprint: str) -> dict[str, Any] | None:
-        target = self.active_snapshot_id(model_fingerprint=model_fingerprint)
+    def company_by_ticker(
+        self, ticker: str, *, model_fingerprint: str,
+        snapshot_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        target = snapshot_id or self.active_snapshot_id(model_fingerprint=model_fingerprint)
         if target is None:
             return None
         rows = self.connection.execute(
@@ -589,7 +621,10 @@ class RelativeValuationRepository:
         ).fetchall()
         if len(rows) != 1:
             return None
-        return self.company(int(rows[0][0]), model_fingerprint=model_fingerprint)
+        return self.company(
+            int(rows[0][0]), model_fingerprint=model_fingerprint,
+            snapshot_id=target,
+        )
 
     def companies(self, company_ids: Sequence[int], *, model_fingerprint: str) -> list[dict[str, Any]]:
         return [row for company_id in company_ids if (row := self.company(company_id, model_fingerprint=model_fingerprint)) is not None]

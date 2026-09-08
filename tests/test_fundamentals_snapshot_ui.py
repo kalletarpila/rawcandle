@@ -487,12 +487,15 @@ def test_ui_service_real_snapshot_integration_is_read_only(tmp_path: Path) -> No
     service = FundamentalsSnapshotUIService(output_dir=tmp_path)
 
     result = service.generate(
-        ticker_input="CRMD", report_date_input="2026-09-06", overwrite=False
+        ticker_input="CRMD", report_date_input="2026-09-12", overwrite=False
     )
 
     assert result.status == "GENERATED"
     assert result.publication_status == "CREATED"
-    assert result.filename == "CRMD_2026-09-06.md"
+    assert result.filename == "CRMD_2026-09-12.md"
     assert (tmp_path / result.filename).is_file()
+    assert "Relative Valuation snapshot date: `2026-09-08`" in (
+        tmp_path / result.filename
+    ).read_text(encoding="utf-8")
     assert len(result.report_content_fingerprint or "") == 64
     assert FUNDAMENTALS_ROUTE == "/fundamentals"

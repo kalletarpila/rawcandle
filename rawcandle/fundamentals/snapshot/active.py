@@ -67,21 +67,36 @@ def generate_active_company_snapshot(
 
         with _readonly(paths.analysis_db) as conn:
             repository = RelativeValuationRepository(conn)
-            metadata = repository.active_metadata(model_fingerprint=MODEL_FINGERPRINT)
-            if metadata is None:
-                snapshot = attach_relative_valuation_unavailable(
-                    snapshot, reason_code="RELATIVE_VALUATION_SNAPSHOT_NOT_ACTIVE"
+            active_id = repository.active_snapshot_id(model_fingerprint=MODEL_FINGERPRINT)
+            try:
+                metadata = repository.report_snapshot_metadata(
+                    report_date, model_fingerprint=MODEL_FINGERPRINT
                 )
-            elif str(metadata["as_of_date"]) != report_date:
+            except ValueError:
                 snapshot = attach_relative_valuation_unavailable(
-                    snapshot,
-                    reason_code="RELATIVE_VALUATION_AS_OF_MISMATCH",
-                    metadata=metadata,
+                    snapshot, reason_code="RELATIVE_VALUATION_SNAPSHOT_INVALID"
                 )
             else:
-                snapshot = promote_persisted_relative_valuation_snapshot(
-                    snapshot, repository
-                )
+                if metadata is None:
+                    reason = (
+                        "RELATIVE_VALUATION_SNAPSHOT_NOT_ACTIVE"
+                        if active_id is None
+                        else "RELATIVE_VALUATION_NO_ELIGIBLE_NON_FUTURE_SNAPSHOT"
+                    )
+                    snapshot = attach_relative_valuation_unavailable(
+                        snapshot, reason_code=reason
+                    )
+                else:
+                    try:
+                        snapshot = promote_persisted_relative_valuation_snapshot(
+                            snapshot, repository, snapshot_metadata=metadata
+                        )
+                    except LookupError:
+                        snapshot = attach_relative_valuation_unavailable(
+                            snapshot,
+                            reason_code="RELATIVE_VALUATION_COMPANY_NOT_IN_SNAPSHOT",
+                            metadata=metadata,
+                        )
     rendered = render_snapshot(snapshot)
     canonical_ticker = snapshot["identity"]["ticker"]
     markdown = rendered.markdown

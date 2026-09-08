@@ -234,14 +234,14 @@ def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
     if not value:
         unavailable = snapshot.get("relative_valuation_unavailable")
         if unavailable:
-            active = unavailable.get("active_as_of_date") or "—"
+            eligible = unavailable.get("eligible_snapshot_date") or "—"
             return [
                 "## Relative Valuation",
                 "",
                 "Relative Valuation ei ole saatavilla tämän raportin päivämäärälle.",
                 "",
                 f"Status: `{unavailable.get('reason_code')}`. Pyydetty as-of: "
-                f"`{unavailable.get('requested_as_of_date')}`; aktiivinen as-of: `{active}`.",
+                f"`{unavailable.get('requested_as_of_date')}`; kelvollinen snapshot: `{eligible}`.",
                 "",
                 "Yksittäinen raporttipyyntö ei käynnistä koko universumin uudelleenlaskentaa.",
                 "",
@@ -304,7 +304,7 @@ def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
     identity = snapshot.get("relative_valuation_identity") or {}
     production_context = (
         [
-            f"Relative Valuation snapshot as-of: `{identity.get('as_of_date')}`; "
+            f"Relative Valuation snapshot date: `{identity.get('as_of_date')}`; "
             f"source fingerprint: `{identity.get('source_fingerprint')}`; "
             f"result fingerprint: `{identity.get('result_fingerprint')}`.",
             "",
@@ -315,7 +315,7 @@ def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
     return [
         "## Relative Valuation",
         "",
-        f"As-of date: `{snapshot['report_date']}`. Historia on nykyisin revisioitu, ei PIT-rekonstruktio.",
+        f"Report date: `{snapshot['report_date']}`. Historia on nykyisin revisioitu, ei PIT-rekonstruktio.",
         "",
         *production_context,
         _table(

@@ -140,3 +140,19 @@ coherence is required. Missing or mismatched persistence is rendered as an
 explicit unavailable state and never triggers a recalculation. Deployment and
 smoke evidence is in
 `fundamentals_v4_relative_valuation_v1_phase11d_deployment.md`.
+
+## Phase 11E Snapshot Selection Correction
+
+The active production Snapshot contract is now
+`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_RELATIVE_VALUATION_V2` with fingerprint
+`7b40558063684256474afa885e60e73d97f01fc01989ae9ffbcae34e74f4dd36`.
+Presentation V9 fingerprint is
+`83f0a959a0b6dd3f03a4497955d3d0e94b687a870efcfa61672b8e5b4d20f6bf`.
+
+Reports select the latest eligible persisted snapshot no later than the report
+date and display `Relative Valuation snapshot date` separately from `Report
+date`. Historical reports use a retained non-future snapshot when available.
+The selected snapshot supplies all Relative Valuation rows coherently. Current
+descriptive valuation and filing Relative Position retain their own contexts.
+Details and verification are in
+`fundamentals_v4_relative_valuation_v1_phase11e_reporting.md`.

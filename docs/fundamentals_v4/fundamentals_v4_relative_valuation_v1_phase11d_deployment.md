@@ -4,6 +4,11 @@
 
 Status: `PRODUCTION_ACTIVE`.
 
+Phase 11E later superseded only the exact-date report-selection rule documented
+below. Production persistence, rows, active snapshot, and manual refresh policy
+remain those deployed here. See
+`fundamentals_v4_relative_valuation_v1_phase11e_reporting.md`.
+
 On 2026-09-08, Phase 11D additively migrated production
 `data/fundamentals_analysis.db`, persisted and atomically activated the first
 full-universe Relative Valuation snapshot, and promoted the persisted reader

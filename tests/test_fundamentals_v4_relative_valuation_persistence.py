@@ -14,6 +14,9 @@ from rawcandle.fundamentals.relative_valuation.engine import (
     HistoricalEndpoint, RelativeValuationInput, calculate_relative_valuation,
     canonical_json,
 )
+from rawcandle.fundamentals.relative_valuation.candidate_snapshot import (
+    promote_persisted_relative_valuation_snapshot,
+)
 from rawcandle.fundamentals.relative_valuation.persistence import (
     LAYOUT_FINGERPRINT, MAX_BULK_SNAPSHOTS, MODEL_FINGERPRINT,
     PERSISTENCE_VERSION, RelativeValuationRepository, apply_snapshot,
@@ -109,6 +112,101 @@ def test_first_apply_round_trip_reader_and_true_noop() -> None:
     assert len(repository.current_universe(model_fingerprint=MODEL_FINGERPRINT)) == 2
     assert len(repository.companies((1, 2), model_fingerprint=MODEL_FINGERPRINT)) == 2
     assert quick_check(conn)["ok"]
+
+
+def test_report_snapshot_selection_uses_latest_eligible_non_future_snapshot() -> None:
+    conn = _connection()
+    first, first_inputs = _snapshot(as_of="2026-09-08")
+    first_report = apply_snapshot(conn, first, first_inputs, applied_at_utc=NOW)
+    second, second_inputs = _snapshot(offset=2.0, as_of="2026-09-10")
+    second_report = apply_snapshot(
+        conn, second, second_inputs, applied_at_utc="2026-09-10T13:00:00Z"
+    )
+    repository = RelativeValuationRepository(conn)
+
+    exact = repository.report_snapshot_metadata(
+        "2026-09-10", model_fingerprint=MODEL_FINGERPRINT
+    )
+    future_reports = [
+        repository.report_snapshot_metadata(date, model_fingerprint=MODEL_FINGERPRINT)
+        for date in ("2026-09-11", "2026-09-30")
+    ]
+    historical = repository.report_snapshot_metadata(
+        "2026-09-09", model_fingerprint=MODEL_FINGERPRINT
+    )
+    unavailable = repository.report_snapshot_metadata(
+        "2026-09-07", model_fingerprint=MODEL_FINGERPRINT
+    )
+
+    assert exact and exact["snapshot_id"] == second_report.snapshot_id
+    assert all(
+        row and row["snapshot_id"] == second_report.snapshot_id
+        for row in future_reports
+    )
+    assert historical and historical["snapshot_id"] == first_report.snapshot_id
+    assert unavailable is None
+    assert repository.company_by_ticker(
+        "T1", model_fingerprint=MODEL_FINGERPRINT,
+        snapshot_id=historical["snapshot_id"],
+    )["snapshot_id"] == first_report.snapshot_id
+
+
+def test_persisted_report_context_does_not_mix_newer_descriptive_price() -> None:
+    conn = _connection()
+    snapshot, inputs = _snapshot(as_of="2026-09-08")
+    report = apply_snapshot(conn, snapshot, inputs, applied_at_utc=NOW)
+    repository = RelativeValuationRepository(conn)
+    metadata = repository.report_snapshot_metadata(
+        "2026-09-12", model_fingerprint=MODEL_FINGERPRINT
+    )
+    base = {
+        "identity": {"ticker": "T1"},
+        "report_date": "2026-09-12",
+        "current_price_valuation": {
+            "price_date": "2026-09-12", "total_valuation_score": 99.0,
+        },
+        "history": [{"valuation": {"total_valuation_score": 10.0}}],
+        "relative_position": {"rows": []},
+        "model_fingerprints": {"snapshot": "base"},
+    }
+    promoted = promote_persisted_relative_valuation_snapshot(
+        base, repository, snapshot_metadata=metadata
+    )
+
+    assert promoted["current_price_valuation"]["price_date"] == "2026-09-12"
+    assert promoted["current_price_valuation"]["total_valuation_score"] == 99.0
+    assert promoted["relative_valuation_identity"]["snapshot_id"] == report.snapshot_id
+    assert promoted["relative_valuation_identity"]["as_of_date"] == "2026-09-08"
+    assert promoted["relative_valuation"]["current_valuation"]["price_date"] == "2026-09-08"
+    assert promoted["relative_valuation"]["current_valuation"]["total_valuation_score"] != 99.0
+    assert {
+        row["snapshot_id"] for row in repository.company_by_ticker(
+            "T1", model_fingerprint=MODEL_FINGERPRINT,
+            snapshot_id=report.snapshot_id,
+        )["peer_positions"]
+    } == {report.snapshot_id}
+
+    missing = dict(base)
+    missing["identity"] = {"ticker": "MISSING"}
+    with pytest.raises(LookupError, match="PERSISTED_RESULT_NOT_FOUND:MISSING"):
+        promote_persisted_relative_valuation_snapshot(
+            missing, repository, snapshot_metadata=metadata
+        )
+
+
+def test_report_snapshot_selection_rejects_invalid_active_contract() -> None:
+    conn = _connection()
+    snapshot, inputs = _snapshot()
+    report = apply_snapshot(conn, snapshot, inputs, applied_at_utc=NOW)
+    conn.execute(
+        "UPDATE relative_valuation_snapshot SET layout_fingerprint='invalid' "
+        "WHERE snapshot_id=?", (report.snapshot_id,),
+    )
+    repository = RelativeValuationRepository(conn)
+    with pytest.raises(ValueError, match="ACTIVE_SNAPSHOT_CONTRACT_INVALID"):
+        repository.report_snapshot_metadata(
+            "2026-09-09", model_fingerprint=MODEL_FINGERPRINT
+        )
 
 
 def test_six_changed_snapshots_keep_active_and_previous_only() -> None:

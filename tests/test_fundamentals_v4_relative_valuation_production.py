@@ -11,17 +11,20 @@ from rawcandle.fundamentals.relative_valuation import production
 from rawcandle.fundamentals.relative_valuation.candidate_snapshot import (
     PRODUCTION_REPORT_PRESENTATION_FINGERPRINT,
     PRODUCTION_SNAPSHOT_FINGERPRINT,
+    PRODUCTION_SNAPSHOT_MODEL_VERSION,
     attach_relative_valuation_unavailable,
 )
 from rawcandle.fundamentals.relative_valuation.contract import PRODUCTION_REPORT_CONTRACT
 from rawcandle.fundamentals.relative_valuation.engine import MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_valuation.persistence import (
-    LAYOUT_FINGERPRINT,
+    LAYOUT_FINGERPRINT, RelativeValuationRepository,
     PERSISTENCE_VERSION,
     deactivate_snapshot,
     ensure_schema,
     set_active_snapshot,
 )
+from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
+from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
 def _role_database(path: Path, table: str) -> None:
     with sqlite3.connect(path) as connection:
         connection.execute(f'CREATE TABLE "{table}" (value INTEGER)')
@@ -58,6 +61,9 @@ def test_production_parser_defaults_to_dry_run() -> None:
     assert len(PRODUCTION_SNAPSHOT_FINGERPRINT) == 64
     assert len(PRODUCTION_REPORT_PRESENTATION_FINGERPRINT) == 64
     assert "CANDIDATE" not in PRODUCTION_REPORT_CONTRACT
+    assert PRODUCTION_SNAPSHOT_MODEL_VERSION.endswith("RELATIVE_VALUATION_V2")
+    assert PRODUCTION_SNAPSHOT_FINGERPRINT == "7b40558063684256474afa885e60e73d97f01fc01989ae9ffbcae34e74f4dd36"
+    assert PRODUCTION_REPORT_PRESENTATION_FINGERPRINT == "83f0a959a0b6dd3f03a4497955d3d0e94b687a870efcfa61672b8e5b4d20f6bf"
     required = {
         action.dest for action in parser._actions if action.required
     }
@@ -129,7 +135,7 @@ def test_unavailable_report_is_explicit_and_uses_production_identities() -> None
     }
     snapshot = attach_relative_valuation_unavailable(
         base,
-        reason_code="RELATIVE_VALUATION_AS_OF_MISMATCH",
+        reason_code="RELATIVE_VALUATION_NO_ELIGIBLE_NON_FUTURE_SNAPSHOT",
         metadata={"as_of_date": "2026-09-08"},
     )
     assert snapshot["report_contract"] == PRODUCTION_REPORT_CONTRACT
@@ -138,5 +144,79 @@ def test_unavailable_report_is_explicit_and_uses_production_identities() -> None
     markdown = "\n".join(__import__(
         "rawcandle.fundamentals.snapshot.renderer", fromlist=["_relative_valuation_sections"]
     )._relative_valuation_sections(snapshot))
-    assert "RELATIVE_VALUATION_AS_OF_MISMATCH" in markdown
+    assert "RELATIVE_VALUATION_NO_ELIGIBLE_NON_FUTURE_SNAPSHOT" in markdown
     assert "2026-09-08" in markdown and "uudelleenlaskentaa" in markdown
+
+    missing = attach_relative_valuation_unavailable(
+        base,
+        reason_code="RELATIVE_VALUATION_COMPANY_NOT_IN_SNAPSHOT",
+        metadata={"as_of_date": "2026-09-08"},
+    )
+    missing_markdown = "\n".join(__import__(
+        "rawcandle.fundamentals.snapshot.renderer",
+        fromlist=["_relative_valuation_sections"],
+    )._relative_valuation_sections(missing))
+    assert "RELATIVE_VALUATION_COMPANY_NOT_IN_SNAPSHOT" in missing_markdown
+    assert "kelvollinen snapshot: `2026-09-08`" in missing_markdown
+
+
+@pytest.mark.integration
+@pytest.mark.database
+def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    paths = SnapshotPaths(
+        canonical_db=root / "data/fundamentals_v4.db",
+        analysis_db=root / "data/fundamentals_analysis.db",
+        market_db=root / "data/osakedata.db",
+        taxonomy_db=root / "data/analysis.db",
+        provider_db=root / "data/fundamentals_provider.db",
+    )
+    if not all(path.is_file() for path in paths.__dict__.values()):
+        pytest.skip("Fundamentals V4 production databases are not present")
+    before = {
+        name: (path.stat().st_size, path.stat().st_mtime_ns)
+        for name, path in paths.__dict__.items()
+    }
+    import rawcandle.fundamentals.relative_valuation.engine as engine_module
+    import rawcandle.fundamentals.relative_valuation.persistence as persistence_module
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("REPORT_GENERATION_MUST_NOT_REFRESH_RELATIVE_VALUATION")
+
+    monkeypatch.setattr(engine_module, "calculate_relative_valuation", forbidden)
+    monkeypatch.setattr(persistence_module, "apply_snapshot", forbidden)
+    first = generate_active_company_snapshot(
+        paths, ticker="NVDA", report_date="2026-09-12", output_dir=tmp_path
+    )
+    second = generate_active_company_snapshot(
+        paths, ticker="NVDA", report_date="2026-09-12", output_dir=tmp_path
+    )
+    markdown = Path(first["output_path"]).read_text(encoding="utf-8")
+    relative = first["snapshot"]["relative_valuation"]
+    identity = first["snapshot"]["relative_valuation_identity"]
+    with sqlite3.connect(
+        f"{paths.analysis_db.resolve().as_uri()}?mode=ro", uri=True
+    ) as connection:
+        persisted = RelativeValuationRepository(connection).company_by_ticker(
+            "NVDA", model_fingerprint=MODEL_FINGERPRINT
+        )
+
+    assert first["status"] == "CREATED" and second["status"] == "NO_CHANGE"
+    assert first["report_content_fingerprint"] == second["report_content_fingerprint"]
+    assert identity["as_of_date"] == "2026-09-08"
+    assert "Relative Valuation snapshot date: `2026-09-08`" in markdown
+    assert (
+        relative["current_valuation"]["total_valuation_score"]
+        == persisted["current_valuation_score"]
+    )
+    assert (
+        relative["current_valuation"]["price_date"]
+        == persisted["current_price_date"]
+    )
+    after = {
+        name: (path.stat().st_size, path.stat().st_mtime_ns)
+        for name, path in paths.__dict__.items()
+    }
+    assert after == before

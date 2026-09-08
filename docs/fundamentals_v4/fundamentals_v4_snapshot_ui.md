@@ -35,7 +35,7 @@ Reports are always written to:
 
 The filename contract is `{TICKER}_{YYYY-MM-DD}.md`. The browser cannot select an output directory or provide a filesystem path.
 
-One report date and one overwrite choice apply to the whole request. Each ticker is attempted independently through the existing Company Snapshot V1 API, in normalized first-appearance order. A failed, invalid, not-ready, or overwrite-required ticker does not block later tickers, and successful files are not rolled back. Publication uses the existing atomic per-file writer:
+One report date and one overwrite choice apply to the whole request. Each ticker is attempted independently through the active Company Snapshot V2 API, in normalized first-appearance order. A failed, invalid, not-ready, or overwrite-required ticker does not block later tickers, and successful files are not rolled back. Publication uses the existing atomic per-file writer:
 
 - a missing target returns `CREATED`
 - byte-identical content returns `NO_CHANGE`
@@ -58,18 +58,20 @@ The UI calls `FundamentalsSnapshotUIService`, which validates browser inputs and
 
 Reports generated through the UI include Company Snapshot V2's three-point valuation-multiples section. This presentation addition does not change batch processing, `NO_CHANGE`, recent-report filtering, or download security; a download still returns the exact generated Markdown bytes.
 
-Phase 11D also exposes persisted Relative Valuation in newly generated reports
-when the requested report date exactly matches the active Relative Valuation
-snapshot. Missing activation or a different date renders an explicit
-unavailable reason; the UI does not silently combine contexts and does not
-start a full-universe refresh. Existing report files remain untouched unless
-the user explicitly authorizes overwrite through the established control.
+Persisted Relative Valuation is exposed from the latest eligible non-future
+snapshot. A later report may therefore show an older Relative Valuation
+snapshot, whose actual date is displayed. An earlier historical report never
+uses a future snapshot; if no retained eligible snapshot exists, the section
+is explicitly unavailable. The UI does not silently combine valuation
+contexts, apply an age cutoff, or start a full-universe refresh. Existing
+report files remain untouched unless the user explicitly authorizes overwrite
+through the established control.
 
 Repeated identical requests converge through the existing atomic writer. The generate action is disabled while a request is running, but backend atomic publication remains authoritative if requests overlap.
 
 ## SwingMaster reference
 
-The SwingMaster `ui_fundamental_pipeline` was inspected read-only. Its snapshot browser presents a download icon and opens a browser URL for the selected file. RawCandle follows that user-facing interaction but uses a stricter RawCandle-owned download route instead of SwingMaster's broad Flet asset serving. RawCandle does not copy its CLI command builder, process executor, CSV snapshot implementation, ZIP creation, folder launcher, market workflow, or update controls. The implementation resides entirely in RawCandle and depends only on RawCandle's Company Snapshot V1 API.
+The SwingMaster `ui_fundamental_pipeline` was inspected read-only. Its snapshot browser presents a download icon and opens a browser URL for the selected file. RawCandle follows that user-facing interaction but uses a stricter RawCandle-owned download route instead of SwingMaster's broad Flet asset serving. RawCandle does not copy its CLI command builder, process executor, CSV snapshot implementation, ZIP creation, folder launcher, market workflow, or update controls. The implementation resides entirely in RawCandle and depends only on RawCandle's active Company Snapshot V2 API.
 
 ## Known limitations
 
