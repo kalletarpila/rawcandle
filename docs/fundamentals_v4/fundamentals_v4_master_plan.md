@@ -321,3 +321,18 @@ The archived seven-flag package `a36d6903...` remains coherent, explicitly
 readable and activation-only rollback capable. The protected second production
 command was a byte-identical `NO_CHANGE`; provider-disabled pipeline, Snapshot,
 UI, backup and rollback-copy validation passed.
+
+## Relative Valuation Phase 11C
+
+Status: `VERSIONED_CURRENT_SNAPSHOT_PERSISTENCE_REHEARSED_NOT_PRODUCTION_ACTIVE`
+
+Phase 11C adds normalized current-snapshot persistence, deterministic readers,
+atomic full-universe activation, active-plus-previous retention, bounded audit
+metadata, a protected rehearsal-only CLI, and persisted candidate Snapshot
+integration. The 2026-09-08 production-copy rehearsal exactly reproduced Phase
+11B source/result fingerprints and coverage, passed the independent no-op,
+six-snapshot retention, nine rollback boundaries, date-only behavior, reader
+latency, storage, and 15-report parity checks. Production schema, data, active
+package, reports, and default UI remain unchanged. Phase 11D is separately
+authorized deployment work governed by
+`fundamentals_v4_relative_valuation_v1_phase11d_runbook.md`.
