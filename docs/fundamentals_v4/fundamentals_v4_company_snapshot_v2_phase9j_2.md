@@ -120,3 +120,23 @@ reconstruction. Source availability uses RawCandle's availability contract.
 Reported Common Earnings remain GAAP-based and unnormalized, current-price
 valuation remains indicative, and diagnostic flags remain numeric review
 candidates rather than confirmed accounting events.
+
+## Phase 11D Production Extension
+
+Phase 11D promotes the persisted Relative Valuation candidate as production
+contract `CURRENT_REVISED_COMPANY_SNAPSHOT_V2_RELATIVE_VALUATION_V1`, snapshot
+fingerprint
+`a688cb7f1637126bb354d179cd12610d891073a10f0692a9a83830c3f6b12391`,
+and presentation contract
+`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V8_RELATIVE_VALUATION` with
+fingerprint
+`e1eecc4d12942470236ecc3ae7a885eb8f562de8b401a774f27efc7f439d6738`.
+
+The extension adds current-price peer percentiles and own positive-yield
+history from the active Relative Valuation persistence reader. It preserves all
+previous sections, eight Diagnostic Flags, Reported Common Earnings wording,
+and existing economic model identities. Exact report-date/snapshot-date
+coherence is required. Missing or mismatched persistence is rendered as an
+explicit unavailable state and never triggers a recalculation. Deployment and
+smoke evidence is in
+`fundamentals_v4_relative_valuation_v1_phase11d_deployment.md`.

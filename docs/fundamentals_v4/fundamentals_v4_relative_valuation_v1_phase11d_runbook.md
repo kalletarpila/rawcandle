@@ -1,7 +1,41 @@
 # Phase 11D Relative Valuation Deployment Runbook
 
-Phase 11D requires separate explicit production authorization. Do not execute
-this runbook during Phase 11C.
+Phase 11D deployed successfully on 2026-09-08. This is now the protected manual
+refresh and rollback runbook. The deployment record is
+`fundamentals_v4_relative_valuation_v1_phase11d_deployment.md`.
+
+## Refresh Command
+
+Run first without `--apply --confirm-production`, inspect the output, then add
+both flags only for an authorized production refresh. Replace the four expected
+content identities with those from a deterministic rehearsal when source data
+has legitimately changed.
+
+```bash
+PYTHONPATH=. python3 -m rawcandle.cli.run_fundamentals_v4_relative_valuation_production \
+  --canonical-db /home/kalle/projects/rawcandle/data/fundamentals_v4.db \
+  --provider-db /home/kalle/projects/rawcandle/data/fundamentals_provider.db \
+  --analysis-db /home/kalle/projects/rawcandle/data/fundamentals_analysis.db \
+  --market-db /home/kalle/projects/rawcandle/data/osakedata.db \
+  --taxonomy-db /home/kalle/projects/rawcandle/data/analysis.db \
+  --output /home/kalle/projects/rawcandle/temp/fundamentals_v4_relative_valuation_phase11d/REFRESH_ID \
+  --backup-dir /home/kalle/projects/rawcandle/backups \
+  --as-of-date YYYY-MM-DD \
+  --model-fingerprint 76c2974108b2c5085b7dfa102acd4bb04eea36a5267bbdb1930a2bc7dc8cb35e \
+  --persistence-version RELATIVE_VALUATION_CURRENT_SNAPSHOT_V1 \
+  --layout-fingerprint 9ffbfa6dd1ed86be3c5858607eb3284070d7a20285f0d46799cc198ba2a6d523 \
+  --expected-active-package 0e269e52a63500342df8a08ee2f91552fdc8fb216fa68cfe469bafb6aa8e3c30 \
+  --expected-source-fingerprint FULL_REHEARSED_SOURCE_FINGERPRINT \
+  --expected-result-fingerprint FULL_REHEARSED_RESULT_FINGERPRINT \
+  --expected-physical-fingerprint FULL_REHEARSED_PHYSICAL_FINGERPRINT \
+  --expected-snapshot-id FULL_REHEARSED_SNAPSHOT_ID \
+  --full-universe
+```
+
+The production apply adds `--apply --confirm-production`. Never reuse stale
+expected fingerprints merely to pass the gate.
+
+## Deployment Procedure
 
 1. Stop or exclude concurrent Fundamentals writers and capture protected
    production database/report inventories.

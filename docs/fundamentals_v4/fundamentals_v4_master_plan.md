@@ -332,7 +332,30 @@ metadata, a protected rehearsal-only CLI, and persisted candidate Snapshot
 integration. The 2026-09-08 production-copy rehearsal exactly reproduced Phase
 11B source/result fingerprints and coverage, passed the independent no-op,
 six-snapshot retention, nine rollback boundaries, date-only behavior, reader
-latency, storage, and 15-report parity checks. Production schema, data, active
-package, reports, and default UI remain unchanged. Phase 11D is separately
-authorized deployment work governed by
+latency, storage, and 15-report parity checks. At Phase 11C completion,
+production schema, data, active package, reports, and default UI remained
+unchanged. Phase 11D subsequently completed the separately authorized work
+governed by
 `fundamentals_v4_relative_valuation_v1_phase11d_runbook.md`.
+
+## Relative Valuation Phase 11D
+
+Status: `PRODUCTION_ACTIVE`
+
+Phase 11D deployed the additive current-snapshot schema and atomically
+activated snapshot
+`b7f786edfa7632a320df5281182761471a15281ca1c518d2d729bbfab36dc5df`
+for as-of 2026-09-08. The production reader now supplies Relative Valuation to
+new Company Snapshot V2 and Fundamentals UI reports only when the report and
+snapshot dates match exactly; missing or stale context is explicit and never
+causes a one-company or full-universe recalculation.
+
+The first apply persisted 2,448 company, 9,792 peer, 2,448 own-history, and
+7,344 component rows. Current-fresh peer eligibility is 2,245; own-history
+fresh `READY`/`LIMITED_HISTORY` counts are 874/124. HUBG remains the sole
+broader-READY but non-current-fresh observation behind the 875/874 difference.
+The independent second apply was byte-identical `NO_CHANGE`; rollback-copy,
+Snapshot/UI, protected-path, complete V4 and 2,729-test repository checks
+passed. Production uses the explicit protected manual refresh command. See
+`fundamentals_v4_relative_valuation_v1_phase11d_deployment.md` and the Phase
+11D runbook.

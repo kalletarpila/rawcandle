@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The RawCandle Scheduler UI has a top-level **Fundamentals** page for manually generating one or more `CURRENT_REVISED_COMPANY_SNAPSHOT_V1` Markdown reports. The page uses results already present in RawCandle. It does not fetch provider data or refresh canonical, TTM, Score, Lifecycle, Valuation, Delta, Relative Position, or Diagnostic Flag results.
+The RawCandle Scheduler UI has a top-level **Fundamentals** page for manually generating one or more Company Snapshot V2 Markdown reports. The page uses results already present in RawCandle. It does not fetch provider data or refresh canonical, TTM, Score, Lifecycle, Valuation, Delta, Relative Position, Relative Valuation, or Diagnostic Flag results.
 
 RawCandle uses Flet in web-browser mode. Scheduler, Taxonomy, and Fundamentals are top-level tabs in the same application. Their stable application routes are `/scheduler`, `/taxonomy`, and `/fundamentals`; `/` opens Scheduler.
 
@@ -54,9 +54,16 @@ The endpoint is restricted to `/home/kalle/projects/rawcandle/fundamental_report
 
 ## Data and safety contract
 
-The UI calls `FundamentalsSnapshotUIService`, which validates browser inputs and delegates all assembly, rendering, fingerprinting, filename construction, and publication to the existing Company Snapshot V1 implementation. Production SQLite sources retain their existing `mode=ro`, immutable and `query_only` behavior. The only write is the requested Markdown report.
+The UI calls `FundamentalsSnapshotUIService`, which validates browser inputs and delegates all assembly, rendering, fingerprinting, filename construction, and publication to the active Company Snapshot V2 implementation. Production SQLite sources retain their read-only and `query_only` behavior. The only write is the requested Markdown report.
 
-Reports generated through the UI include Company Snapshot V1's three-point valuation-multiples section. This presentation addition does not change batch processing, `NO_CHANGE`, recent-report filtering, or download security; a download still returns the exact generated Markdown bytes.
+Reports generated through the UI include Company Snapshot V2's three-point valuation-multiples section. This presentation addition does not change batch processing, `NO_CHANGE`, recent-report filtering, or download security; a download still returns the exact generated Markdown bytes.
+
+Phase 11D also exposes persisted Relative Valuation in newly generated reports
+when the requested report date exactly matches the active Relative Valuation
+snapshot. Missing activation or a different date renders an explicit
+unavailable reason; the UI does not silently combine contexts and does not
+start a full-universe refresh. Existing report files remain untouched unless
+the user explicitly authorizes overwrite through the established control.
 
 Repeated identical requests converge through the existing atomic writer. The generate action is disabled while a request is running, but backend atomic publication remains authoritative if requests overlap.
 

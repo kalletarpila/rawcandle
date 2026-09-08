@@ -58,10 +58,21 @@ Every lookup requires an explicit model fingerprint or resolves only its
 explicit active pointer. It never recalculates the universe or falls back to a
 different model.
 
-## Refresh Boundary
+## Production Status And Refresh Boundary
+
+Phase 11D deployed and activated this persistence on 2026-09-08. The active
+snapshot is `b7f786edfa7632a320df5281182761471a15281ca1c518d2d729bbfab36dc5df`.
+Its source, result, and physical-content fingerprints are recorded in
+`fundamentals_v4_relative_valuation_v1_phase11d_deployment.md`.
 
 The safe refresh unit is the complete universe because one company, price,
-classification, or taxonomy change can alter many ranks. Phase 11C exposes no
-production override. The CLI defaults to dry-run, requires an explicit
-destination under repository `temp`, exact model fingerprint, and
-`--full-universe` for apply. Production activation is reserved for Phase 11D.
+classification, or taxonomy change can alter many ranks. The production CLI
+defaults to dry-run and requires exact absolute source/destination paths,
+explicit as-of, full model and persistence identities, expected content
+identities, `--full-universe`, `--apply`, and `--confirm-production`. V1 uses
+this protected manual refresh after a successful source refresh; no company
+report request or scheduler hook triggers it.
+
+Company Snapshot V2 reads only the active persisted snapshot. It requires an
+exact date match and degrades explicitly when the pointer is absent or the
+requested date differs. It does not perform a one-company recalculation.
