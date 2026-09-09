@@ -392,3 +392,23 @@ and documents Own-History weights, eligibility and readiness. Snapshot economic
 fingerprint `7b40558063684256474afa885e60e73d97f01fc01989ae9ffbcae34e74f4dd36`
 and all production state remain unchanged. See
 `fundamentals_v4_company_snapshot_v2_phase11f_presentation_freeze.md`.
+
+## Forward-Return Research Phase 12A
+
+Status: `OUTCOME_B_REVISED_HISTORY_EXPLORATORY_ONLY`
+
+Phase 12A completed a read-only timing, market-label, identity, survivorship,
+revision and leakage audit over 50,585 Fundamentals V4 endpoints. It found zero
+endpoints with a historical provider-version chain sufficient for a PIT
+backtest. Conservative next-session SPY-calendar labels are usable for limited
+revised-history exploratory association research; 47,283 endpoints have a
+valid 63-session label before feature-readiness filtering. Current Relative
+Position, Relative Valuation, classification and taxonomy are not eligible as
+historical predictors.
+
+Any Phase 12B work must retain a separate predictive layer, use locked
+chronological splits with a 63-session purge/embargo, and make no change to the
+existing economic models or Company Snapshot. Stronger claims require provider
+version history, stable market security identity, explicit adjustment
+provenance, and delisting-return treatment. See
+`fundamentals_v4_phase12a_forward_return_readiness.md`.
