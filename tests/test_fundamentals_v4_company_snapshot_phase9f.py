@@ -27,11 +27,14 @@ from rawcandle.fundamentals.snapshot.renderer import (
     DIAGNOSTIC_COVERAGE_TEXT,
     DIAGNOSTIC_DEFINITIONS,
     DIAGNOSTIC_LABELS,
+    DIAGNOSTIC_METRIC_DISPLAY_UNITS,
     DIAGNOSTIC_REASON_EXPLANATIONS,
     UNKNOWN_DIAGNOSTIC_EXPLANATION,
     _build_diagnostic_definitions,
     _zero_diagnostic_text,
     diagnostic_explanation,
+    _diagnostic_metric,
+    _diagnostic_threshold,
 )
 
 
@@ -195,6 +198,16 @@ def test_phase9j_2_definitions_are_complete_and_engine_reconciled(
     assert len({row.flag_name for row in DIAGNOSTIC_DEFINITIONS}) == 7
     assert set(DIAGNOSTIC_MODEL_CONTRACT["definitions"]) == set(FLAG_NAMES)
     assert REVENUE_SCALE_FLOOR == 10_000_000.0
+    assert DIAGNOSTIC_METRIC_DISPLAY_UNITS == {
+        "ABRUPT_FUNDAMENTAL_SHIFT": "PERCENT",
+        "EARNINGS_CASH_DIVERGENCE_CANDIDATE": "PERCENT",
+        "CAPEX_INTENSITY_SHIFT_CANDIDATE": "PERCENTAGE_POINTS",
+        "NET_DEBT_SHIFT_CANDIDATE": "PERCENT",
+        "VALUATION_YIELD_OUTLIER": "PERCENT",
+        "RECENT_MARGIN_DECELERATION_REVIEW": "PERCENTAGE_POINTS",
+        "WORKING_CAPITAL_SHIFT_CANDIDATE": "PERCENT",
+        "NON_OPERATING_EARNINGS_GAP_CANDIDATE": "PERCENT",
+    }
 
     section = report.split("### Diagnostiikan määritelmät", maxsplit=1)[1].split(
         DIAGNOSTIC_COVERAGE_TEXT, maxsplit=1
@@ -242,6 +255,52 @@ def test_phase9j_2_definitions_are_complete_and_engine_reconciled(
         assert all(operator in {">=", "<="} for operator in operators)
         assert all(threshold is not None for threshold in thresholds)
 
+
+def test_phase11f_diagnostic_units_are_semantic_and_evidence_is_unchanged() -> None:
+    capex_evidence = {
+        "metric_value": 0.001653,
+        "threshold": 0.10,
+        "current_capex_intensity": 0.20,
+        "prior_capex_intensity": 0.198347,
+    }
+    capex = {
+        "flag_name": "CAPEX_INTENSITY_SHIFT_CANDIDATE",
+        "evidence": dict(capex_evidence),
+    }
+    assert _diagnostic_metric(capex) == "0.17 pp"
+    assert _diagnostic_threshold(capex) == "10.00 pp"
+    assert capex["evidence"] == capex_evidence
+
+    ratio = {
+        "flag_name": "ABRUPT_FUNDAMENTAL_SHIFT",
+        "evidence": {"metric_value": 0.20, "threshold": 0.20},
+    }
+    margin = {
+        "flag_name": "RECENT_MARGIN_DECELERATION_REVIEW",
+        "evidence": {
+            "signed_margin_change": -0.02,
+            "current_operating_margin": 0.10,
+            "trajectory_threshold": 7.0,
+            "margin_change_threshold": -0.02,
+        },
+    }
+    assert _diagnostic_metric(ratio) == "20.0000 %"
+    assert _diagnostic_threshold(ratio) == "20.00 %"
+    assert _diagnostic_metric(margin) == "−2.00 pp"
+    assert "marginaali ≤ −2.00 pp" in _diagnostic_threshold(margin)
+
+
+def test_phase11f_active_capex_report_uses_percentage_points(
+    phase9j_edge_reports: dict[str, str],
+) -> None:
+    report = phase9j_edge_reports["AAOI"]
+    assert "Capex Intensity Shift: TARKASTETTAVA EHDOKAS" in report
+    assert "83.17 pp suhteessa rajaan 10.00 pp" in report
+    assert (
+        "| Capex Intensity Shift | EVALUATED_FLAGGED | "
+        "CAPEX-intensiteetin muutoksen tarkastusraja täyttyi; "
+        "havainto on tarkastettava ehdokas. | 83.17 pp | 10.00 pp |"
+    ) in report
 
 def test_phase9j_2_definition_audit_covers_exact_engine_contract() -> None:
     audit_path = (

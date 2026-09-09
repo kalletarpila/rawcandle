@@ -36,6 +36,18 @@ SUPPORTED_REPORT_CONTRACTS = {
 }
 
 
+DIAGNOSTIC_METRIC_DISPLAY_UNITS = {
+    "ABRUPT_FUNDAMENTAL_SHIFT": "PERCENT",
+    "EARNINGS_CASH_DIVERGENCE_CANDIDATE": "PERCENT",
+    "CAPEX_INTENSITY_SHIFT_CANDIDATE": "PERCENTAGE_POINTS",
+    "NET_DEBT_SHIFT_CANDIDATE": "PERCENT",
+    "VALUATION_YIELD_OUTLIER": "PERCENT",
+    "RECENT_MARGIN_DECELERATION_REVIEW": "PERCENTAGE_POINTS",
+    "WORKING_CAPITAL_SHIFT_CANDIDATE": "PERCENT",
+    "NON_OPERATING_EARNINGS_GAP_CANDIDATE": "PERCENT",
+}
+
+
 FINGERPRINT_PLACEHOLDER = "REPORT_CONTENT_SHA256_V1"
 HISTORY_HEADERS = ("t−4 (YoY comparison)", "t−3", "t−2", "t−1", "Nykyinen")
 
@@ -302,9 +314,23 @@ def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
             )
         )
     identity = snapshot.get("relative_valuation_identity") or {}
+    snapshot_date = identity.get("as_of_date") or "—"
+    persisted_price_date = current.get("price_date") or "—"
+    report_price_date = (
+        (snapshot.get("current_price_valuation") or {}).get("price_date") or "—"
+    )
+    readiness_requirement = {
+        "READY": "READY: ≥12 per component",
+        "LIMITED_HISTORY": (
+            "LIMITED_HISTORY: ≥8 per component; at least one component has 8–11"
+        ),
+    }.get(
+        str(own.get("status")),
+        "Aggregate: ≥8 per component; READY: ≥12 per component",
+    )
     production_context = (
         [
-            f"Relative Valuation snapshot date: `{identity.get('as_of_date')}`; "
+            f"Relative Valuation snapshot date: `{snapshot_date}`; "
             f"source fingerprint: `{identity.get('source_fingerprint')}`; "
             f"result fingerprint: `{identity.get('result_fingerprint')}`.",
             "",
@@ -318,19 +344,30 @@ def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
         f"Report date: `{snapshot['report_date']}`. Historia on nykyisin revisioitu, ei PIT-rekonstruktio.",
         "",
         *production_context,
+        f"Relative Valuation laskettiin tallennetussa snapshotissa `{snapshot_date}` "
+        f"yhtiön `{persisted_price_date}` päivän hinnalla. Raportin erillinen "
+        f"Indicative current-price valuation käyttää `{report_price_date}` päivän hintaa. "
+        "Peer-persentiilejä ei ole laskettu uudelleen tällä raporttihinnalla.",
+        "",
+        "Snapshot date on laskennan as-of-päivä ja yhtiön snapshot-hintapäivä on "
+        "laskentaan valittu markkinahavainto. Peer-yhtiöillä on saman snapshotin "
+        "säännöillä johdonmukaisesti valitut omat hintapäivänsä. Yhden yhtiön hinnan "
+        "vaihtaminen ilman koko peer-snapshotin uudelleenrakennusta ei tuota "
+        "kelvollista uutta peer-persentiiliä.",
+        "",
         _table(
-            ("Mittari", "Saatavuuspäivän konteksti", "Nykyhintainen", "Muutos"),
+            ("Mittari", "Saatavuuspäivän konteksti", "Snapshot-hintainen", "Muutos"),
             (
-                ("Absolute Valuation Score", _score(filing.get("total_valuation_score")), _score(current.get("total_valuation_score")), _score_point_change(value.get("score_change_due_to_current_price"))),
+                ("Snapshot-price Absolute Valuation Score", _score(filing.get("total_valuation_score")), _score(current.get("total_valuation_score")), _score_point_change(value.get("score_change_due_to_current_price"))),
                 ("Price date", filing.get("price_date"), current.get("price_date"), "—"),
                 ("Price age", filing.get("price_age_calendar_days"), current.get("price_age_calendar_days"), "—"),
             ),
         ),
         "",
-        "### Current-price peer comparison",
+        f"### Persisted peer comparison — snapshot {snapshot_date}",
         "",
         _table(
-            ("Peer scope", "Filing percentile", "Current percentile", "Current − filing", "Current status / peers"),
+            ("Peer scope", "Filing percentile", "Snapshot percentile", "Snapshot − filing", "Snapshot status / peers"),
             tuple((scope.title(), *peer_cell(scope)) for scope in ("UNIVERSE", "SECTOR", "INDUSTRY", "ECOSYSTEM")),
             ("left", "right", "right", "right", "left"),
         ),
@@ -338,15 +375,16 @@ def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
         "### Own positive-yield history",
         "",
         _table(
-            ("Own-History Valuation Percentile", "Status", "Five-year window", "Minimum positive observations", "Fiscal gaps"),
+            ("Own-History Valuation Percentile", "Status", "Five-year window", "Smallest component history count", "Readiness requirement", "Fiscal gaps"),
             ((
                 _percentile(own.get("percentile")),
                 f"{own.get('status')} / {own.get('reason_code')}",
                 f"{own.get('window_start_date')} – {own.get('window_end_date')}",
                 own.get("minimum_component_positive_history_count"),
+                readiness_requirement,
                 own.get("fiscal_gap_count"),
             ),),
-            ("right", "left", "left", "right", "right"),
+            ("right", "left", "left", "right", "left", "right"),
         ),
         "",
         _table(
@@ -355,7 +393,24 @@ def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
             ("left", "right", "right", "right", "right", "left", "left"),
         ),
         "",
-        "> A high peer percentile means the company is cheap relative to current eligible peers under Absolute Valuation Score V2. A high own-history percentile means the company is cheap relative to its own positive and economically comparable historical yield observations. Neither measure implies fundamental strength or predicts a price increase.",
+        "Own-History Valuation Percentile = 40% × Operating Income / EV history "
+        "percentile + 40% × FCF / Market Cap history percentile + 20% × Reported "
+        "Common Earnings / Market Cap history percentile.",
+        "",
+        "Jokainen komponenttihistoria arvioidaan itsenäisesti mallin enintään viiden "
+        "vuoden ja 20 endpointin ikkunassa. Kukin endpoint käyttää sen "
+        "saatavuuspäivälle valittua kelvollista markkinahintaa. Vain havaittu, "
+        "äärellinen ja aidosti positiivinen yield hyväksytään; puuttuva, nolla, "
+        "negatiivinen, virheellinen tai muuten kelpaamaton havainto suljetaan pois, "
+        "eikä sitä muuteta nollaksi.",
+        "",
+        "READY vaatii vähintään 12 hyväksyttyä positiivista havaintoa jokaiselle "
+        "komponentille. LIMITED_HISTORY vaatii vähintään 8 jokaiselle ja 8–11 "
+        "vähintään yhdelle. Aggregate-persentiiliä ei tuoteta, jos yhdelläkin "
+        "komponentilla on alle 8 havaintoa tai nyky-yield puuttuu, ei ole äärellinen "
+        "tai on enintään nolla.",
+        "",
+        "> A high peer percentile means the company is cheap relative to eligible peers in the persisted snapshot. A high own-history percentile means the company is cheap relative to its accepted positive history. It is not a percentage discount, probability of price appreciation, or forecast, and neither measure implies fundamental strength.",
         "",
     ]
 
@@ -738,12 +793,16 @@ def _diagnostic_metric(evaluation: Mapping[str, Any]) -> str:
         return _pp(evidence.get("signed_margin_change"), signed="current_operating_margin" in evidence)
     if evaluation["flag_name"] == "NON_OPERATING_EARNINGS_GAP_CANDIDATE":
         return _percentage(evidence.get("gap_abs_to_revenue"), 4)
+    if DIAGNOSTIC_METRIC_DISPLAY_UNITS[evaluation["flag_name"]] == "PERCENTAGE_POINTS":
+        return _pp(evidence.get("metric_value"))
     return _percentage(evidence.get("metric_value"), 4)
 
 
 def _diagnostic_threshold(evaluation: Mapping[str, Any]) -> str:
     evidence = evaluation.get("evidence", {})
     if "threshold" in evidence:
+        if DIAGNOSTIC_METRIC_DISPLAY_UNITS[evaluation["flag_name"]] == "PERCENTAGE_POINTS":
+            return _pp(evidence["threshold"])
         return _percentage(evidence["threshold"])
     if "activation_threshold" in evidence:
         return _percentage(evidence["activation_threshold"])
@@ -1089,7 +1148,11 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
         "",
         "> Osakemäärä, velka ja kassa tulevat viimeisimmästä saatavilla olevasta fundamentti-endpointista ja voivat poiketa nykyhetken arvoista.",
         "",
-        "Nykyhintalaskenta pitää anchor-fundamentit vakiona. Nykyhintapersentiiliä ei lasketa eikä esitetä.",
+        "Nykyhintalaskenta pitää anchor-fundamentit vakiona. Tässä osiossa ei "
+        "lasketa uutta persentiiliä raportin nykyhinnalla. Erillinen Relative "
+        "Valuation -osio näyttää viimeisimmän tallennetun vertailun sen omalla "
+        "snapshot- ja hintapäivällä; raportin generointi ei käynnistä tietokannan "
+        "päivitystä.",
         "",
         "## Three-point valuation multiples",
         "",

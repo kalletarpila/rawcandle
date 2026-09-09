@@ -60,6 +60,16 @@ PRODUCTION_REPORT_SPEC = {
     "unavailable_state": "EXPLICIT_NO_ON_DEMAND_RECALCULATION",
     "snapshot_selection": "LATEST_ELIGIBLE_NON_FUTURE_PERSISTED_SNAPSHOT",
     "visible_snapshot_date": True,
+    "frozen_baseline": True,
+    "date_contexts": (
+        "REPORT_DATE",
+        "RELATIVE_VALUATION_SNAPSHOT_DATE",
+        "PERSISTED_COMPANY_PRICE_DATE",
+        "INDICATIVE_CURRENT_PRICE_DATE",
+    ),
+    "relative_valuation_labels": "PERSISTED_SNAPSHOT_PRICE_CONTEXT",
+    "diagnostic_display_units": "FLAG_SEMANTIC_UNITS_V1",
+    "own_history_methodology_visible": True,
 }
 PRODUCTION_REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
     json.dumps(

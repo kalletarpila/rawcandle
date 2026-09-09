@@ -716,6 +716,11 @@ def test_relative_valuation_candidate_is_explicit_and_renders_component_evidence
         context["source_inputs"]["ttm_operating_income"] = context["source_inputs"]["ttm_ebit"]
         context["metrics"]["ev_operating_income"] = context["metrics"]["ev_ebit"]
         context["metrics"]["operating_income_yield"] = context["metrics"]["ebit_yield"]
+    positive_counts = {
+        "OPERATING_YIELD": 12,
+        "FCF_YIELD": 14,
+        "REPORTED_EARNINGS_YIELD": 13,
+    }
     component_rows = tuple(
         ComponentHistoryResult(
             component=name,
@@ -723,9 +728,9 @@ def test_relative_valuation_candidate_is_explicit_and_renders_component_evidence
             historical_median_positive_yield=0.05,
             historical_percentile=75.0,
             component_observation_count=15,
-            positive_history_count=12,
-            nonpositive_history_count=2,
-            missing_or_invalid_history_count=1,
+            positive_history_count=positive_counts[name],
+            nonpositive_history_count=15 - positive_counts[name],
+            missing_or_invalid_history_count=0,
             component_first_observation_date="2022-05-01",
             component_last_observation_date="2026-08-01",
             positive_history_start_date="2022-08-01",
@@ -790,5 +795,11 @@ def test_relative_valuation_candidate_is_explicit_and_renders_component_evidence
     assert "## Relative Valuation" in rendered.markdown
     assert "Own-History Valuation Percentile" in rendered.markdown
     assert "Reported Common Earnings / Market Cap" in rendered.markdown
+    assert "Smallest component history count" in rendered.markdown
+    assert "READY: ≥12 per component" in rendered.markdown
+    assert "| 12 |" in rendered.markdown
+    assert "| 14 |" in rendered.markdown
+    assert "| 13 |" in rendered.markdown
+    assert "Minimum positive observations" not in rendered.markdown
     assert "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V8" not in render_snapshot(base).markdown
     assert verify_rendered_report(rendered)

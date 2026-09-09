@@ -131,3 +131,10 @@ manual full-universe refresh documented in the Phase 11D runbook. Active plus
 previous retention means sufficiently old historical report dates may
 legitimately have no eligible non-future snapshot. No Scheduler refresh control
 was added.
+
+## Phase 11F Supersession
+
+Phase 11F supersedes only the Phase 11E presentation identity and wording with
+the frozen V10 report contract. Phase 11E snapshot-selection behavior and all
+economic and persisted identities remain unchanged. See
+`fundamentals_v4_company_snapshot_v2_phase11f_presentation_freeze.md`.

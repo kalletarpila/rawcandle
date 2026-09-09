@@ -156,3 +156,14 @@ The selected snapshot supplies all Relative Valuation rows coherently. Current
 descriptive valuation and filing Relative Position retain their own contexts.
 Details and verification are in
 `fundamentals_v4_relative_valuation_v1_phase11e_reporting.md`.
+
+## Phase 11F Presentation Freeze
+
+Presentation V10 is the frozen Company Snapshot V2 baseline:
+`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V10_RELATIVE_VALUATION_FROZEN`
+with fingerprint
+`d4e90e7ac75a5cfc76e87fa8855b9191485b3305193871396ca0776402fce9c0`.
+It clarifies persisted snapshot-price context, corrects Capex Intensity Shift
+to `pp`, and exposes Own-History methodology and readiness without changing the
+Phase 11E economic fingerprint. See
+`fundamentals_v4_company_snapshot_v2_phase11f_presentation_freeze.md`.

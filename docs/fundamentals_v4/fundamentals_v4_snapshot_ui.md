@@ -69,6 +69,14 @@ through the established control.
 
 Repeated identical requests converge through the existing atomic writer. The generate action is disabled while a request is running, but backend atomic publication remains authoritative if requests overlap.
 
+Phase 11F freezes the active report presentation as
+`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V10_RELATIVE_VALUATION_FROZEN`
+with fingerprint
+`d4e90e7ac75a5cfc76e87fa8855b9191485b3305193871396ca0776402fce9c0`.
+It separates all Relative Valuation date contexts, uses persisted-snapshot
+labels, corrects Capex Intensity Shift to percentage points, and discloses the
+Own-History method. Economic identities and UI behavior are unchanged.
+
 ## SwingMaster reference
 
 The SwingMaster `ui_fundamental_pipeline` was inspected read-only. Its snapshot browser presents a download icon and opens a browser URL for the selected file. RawCandle follows that user-facing interaction but uses a stricter RawCandle-owned download route instead of SwingMaster's broad Flet asset serving. RawCandle does not copy its CLI command builder, process executor, CSV snapshot implementation, ZIP creation, folder launcher, market workflow, or update controls. The implementation resides entirely in RawCandle and depends only on RawCandle's active Company Snapshot V2 API.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sqlite3
 from argparse import Namespace
 from pathlib import Path
@@ -25,6 +26,7 @@ from rawcandle.fundamentals.relative_valuation.persistence import (
 )
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
 from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.renderer import render_snapshot
 def _role_database(path: Path, table: str) -> None:
     with sqlite3.connect(path) as connection:
         connection.execute(f'CREATE TABLE "{table}" (value INTEGER)')
@@ -63,7 +65,11 @@ def test_production_parser_defaults_to_dry_run() -> None:
     assert "CANDIDATE" not in PRODUCTION_REPORT_CONTRACT
     assert PRODUCTION_SNAPSHOT_MODEL_VERSION.endswith("RELATIVE_VALUATION_V2")
     assert PRODUCTION_SNAPSHOT_FINGERPRINT == "7b40558063684256474afa885e60e73d97f01fc01989ae9ffbcae34e74f4dd36"
-    assert PRODUCTION_REPORT_PRESENTATION_FINGERPRINT == "83f0a959a0b6dd3f03a4497955d3d0e94b687a870efcfa61672b8e5b4d20f6bf"
+    assert PRODUCTION_REPORT_CONTRACT == (
+        "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V10_"
+        "RELATIVE_VALUATION_FROZEN"
+    )
+    assert PRODUCTION_REPORT_PRESENTATION_FINGERPRINT == "d4e90e7ac75a5cfc76e87fa8855b9191485b3305193871396ca0776402fce9c0"
     required = {
         action.dest for action in parser._actions if action.required
     }
@@ -188,10 +194,10 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
     monkeypatch.setattr(engine_module, "calculate_relative_valuation", forbidden)
     monkeypatch.setattr(persistence_module, "apply_snapshot", forbidden)
     first = generate_active_company_snapshot(
-        paths, ticker="NVDA", report_date="2026-09-12", output_dir=tmp_path
+        paths, ticker="NVDA", report_date="2026-09-09", output_dir=tmp_path
     )
     second = generate_active_company_snapshot(
-        paths, ticker="NVDA", report_date="2026-09-12", output_dir=tmp_path
+        paths, ticker="NVDA", report_date="2026-09-09", output_dir=tmp_path
     )
     markdown = Path(first["output_path"]).read_text(encoding="utf-8")
     relative = first["snapshot"]["relative_valuation"]
@@ -206,7 +212,45 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
     assert first["status"] == "CREATED" and second["status"] == "NO_CHANGE"
     assert first["report_content_fingerprint"] == second["report_content_fingerprint"]
     assert identity["as_of_date"] == "2026-09-08"
-    assert "Relative Valuation snapshot date: `2026-09-08`" in markdown
+    assert relative["current_valuation"]["price_date"] == "2026-09-04"
+    assert first["snapshot"]["current_price_valuation"]["price_date"] == "2026-09-08"
+    for expected in (
+        "Report date: `2026-09-09`",
+        "Relative Valuation snapshot date: `2026-09-08`",
+        "snapshotissa `2026-09-08` yhtiön `2026-09-04` päivän hinnalla",
+        "Indicative current-price valuation käyttää `2026-09-08` päivän hintaa",
+        "Persisted peer comparison — snapshot 2026-09-08",
+        "Snapshot-price Absolute Valuation Score",
+        "Snapshot-hintainen",
+        "ei lasketa uutta persentiiliä raportin nykyhinnalla",
+        "| Snapshot-price Absolute Valuation Score | 27.02 | 24.15 | −2.87 p |",
+    ):
+        assert expected in markdown
+    assert "Current-price peer comparison" not in markdown
+    assert "Nykyhintapersentiiliä ei lasketa eikä esitetä." not in markdown
+    assert "peer-snapshotin uudelleenrakennusta" in markdown
+    assert "Smallest component history count" in markdown
+    assert "40% × Operating Income / EV" in markdown
+    assert "40% × FCF / Market Cap" in markdown
+    assert "20% × Reported Common Earnings / Market Cap" in markdown
+    assert "READY vaatii vähintään 12" in markdown
+    assert "LIMITED_HISTORY vaatii vähintään 8" in markdown
+    assert "percentage discount" in markdown
+    assert "probability of price appreciation" in markdown
+    assert "company_id" not in markdown and "snapshot_id" not in markdown
+
+    distinct_dates = copy.deepcopy(first["snapshot"])
+    distinct_dates["report_date"] = "2026-09-10"
+    distinct_dates["current_price_valuation"]["price_date"] = "2026-09-09"
+    distinct_markdown = render_snapshot(distinct_dates).markdown
+    assert len({
+        distinct_dates["report_date"],
+        distinct_dates["relative_valuation_identity"]["as_of_date"],
+        distinct_dates["relative_valuation"]["current_valuation"]["price_date"],
+        distinct_dates["current_price_valuation"]["price_date"],
+    }) == 4
+    for date_value in ("2026-09-10", "2026-09-08", "2026-09-04", "2026-09-09"):
+        assert date_value in distinct_markdown
     assert (
         relative["current_valuation"]["total_valuation_score"]
         == persisted["current_valuation_score"]

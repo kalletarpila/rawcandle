@@ -309,8 +309,8 @@ def run_full_universe_rehearsal(
         (report_dir / f"{ticker}_{as_of_date}.md").write_text(rendered.markdown, encoding="utf-8")
         required_fragments = (
             "## Relative Valuation",
-            f"As-of date: `{as_of_date}`",
-            "Current-price peer comparison",
+            f"Report date: `{as_of_date}`",
+            f"Persisted peer comparison — snapshot {as_of_date}",
             "Own positive-yield history",
             "Positive observations",
             "ei PIT-rekonstruktio",

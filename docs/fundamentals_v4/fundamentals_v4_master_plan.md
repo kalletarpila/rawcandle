@@ -377,3 +377,18 @@ Persistence, production rows, active pointer, economic models, active package,
 and existing reports remain unchanged. Refresh remains the protected manual
 full-universe operation. See
 `fundamentals_v4_relative_valuation_v1_phase11e_reporting.md`.
+
+## Company Snapshot Phase 11F
+
+Status: `PRESENTATION_V10_FROZEN_NO_ECONOMIC_CHANGE`
+
+Phase 11F freezes Company Snapshot V2 presentation contract
+`CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V10_RELATIVE_VALUATION_FROZEN`
+with fingerprint
+`d4e90e7ac75a5cfc76e87fa8855b9191485b3305193871396ca0776402fce9c0`.
+It separates report, Relative Valuation snapshot, persisted snapshot-price and
+indicative report-price contexts; corrects the Capex difference unit to `pp`;
+and documents Own-History weights, eligibility and readiness. Snapshot economic
+fingerprint `7b40558063684256474afa885e60e73d97f01fc01989ae9ffbcae34e74f4dd36`
+and all production state remain unchanged. See
+`fundamentals_v4_company_snapshot_v2_phase11f_presentation_freeze.md`.
