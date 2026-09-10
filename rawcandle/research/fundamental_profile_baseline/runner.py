@@ -137,7 +137,8 @@ def database_state(paths: ResearchPaths) -> dict[str, Any]:
 
 
 def _phase12a_reconciliation(
-    rows: Sequence[Mapping[str, Any]], preflight: Mapping[str, Any]
+    rows: Sequence[Mapping[str, Any]], preflight: Mapping[str, Any],
+    *, allow_expanded_revised_history: bool = False,
 ) -> dict[str, Any]:
     phase12a_hashes = {
         "fundamentals_v4.db": "f553639e7f25ce75fed51af0c2127121a96573cd88728c2eafa84b9dfdc087da",
@@ -205,11 +206,23 @@ def _phase12a_reconciliation(
             else "FAILED_UNEXPLAINED_SOURCE_OR_RESULT_DIFFERENCE"
         ),
     }
-    result["passed"] = (
+    reference_passed = (
         result["endpoint_count"] == 50585
         and result["unresolved_identity_count"] == 258
         and (exact_reference_match or documented_market_drift)
     )
+    expanded_history_passed = (
+        allow_expanded_revised_history
+        and result["endpoint_count"] > 50585
+        and result["unresolved_identity_count"] >= 258
+        and all(coverage[h] >= expected_coverage[h] for h in coverage)
+    )
+    result["allow_expanded_revised_history"] = allow_expanded_revised_history
+    result["reference_passed"] = reference_passed
+    result["expanded_history_passed"] = expanded_history_passed
+    result["passed"] = reference_passed or expanded_history_passed
+    if expanded_history_passed:
+        result["reconciliation_status"] = "EXPANDED_REVISED_HISTORY_ACCEPTED"
     return result
 
 
@@ -730,7 +743,13 @@ def _decision(hypotheses: Sequence[Mapping[str, Any]], comparisons: Sequence[Map
     return {"outcome": outcome, "hypothesis_classes": classes, "repeated_hypotheses": repeated, "later_ml_gate_passed": outcome == "OUTCOME_A", "prospective_collection_recommended": outcome != "OUTCOME_A", "status": "REVISED_HISTORY_EXPLORATORY_ONLY"}
 
 
-def run(paths: ResearchPaths, output_dir: Path, *, contract_fingerprint: str) -> RunResult:
+def run(
+    paths: ResearchPaths,
+    output_dir: Path,
+    *,
+    contract_fingerprint: str,
+    allow_expanded_revised_history: bool = False,
+) -> RunResult:
     if contract_fingerprint != CONTRACT_FINGERPRINT:
         raise ValueError("LOCKED_RESEARCH_CONTRACT_FINGERPRINT_MISMATCH")
     if not output_dir.is_absolute() or "temp" not in output_dir.parts:
@@ -739,7 +758,10 @@ def run(paths: ResearchPaths, output_dir: Path, *, contract_fingerprint: str) ->
     preflight = database_state(paths)
     write_json(output_dir / "production_preflight.json", preflight)
     rows, sessions = build_research_rows(paths)
-    reconciliation = _phase12a_reconciliation(rows, preflight)
+    reconciliation = _phase12a_reconciliation(
+        rows, preflight,
+        allow_expanded_revised_history=allow_expanded_revised_history,
+    )
     write_json(output_dir / "source_reconciliation.json", reconciliation)
     if not reconciliation["passed"]:
         write_json(output_dir / "decision.json", {"outcome": "OUTCOME_D", "reason": "PHASE12A_RECONCILIATION_FAILED", "status": "REVISED_HISTORY_EXPLORATORY_ONLY"})
@@ -855,7 +877,11 @@ def run(paths: ResearchPaths, output_dir: Path, *, contract_fingerprint: str) ->
         "Model metrics are retained as transparent diagnostics only and must not be treated as validation evidence.", "",
         "## Reconciliation", "",
         f"- Phase 12A status: `{reconciliation['reconciliation_status']}`.",
-        "- Canonical, provider and Fundamentals analysis databases remain byte-identical to Phase 12A.",
+        (
+            "- Canonical and Fundamentals analysis inputs are the explicitly authorized Phase 12D rebuilt-history copies; the locked research contract is unchanged."
+            if allow_expanded_revised_history
+            else "- Canonical, provider and Fundamentals analysis databases remain byte-identical to Phase 12A."
+        ),
         "- The market database changed after Phase 12A; both reference and current label counts and exact IC values are preserved in `source_reconciliation.json`.",
         "- Current taxonomy/classification storage is non-PIT descriptive context, not a predictor; any source drift is fingerprinted explicitly.",
         f"- Current session-zero label coverage: 21={label_ready[21]:,}, 42={label_ready[42]:,}, 63={label_ready[63]:,} of {len(rows):,} endpoints.", "",

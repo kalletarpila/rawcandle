@@ -95,8 +95,10 @@ def _ttm_input_audit(canonical_path: Path) -> dict[int, dict[str, Any]]:
     return audit
 
 
-def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
-    calculated = rehearsal.calculate(paths)
+def calculate(
+    paths: Mapping[str, Path], *, verify_v1_overlap: bool = True
+) -> dict[str, Any]:
+    calculated = rehearsal.calculate(paths, verify_v1_overlap=verify_v1_overlap)
     input_audit = _ttm_input_audit(paths["canonical"])
     rows = calculated["rows"]
     ttm_by_key = {
@@ -225,14 +227,16 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
     return calculated
 
 
-def _candidate_manifest(conn: sqlite3.Connection) -> sqlite3.Row | None:
+def _candidate_manifest(
+    conn: sqlite3.Connection, persistence_fingerprint: str = PACKAGE_FINGERPRINT
+) -> sqlite3.Row | None:
     conn.row_factory = sqlite3.Row
     for table in (persistence.MANIFEST_TABLE, persistence.MANIFEST_HISTORY_TABLE):
         if not conn.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone():
             continue
         row = conn.execute(
             f"SELECT * FROM {table} WHERE persistence_fingerprint=?",
-            (PACKAGE_FINGERPRINT,),
+            (persistence_fingerprint,),
         ).fetchone()
         if row is not None:
             return row
@@ -264,11 +268,12 @@ def apply_candidate_package(
     applied_at: str,
     inject_failure_at: str | None = None,
     stage_callback: Callable[[str, sqlite3.Connection], None] | None = None,
+    persistence_fingerprint: str = PACKAGE_FINGERPRINT,
 ) -> CandidateApplyReport:
     _validate(calculated)
     persistence.ensure_schema(conn)
     target = persistence.economic_fingerprint(calculated)
-    existing = _candidate_manifest(conn)
+    existing = _candidate_manifest(conn, persistence_fingerprint)
     if existing is not None and existing["economic_result_fingerprint"] == target:
         physical = persistence.physical_fingerprint(conn, diagnostic_model=diagnostic_flags_eight)
         if physical != existing["physical_content_fingerprint"]:
@@ -286,6 +291,26 @@ def apply_candidate_package(
     conn.execute("BEGIN IMMEDIATE")
     try:
         persistence._archive_current_manifest(conn)
+        persistence._apply_score(conn, calculated["score_v2"], applied_at)
+        if stage_callback:
+            stage_callback("score", conn)
+        if inject_failure_at == "score":
+            raise RuntimeError("INJECTED_PHASE10B_SCORE_FAILURE")
+        persistence._apply_lifecycle(conn, calculated, applied_at)
+        if stage_callback:
+            stage_callback("lifecycle", conn)
+        if inject_failure_at == "lifecycle":
+            raise RuntimeError("INJECTED_PHASE10B_LIFECYCLE_FAILURE")
+        persistence._apply_valuation(conn, calculated, applied_at)
+        if stage_callback:
+            stage_callback("valuation", conn)
+        if inject_failure_at == "valuation":
+            raise RuntimeError("INJECTED_PHASE10B_VALUATION_FAILURE")
+        persistence._apply_delta(conn, calculated, applied_at)
+        if stage_callback:
+            stage_callback("delta", conn)
+        if inject_failure_at == "delta":
+            raise RuntimeError("INJECTED_PHASE10B_DELTA_FAILURE")
         persistence._apply_diagnostics(
             conn,
             calculated,
@@ -297,6 +322,11 @@ def apply_candidate_package(
             stage_callback("diagnostic", conn)
         if inject_failure_at == "diagnostic":
             raise RuntimeError("INJECTED_PHASE10B_DIAGNOSTIC_FAILURE")
+        persistence._apply_relative(conn, calculated, applied_at)
+        if stage_callback:
+            stage_callback("relative", conn)
+        if inject_failure_at in {"relative", "activation"}:
+            raise RuntimeError("INJECTED_PHASE10B_ACTIVATION_BOUNDARY_FAILURE")
         physical = persistence.physical_fingerprint(conn, diagnostic_model=diagnostic_flags_eight)
         conn.execute(
             f"INSERT OR REPLACE INTO {persistence.MANIFEST_TABLE} VALUES(?,?,?,?,?,?,?,'COMPLETE',?)",
@@ -304,7 +334,7 @@ def apply_candidate_package(
                 contract.FAMILY_FINGERPRINT,
                 contract.FAMILY_VERSION,
                 PERSISTENCE_VERSION,
-                PACKAGE_FINGERPRINT,
+                persistence_fingerprint,
                 json.dumps(MODEL_MAP, sort_keys=True, separators=(",", ":")),
                 target,
                 physical,
@@ -329,7 +359,7 @@ def apply_candidate_package(
     rows = persistence.row_counts(conn, diagnostic_model=diagnostic_flags_eight)
     return CandidateApplyReport(
         "APPLIED", target, physical, package[0], package[1], package[2], rows,
-        rows["diagnostic_endpoint"] + rows["diagnostic_evaluation"],
+        sum(rows.values()),
     )
 
 

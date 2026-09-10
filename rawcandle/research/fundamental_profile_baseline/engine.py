@@ -183,9 +183,10 @@ def construct_forward_label(
 def assign_period(entry_date: str | None) -> str | None:
     if entry_date is None:
         return None
-    for name, (start, end) in CONTRACT["periods"].items():
+    for name, bounds in CONTRACT["periods"].items():
         if name in {"assignment_date", "prospective_future_name"}:
             continue
+        start, end = bounds
         if start <= entry_date <= end:
             return name
     return None

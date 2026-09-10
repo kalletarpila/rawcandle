@@ -15,6 +15,7 @@ from rawcandle.fundamentals.score import engine as score_v1
 from rawcandle.fundamentals.score.engine import MODEL_FINGERPRINT as SCORE_V1_FINGERPRINT
 from rawcandle.fundamentals.lifecycle.engine import MODEL_FINGERPRINT as LIFECYCLE_V1_FINGERPRINT
 from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_V1_FINGERPRINT
+from rawcandle.fundamentals.valuation.persistence import load_canonical_source as load_valuation_source
 
 from . import delta, diagnostic_flags, lifecycle, relative_position, score, snapshot, valuation
 from .contract import FAMILY_FINGERPRINT, TTM_MODEL_VERSION, fingerprint
@@ -235,6 +236,34 @@ def _valuation(row: Mapping[str, Any], ttm: Mapping[str, Any]) -> valuation.Valu
     return valuation.calculate_valuation(observation, bars)
 
 
+def _valuation_from_canonical_source(
+    source: Mapping[str, Any], ttm: Mapping[str, Any]
+) -> valuation.ValuationResult:
+    base = source["observation"]
+    observation = valuation.ValuationObservation(
+        int(ttm["company_id"]),
+        int(ttm["security_id"]) if ttm.get("security_id") else None,
+        ttm.get("ticker"),
+        int(ttm["endpoint_fiscal_year"]),
+        str(ttm["endpoint_fiscal_quarter"]),
+        int(ttm["endpoint_quarter_id"]),
+        str(ttm["period_end"]),
+        ttm.get("ttm_source_available_date"),
+        str(ttm["readiness_status"]),
+        tuple(json.loads(ttm["blocker_codes_json"])),
+        ttm.get("ttm_operating_income"),
+        ttm.get("ttm_free_cashflow"),
+        ttm.get("ttm_net_income_common"),
+        bool(ttm.get("net_income_common_4q_ready")),
+        ttm.get("shares_outstanding"),
+        ttm.get("cash"),
+        ttm.get("total_debt"),
+        base.sector,
+        base.industry,
+    )
+    return valuation.calculate_valuation(observation, source["price_bars"])
+
+
 def _score_delta_observation(row: Mapping[str, Any], ttm: Mapping[str, Any]) -> delta.ScoreObservation:
     sequence = int(ttm["endpoint_fiscal_year"]) * 4 + int(str(ttm["endpoint_fiscal_quarter"])[1])
     fiscal = delta.FiscalObservation(str(ttm["endpoint_quarter_id"]), int(ttm["company_id"]), int(ttm["endpoint_fiscal_year"]), str(ttm["endpoint_fiscal_quarter"]), sequence, str(ttm["period_end"]), str(ttm["ttm_source_available_date"]))
@@ -243,7 +272,9 @@ def _score_delta_observation(row: Mapping[str, Any], ttm: Mapping[str, Any]) -> 
     return delta.ScoreObservation(fiscal, int(ttm["endpoint_quarter_id"]), score.MODEL_VERSION, score.MODEL_FINGERPRINT, row["total_score"], row["readiness_status"], "TTM_READY" if ttm.get("core_ttm_ready") else "TTM_NOT_READY", components)
 
 
-def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
+def calculate(
+    paths: Mapping[str, Path], *, verify_v1_overlap: bool = True
+) -> dict[str, Any]:
     rows = _load_ttm(paths["canonical"]); ttm_index = {(int(row["company_id"]), int(row["endpoint_quarter_id"])): row for row in rows}
     fresh = _fresh(rows); fresh_keys = {(int(row["company_id"]), int(row["endpoint_quarter_id"])) for row in fresh}
     split_events = _load_split_events(paths["market"])
@@ -255,26 +286,58 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
     unaffected = {"REVENUE_GROWTH", "FCF_MARGIN", "DILUTION"}
     for key, persisted in v1_scores.items():
         replayed = v1_replay_index[key]
-        assert persisted["readiness_status"] == replayed["readiness_status"]
-        assert persisted["total_score"] == replayed["total_score"]
         persisted_components = {item["component_name"]: item["component_score"] for item in persisted["components"]}
         replayed_components = {item["component_name"]: item["component_score"] for item in replayed["components"]}
         v2_components = {item["component_name"]: item["component_score"] for item in score_index[key]["components"]}
-        assert persisted_components == replayed_components
-        assert all(v2_components[name] == persisted_components[name] for name in unaffected)
+        if verify_v1_overlap:
+            assert persisted["readiness_status"] == replayed["readiness_status"]
+            assert persisted["total_score"] == replayed["total_score"]
+            assert persisted_components == replayed_components
+            assert all(v2_components[name] == persisted_components[name] for name in unaffected)
     life_v2 = _lifecycle(rows, _load_quarter_revenues(paths["canonical"], rows)); life_v1 = _load_lifecycle(paths["analysis"])
     valuation_v1 = _load_valuations(paths["analysis"])
     valuation_v1_index = {(int(row["company_id"]), int(row["quarter_id"])): row for row in valuation_v1}
+    canonical_valuation = load_valuation_source(paths["canonical"], paths["market"])
+    canonical_valuation_index = {
+        (int(row["observation"].company_id), int(row["observation"].quarter_id)): row
+        for row in canonical_valuation.rows
+    }
     valuation_v2 = {}
-    for row in valuation_v1:
-        key = (int(row["company_id"]), int(row["quarter_id"])); valuation_v2[key] = _valuation(row, ttm_index[key])
+    valuation_source_rows = []
+    for key in sorted(ttm_index):
+        old = valuation_v1_index.get(key)
+        source = canonical_valuation_index[key]
+        valuation_v2[key] = (
+            _valuation(old, ttm_index[key])
+            if old is not None
+            else _valuation_from_canonical_source(source, ttm_index[key])
+        )
+        base = source["observation"]
+        valuation_source_rows.append(
+            old
+            if old is not None
+            else {
+                "company_id": key[0],
+                "quarter_id": key[1],
+                "security_active": source["security_active"],
+                "sector": base.sector,
+                "industry": base.industry,
+                "source_fingerprint": source["source_fingerprint"],
+            }
+        )
+    valuation_context_index = {
+        (int(row["company_id"]), int(row["quarter_id"])): row
+        for row in valuation_source_rows
+    }
 
     score_current=[]; lifecycle_current=[]; valuation_current=[]
     for key in sorted(fresh_keys):
-        before=v1_scores[key]; after=score_index[key]
-        score_current.append({"company_id":key[0],"quarter_id":key[1],"ticker":after["ticker"],"v1_status":before["readiness_status"],"v2_status":after["readiness_status"],"v1_score":before["total_score"],"v2_score":after["total_score"],"delta":None if before["total_score"] is None or after["total_score"] is None else after["total_score"]-before["total_score"]})
-        b=life_v1[key]; a=life_v2[key]
-        lifecycle_current.append({"company_id":key[0],"quarter_id":key[1],"ticker":after["ticker"],"v1_raw":b["raw_state"],"v2_raw":a.raw_result.raw_state.value,"v1_final":b["final_state"],"v2_final":a.final_state.value if a.final_state else None,"v1_status":b["lifecycle_status"],"v2_status":a.lifecycle_status.value})
+        before=v1_scores.get(key); after=score_index[key]
+        if before is not None:
+            score_current.append({"company_id":key[0],"quarter_id":key[1],"ticker":after["ticker"],"v1_status":before["readiness_status"],"v2_status":after["readiness_status"],"v1_score":before["total_score"],"v2_score":after["total_score"],"delta":None if before["total_score"] is None or after["total_score"] is None else after["total_score"]-before["total_score"]})
+        b=life_v1.get(key); a=life_v2[key]
+        if b is not None:
+            lifecycle_current.append({"company_id":key[0],"quarter_id":key[1],"ticker":after["ticker"],"v1_raw":b["raw_state"],"v2_raw":a.raw_result.raw_state.value,"v1_final":b["final_state"],"v2_final":a.final_state.value if a.final_state else None,"v1_status":b["lifecycle_status"],"v2_status":a.lifecycle_status.value})
         old=valuation_v1_index.get(key); new=valuation_v2.get(key)
         if old and new: valuation_current.append({"company_id":key[0],"quarter_id":key[1],"ticker":after["ticker"],"v1_status":old["valuation_status"],"v2_status":new.valuation_status,"v1_score":old["total_valuation_score"],"v2_score":new.total_valuation_score,"delta":None if old["total_valuation_score"] is None or new.total_valuation_score is None else new.total_valuation_score-old["total_valuation_score"]})
 
@@ -332,7 +395,7 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
             val=valuation_v2.get(source_key)
             scored=score_index[source_key]
             traj=next((item["component_score"] for item in scored["components"] if item["component_name"]=="FUNDAMENTAL_TRAJECTORY"),None)
-            valuation_source = valuation_v1_index.get(source_key, {})
+            valuation_source = valuation_context_index.get(source_key, {})
             application=valuation.classify_applicability(valuation_source.get("sector"), valuation_source.get("industry"))
             diagnostic_classification="SUPPORTED" if application.supported is True else "NOT_APPLICABLE" if application.supported is False else "NOT_READY"
             return _diagnostic_endpoint(
@@ -352,7 +415,7 @@ def calculate(paths: Mapping[str, Path]) -> dict[str, Any]:
     diagnostics=[row for row in diagnostics_full if (row["company_id"],row["quarter_id"]) in fresh_keys]
 
     snapshot.validate_model_bundle({layer:snapshot.ModelIdentity(*identity) for layer,identity in snapshot.MODEL_CONTRACT["required_models"].items()})
-    outputs={"rows":rows,"fresh":fresh,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_v1_rows":valuation_v1,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostic_source_fingerprint":fingerprint(diagnostic_source_rows),"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
+    outputs={"rows":rows,"fresh":fresh,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_v1_rows":valuation_source_rows,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostic_source_fingerprint":fingerprint(diagnostic_source_rows),"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
     outputs["fingerprints"]={"score":fingerprint(v2_scores),"lifecycle":fingerprint([asdict(life_v2[key]) for key in sorted(life_v2)]),"valuation":fingerprint([valuation_v2[key].to_dict() for key in sorted(valuation_v2)]),"delta":fingerprint(delta_full),"relative":relative.result_fingerprint,"diagnostic":fingerprint(diagnostics_full)}
     return outputs
 

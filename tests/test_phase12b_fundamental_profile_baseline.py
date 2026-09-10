@@ -144,6 +144,16 @@ def test_partition_purge_and_embargo() -> None:
     assert status == "PURGED_LABEL_CROSSES_PERIOD_END"
 
 
+def test_partition_ignores_period_metadata_for_pre_contract_history() -> None:
+    period, status = partition_decision(
+        entry_date="2018-06-15",
+        exit_date_63="2018-09-14",
+        benchmark_sessions=[],
+    )
+    assert period is None
+    assert status == "OUTSIDE_LOCKED_PERIODS"
+
+
 def test_stress_bounds_do_not_make_rows_model_eligible() -> None:
     days = [f"2024-03-{day:02d}" for day in range(1, 30)]
     label = construct_forward_label(
