@@ -135,10 +135,32 @@ def download_sharadar_5y_bulk(
     opener: Callable[[Request, float], Any] | None = None,
     timeout_seconds: float = 120.0,
 ) -> dict[str, Any]:
+    return download_sharadar_bulk(
+        paths,
+        years=5,
+        api_key=api_key,
+        opener=opener,
+        timeout_seconds=timeout_seconds,
+        manifest_name="sharadar_5y_bulk_manifest.json",
+    )
+
+
+def download_sharadar_bulk(
+    paths: ProductionPaths,
+    *,
+    years: int,
+    api_key: str | None = None,
+    opener: Callable[[Request, float], Any] | None = None,
+    timeout_seconds: float = 120.0,
+    manifest_name: str = "sharadar_bulk_manifest.json",
+) -> dict[str, Any]:
+    if years <= 0:
+        raise ValueError("Sharadar history years must be positive")
     key = resolve_api_key(api_key)
     opener = opener or (lambda request, timeout: urlopen(request, timeout=timeout))
     endpoint = "/data/fundamentals"
-    params = {"years": "5"}
+    history_scope = f"years={years}"
+    params = {"years": str(years)}
     url = f"{SHARADAR_DIRECT_BASE_URL}{endpoint}?{urlencode(params)}"
     request = Request(
         url,
@@ -160,7 +182,7 @@ def download_sharadar_5y_bulk(
         body = exc.read().decode("utf-8", errors="replace")
         return {
             "endpoint": endpoint,
-            "history_scope": "years=5",
+            "history_scope": history_scope,
             "http_status": int(exc.code),
             "status": "HTTP_ERROR",
             "error": redact_secret(body[:500], [key]),
@@ -169,7 +191,7 @@ def download_sharadar_5y_bulk(
     except (TimeoutError, URLError, OSError) as exc:
         return {
             "endpoint": endpoint,
-            "history_scope": "years=5",
+            "history_scope": history_scope,
             "http_status": 0,
             "status": "REQUEST_FAILED",
             "error": redact_secret(f"{type(exc).__name__}:{exc}", [key]),
@@ -178,10 +200,10 @@ def download_sharadar_5y_bulk(
     extracted = extract_bulk_csv(saved_path, paths.extracted_csv_path)
     manifest = {
         "endpoint": endpoint,
-        "history_scope": "years=5",
+        "history_scope": history_scope,
         "http_status": http_status,
         "status": "SUCCESS",
-        "url_class": redact_url(f"{SHARADAR_DIRECT_BASE_URL}{endpoint}?years=5"),
+        "url_class": redact_url(f"{SHARADAR_DIRECT_BASE_URL}{endpoint}?years={years}"),
         "final_url_class": _url_class(final_url),
         "content_type": content_type,
         "downloaded_path": str(saved_path),
@@ -192,7 +214,7 @@ def download_sharadar_5y_bulk(
         **extracted,
         "downloaded_at_utc": utc_now(),
     }
-    write_json(paths.artifact_root / "sharadar_5y_bulk_manifest.json", manifest)
+    write_json(paths.artifact_root / manifest_name, manifest)
     return manifest
 
 
