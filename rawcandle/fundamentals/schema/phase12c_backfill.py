@@ -19,9 +19,9 @@ from rawcandle.fundamentals.schema.production_bootstrap import (
     target_tickers,
 )
 from rawcandle.fundamentals.schema.prototype import stable_hash, stable_id
+from rawcandle.fundamentals.schema.sharadar_history_policy import history_policy_metadata
 
 
-HISTORY_YEARS = 10
 RUN_TYPE = "SHARADAR_10Y_RAW_BACKFILL"
 REQUIRED_COLUMNS = frozenset({
     "ticker", "dimension", "calendardate", "reportperiod", "fiscalperiod",
@@ -272,8 +272,11 @@ def import_staged(paths: Phase12CPaths, validation: Mapping[str, Any], *, fail_a
             "INSERT OR IGNORE INTO provider_run(run_id,provider,started_at_utc,completed_at_utc,status,"
             "request_scope,entitlement_scope,source_version,metadata_json) VALUES(?, 'SHARADAR',?,?,"
             "'SUCCESS',?,?,?,?)",
-            (run_id, now, now, RUN_TYPE, "Sharadar Fundamentals 10 Years", "PHASE12C",
-             json.dumps({"history_scope": "years=10", "source_sha256": validation["source_sha256"]}, sort_keys=True)),
+            (run_id, now, now, RUN_TYPE, "Sharadar Fundamentals", "PHASE12C",
+             json.dumps({
+                 "history_policy": history_policy_metadata(),
+                 "source_sha256": validation["source_sha256"],
+             }, sort_keys=True)),
         )
         with paths.staged_csv.open(newline="", encoding="utf-8-sig") as handle:
             for row in csv.DictReader(handle):
@@ -343,7 +346,11 @@ def isolation_inventory(paths: Phase12CPaths) -> dict[str, Any]:
 
 def disk_gate(paths: Phase12CPaths) -> dict[str, Any]:
     provider_size = paths.provider_db.stat().st_size
-    old_stage = max((p.stat().st_size for p in paths.root.glob("temp/fundamentals_v4_1b_production_bootstrap/*/sharadar_fundamentals_5y.csv")), default=500_000_000)
+    staged_candidates = (
+        *paths.root.glob("temp/fundamentals_v4_1b_production_bootstrap/*/sharadar_fundamentals.csv"),
+        *paths.root.glob("temp/fundamentals_v4_1b_production_bootstrap/*/sharadar_fundamentals_5y.csv"),
+    )
+    old_stage = max((path.stat().st_size for path in staged_candidates), default=500_000_000)
     required = int((provider_size * 3 + old_stage * 4) * 1.25)
     free = shutil.disk_usage(paths.root).free
     if free < required:

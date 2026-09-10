@@ -8,12 +8,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rawcandle.fundamentals.schema.phase12c_backfill import (
-    HISTORY_YEARS, Phase12CPaths, create_verified_backup, database_inventory,
+    Phase12CPaths, create_verified_backup, database_inventory,
     disk_gate, import_staged, isolation_inventory, provider_counts,
     staged_provider_reconciliation, validate_staged_source,
 )
-from rawcandle.fundamentals.schema.production_bootstrap import download_sharadar_bulk, target_tickers
+from rawcandle.fundamentals.schema.production_bootstrap import download_sharadar_fundamentals_bulk, target_tickers
 from rawcandle.fundamentals.schema.prototype import write_csv, write_json
+from rawcandle.fundamentals.schema.sharadar_history_policy import history_policy_metadata
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -78,12 +79,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         if not source.is_file() or source.is_symlink():
             raise RuntimeError("PHASE12C_REGULAR_STAGED_SOURCE_REQUIRED")
         shutil.copyfile(source, paths.staged_csv)
-        manifest = {"status": "REUSED_STAGED_SOURCE", "history_scope": "years=10",
-                    "extracted_path": str(paths.staged_csv)}
+        policy = history_policy_metadata()
+        manifest = {
+            "status": "REUSED_STAGED_SOURCE",
+            "history_scope": f"years={policy['requested_history_years']}",
+            "history_policy": policy,
+            "extracted_path": str(paths.staged_csv),
+        }
     else:
-        manifest = download_sharadar_bulk(
-            paths.production_paths(), years=HISTORY_YEARS,
-            manifest_name="sharadar_10y_bulk_manifest.json", timeout_seconds=args.timeout,
+        manifest = download_sharadar_fundamentals_bulk(
+            paths.production_paths(), timeout_seconds=args.timeout,
         )
         if manifest.get("status") != "SUCCESS":
             raise RuntimeError("PHASE12C_DOWNLOAD_FAILED:" + json.dumps(manifest, sort_keys=True))

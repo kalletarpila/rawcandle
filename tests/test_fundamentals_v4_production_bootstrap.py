@@ -19,7 +19,7 @@ from rawcandle.fundamentals.schema.production_bootstrap import (
     create_production_databases,
     csv_profile,
     debt_reconciliation,
-    download_sharadar_5y_bulk,
+    download_sharadar_fundamentals_bulk,
     fcf_reconciliation,
     field_coverage,
     hard_case_validation,
@@ -34,6 +34,7 @@ from rawcandle.fundamentals.schema.production_bootstrap import (
     sharesbas_audit,
     target_tickers,
 )
+from rawcandle.fundamentals.schema.sharadar_history_policy import history_policy_metadata
 from rawcandle.fundamentals.schema.provenance import read_provenance
 
 
@@ -74,8 +75,8 @@ def _paths(tmp_path: Path) -> ProductionPaths:
         canonical_db=tmp_path / "data" / "fundamentals_v4.db",
         analysis_db=tmp_path / "data" / "fundamentals_analysis.db",
         bootstrap_csv=tmp_path / "temp" / "v3_active_tickers_99_27.csv",
-        bulk_zip_path=artifact / "sharadar_fundamentals_5y.zip",
-        extracted_csv_path=artifact / "sharadar_fundamentals_5y.csv",
+        bulk_zip_path=artifact / "sharadar_fundamentals.zip",
+        extracted_csv_path=artifact / "sharadar_fundamentals.csv",
     )
 
 
@@ -173,7 +174,9 @@ def _bootstrap(paths: ProductionPaths) -> None:
     from rawcandle.fundamentals.schema.identity_calendar_bootstrap import bootstrap_identity_calendar
 
     bootstrap_identity_calendar(paths.canonical_db, paths.bootstrap_csv, "now")
-    ingest_bulk_provider_rows(paths, "run", "now")
+    ingest_bulk_provider_rows(
+        paths, "run", "now", history_policy=history_policy_metadata()
+    )
     canonicalize_arq_production(paths, "now")
 
 
@@ -192,15 +195,16 @@ def test_existing_unknown_db_blocks_creation(tmp_path: Path) -> None:
     assert not preflight(paths, api_key_configured=True, git_status="")["ok_to_create"]
 
 
-def test_5y_bulk_only_and_no_10y_or_full_request(tmp_path: Path) -> None:
+def test_production_bulk_defaults_to_ten_years(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     opener = FakeOpener(_zip_bytes())
-    manifest = download_sharadar_5y_bulk(paths, api_key="secret", opener=opener)
+    manifest = download_sharadar_fundamentals_bulk(paths, api_key="secret", opener=opener)
     url = opener.requests[0].full_url
-    assert "years=5" in url
-    assert "years=10" not in url
+    assert "years=10" in url
+    assert "years=5" not in url
     assert "years=full" not in url
     assert manifest["status"] == "SUCCESS"
+    assert manifest["history_policy"]["minimum_history_years"] == 10
 
 
 def test_default_urlopen_uses_timeout_keyword(tmp_path: Path, monkeypatch: Any) -> None:
@@ -214,7 +218,7 @@ def test_default_urlopen_uses_timeout_keyword(tmp_path: Path, monkeypatch: Any) 
         return FakeResponse(_zip_bytes())
 
     monkeypatch.setattr(module, "urlopen", fake_urlopen)
-    manifest = module.download_sharadar_5y_bulk(paths, api_key="secret")
+    manifest = module.download_sharadar_fundamentals_bulk(paths, api_key="secret")
     assert manifest["status"] == "SUCCESS"
     assert calls
     assert calls[0][1] == ()
@@ -223,7 +227,7 @@ def test_default_urlopen_uses_timeout_keyword(tmp_path: Path, monkeypatch: Any) 
 
 def test_zip_manifest_hash(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
-    manifest = download_sharadar_5y_bulk(paths, api_key="secret", opener=FakeOpener(_zip_bytes()))
+    manifest = download_sharadar_fundamentals_bulk(paths, api_key="secret", opener=FakeOpener(_zip_bytes()))
     assert manifest["zip_size"] > 0
     assert len(manifest["zip_sha256"]) == 64
     assert manifest["extracted_rows"] == 9
@@ -328,7 +332,9 @@ def test_duplicate_quarter_and_provider_observation_prevention(tmp_path: Path) -
     paths = _paths(tmp_path)
     _bootstrap(paths)
     first = baseline_fingerprints(paths)
-    ingest_bulk_provider_rows(paths, "run", "now")
+    ingest_bulk_provider_rows(
+        paths, "run", "now", history_policy=history_policy_metadata()
+    )
     canonicalize_arq_production(paths, "now")
     assert first == baseline_fingerprints(paths)
 
@@ -337,7 +343,9 @@ def test_replay_idempotency_and_fingerprints_deterministic(tmp_path: Path) -> No
     paths = _paths(tmp_path)
     _bootstrap(paths)
     before = baseline_fingerprints(paths)
-    summary = replay(paths, before, "now")
+    summary = replay(
+        paths, before, "now", history_policy=history_policy_metadata()
+    )
     assert summary["changed_canonical_values"] == 0
     assert summary["duplicate_rows_created"] == 0
     assert summary["fingerprints_identical"]

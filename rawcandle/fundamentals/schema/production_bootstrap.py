@@ -36,6 +36,12 @@ from rawcandle.fundamentals.schema.provenance import (
     read_provenance,
     write_provenance,
 )
+from rawcandle.fundamentals.schema.sharadar_history_policy import (
+    MINIMUM_HISTORY_YEARS,
+    REQUESTED_DIMENSIONS,
+    RETENTION_MODE,
+    history_policy_metadata,
+)
 from rawcandle.fundamentals.schema.prototype import (
     PROTOTYPE_TICKERS,
     int_or_none,
@@ -56,7 +62,7 @@ from rawcandle.fundamentals.schema.prototype import (
 PROVIDER_DB_NAME = "fundamentals_provider.db"
 CANONICAL_DB_NAME = "fundamentals_v4.db"
 ANALYSIS_DB_NAME = "fundamentals_analysis.db"
-PRODUCTION_RUN_TYPE = "SHARADAR_5Y_INITIAL_BOOTSTRAP"
+PRODUCTION_RUN_TYPE = "SHARADAR_MINIMUM_HISTORY_INITIAL_BOOTSTRAP"
 ALLOWED_DIMENSIONS = {"ARQ", "MRQ"}
 CRITICAL_FIELDS = ("revenue", "ebit", "free_cashflow", "cash", "total_debt", "shares_outstanding")
 
@@ -83,8 +89,8 @@ def production_paths(repo_root: Path, timestamp: str | None = None, bootstrap_cs
         canonical_db=repo_root / "data" / CANONICAL_DB_NAME,
         analysis_db=repo_root / "data" / ANALYSIS_DB_NAME,
         bootstrap_csv=bootstrap_csv or locate_bootstrap_csv(repo_root),
-        bulk_zip_path=artifact_root / "sharadar_fundamentals_5y.zip",
-        extracted_csv_path=artifact_root / "sharadar_fundamentals_5y.csv",
+        bulk_zip_path=artifact_root / "sharadar_fundamentals.zip",
+        extracted_csv_path=artifact_root / "sharadar_fundamentals.csv",
     )
 
 
@@ -128,21 +134,30 @@ def preflight(paths: ProductionPaths, *, api_key_configured: bool, git_status: s
     return result
 
 
-def download_sharadar_5y_bulk(
+def download_sharadar_fundamentals_bulk(
     paths: ProductionPaths,
     *,
+    history_years: int | None = None,
     api_key: str | None = None,
     opener: Callable[[Request, float], Any] | None = None,
     timeout_seconds: float = 120.0,
 ) -> dict[str, Any]:
-    return download_sharadar_bulk(
+    policy = history_policy_metadata(history_years)
+    manifest = download_sharadar_bulk(
         paths,
-        years=5,
+        years=policy["requested_history_years"],
         api_key=api_key,
         opener=opener,
         timeout_seconds=timeout_seconds,
-        manifest_name="sharadar_5y_bulk_manifest.json",
+        manifest_name="sharadar_fundamentals_bulk_manifest.json",
     )
+    manifest["history_policy"] = policy
+    if manifest.get("status") == "SUCCESS":
+        manifest["staged_observed_ranges"] = csv_dimension_ranges(
+            paths.extracted_csv_path, set(REQUESTED_DIMENSIONS)
+        )
+    write_json(paths.artifact_root / "sharadar_fundamentals_bulk_manifest.json", manifest)
+    return manifest
 
 
 def download_sharadar_bulk(
@@ -281,6 +296,22 @@ def csv_profile(path: Path) -> tuple[int, int, set[str]]:
     return count, len(fields), dimensions
 
 
+def csv_dimension_ranges(path: Path, dimensions: set[str]) -> dict[str, dict[str, Any]]:
+    result = {dimension: {"rows": 0, "oldest": None, "newest": None} for dimension in sorted(dimensions)}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for row in csv.DictReader(handle):
+            dimension = str(row.get("dimension") or "").upper()
+            if dimension not in result:
+                continue
+            period = nullable_text(row.get("calendardate") or row.get("reportperiod"))
+            result[dimension]["rows"] += 1
+            if period:
+                current = result[dimension]
+                current["oldest"] = min(current["oldest"] or period, period)
+                current["newest"] = max(current["newest"] or period, period)
+    return result
+
+
 def _url_class(url: str) -> str:
     redacted = redact_url(url)
     return redacted.split("?")[0]
@@ -296,7 +327,14 @@ def target_tickers(csv_path: Path) -> set[str]:
     return {str(row.get("ticker") or "").strip().upper() for row in rows if row.get("ticker")}
 
 
-def ingest_bulk_provider_rows(paths: ProductionPaths, run_id: str, now: str) -> dict[str, Any]:
+def ingest_bulk_provider_rows(
+    paths: ProductionPaths,
+    run_id: str,
+    now: str,
+    *,
+    history_policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    history_policy = dict(history_policy)
     universe = target_tickers(paths.bootstrap_csv)
     universe_hash = stable_hash({"tickers": sorted(universe)})
     rows_read = 0
@@ -330,14 +368,18 @@ def ingest_bulk_provider_rows(paths: ProductionPaths, run_id: str, now: str) -> 
             INSERT OR IGNORE INTO provider_run(
                 run_id, provider, started_at_utc, completed_at_utc, status, request_scope, entitlement_scope,
                 source_version, metadata_json
-            ) VALUES (?, 'SHARADAR', ?, ?, 'SUCCESS', ?, 'Sharadar Fundamentals 5 Years', 'V4-1B', ?)
+            ) VALUES (?, 'SHARADAR', ?, ?, 'SUCCESS', ?, 'Sharadar Fundamentals', 'V4-1B', ?)
             """,
             (
                 run_id,
                 now,
                 now,
                 PRODUCTION_RUN_TYPE,
-                json.dumps({"universe_hash": universe_hash, "target_tickers": len(universe)}, sort_keys=True),
+                json.dumps({
+                    "universe_hash": universe_hash,
+                    "target_tickers": len(universe),
+                    "history_policy": history_policy,
+                }, sort_keys=True),
             ),
         )
         with paths.extracted_csv_path.open(newline="", encoding="utf-8-sig") as handle:
@@ -380,7 +422,7 @@ def ingest_bulk_provider_rows(paths: ProductionPaths, run_id: str, now: str) -> 
                             """
                             INSERT OR IGNORE INTO provider_security_identity(
                                 provider, provider_security_id, security_id, provider_ticker, source, created_at_utc
-                            ) VALUES ('SHARADAR', ?, ?, ?, 'SHARADAR_5Y_INITIAL_BOOTSTRAP', ?)
+                            ) VALUES ('SHARADAR', ?, ?, ?, 'SHARADAR_MINIMUM_HISTORY_INITIAL_BOOTSTRAP', ?)
                             """,
                             (permaticker, identity[0], ticker, now),
                         )
@@ -410,6 +452,7 @@ def ingest_bulk_provider_rows(paths: ProductionPaths, run_id: str, now: str) -> 
         "run_type": PRODUCTION_RUN_TYPE,
         "universe_tickers": len(universe),
         "universe_hash": universe_hash,
+        "history_policy": history_policy,
         "bulk_rows_read": rows_read,
         "rows_matched_to_target_universe": rows_matched,
         "rows_excluded_outside_target": rows_excluded_outside_target,
@@ -427,6 +470,7 @@ def ingest_bulk_provider_rows(paths: ProductionPaths, run_id: str, now: str) -> 
             "ticker_security_collisions": ticker_security_collisions,
         },
         "provider_counts": provider_counts(paths.provider_db),
+        "retained_observed_ranges": provider_observed_ranges(paths.provider_db),
     }
     write_json(paths.artifact_root / "provider_ingest_summary.json", summary)
     write_csv(paths.artifact_root / "provider_unmatched_rows.csv", unmatched_provider_rows)
@@ -436,6 +480,21 @@ def ingest_bulk_provider_rows(paths: ProductionPaths, run_id: str, now: str) -> 
         [{"dimension": key, "rows": value, "inserted": inserted_by_dimension.get(key, 0)} for key, value in sorted(dimension_counter.items())],
     )
     return summary
+
+
+def provider_observed_ranges(provider_db: Path) -> dict[str, dict[str, Any]]:
+    with connect(provider_db) as connection:
+        rows = connection.execute(
+            "SELECT dimension,COUNT(*) rows,MIN(calendardate) oldest,MAX(calendardate) newest "
+            "FROM provider_observation WHERE provider='SHARADAR' AND native_table='fundamentals' "
+            "AND dimension IN ('ARQ','MRQ') GROUP BY dimension ORDER BY dimension"
+        )
+        return {
+            str(row["dimension"]): {
+                "rows": int(row["rows"]), "oldest": row["oldest"], "newest": row["newest"]
+            }
+            for row in rows
+        }
 
 
 def _unmatched_row(row: Mapping[str, Any], reason: str) -> dict[str, Any]:
@@ -1031,10 +1090,21 @@ def sqlite_query_hash(db_path: Path, query: str) -> str:
     return hasher.hexdigest()
 
 
-def replay(paths: ProductionPaths, before_fingerprints: Mapping[str, str], now: str) -> dict[str, Any]:
+def replay(
+    paths: ProductionPaths,
+    before_fingerprints: Mapping[str, str],
+    now: str,
+    *,
+    history_policy: Mapping[str, Any],
+) -> dict[str, Any]:
     before_counts = {"provider": provider_counts(paths.provider_db), "canonical": canonical_counts(paths.canonical_db)}
     bootstrap_identity_calendar(paths.canonical_db, paths.bootstrap_csv, now)
-    ingest_bulk_provider_rows(paths, "v4_1b_production_bootstrap", now)
+    ingest_bulk_provider_rows(
+        paths,
+        "v4_1b_production_bootstrap",
+        now,
+        history_policy=history_policy,
+    )
     canonicalize_arq_production(paths, now)
     after_counts = {"provider": provider_counts(paths.provider_db), "canonical": canonical_counts(paths.canonical_db)}
     after_fingerprints = baseline_fingerprints(paths)
@@ -1140,7 +1210,15 @@ def write_identity_artifacts(paths: ProductionPaths, identity_bootstrap: Mapping
     return bootstrap_summary, fiscal_summary
 
 
-def run_production_bootstrap(paths: ProductionPaths, *, api_key: str | None = None, git_status: str = "", opener: Callable[[Request, float], Any] | None = None) -> dict[str, Any]:
+def run_production_bootstrap(
+    paths: ProductionPaths,
+    *,
+    history_years: int | None = None,
+    api_key: str | None = None,
+    git_status: str = "",
+    opener: Callable[[Request, float], Any] | None = None,
+) -> dict[str, Any]:
+    policy = history_policy_metadata(history_years)
     paths.artifact_root.mkdir(parents=True, exist_ok=True)
     key_configured = bool(api_key)
     preflight_result = preflight(paths, api_key_configured=key_configured, git_status=git_status)
@@ -1154,13 +1232,15 @@ def run_production_bootstrap(paths: ProductionPaths, *, api_key: str | None = No
         }
         write_json(paths.artifact_root / "v4_1b_summary.json", summary)
         return summary
-    manifest = download_sharadar_5y_bulk(paths, api_key=api_key, opener=opener)
+    manifest = download_sharadar_fundamentals_bulk(
+        paths, history_years=policy["requested_history_years"], api_key=api_key, opener=opener
+    )
     if manifest.get("status") != "SUCCESS":
         summary = {
             "classification": "V4_PRODUCTION_BOOTSTRAP_BLOCKED",
             "bulk_manifest": manifest,
             "preflight": preflight_result,
-            "next_action": "RESOLVE SHARADAR 5Y BULK DOWNLOAD FAILURE BEFORE PRODUCTION BOOTSTRAP",
+            "next_action": "RESOLVE SHARADAR FUNDAMENTALS BULK DOWNLOAD FAILURE BEFORE PRODUCTION BOOTSTRAP",
         }
         write_json(paths.artifact_root / "v4_1b_summary.json", summary)
         return summary
@@ -1168,7 +1248,9 @@ def run_production_bootstrap(paths: ProductionPaths, *, api_key: str | None = No
     create_production_databases(paths, now)
     identity_bootstrap = bootstrap_identity_calendar(paths.canonical_db, paths.bootstrap_csv, now)
     identity_summary, fiscal_summary = write_identity_artifacts(paths, identity_bootstrap)
-    provider_summary = ingest_bulk_provider_rows(paths, "v4_1b_production_bootstrap", now)
+    provider_summary = ingest_bulk_provider_rows(
+        paths, "v4_1b_production_bootstrap", now, history_policy=policy
+    )
     canonical_summary = canonicalize_arq_production(paths, now)
     coverage, latest8, latest4, latest1, coverage_summary = field_coverage(paths)
     provenance = provenance_summary(paths)
@@ -1183,7 +1265,12 @@ def run_production_bootstrap(paths: ProductionPaths, *, api_key: str | None = No
     fingerprints = baseline_fingerprints(paths)
     write_json(paths.artifact_root / "v4_production_baseline_fingerprints.json", fingerprints)
     snapshot_path = snapshot_databases(paths)
-    replay_summary = replay(paths, fingerprints, utc_now())
+    replay_summary = replay(
+        paths,
+        fingerprints,
+        utc_now(),
+        history_policy=policy,
+    )
     provider_integrity, canonical_integrity, analysis_integrity, cross_db = production_integrity(paths)
     review_items = {
         "cik_missing": identity_summary["companies_still_cik_null"],
@@ -1289,7 +1376,9 @@ def write_production_baseline_doc(path: Path, summary: Mapping[str, Any]) -> Non
         f"- `{summary['production_paths']['provider_db']}`\n"
         f"- `{summary['production_paths']['canonical_db']}`\n"
         f"- `{summary['production_paths']['analysis_db']}`\n\n"
-        "Sharadar history scope: `years=5`.\n\n"
+        f"Sharadar minimum request: `{MINIMUM_HISTORY_YEARS}` years. Retention: `{RETENTION_MODE}`.\n\n"
+        f"Actual staged ranges: `{summary['bulk_manifest'].get('staged_observed_ranges', {})}`.\n\n"
+        f"Actual retained ranges: `{summary['provider_ingest'].get('retained_observed_ranges', {})}`.\n\n"
         f"Universe: `{summary['identity']['csv_tickers']}` local bootstrap tickers from `temp/v3_active_tickers_99_27.csv`.\n\n"
         f"Provider observations: `{summary['provider_ingest']['provider_counts']['provider_observations']}`. "
         f"Canonical quarters: `{summary['canonicalization']['canonical_counts']['canonical_quarters']}`. "
