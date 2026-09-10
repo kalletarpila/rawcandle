@@ -412,3 +412,16 @@ existing economic models or Company Snapshot. Stronger claims require provider
 version history, stable market security identity, explicit adjustment
 provenance, and delisting-return treatment. See
 `fundamentals_v4_phase12a_forward_return_readiness.md`.
+
+## Fundamental Profile Baseline Phase 12B
+
+Status: `OUTCOME_C_REVISED_HISTORY_EXPLORATORY_ONLY`
+
+Phase 12B implemented the preregistered H1-H8 profile study and fixed B0-B4
+baselines without production integration. The purged 2021-2023 primary common
+cohort has only 70 observations, 68 companies and 3 signal months, so it fails
+the locked 200/100/12 evidence gate. All primary hypotheses are
+`NOT_TESTABLE_WITH_CURRENT_DATA`; the later-ML gate fails. Start prospective
+PIT-capable collection before model expansion. See
+`fundamentals_v4_phase12b_research_contract.md` and
+`fundamentals_v4_phase12b_baseline_results.md`.
