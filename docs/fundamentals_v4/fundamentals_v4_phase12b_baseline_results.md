@@ -32,6 +32,27 @@ calculated and serialized for diagnostic transparency, but they are marked
 `NOT_TESTABLE_DEVELOPMENT_SAMPLE_GATE_FAILED`. They are not validation evidence.
 All H1-H8 hypotheses are therefore `NOT_TESTABLE_WITH_CURRENT_DATA`.
 
+The sequential development attrition is:
+
+| Stage | Remaining | Removed at stage |
+|---|---:|---:|
+| All 2021-2023 availability endpoints | 23,872 | 0 |
+| Valid 63-session label | 23,258 | 614 |
+| `SCORE_FULL` | 6,151 | 17,107 |
+| `VALUATION_FULL` | 5,689 | 462 |
+| Delta 2Q `DELTA_READY` | 1,876 | 3,813 |
+| `LIFECYCLE_READY` | 1,876 | 0 |
+| Complete Diagnostic coverage | 1,876 | 0 |
+| Identity and price gates | 1,876 | 0 |
+| Development purge and embargo | 70 | 1,806 |
+
+The purge implementation does not remove the whole development interval:
+20,876 development-period endpoints pass its retained-label timing rule, while
+2,395 are purged at the period boundary. The collapse occurs because the full
+common cohort first becomes available near the end of 2023. Of its 1,876 rows,
+1,806 have 63-session labels crossing 2023-12-31. This is the intended locked
+boundary rule acting on a late-forming cohort, not an indexing defect.
+
 ## Samples And Labels
 
 The retained primary common-cohort counts are:
@@ -75,16 +96,16 @@ drift separately as non-PIT descriptive context.
 
 ## Determinism And Safety
 
-Two complete runs produced 41 byte-identical artifacts. Identities:
+Two complete runs produced 42 byte-identical artifacts. Identities:
 
 - source: `d35d68069707477913269e4c7e4febb10f84f3a5c1d09b174e5329357942e59c`;
 - contract: `26a2826841ca024aa40682a3160df4fcff83cd2af1e3cbe9cccbb401f7201139`;
 - sample: `f6426c1e09ea9467302230ccba95dbf06f589a2a62f307f34f966fb5734c98cd`;
-- result: `83c4c58573253e30bf6ae9aa9b28879de8fc5896f072798929669282c087df06`.
+- result: `a3a70a49bc8551fa20c4f630b3675d1190db00025be43c69fe9a30988a218437`.
 
 Accepted artifacts are under
-`temp/fundamentals_v4_phase12b/20260910T_PHASE12B_ACCEPTED_B/`; the independent
-replay is `20260910T_PHASE12B_ACCEPTED_C/`. Preflight and postflight production
+`temp/fundamentals_v4_phase12b/20260910T_PHASE12B_ATTRITION_A/`; the independent
+replay is `20260910T_PHASE12B_ATTRITION_B/`. Preflight and postflight production
 state fingerprints are identical. No database, production report, active
 package, Relative Valuation snapshot, Snapshot contract or Scheduler path was
 changed.
@@ -111,10 +132,12 @@ Result: 27 passed.
 Relevant broad command:
 
 ```text
-pytest -q tests/test_fundamentals_v4*.py tests/test_phase12b_research_contract.py tests/test_phase12b_fundamental_profile_baseline.py <market/alias/corporate-action isolation tests>
+pytest -q tests/test_fundamentals_v4*.py tests/test_phase12b_research_contract.py tests/test_phase12b_fundamental_profile_baseline.py tests/test_splits_support.py tests/test_splits_price_backfill.py tests/test_recompute_history_normalization.py
 ```
 
-Result: 840 passed, one existing data-coupled test failed. The failure expects a
-hard-coded latest report price date of 2026-09-08, while the updated read-only
-market database now returns 2026-09-09. Phase 12B does not change that test or
-the Company Snapshot implementation. `compileall` and `git diff --check` pass.
+Result: 842 passed.
+
+The data-coupled Relative Valuation production test now derives the latest
+eligible date independently from its read-only market source instead of
+hard-coding 2026-09-08. The production calculation is unchanged. `compileall`
+and `git diff --check` pass.

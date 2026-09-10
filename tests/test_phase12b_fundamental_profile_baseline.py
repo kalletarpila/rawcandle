@@ -27,7 +27,11 @@ from rawcandle.research.fundamental_profile_baseline.models import (
     fit_baseline,
     predict,
 )
-from rawcandle.research.fundamental_profile_baseline.runner import _bootstrap_interval, eligibility_reason
+from rawcandle.research.fundamental_profile_baseline.runner import (
+    _bootstrap_interval,
+    attrition_waterfall,
+    eligibility_reason,
+)
 from rawcandle.research.fundamental_profile_baseline.source import readonly
 
 
@@ -225,3 +229,25 @@ def test_readonly_connection_rejects_writes(tmp_path) -> None:
 
 def test_contract_fingerprint_is_required_by_cli_contract() -> None:
     assert len(CONTRACT_FINGERPRINT) == 64
+
+
+def test_development_attrition_waterfall_is_sequential() -> None:
+    base = {
+        "source_availability_date": "2023-06-01", "entry_date": "2023-06-02",
+        "company_id": 1, "h63_status": "LABEL_READY", "score_status": "SCORE_FULL",
+        "valuation_status": "VALUATION_FULL", "two_quarter_status": "DELTA_READY",
+        "lifecycle_status": "LIFECYCLE_READY", "lifecycle": "MATURE",
+        "diagnostic_complete": True, "identity_status": "DATED_ALIAS",
+        "period": "DEVELOPMENT", "partition_status": "RETAINED",
+    }
+    missing_score = dict(base, company_id=2, score_status="SCORE_LIMITED")
+    purged = dict(base, company_id=3, partition_status="PURGED_LABEL_CROSSES_PERIOD_END")
+    rows = attrition_waterfall(
+        [base, missing_score, purged],
+        availability_start="2021-01-01", availability_end="2023-12-31",
+        final_period="DEVELOPMENT",
+    )
+    counts = {row["stage"]: row["remaining"] for row in rows}
+    assert counts["ALL_ENDPOINTS"] == 3
+    assert counts["SCORE_FULL"] == 2
+    assert counts["PURGE_AND_EMBARGO"] == 1

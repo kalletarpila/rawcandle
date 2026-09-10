@@ -208,17 +208,24 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
         persisted = RelativeValuationRepository(connection).company_by_ticker(
             "NVDA", model_fingerprint=MODEL_FINGERPRINT
         )
+    with sqlite3.connect(
+        f"{paths.market_db.resolve().as_uri()}?mode=ro", uri=True
+    ) as connection:
+        expected_current_price_date = connection.execute(
+            "SELECT MAX(pvm) FROM osakedata WHERE osake=? AND market=? AND pvm<=?",
+            ("NVDA", "usa", "2026-09-09"),
+        ).fetchone()[0]
 
     assert first["status"] == "CREATED" and second["status"] == "NO_CHANGE"
     assert first["report_content_fingerprint"] == second["report_content_fingerprint"]
     assert identity["as_of_date"] == "2026-09-08"
     assert relative["current_valuation"]["price_date"] == "2026-09-04"
-    assert first["snapshot"]["current_price_valuation"]["price_date"] == "2026-09-08"
+    assert first["snapshot"]["current_price_valuation"]["price_date"] == expected_current_price_date
     for expected in (
         "Report date: `2026-09-09`",
         "Relative Valuation snapshot date: `2026-09-08`",
         "snapshotissa `2026-09-08` yhtiön `2026-09-04` päivän hinnalla",
-        "Indicative current-price valuation käyttää `2026-09-08` päivän hintaa",
+        f"Indicative current-price valuation käyttää `{expected_current_price_date}` päivän hintaa",
         "Persisted peer comparison — snapshot 2026-09-08",
         "Snapshot-price Absolute Valuation Score",
         "Snapshot-hintainen",

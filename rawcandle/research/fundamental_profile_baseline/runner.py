@@ -256,6 +256,49 @@ def retained_common(rows: Sequence[Mapping[str, Any]], period: str | None = None
     return [row for row in rows if row.get("common_eligibility") == "ELIGIBLE" and row.get("partition_status") == "RETAINED" and (period is None or row.get("period") == period)]
 
 
+def attrition_waterfall(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    availability_start: str,
+    availability_end: str,
+    final_period: str,
+) -> list[dict[str, Any]]:
+    members = [
+        row for row in rows
+        if row.get("source_availability_date") is not None
+        and availability_start <= str(row["source_availability_date"]) <= availability_end
+    ]
+    stages: tuple[tuple[str, Callable[[Mapping[str, Any]], bool]], ...] = (
+        ("ALL_ENDPOINTS", lambda row: True),
+        ("LABEL_63_READY", lambda row: row.get("h63_status") == "LABEL_READY"),
+        ("SCORE_FULL", lambda row: row.get("score_status") == "SCORE_FULL"),
+        ("VALUATION_FULL", lambda row: row.get("valuation_status") == "VALUATION_FULL"),
+        ("DELTA_2Q_READY", lambda row: row.get("two_quarter_status") == "DELTA_READY"),
+        ("LIFECYCLE_READY", lambda row: row.get("lifecycle_status") == "LIFECYCLE_READY" and bool(row.get("lifecycle"))),
+        ("DIAGNOSTIC_COVERAGE", lambda row: bool(row.get("diagnostic_complete"))),
+        ("IDENTITY_AND_PRICE_GATES", lambda row: row.get("identity_status") in {"DATED_ALIAS", "CURRENT_TICKER_FALLBACK"} and row.get("h63_status") == "LABEL_READY"),
+        ("PURGE_AND_EMBARGO", lambda row: row.get("period") == final_period and row.get("partition_status") == "RETAINED"),
+    )
+    output = []
+    total = len(members)
+    previous = total
+    for sequence, (stage, predicate) in enumerate(stages, start=1):
+        if sequence > 1:
+            members = [row for row in members if predicate(row)]
+        count = len(members)
+        output.append({
+            "sequence": sequence,
+            "stage": stage,
+            "remaining": count,
+            "removed_at_stage": previous - count if sequence > 1 else 0,
+            "fraction_of_all": count / total if total else None,
+            "distinct_companies": len({int(row["company_id"]) for row in members}),
+            "distinct_signal_months": len({str(row["entry_date"])[:7] for row in members if row.get("entry_date")}),
+        })
+        previous = count
+    return output
+
+
 def _summary(rows: Sequence[Mapping[str, Any]], target: str = "h63_excess_return") -> dict[str, Any]:
     values = sorted(float(row[target]) for row in rows if row.get(target) is not None)
     if not values:
@@ -706,6 +749,12 @@ def run(paths: ResearchPaths, output_dir: Path, *, contract_fingerprint: str) ->
     sample_fp = stable_hash([{key: row.get(key) for key in ("company_id", "quarter_id", "entry_date", "h63_exit_date", "h63_excess_return", "common_eligibility", "period", "partition_status")} for row in rows])
 
     auxiliary = auxiliary_artifacts(rows)
+    development_attrition = attrition_waterfall(
+        rows,
+        availability_start="2021-01-01",
+        availability_end="2023-12-31",
+        final_period="DEVELOPMENT",
+    )
     hypotheses = hypothesis_results(rows, sessions)
     (
         continuous, classification, calibration, coefficients, quintiles,
@@ -758,6 +807,7 @@ def run(paths: ResearchPaths, output_dir: Path, *, contract_fingerprint: str) ->
         "nested_model_comparison.csv": comparisons,
         "exclusion_reasons.csv": auxiliary["exclusions"],
         "feature_summary_by_period.csv": auxiliary["feature_summary"],
+        "development_attrition_waterfall.csv": development_attrition,
     }
     for filename, values in mapping.items():
         write_csv(output_dir / filename, values)
