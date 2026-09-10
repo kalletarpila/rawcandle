@@ -54,6 +54,8 @@ data/reverse/*
 !data/reverse/.gitkeep
 data/test_*.txt
 data/yf_cache/
+/data/source_archives/sharadar/fundamentals/**/*.zip
+/data/source_archives/sharadar/fundamentals/**/archive_manifest.json
 
 # Large data files
 *.csv
