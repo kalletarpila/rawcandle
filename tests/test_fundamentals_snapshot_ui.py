@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 import os
 from pathlib import Path
+import sqlite3
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -484,18 +485,40 @@ def test_recent_report_row_has_download_action() -> None:
 def test_ui_service_real_snapshot_integration_is_read_only(tmp_path: Path) -> None:
     if not all(path.is_file() for path in PRODUCTION_SNAPSHOT_PATHS.__dict__.values()):
         pytest.skip("Fundamentals V4 production databases are not present")
+    from rawcandle.fundamentals.relative_valuation.engine import (
+        MODEL_FINGERPRINT as RELATIVE_VALUATION_MODEL_FINGERPRINT,
+    )
+    from rawcandle.fundamentals.relative_valuation.persistence import (
+        RelativeValuationRepository,
+    )
+
+    report_date = "2026-09-12"
+    with sqlite3.connect(
+        f"{PRODUCTION_SNAPSHOT_PATHS.analysis_db.resolve().as_uri()}?mode=ro",
+        uri=True,
+    ) as connection:
+        expected_snapshot = RelativeValuationRepository(
+            connection
+        ).report_snapshot_metadata(
+            report_date,
+            model_fingerprint=RELATIVE_VALUATION_MODEL_FINGERPRINT,
+        )
+    assert expected_snapshot is not None
     service = FundamentalsSnapshotUIService(output_dir=tmp_path)
 
     result = service.generate(
-        ticker_input="CRMD", report_date_input="2026-09-12", overwrite=False
+        ticker_input="CRMD", report_date_input=report_date, overwrite=False
     )
 
     assert result.status == "GENERATED"
     assert result.publication_status == "CREATED"
     assert result.filename == "CRMD_2026-09-12.md"
     assert (tmp_path / result.filename).is_file()
-    assert "Relative Valuation snapshot date: `2026-09-08`" in (
+    assert (
+        f"Relative Valuation snapshot date: `{expected_snapshot['as_of_date']}`"
+        in (
         tmp_path / result.filename
     ).read_text(encoding="utf-8")
+    )
     assert len(result.report_content_fingerprint or "") == 64
     assert FUNDAMENTALS_ROUTE == "/fundamentals"
