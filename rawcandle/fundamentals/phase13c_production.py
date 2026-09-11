@@ -159,13 +159,12 @@ def validate_preflight_state(paths: CandidatePaths) -> dict[str, Any]:
     members, aliases = current_universe_rows(paths.canonical_db, now="PHASE13C_PREFLIGHT")
     identity = universe_identity(members, aliases, as_of_date="PHASE13C_P")
     taxonomy = taxonomy_identity(paths.taxonomy_db)
-    reconciliation = verify_reconciliation(paths, identity)
     if identity["economic_result_fingerprint"] != EXPECTED_UNIVERSE_FINGERPRINT:
         raise RuntimeError(f"PHASE13C_UNIVERSE_DRIFT:{identity['economic_result_fingerprint']}")
     if identity["member_count"] != 2458 or identity["active_security_count"] != 2453 or identity["zero_active_company_count"] != 16 or identity["multi_active_company_count"] != 11:
         raise RuntimeError("PHASE13C_UNIVERSE_COUNT_GATE_FAILED")
-    if not reconciliation["ok"]:
-        raise RuntimeError("PHASE13C_BASELINE_RECONCILIATION_FAILED")
+    with sqlite3.connect(f"file:{paths.canonical_db.resolve()}?mode=ro", uri=True) as conn:
+        ttm_rows = int(conn.execute("SELECT COUNT(*) FROM v4_ttm_values").fetchone()[0])
     with sqlite3.connect(f"file:{paths.analysis_db.resolve()}?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
         active_package = conn.execute("SELECT persistence_fingerprint FROM fundamentals_active_model_family WHERE singleton=1").fetchone()[0]
@@ -173,8 +172,22 @@ def validate_preflight_state(paths: CandidatePaths) -> dict[str, Any]:
             "SELECT snapshot_id FROM relative_valuation_active_snapshot WHERE model_fingerprint=?",
             (EXPECTED_RV_MODEL,),
         ).fetchone()[0]
+        diagnostic_evaluations = int(conn.execute(
+            "SELECT evaluation_count FROM diagnostic_flag_package "
+            "WHERE model_fingerprint='0ac66c6749afc889cf553c47436757a54f644b6a81febd161cf947885e444904' "
+            "ORDER BY applied_at_utc DESC LIMIT 1"
+        ).fetchone()[0])
     if str(active_package) != EXPECTED_ACTIVE_PACKAGE or str(active_rv) != EXPECTED_ACTIVE_RV:
         raise RuntimeError("PHASE13C_ACTIVE_POINTER_DRIFT")
+    if ttm_rows != 87319 or diagnostic_evaluations != 698552:
+        raise RuntimeError("PHASE13C_BASELINE_RECONCILIATION_FAILED")
+    reconciliation = {
+        "ttm_endpoint_rows": ttm_rows,
+        "diagnostic_evaluations_active_package": diagnostic_evaluations,
+        "active_package": str(active_package),
+        "active_relative_valuation_snapshot": str(active_rv),
+        "ok": True,
+    }
     return {"universe": identity, "taxonomy": taxonomy, "reconciliation": reconciliation}
 
 
@@ -480,4 +493,3 @@ plus 11 additional active share-class securities equals 2,453 active securities.
 
 Phase 13D remains Add Tickers and Taxonomy Update backend/CLI implementation and rehearsal only.
 """
-
