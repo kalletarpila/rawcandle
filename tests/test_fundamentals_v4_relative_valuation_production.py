@@ -209,8 +209,16 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
     with sqlite3.connect(
         f"{paths.analysis_db.resolve().as_uri()}?mode=ro", uri=True
     ) as connection:
-        persisted = RelativeValuationRepository(connection).company_by_ticker(
-            "NVDA", model_fingerprint=MODEL_FINGERPRINT
+        repository = RelativeValuationRepository(connection)
+        selected_metadata = repository.report_snapshot_metadata(
+            "2026-09-09", model_fingerprint=MODEL_FINGERPRINT
+        )
+        assert selected_metadata is not None
+        assert selected_metadata["as_of_date"] == "2026-09-08"
+        persisted = repository.company_by_ticker(
+            "NVDA",
+            model_fingerprint=MODEL_FINGERPRINT,
+            snapshot_id=selected_metadata["snapshot_id"],
         )
     with sqlite3.connect(
         f"{paths.market_db.resolve().as_uri()}?mode=ro", uri=True

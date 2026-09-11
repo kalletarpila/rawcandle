@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from rawcandle.fundamentals.operating_income_v2 import diagnostic_flags_eight, phase10b
+from rawcandle.fundamentals.operating_income_v2 import activation, diagnostic_flags_eight, phase10b
 from rawcandle.fundamentals.relative_valuation.candidate_snapshot import (
     PRODUCTION_SNAPSHOT_FINGERPRINT as RELATIVE_VALUATION_SNAPSHOT_FINGERPRINT,
 )
@@ -187,7 +187,9 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
         phase10b.snapshot_eight.MODEL_FINGERPRINT,
         RELATIVE_VALUATION_SNAPSHOT_FINGERPRINT,
     }
-    assert snapshot["source_state"]["active_package"][1] == phase10b.PACKAGE_FINGERPRINT
+    assert snapshot["source_state"]["active_package"][1] == (
+        activation.TEN_YEAR_OPERATIONAL_PACKAGE_FINGERPRINT
+    )
 
 
 def test_phase9j_2_definitions_are_complete_and_engine_reconciled(
