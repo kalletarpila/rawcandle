@@ -366,41 +366,67 @@ def taxonomy_identity(taxonomy_db: Path) -> dict[str, Any]:
     }
 
 
-def ensure_candidate_schema(paths: CandidatePaths, *, applied_at_utc: str, apply: bool) -> dict[str, Any]:
-    reject_production_path(paths.canonical_db, "canonical")
-    reject_production_path(paths.analysis_db, "analysis")
+def ensure_candidate_schema(paths: CandidatePaths, *, applied_at_utc: str, apply: bool, allow_production: bool = False) -> dict[str, Any]:
+    if not allow_production:
+        reject_production_path(paths.canonical_db, "canonical")
+        reject_production_path(paths.analysis_db, "analysis")
     before = {"canonical": database_fingerprint(paths.canonical_db), "analysis": database_fingerprint(paths.analysis_db)}
     if not apply:
         return {"outcome": "DRY_RUN", "would_apply": True, "before": before}
     with sqlite3.connect(paths.canonical_db) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("BEGIN IMMEDIATE")
-        execute_script(conn, CANONICAL_SCHEMA_SQL)
-        conn.execute(
-            "INSERT INTO fundamentals_operational_universe_schema_meta VALUES (1,?,?) "
-            "ON CONFLICT(singleton) DO UPDATE SET contract_version=excluded.contract_version,applied_at_utc=excluded.applied_at_utc",
-            (CONTRACT_VERSION, applied_at_utc),
-        )
-        conn.commit()
+        table_exists = conn.execute("SELECT 1 FROM sqlite_schema WHERE name='fundamentals_operational_universe_schema_meta'").fetchone()
+        if table_exists:
+            row = conn.execute("SELECT contract_version,applied_at_utc FROM fundamentals_operational_universe_schema_meta WHERE singleton=1").fetchone()
+            if row is not None and tuple(row) == (CONTRACT_VERSION, applied_at_utc):
+                canonical_noop = True
+            else:
+                canonical_noop = False
+        else:
+            canonical_noop = False
+        if canonical_noop:
+            pass
+        else:
+            conn.execute("BEGIN IMMEDIATE")
+            execute_script(conn, CANONICAL_SCHEMA_SQL)
+            conn.execute(
+                "INSERT INTO fundamentals_operational_universe_schema_meta VALUES (1,?,?) "
+                "ON CONFLICT(singleton) DO UPDATE SET contract_version=excluded.contract_version,applied_at_utc=excluded.applied_at_utc",
+                (CONTRACT_VERSION, applied_at_utc),
+            )
+            conn.commit()
     with sqlite3.connect(paths.analysis_db) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("BEGIN IMMEDIATE")
-        execute_script(conn, ANALYSIS_SCHEMA_SQL)
-        conn.execute(
-            "INSERT INTO fundamentals_dependency_schema_meta VALUES (1,?,?) "
-            "ON CONFLICT(singleton) DO UPDATE SET contract_version=excluded.contract_version,applied_at_utc=excluded.applied_at_utc",
-            (DEPENDENCY_CONTRACT_VERSION, applied_at_utc),
-        )
-        conn.commit()
+        table_exists = conn.execute("SELECT 1 FROM sqlite_schema WHERE name='fundamentals_dependency_schema_meta'").fetchone()
+        if table_exists:
+            row = conn.execute("SELECT contract_version,applied_at_utc FROM fundamentals_dependency_schema_meta WHERE singleton=1").fetchone()
+            if row is not None and tuple(row) == (DEPENDENCY_CONTRACT_VERSION, applied_at_utc):
+                analysis_noop = True
+            else:
+                analysis_noop = False
+        else:
+            analysis_noop = False
+        if analysis_noop:
+            pass
+        else:
+            conn.execute("BEGIN IMMEDIATE")
+            execute_script(conn, ANALYSIS_SCHEMA_SQL)
+            conn.execute(
+                "INSERT INTO fundamentals_dependency_schema_meta VALUES (1,?,?) "
+                "ON CONFLICT(singleton) DO UPDATE SET contract_version=excluded.contract_version,applied_at_utc=excluded.applied_at_utc",
+                (DEPENDENCY_CONTRACT_VERSION, applied_at_utc),
+            )
+            conn.commit()
     after = {"canonical": database_fingerprint(paths.canonical_db), "analysis": database_fingerprint(paths.analysis_db)}
     changed = stable_json(before) != stable_json(after)
     return {"outcome": "APPLIED" if changed else "NO_CHANGE", "before": before, "after": after}
 
 
-def backfill_universe(paths: CandidatePaths, *, applied_at_utc: str, apply: bool) -> dict[str, Any]:
-    reject_production_path(paths.canonical_db, "canonical")
+def backfill_universe(paths: CandidatePaths, *, applied_at_utc: str, apply: bool, allow_production: bool = False) -> dict[str, Any]:
+    if not allow_production:
+        reject_production_path(paths.canonical_db, "canonical")
     members, aliases = current_universe_rows(paths.canonical_db, now=applied_at_utc)
     identity = universe_identity(members, aliases, as_of_date=applied_at_utc[:10])
     if not apply:
@@ -447,8 +473,9 @@ def backfill_universe(paths: CandidatePaths, *, applied_at_utc: str, apply: bool
     return {"outcome": "APPLIED", "identity": identity}
 
 
-def attach_dependencies(paths: CandidatePaths, *, universe: Mapping[str, Any], applied_at_utc: str, apply: bool, force_unknown: bool = False) -> dict[str, Any]:
-    reject_production_path(paths.analysis_db, "analysis")
+def attach_dependencies(paths: CandidatePaths, *, universe: Mapping[str, Any], applied_at_utc: str, apply: bool, force_unknown: bool = False, allow_production: bool = False) -> dict[str, Any]:
+    if not allow_production:
+        reject_production_path(paths.analysis_db, "analysis")
     taxonomy = taxonomy_identity(paths.taxonomy_db)
     with readonly(paths.analysis_db) as conn:
         rv_snapshots = [dict(row) for row in conn.execute(
@@ -612,11 +639,11 @@ def candidate_relative_valuation_dependency_state(
         return {"state": state, "snapshot_id": metadata["snapshot_id"], "as_of_date": metadata["as_of_date"]}
 
 
-def run_candidate_apply(paths: CandidatePaths, *, apply: bool, applied_at_utc: str, force_unknown: bool = False) -> dict[str, Any]:
-    schema = ensure_candidate_schema(paths, applied_at_utc=applied_at_utc, apply=apply)
-    universe = backfill_universe(paths, applied_at_utc=applied_at_utc, apply=apply)
+def run_candidate_apply(paths: CandidatePaths, *, apply: bool, applied_at_utc: str, force_unknown: bool = False, allow_production: bool = False) -> dict[str, Any]:
+    schema = ensure_candidate_schema(paths, applied_at_utc=applied_at_utc, apply=apply, allow_production=allow_production)
+    universe = backfill_universe(paths, applied_at_utc=applied_at_utc, apply=apply, allow_production=allow_production)
     identity = universe["identity"]
-    dependencies = attach_dependencies(paths, universe=identity, applied_at_utc=applied_at_utc, apply=apply, force_unknown=force_unknown)
+    dependencies = attach_dependencies(paths, universe=identity, applied_at_utc=applied_at_utc, apply=apply, force_unknown=force_unknown, allow_production=allow_production)
     return {"schema": schema, "universe": universe, "dependencies": dependencies}
 
 
