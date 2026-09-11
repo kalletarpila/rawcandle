@@ -347,8 +347,8 @@ def _relative_refresh(as_of_date: str, applied_at: str) -> dict[str, Any]:
     metadata_counts = {
         "current_fresh": int(metadata["current_fresh_count"]),
         "current_peer_eligible": int(metadata["current_peer_eligible_count"]),
-        "own_history_ready_current_fresh": int(metadata["own_history_ready_fresh_count"]),
-        "own_history_limited_current_fresh": int(metadata["own_history_limited_fresh_count"]),
+        "own_history_ready_current_fresh": int(metadata["own_history_ready_count"]),
+        "own_history_limited_current_fresh": int(metadata["own_history_limited_count"]),
     }
     if cohorts != metadata_counts:
         raise RuntimeError("PHASE12E_RELATIVE_VALUATION_METADATA_RECONCILIATION_FAILED")
