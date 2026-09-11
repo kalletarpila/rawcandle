@@ -100,6 +100,10 @@ def test_production_gate_requires_exact_roles_and_confirmation(
     wrong.layout_fingerprint = "wrong"
     with pytest.raises(ValueError, match="LAYOUT"):
         production.validate_production_request(wrong)
+    unknown_package = _args(paths, output_root / "package", backup_dir=backup_root)
+    unknown_package.expected_active_package = "unknown"
+    with pytest.raises(ValueError, match="ACTIVE_PACKAGE"):
+        production.validate_production_request(unknown_package)
     alias = tmp_path / "analysis-alias.db"
     alias.symlink_to(paths["analysis"])
     symlinked = _args(paths, output_root / "alias", backup_dir=backup_root)

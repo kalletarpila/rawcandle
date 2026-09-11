@@ -11,6 +11,7 @@ from .readers import ParallelModelRepository
 
 ACTIVATION_TABLE = "fundamentals_active_model_family"
 PRE_PHASE9G_PACKAGE_FINGERPRINT = "cf4ce8134c362399ea94667e4659e27a32b1e8b9de199eaaba32c91b450a51bc"
+TEN_YEAR_OPERATIONAL_PACKAGE_FINGERPRINT = "f9621556445ef7c85f5486ea170e2366cbd356fa9283cd8528436abeab0d0d40"
 PRE_PHASE9G_MODEL_MAP = {
     **MODEL_MAP,
     "diagnostic_flags": (
@@ -31,7 +32,11 @@ KNOWN_PACKAGES = {
 def known_packages() -> dict[str, dict[str, tuple[str, str]]]:
     from .phase10b import MODEL_MAP as PHASE10B_MODEL_MAP, PACKAGE_FINGERPRINT as PHASE10B_PACKAGE
 
-    return {**KNOWN_PACKAGES, PHASE10B_PACKAGE: PHASE10B_MODEL_MAP}
+    return {
+        **KNOWN_PACKAGES,
+        PHASE10B_PACKAGE: PHASE10B_MODEL_MAP,
+        TEN_YEAR_OPERATIONAL_PACKAGE_FINGERPRINT: PHASE10B_MODEL_MAP,
+    }
 ACTIVATION_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {ACTIVATION_TABLE}(
  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -93,6 +98,9 @@ def assert_v2_active(conn: sqlite3.Connection) -> ActiveFamily:
     if manifest != expected_manifest:
         raise ValueError("OPERATING_INCOME_V2_ACTIVE_PACKAGE_MISMATCH")
     package = ParallelModelRepository(conn).package_manifest(active.persistence_fingerprint)
+    current_package = ParallelModelRepository(conn).package_manifest()
+    if current_package["persistence_fingerprint"] != active.persistence_fingerprint:
+        raise ValueError("OPERATING_INCOME_V2_ACTIVE_PACKAGE_CONTENT_REPLACED")
     if (
         package["persistence_fingerprint"] != active.persistence_fingerprint
         or json.loads(package["model_manifest_json"])
@@ -119,6 +127,9 @@ def activate_package(
     if package_fingerprint not in packages:
         raise ValueError("OPERATING_INCOME_V2_UNKNOWN_PACKAGE")
     repository = ParallelModelRepository(conn)
+    current_manifest = repository.package_manifest()
+    if current_manifest["persistence_fingerprint"] != package_fingerprint:
+        raise RuntimeError("OPERATING_INCOME_V2_ARCHIVED_MANIFEST_NOT_ACTIVATABLE")
     model_map = packages[package_fingerprint]
     repository.assert_v2_bundle(
         model_map, persistence_fingerprint=package_fingerprint

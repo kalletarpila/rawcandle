@@ -95,12 +95,20 @@ Leave production on the archived coherent package.
 
 ## Rollback
 
-Before activation, discard the candidate and restore any modified canonical/analysis
-databases from verified backups. After activation, atomically restore the archived
-active package pointer and, if changed, the archived Relative Valuation pointer;
-restore database backups when append-only rollback is insufficient. Re-run quick
-checks, foreign keys, package readability, Snapshot/UI smoke tests, and postflight
-inventory. Do not delete failed candidate evidence or audit rows needed for diagnosis.
+Phase 12E treats canonical and analysis as one recovery unit. Activation-only rollback
+to an archived package is forbidden because the package manifests are versioned but
+the underlying model rows are replaced under stable model fingerprints. An archived
+manifest is historical audit evidence, not an activatable package after replacement.
+
+Before any production write, create and independently verify matching online backups
+of both databases while holding the maintenance lock. Rehearse restoration into new
+files. On any mandatory-stage failure, restore both databases even if only one changed:
+materialize both backups into new files, verify schema, rows, active pointers,
+`quick_check`, and foreign keys, and only then replace both production files while the
+maintenance lock remains held. Relative Valuation is included in the analysis restore.
+Retain the verified pre-write backups after Phase 12E. Re-run package readability,
+Snapshot/UI smoke tests, and postflight inventory after any real restoration. Do not
+delete failed candidate evidence or audit rows needed for diagnosis.
 
 ## Postflight
 

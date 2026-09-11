@@ -17,6 +17,7 @@ from rawcandle.fundamentals.operating_income_v2.persistence import (
 from rawcandle.fundamentals.operating_income_v2.phase9d import deep_reconcile
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
 from rawcandle.fundamentals.operating_income_v2.activation import (
+    activate_package,
     activate_v2,
     active_family,
     assert_v2_active,
@@ -251,12 +252,15 @@ def test_activation_is_atomic_coherent_and_reversible(
         archived,
         MODEL_MAP,
     )
+    with pytest.raises(RuntimeError, match="ARCHIVED_MANIFEST_NOT_ACTIVATABLE"):
+        activate_package(database, archived, activated_at="later")
     database.execute(
         "UPDATE fundamentals_active_model_family SET persistence_fingerprint=?",
         (archived,),
     )
-    assert assert_v2_active(database).persistence_fingerprint == archived
-    database.commit()
+    with pytest.raises(ValueError, match="CONTENT_REPLACED"):
+        assert_v2_active(database)
+    database.rollback()
 
     database.execute("BEGIN")
     deactivate_v2(database)

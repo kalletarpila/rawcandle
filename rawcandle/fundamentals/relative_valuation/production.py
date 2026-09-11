@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from rawcandle.fundamentals.operating_income_v2.activation import assert_v2_active
+from rawcandle.fundamentals.operating_income_v2.activation import assert_v2_active, known_packages
 from rawcandle.fundamentals.operating_income_v2.phase10c import LOCKED_PACKAGE
 
 from .engine import MODEL_FINGERPRINT, MODEL_VERSION, calculate_relative_valuation
@@ -166,7 +166,7 @@ def validate_production_request(args: Any) -> dict[str, str]:
         raise ValueError("PHASE11D_PERSISTENCE_VERSION_MISMATCH")
     if args.layout_fingerprint != LAYOUT_FINGERPRINT:
         raise ValueError("PHASE11D_LAYOUT_FINGERPRINT_MISMATCH")
-    if args.expected_active_package != LOCKED_PACKAGE:
+    if args.expected_active_package not in known_packages():
         raise ValueError("PHASE11D_ACTIVE_PACKAGE_MISMATCH")
     if not args.full_universe:
         raise ValueError("PHASE11D_FULL_UNIVERSE_REQUIRED")
@@ -256,7 +256,9 @@ def disk_gate(backup_dir: Path, output: Path) -> dict[str, Any]:
     return {"analysis_size": analysis_size, "required_bytes": required, "checks": checks}
 
 
-def online_backup(source: Path, backup_dir: Path, stamp: str) -> dict[str, Any]:
+def online_backup(
+    source: Path, backup_dir: Path, stamp: str, *, expected_active_package: str = LOCKED_PACKAGE
+) -> dict[str, Any]:
     backup_dir.mkdir(parents=True, exist_ok=True)
     target = backup_dir / f"fundamentals_analysis.phase11d.{stamp}.db"
     if target.exists() or target.is_symlink():
@@ -267,7 +269,7 @@ def online_backup(source: Path, backup_dir: Path, stamp: str) -> dict[str, Any]:
     evidence = database_evidence(target)
     if evidence["quick_check"] != "ok" or evidence["foreign_key_violations"]:
         raise RuntimeError("PHASE11D_BACKUP_INTEGRITY_FAILED")
-    if evidence["active_package"] != LOCKED_PACKAGE:
+    if evidence["active_package"] != expected_active_package:
         raise RuntimeError("PHASE11D_BACKUP_ACTIVE_PACKAGE_MISMATCH")
     if evidence["relative_valuation_counts"]:
         raise RuntimeError("PHASE11D_BACKUP_NOT_PRE_MIGRATION")
@@ -301,7 +303,7 @@ def run_production(args: Any) -> dict[str, Any]:
     args.output.mkdir(parents=True, exist_ok=False)
     before = database_evidence(args.analysis_db)
     with sqlite3.connect(f"file:{args.analysis_db.resolve()}?mode=ro", uri=True) as conn:
-        if assert_v2_active(conn).persistence_fingerprint != LOCKED_PACKAGE:
+        if assert_v2_active(conn).persistence_fingerprint != args.expected_active_package:
             raise RuntimeError("PHASE11D_ACTIVE_PACKAGE_CHANGED")
     process = process_inventory()
     disk = disk_gate(args.backup_dir, args.output)
@@ -355,11 +357,16 @@ def run_production(args: Any) -> dict[str, Any]:
                 ).active_snapshot_id(model_fingerprint=MODEL_FINGERPRINT)
                 if previous_snapshot_id is None:
                     raise RuntimeError("PHASE11D_SCHEMA_WITHOUT_ACTIVE_SNAPSHOT")
-        if active_package != LOCKED_PACKAGE:
+        if active_package != args.expected_active_package:
             raise RuntimeError("PHASE11D_ACTIVE_PACKAGE_CHANGED")
         backup = None
         if not schema_present:
-            backup = online_backup(args.analysis_db, args.backup_dir, datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
+            backup = online_backup(
+                args.analysis_db,
+                args.backup_dir,
+                datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+                expected_active_package=args.expected_active_package,
+            )
         snapshot_again, inputs_again, plan_again = calculate_plan(args)
         require_expected_plan(args, plan_again)
         if plan_again != plan:

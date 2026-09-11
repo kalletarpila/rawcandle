@@ -139,14 +139,16 @@ def database_inventory(path: Path) -> dict[str, Any]:
         )]
         page_count = int(connection.execute("PRAGMA page_count").fetchone()[0])
         freelist = int(connection.execute("PRAGMA freelist_count").fetchone()[0])
+        journal_mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0])
         quick = str(connection.execute("PRAGMA quick_check").fetchone()[0])
         foreign = len(connection.execute("PRAGMA foreign_key_check").fetchall())
     return {
         "path": str(path.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
         "sha256": sha256(path), "schema_fingerprint": stable_hash(schema),
         "row_counts": row_counts, "page_count": page_count, "freelist_count": freelist,
-        "quick_check": quick, "foreign_key_errors": foreign,
+        "journal_mode": journal_mode, "quick_check": quick, "foreign_key_errors": foreign,
         "wal": _sidecar(path, "-wal"), "shm": _sidecar(path, "-shm"),
+        "journal": _sidecar(path, "-journal"),
     }
 
 
