@@ -1,6 +1,6 @@
 # Fundamentals V4 Phase 13E Production Onboarding Runbook
 
-Phase 13E must not activate production onboarding until the Phase 13D.2 Outcome B blockers are closed on copies.
+Phase 13E must not activate production onboarding until the Phase 13D.2 and Phase 13D.3 blockers are closed on copies.
 
 ## Required Preconditions
 
@@ -25,7 +25,7 @@ For a ticker such as SNDK:
 
 For SNDK specifically, permaticker `643888` and CIK `0002023554` must remain distinct from predecessor `SNDK1` / permaticker `197210`.
 
-For AREB specifically, production activation is blocked until taxonomy membership is resolved through evidence. Phase 13D.2 left AREB as `TAXONOMY_REVIEW_REQUIRED`.
+For AREB specifically, production activation is blocked until local classification is reconciled with authoritative evidence. Phase 13D.3 confirmed the company identity but found local `ticker_meta` still classifies AREB as `Consumer Cyclical / Footwear & Accessories`, not the corrected expected `Industrials / Commercial Services & Supplies`. Do not create an AREB taxonomy membership solely to make onboarding succeed.
 
 ## Apply Order
 
@@ -80,15 +80,20 @@ Activation-only rollback is not sufficient. Phase 13D.2 did not prove the full f
 
 ## Phase 13D.2 Carry-Forward Blockers
 
-Phase 13D.2 completed the economic copy-only rebuild and manual Relative Valuation refresh, but production remains blocked by:
+Phase 13D.2 completed the economic copy-only rebuild and manual Relative Valuation refresh. Phase 13D.3 narrowed some blockers, but production remains blocked by:
 
-- AREB taxonomy ambiguity: `TAXONOMY_REVIEW_REQUIRED`.
+- AREB classification/taxonomy ambiguity: local classification mismatch must be resolved before batch AREB+SNDK production onboarding.
 - Pre-refresh Snapshot/UI rendering still produced reports with Relative Valuation content although the dependency state was `OPERATIONAL_UNIVERSE_MISMATCH`.
-- Snapshot report content fingerprints were not deterministic because the technical source-state includes run-local audit fields.
 - Full multi-database failure injection and exact restoration remain unproven.
 - Full onboarding second-apply `NO_CHANGE` remains unproven.
 
 Reader corrections already established by Phase 13D.2 must remain in place: Relative Valuation source input excludes upstream Relative Position `snapshot_id` and filing valuation `calculated_at_utc` because those are run-local metadata, not economic source content.
+
+Snapshot correction established by Phase 13D.3 must remain in place: full `source_state_audit` is retained for machine evidence, while rendered report bytes and report-content fingerprint use stable presentation `source_state`.
+
+## SNDK-Only Readiness
+
+A narrower SNDK-only protected production proposal may be reviewed separately from AREB only if it excludes AREB from the production batch, preserves SNDK/SNDK1 separation, proves deterministic Snapshot output, proves full rollback/restore for every modified database, and reruns the explicit manual full-universe Relative Valuation refresh with a second `NO_CHANGE` pass.
 
 ## Required Final Evidence
 

@@ -142,3 +142,12 @@ Phase 13E must not proceed as Outcome A until these are resolved:
 - Snapshot report content fingerprint is not deterministic because source-state includes run-local audit fields.
 - Full failure-injection and exact multi-database rollback restoration matrix is not proven.
 - Full onboarding second-apply `NO_CHANGE` remains not fully proven.
+
+## Phase 13D.3 Closure Update
+
+Phase 13D.3 supersedes two D13D.2 blocker interpretations:
+
+- The 14 full-suite failures were retired Fundamentals V3 real-CSV fixture tests for `temp/v3_active_tickers_99_27.csv`, not active V4 runtime failures. They are marked `retired_v3`; synthetic V4 bootstrap tests remain active.
+- Snapshot report-content nondeterminism was traced to reuse of the same source-state object for both machine audit and rendered report fingerprinting. The Snapshot assembler now retains full `source_state_audit` while rendering/fingerprinting a stable presentation `source_state`.
+
+AREB remains blocked for batch production onboarding unless local classification is reconciled. Local evidence confirms `AMERICAN REBEL HOLDINGS INC`, but `ticker_meta` currently says `Consumer Cyclical / Footwear & Accessories`, which does not match the corrected expected classification `Industrials / Commercial Services & Supplies`.

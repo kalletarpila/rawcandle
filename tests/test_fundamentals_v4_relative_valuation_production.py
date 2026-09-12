@@ -69,7 +69,7 @@ def test_production_parser_defaults_to_dry_run() -> None:
         "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V10_"
         "RELATIVE_VALUATION_FROZEN"
     )
-    assert PRODUCTION_REPORT_PRESENTATION_FINGERPRINT == "d4e90e7ac75a5cfc76e87fa8855b9191485b3305193871396ca0776402fce9c0"
+    assert PRODUCTION_REPORT_PRESENTATION_FINGERPRINT == "d3ede6119c5f1fadcc48c88d186e507c6f20521e72ddb8c1a7fff817a2c31a97"
     required = {
         action.dest for action in parser._actions if action.required
     }

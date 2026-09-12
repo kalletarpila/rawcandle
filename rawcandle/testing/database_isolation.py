@@ -266,18 +266,40 @@ def inventory_differences(
     before: Mapping[str, Mapping[str, Mapping[str, Any]]],
     after: Mapping[str, Mapping[str, Mapping[str, Any]]],
 ) -> list[str]:
-    """Compare production state; permit only byte-identical SHM mtime changes."""
+    """Compare production state while tolerating SQLite read-only sidecars.
+
+    Opening a WAL-mode SQLite database with ``mode=ro`` can materialize a zero
+    byte ``-wal`` file and the shared-memory index without changing the main
+    database. A non-empty WAL, changed main file, or changed existing sidecar is
+    still reported as a protected production mutation.
+    """
 
     differences: list[str] = []
     for role in sorted(set(before) | set(after)):
         if role not in before or role not in after:
             differences.append(f"{role}:inventory membership changed")
             continue
+        main_before = dict(before[role]["main"])
+        main_after = dict(after[role]["main"])
+        main_unchanged = main_before == main_after
+        wal_before = dict(before[role]["wal"])
+        wal_after = dict(after[role]["wal"])
+        readonly_empty_wal = (
+            main_unchanged
+            and not wal_before.get("exists")
+            and wal_after.get("exists")
+            and wal_after.get("size") == 0
+            and wal_after.get("sha256") == hashlib.sha256(b"").hexdigest()
+        )
         for kind in ("main", "wal", "shm"):
             left = dict(before[role][kind])
             right = dict(after[role][kind])
             if kind == "shm" and left.get("sha256") == right.get("sha256"):
                 left["mtime_ns"] = right.get("mtime_ns")
+            if kind == "wal" and readonly_empty_wal:
+                continue
+            if kind == "shm" and readonly_empty_wal and not left.get("exists") and right.get("exists"):
+                continue
             if left != right:
                 differences.append(f"{role}:{kind}:{left!r} != {right!r}")
     return differences

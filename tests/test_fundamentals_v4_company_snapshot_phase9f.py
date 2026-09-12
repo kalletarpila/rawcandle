@@ -1,5 +1,6 @@
 import csv
 from pathlib import Path
+import shutil
 import sqlite3
 
 import pytest
@@ -39,6 +40,13 @@ from rawcandle.fundamentals.snapshot.renderer import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SNAPSHOT_FIXTURE_DATABASES = (
+    "fundamentals_v4.db",
+    "fundamentals_analysis.db",
+    "osakedata.db",
+    "analysis.db",
+    "fundamentals_provider.db",
+)
 CANDIDATE_DIAGNOSTIC_DEFINITIONS = _build_diagnostic_definitions(
     diagnostic_flags_eight.MODEL_CONTRACT,
     diagnostic_flags_eight.FLAG_NAMES,
@@ -54,18 +62,22 @@ CANDIDATE_INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT = _zero_diagnostic_text(
 )
 
 
+def _copied_snapshot_paths(tmp_path_factory: pytest.TempPathFactory, label: str) -> SnapshotPaths:
+    if not all((ROOT / "data" / name).exists() for name in SNAPSHOT_FIXTURE_DATABASES):
+        pytest.skip("production-shaped read-only fixture databases are unavailable")
+    copied = []
+    target = tmp_path_factory.mktemp(label)
+    for name in SNAPSHOT_FIXTURE_DATABASES:
+        source = ROOT / "data" / name
+        destination = target / name
+        shutil.copy2(source, destination)
+        copied.append(destination)
+    return SnapshotPaths(*copied)
+
+
 @pytest.fixture(scope="module")
 def nvda_report(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, dict]:
-    required = (
-        "fundamentals_v4.db",
-        "fundamentals_analysis.db",
-        "osakedata.db",
-        "analysis.db",
-        "fundamentals_provider.db",
-    )
-    if not all((ROOT / "data" / name).exists() for name in required):
-        pytest.skip("production-shaped read-only fixture databases are unavailable")
-    paths = SnapshotPaths(*(ROOT / "data" / name for name in required))
+    paths = _copied_snapshot_paths(tmp_path_factory, "phase9f-dbs")
     output = tmp_path_factory.mktemp("phase9f")
     first = generate_active_company_snapshot(
         paths, ticker="NVDA", report_date="2026-09-07", output_dir=output
@@ -81,16 +93,7 @@ def nvda_report(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, dict]:
 
 @pytest.fixture(scope="module")
 def phase9j_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
-    required = (
-        "fundamentals_v4.db",
-        "fundamentals_analysis.db",
-        "osakedata.db",
-        "analysis.db",
-        "fundamentals_provider.db",
-    )
-    if not all((ROOT / "data" / name).exists() for name in required):
-        pytest.skip("production-shaped read-only fixture databases are unavailable")
-    paths = SnapshotPaths(*(ROOT / "data" / name for name in required))
+    paths = _copied_snapshot_paths(tmp_path_factory, "phase9j-edge-dbs")
     output = tmp_path_factory.mktemp("phase9j-edges")
     reports = {}
     for ticker in ("A", "CRMD", "APD", "AIV", "LEG", "AAT", "AGEN", "BNC", "AAOI", "ILLR"):
@@ -182,7 +185,7 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
     nvda_report: tuple[str, dict],
 ) -> None:
     _, snapshot = nvda_report
-    assert CANDIDATE_REPORT_PRESENTATION_FINGERPRINT == "b539ceb4e4745aa1233b27d9883b442d6106a2a1b4769a7c52bcf099cb55ad87"
+    assert CANDIDATE_REPORT_PRESENTATION_FINGERPRINT == "5fd3730369616d518a4ac22fdaa1125502553a391357e200af42fa4a8783fefc"
     assert snapshot["model_fingerprints"]["snapshot"] in {
         phase10b.snapshot_eight.MODEL_FINGERPRINT,
         RELATIVE_VALUATION_SNAPSHOT_FINGERPRINT,

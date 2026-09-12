@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import pytest
+
 from rawcandle.fundamentals.schema.contract import SHARADAR_ARQ_FIELD_MAPPING, V4_CANONICAL_FINANCIAL_FIELDS
 from rawcandle.fundamentals.schema.identity_calendar_bootstrap import (
     BOOTSTRAP_SOURCE_FILENAME,
@@ -16,6 +18,9 @@ from rawcandle.fundamentals.schema.identity_calendar_bootstrap import (
 )
 from rawcandle.fundamentals.schema.migrations import bootstrap_all, canonical_field_contract_present, connect
 from rawcandle.fundamentals.schema.prototype import canonicalize_arq, load_provider_subset, validate_integrity
+
+
+retired_v3 = pytest.mark.retired_v3
 
 
 def _write_bootstrap_csv(path: Path, rows: list[dict[str, str]]) -> None:
@@ -106,6 +111,7 @@ def _acceptance_csvs(root: Path) -> None:
         writer.writerows(mrq)
 
 
+@retired_v3
 def test_bootstrap_csv_found() -> None:
     path = locate_bootstrap_csv(Path.cwd())
     assert path.name == BOOTSTRAP_SOURCE_FILENAME
@@ -221,6 +227,7 @@ def test_old_chain_break_does_not_invalidate_later_exact_anchor(tmp_path: Path) 
         assert conn.execute("SELECT confidence FROM company_fiscal_year_anchor WHERE fiscal_year=2027").fetchone()[0] == "VERIFIED"
 
 
+@retired_v3
 def test_real_csv_hard_case_ciks_available() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     by_ticker = {row["ticker"]: row for row in rows}
@@ -230,45 +237,53 @@ def test_real_csv_hard_case_ciks_available() -> None:
     assert "CIK0000003197.json" in by_ticker["CECO"]["Lähde"]
 
 
+@retired_v3
 def test_real_csv_column_mapping_valid() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     assert detect_column_mapping(rows[0].keys())["valid"]
 
 
+@retired_v3
 def test_real_csv_expected_scale() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     assert 2400 <= len(rows) <= 2600
 
 
+@retired_v3
 def test_real_csv_companyfacts_url_count() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     assert sum(1 for row in rows if "companyfacts/" in row["Lähde"]) == 2448
 
 
+@retired_v3
 def test_aapl_cik_imported_if_available() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     aapl = next(row for row in rows if row["ticker"] == "AAPL")
     assert parse_cik_from_source_url(aapl["Lähde"])[0] == "0000320193"
 
 
+@retired_v3
 def test_wday_cik_imported_if_available() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     wday = next(row for row in rows if row["ticker"] == "WDAY")
     assert parse_cik_from_source_url(wday["Lähde"])[0] == "0001327811"
 
 
+@retired_v3
 def test_asth_cik_imported_if_available() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     asth = next(row for row in rows if row["ticker"] == "ASTH")
     assert parse_cik_from_source_url(asth["Lähde"])[0] == "0001083446"
 
 
+@retired_v3
 def test_ceco_cik_imported_if_available() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     ceco = next(row for row in rows if row["ticker"] == "CECO")
     assert parse_cik_from_source_url(ceco["Lähde"])[0] == "0000003197"
 
 
+@retired_v3
 def test_wday_asth_ceco_anchors_validate_expected_fiscal_years() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     by_ticker = {row["ticker"]: row for row in rows}
@@ -277,24 +292,28 @@ def test_wday_asth_ceco_anchors_validate_expected_fiscal_years() -> None:
     assert by_ticker["CECO"]["FY2026 alkoi"] == "2026-01-01"
 
 
+@retired_v3
 def test_aapl_anchor_preserved() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     aapl = next(row for row in rows if row["ticker"] == "AAPL")
     assert aapl["FY2026 alkoi"] == "2025-09-28"
 
 
+@retired_v3
 def test_wday_anchor_validates_fy2027() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     wday = next(row for row in rows if row["ticker"] == "WDAY")
     assert wday["FY2027 alkoi"] <= "2026-04-30"
 
 
+@retired_v3
 def test_asth_anchor_validates_fy2026() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     asth = next(row for row in rows if row["ticker"] == "ASTH")
     assert asth["FY2026 alkoi"] <= "2026-03-31"
 
 
+@retired_v3
 def test_ceco_anchor_validates_fy2026() -> None:
     rows = list(csv.DictReader(locate_bootstrap_csv(Path.cwd()).open(encoding="utf-8-sig")))
     ceco = next(row for row in rows if row["ticker"] == "CECO")

@@ -121,6 +121,72 @@ def test_inventory_detects_simulated_fixture_mutation(tmp_path: Path) -> None:
     assert inventory_differences(before, after)
 
 
+def test_inventory_allows_sqlite_readonly_empty_sidecar_creation(tmp_path: Path) -> None:
+    fixture = tmp_path / "fixture.db"
+    fixture.write_bytes(b"main")
+    main = {
+        "path": str(fixture),
+        "exists": True,
+        "size": 4,
+        "mtime_ns": fixture.stat().st_mtime_ns,
+        "sha256": "main-sha",
+    }
+    before = {
+        "fixture": {
+            "main": main,
+            "wal": {"path": f"{fixture}-wal", "exists": False, "size": None, "mtime_ns": None, "sha256": None},
+            "shm": {"path": f"{fixture}-shm", "exists": False, "size": None, "mtime_ns": None, "sha256": None},
+        }
+    }
+    after = {
+        "fixture": {
+            "main": main,
+            "wal": {
+                "path": f"{fixture}-wal",
+                "exists": True,
+                "size": 0,
+                "mtime_ns": fixture.stat().st_mtime_ns + 1,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            },
+            "shm": {
+                "path": f"{fixture}-shm",
+                "exists": True,
+                "size": 32768,
+                "mtime_ns": fixture.stat().st_mtime_ns + 1,
+                "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+            },
+        }
+    }
+    assert inventory_differences(before, after) == []
+
+
+def test_inventory_rejects_nonempty_wal_sidecar_creation(tmp_path: Path) -> None:
+    fixture = tmp_path / "fixture.db"
+    fixture.write_bytes(b"main")
+    main = {
+        "path": str(fixture),
+        "exists": True,
+        "size": 4,
+        "mtime_ns": fixture.stat().st_mtime_ns,
+        "sha256": "main-sha",
+    }
+    before = {
+        "fixture": {
+            "main": main,
+            "wal": {"path": f"{fixture}-wal", "exists": False, "size": None, "mtime_ns": None, "sha256": None},
+            "shm": {"path": f"{fixture}-shm", "exists": False, "size": None, "mtime_ns": None, "sha256": None},
+        }
+    }
+    after = {
+        "fixture": {
+            "main": main,
+            "wal": {"path": f"{fixture}-wal", "exists": True, "size": 12, "mtime_ns": 1, "sha256": "wal-sha"},
+            "shm": {"path": f"{fixture}-shm", "exists": True, "size": 32768, "mtime_ns": 1, "sha256": "shm-sha"},
+        }
+    }
+    assert inventory_differences(before, after)
+
+
 def test_repository_connection_audit_has_no_unresolved_test_paths() -> None:
     findings = connection_audit(ROOT)
     assert findings

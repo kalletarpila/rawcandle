@@ -12,6 +12,8 @@ from rawcandle.fundamentals.snapshot.assembler import (
     CURRENT_PRICE_LABEL,
     REPORT_CONTRACT,
     _current_price_valuation,
+    _fingerprint,
+    _report_source_state,
     _resolve_ticker,
     SnapshotPaths,
     assemble_company_snapshot,
@@ -25,6 +27,7 @@ from rawcandle.fundamentals.snapshot.assembler import (
 )
 from rawcandle.fundamentals.snapshot.renderer import render_snapshot, verify_rendered_report
 from rawcandle.fundamentals.snapshot.writer import publish_report, report_filename
+from rawcandle.fundamentals.snapshot.v2_assembler import _report_source_state as _report_source_state_v2
 from rawcandle.fundamentals.relative_valuation.candidate_snapshot import (
     CANDIDATE_REPORT_CONTRACT as RELATIVE_VALUATION_REPORT_CONTRACT,
     CANDIDATE_SNAPSHOT_FINGERPRINT,
@@ -51,6 +54,54 @@ def _score(total: float) -> dict[str, object]:
             for name, maximum in points.items()
         },
     }
+
+
+def test_report_source_state_excludes_run_local_audit_fields() -> None:
+    first = {
+        "canonical_ttm": [10, "2026-09-12T00:00:00Z", "run-a"],
+        "score": [20, "2026-09-12T00:00:01Z", "run-a"],
+        "lifecycle": [30, "2026-09-12T00:00:02Z"],
+        "valuation": [40, "2026-09-12T00:00:03Z"],
+        "relative": ["snapshot-one", "2026-09-12", "source", "content", "result"],
+        "price": [50, "2026-09-12", 101],
+        "provider_identity": ["SANDISK CORP", "643888", "2026-08-18", "2026-09-12T00:00:04Z"],
+        "taxonomy": [2, 100, "taxonomy-source"],
+        "delta": ["fund-source", "fund-result", "life-source", "life-result", "val-source", "val-result", "economic", "physical", 1, 2],
+    }
+    second = deepcopy(first)
+    second["canonical_ttm"][1:] = ["2026-09-12T00:10:00Z", "run-b"]
+    second["score"][1:] = ["2026-09-12T00:10:01Z", "run-b"]
+    second["lifecycle"][1] = "2026-09-12T00:10:02Z"
+    second["valuation"][1] = "2026-09-12T00:10:03Z"
+    second["relative"][0] = "snapshot-two"
+    second["price"][2] = 202
+    second["provider_identity"][3] = "2026-09-12T00:10:04Z"
+    second["taxonomy"][1] = 200
+
+    assert _fingerprint(_report_source_state(first)) == _fingerprint(_report_source_state(second))
+    assert _fingerprint(first) != _fingerprint(second)
+
+
+def test_v2_report_source_state_excludes_run_local_audit_fields() -> None:
+    first = {
+        "score": [20, "2026-09-12T00:00:01Z", "run-a"],
+        "lifecycle": [30, "2026-09-12T00:00:02Z"],
+        "valuation": [40, "2026-09-12T00:00:03Z"],
+        "relative": ["snapshot-one", "2026-09-12", "source", "content", "result"],
+        "delta": ["fund-source", "fund-result", "life-source", "life-result", "val-source", "val-result", "economic", "physical", 1, 2],
+        "diagnostic": ["diag-source", "diag-result", "diag-physical", 3, 4],
+        "active_package": ["family", "package"],
+    }
+    second = deepcopy(first)
+    second["score"][1:] = ["2026-09-12T00:10:01Z", "run-b"]
+    second["lifecycle"][1] = "2026-09-12T00:10:02Z"
+    second["valuation"][1] = "2026-09-12T00:10:03Z"
+    second["relative"][0] = "snapshot-two"
+    second["delta"][8:] = [10, 20]
+    second["diagnostic"][3:] = [30, 40]
+
+    assert _fingerprint(_report_source_state_v2(first)) == _fingerprint(_report_source_state_v2(second))
+    assert _fingerprint(first) != _fingerprint(second)
 
 
 def _valuation(total: float, price: float) -> dict[str, object]:

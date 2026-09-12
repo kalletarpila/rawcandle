@@ -40,6 +40,26 @@ from rawcandle.fundamentals.valuation.persistence import ValuationRepository
 
 
 REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V1"
+REPORT_PRESENTATION_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V1_PRESENTATION_STABLE_SOURCE_STATE_V2"
+REPORT_PRESENTATION_SPEC = {
+    "version": REPORT_PRESENTATION_CONTRACT,
+    "stable_source_state": {
+        "canonical_ttm": "audit_only_not_rendered",
+        "score": "audit_only_not_rendered",
+        "lifecycle": "audit_only_not_rendered",
+        "valuation": "audit_only_not_rendered",
+        "relative": "snapshot_identity_suppressed",
+        "delta": "rendered_source_and_package_fingerprints",
+        "diagnostic": "rendered_source_result_physical_fingerprints",
+        "price": "audit_only_current_price_date_rendered_from_valuation_context",
+        "provider_identity": "audit_only_not_rendered",
+        "taxonomy": "audit_only_not_rendered",
+    },
+    "audit_source_state": "retained_outside_rendered_report_fingerprint",
+}
+REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
+    json.dumps(REPORT_PRESENTATION_SPEC, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+).hexdigest()
 CURRENT_PRICE_LABEL = "INDICATIVE_CURRENT_PRICE_VALUATION"
 PRICE_MAX_AGE_DAYS = 7
 FILING_PRICE_MAX_AGE_DAYS = 3
@@ -344,6 +364,21 @@ def _source_state(
             (ticker,),
         ),
     }
+
+
+def _report_source_state(source_state: Mapping[str, Any]) -> dict[str, Any]:
+    state: dict[str, Any] = {}
+    delta = list(source_state.get("delta") or [])
+    if delta:
+        state["delta"] = delta[:8]
+    diagnostic = list(source_state.get("diagnostic") or [])
+    if diagnostic:
+        state["diagnostic"] = diagnostic[:3]
+    relative = list(source_state.get("relative") or [])
+    if relative:
+        relative[0] = None
+        state["relative"] = relative
+    return state
 
 
 def read_source_state(paths: SnapshotPaths, ticker: str) -> dict[str, Any]:
@@ -886,7 +921,8 @@ def assemble_company_snapshot(
         classification = _classification(connections["market"], identity["ticker"])
         identity.update(classification)
         identity["taxonomy_memberships"] = _taxonomy_memberships(connections["taxonomy"], identity["ticker"])
-        source_state = _source_state(connections, identity["ticker"])
+        source_state_audit = _source_state(connections, identity["ticker"])
+        source_state = _report_source_state(source_state_audit)
 
         canonical_rows = _canonical_history(canonical, identity["company_id"], report_date)
         if not canonical_rows:
@@ -1025,8 +1061,12 @@ def assemble_company_snapshot(
                 "relative_position": RELATIVE_FINGERPRINT,
                 "diagnostic_flags": DIAGNOSTIC_FINGERPRINT,
             },
+            "report_presentation_contract": REPORT_PRESENTATION_CONTRACT,
+            "report_presentation_fingerprint": REPORT_PRESENTATION_FINGERPRINT,
             "source_state": source_state,
             "source_state_fingerprint": _fingerprint(source_state),
+            "source_state_audit": source_state_audit,
+            "source_state_audit_fingerprint": _fingerprint(source_state_audit),
         }
         snapshot["reconciliation"] = _reconcile(snapshot)
         failures = [row for row in snapshot["reconciliation"] if not row["ok"]]
@@ -1036,7 +1076,7 @@ def assemble_company_snapshot(
     if before_final_verify is not None:
         before_final_verify()
     final_state = read_source_state(paths, identity["ticker"])
-    assert_source_unchanged(source_state, final_state)
+    assert_source_unchanged(source_state_audit, final_state)
     return snapshot
 
 
@@ -1055,7 +1095,7 @@ def generate_company_snapshot(
     rendered = render_snapshot(snapshot)
     final_state = read_source_state(paths, snapshot["identity"]["ticker"])
     try:
-        assert_source_unchanged(snapshot["source_state"], final_state)
+        assert_source_unchanged(snapshot["source_state_audit"], final_state)
     except RuntimeError as exc:
         raise RuntimeError("SNAPSHOT_SOURCE_CHANGED_BEFORE_PUBLICATION") from exc
     published = publish_report(

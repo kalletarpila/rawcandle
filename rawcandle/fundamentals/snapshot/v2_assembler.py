@@ -51,6 +51,7 @@ REPORT_CONTRACT_SPEC = {
     "context": "CURRENT_PRICE_AND_ACTIVE_V2_PACKAGE_IDENTITY",
     "formatting": "COMPACT_MONEY_PERCENT_PP_MULTIPLE_AND_EXPLICIT_CURRENCY_NA",
     "internal_database_ids": "NOT_RENDERED",
+    "source_state_fingerprint_scope": "RENDERED_STABLE_SOURCE_FIELDS_ONLY",
 }
 REPORT_PRESENTATION_FINGERPRINT = hashlib.sha256(
     json.dumps(REPORT_CONTRACT_SPEC, sort_keys=True, separators=(",", ":")).encode("ascii")
@@ -488,6 +489,25 @@ def _source_state(
     return state
 
 
+def _report_source_state(source_state: Mapping[str, Any]) -> dict[str, Any]:
+    state: dict[str, Any] = {}
+    for key in ("candidate_package", "active_package"):
+        value = source_state.get(key)
+        if value:
+            state[key] = list(value)
+    delta = list(source_state.get("delta") or [])
+    if delta:
+        state["delta"] = delta[:8]
+    diagnostic = list(source_state.get("diagnostic") or [])
+    if diagnostic:
+        state["diagnostic"] = diagnostic[:3]
+    relative = list(source_state.get("relative") or [])
+    if relative:
+        relative[0] = None
+        state["relative"] = relative
+    return state
+
+
 def _assemble_company_snapshot_v2(
     paths: v1.SnapshotPaths,
     *,
@@ -567,10 +587,12 @@ def _assemble_company_snapshot_v2(
             active_diagnostic_contract = diagnostic_model_contract or diagnostic_flags_eight.MODEL_CONTRACT
             base["diagnostic_model_contract"] = dict(active_diagnostic_contract)
             base["diagnostic_flag_names"] = list(active_diagnostic_contract["flags"])
-        base["source_state"] = _source_state(
+        source_state_audit_v2 = _source_state(
             analysis, base["source_state"], model_map, package_fingerprint,
             candidate=is_explicit_candidate,
         )
+        base["source_state_audit_v2"] = source_state_audit_v2
+        base["source_state"] = _report_source_state(source_state_audit_v2)
         base["source_state_fingerprint"] = hashlib.sha256(json.dumps(base["source_state"], sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
         base["reconciliation"] = []
         for slot in base["history"]:
