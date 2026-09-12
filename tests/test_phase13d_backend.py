@@ -97,7 +97,7 @@ def test_ticker_preview_is_read_only_and_classifies_evidence(tmp_path: Path) -> 
 
 def test_ticker_apply_rebuilds_copy_dependencies_and_second_apply_no_changes(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
-    preview = build_ticker_preview(paths, "NEWC", now="2026-09-11T10:00:00Z")
+    preview = build_ticker_preview(paths, "NEWC", now="2026-09-12T10:00:00Z")
     preview_path = _write(tmp_path / "preview.json", preview)
 
     dry = apply_ticker_preview(
@@ -128,7 +128,7 @@ def test_ticker_apply_rebuilds_copy_dependencies_and_second_apply_no_changes(tmp
 
 def test_ticker_apply_failure_restores_all_copies(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
-    preview = build_ticker_preview(paths, "NEWC", now="2026-09-11T10:00:00Z")
+    preview = build_ticker_preview(paths, "NEWC", now="2026-09-12T10:00:00Z")
     preview_path = _write(tmp_path / "preview.json", preview)
 
     with pytest.raises(RuntimeError, match="PHASE13D_INJECTED_AFTER_IDENTITY"):

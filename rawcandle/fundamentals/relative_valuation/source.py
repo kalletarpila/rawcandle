@@ -72,6 +72,18 @@ def _bars(connection: sqlite3.Connection, ticker: str, as_of_date: str) -> tuple
     return tuple(valuation.PriceBar(str(row["pvm"]), row["open"], row["high"], row["low"], row["close"]) for row in rows)
 
 
+def _strip_upstream_snapshot_identity(row: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(row)
+    cleaned.pop("snapshot_id", None)
+    return cleaned
+
+
+def _strip_filing_valuation_run_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(row)
+    cleaned.pop("calculated_at_utc", None)
+    return cleaned
+
+
 def load_relative_valuation_source(
     paths: ReadOnlySourcePaths,
     *,
@@ -87,7 +99,7 @@ def load_relative_valuation_source(
     memberships, taxonomy_audit, taxonomy_fp, taxonomy_metadata = peer_source._taxonomy_source(paths.taxonomy_db, identity)
     with _readonly(paths.analysis_db) as analysis:
         assert_v2_active(analysis)
-        valuation_rows = [dict(row) for row in analysis.execute(
+        valuation_rows = [_strip_filing_valuation_run_metadata(dict(row)) for row in analysis.execute(
             "SELECT * FROM valuation_revised_result WHERE model_fingerprint=? AND history_mode='REVISED_HISTORY' "
             "AND (fundamental_available_date IS NULL OR fundamental_available_date<=?) "
             "ORDER BY company_id,fiscal_sequence,valuation_revised_result_id",
@@ -98,7 +110,7 @@ def load_relative_valuation_source(
             "JOIN relative_position_snapshot s USING(snapshot_id) WHERE a.model_fingerprint=?",
             (active_relative_position.MODEL_FINGERPRINT,),
         ).fetchone()
-        peer_rows = [] if active_peer is None else [dict(row) for row in analysis.execute(
+        peer_rows = [] if active_peer is None else [_strip_upstream_snapshot_identity(dict(row)) for row in analysis.execute(
             "SELECT * FROM relative_position_result WHERE snapshot_id=? AND measure='ABSOLUTE_VALUATION_SCORE' ORDER BY company_id,peer_scope,peer_group_id",
             (active_peer["snapshot_id"],),
         )]
