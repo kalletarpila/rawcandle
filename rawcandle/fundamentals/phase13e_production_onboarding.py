@@ -567,6 +567,7 @@ def run_phase13e(output: Path | None = None, *, apply: bool = False) -> dict[str
         second_before = production_inventory()
         second = _apply_sndk(output, applied_at_utc=applied_at, require_pre_refresh_mismatch=False)
         second_after = production_inventory()
+        second_compare = compare_production_inventory(second_before, second_after)
         second_no_change = {
             "provider_inserted_rows": second["stage"]["inserted_rows"],
             "canonical_outcome": second["canonical"].get("NEW_HISTORY", 0) == 0 and second["canonical"].get("REVISED_OVERLAP", 0) == 0,
@@ -576,6 +577,8 @@ def run_phase13e(output: Path | None = None, *, apply: bool = False) -> dict[str
             "relative_position_outcome": second["relative_position"]["apply"]["outcome"],
             "relative_valuation_second_apply": second["relative_valuation"]["first_apply"]["outcome"],
             "inventory_exact_no_change": second_before == second_after,
+            "inventory_normalized_no_change": second_compare["identical"],
+            "inventory_compare": second_compare,
         }
         postflight = production_inventory()
         compare = compare_production_inventory(before_apply, postflight)

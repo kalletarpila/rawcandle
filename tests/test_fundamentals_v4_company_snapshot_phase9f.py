@@ -162,7 +162,7 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "Currency: N/A (source currency not available in the validated contract)" in report
     assert "Datacenter" in report
     assert "Overall eligible universe" in report
-    assert "n=2198" in report
+    assert "n=2199" in report
     assert "Non-Operating Earnings Gap: TARKASTETTAVA EHDOKAS" in report
     assert (
         "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7" in report
