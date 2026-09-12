@@ -77,6 +77,14 @@ def test_api_key_loaded_from_env_and_sent_as_header() -> None:
     assert "secret-key" not in result.url
 
 
+def test_api_key_loaded_from_repo_env_when_no_explicit_env(monkeypatch) -> None:
+    opener = FakeOpener([FakeResponse(200, [{"ticker": "AAPL", "dimension": "ARQ"}])])
+    monkeypatch.setenv("SHARADAR_API_KEY", "repo-env-key")
+    result = SharadarClient(opener=opener).fundamentals(ticker="AAPL")
+    assert result.status == STATUS_SUCCESS
+    assert opener.requests[0].headers["X-api-key"] == "repo-env-key"
+
+
 def test_api_key_never_logged_or_returned_in_errors() -> None:
     opener = FakeOpener([URLError("secret-key unavailable")])
     client = SharadarClient(api_key="secret-key", opener=opener, max_retries=0)

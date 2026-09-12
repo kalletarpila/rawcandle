@@ -4,7 +4,6 @@ import csv
 import hashlib
 import io
 import json
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -13,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from urllib.request import Request, urlopen
 
+from rawcandle.config.env import get_env
 from rawcandle.fundamentals.providers.base import ProviderObservation
 
 
@@ -89,7 +89,7 @@ class SharadarResult:
 
 
 def resolve_api_key(api_key: str | None = None, env: Mapping[str, str] | None = None) -> str:
-    resolved = api_key or (env or os.environ).get(SHARADAR_API_KEY_ENV)
+    resolved = api_key or (env.get(SHARADAR_API_KEY_ENV) if env is not None else get_env(SHARADAR_API_KEY_ENV))
     if not resolved:
         raise RuntimeError('SHARADAR_API_KEY_NOT_CONFIGURED; set it with: export SHARADAR_API_KEY="YOUR_KEY_HERE"')
     return resolved
@@ -167,7 +167,7 @@ class SharadarClient:
         sleeper: Callable[[float], None] = time.sleep,
         env: Mapping[str, str] | None = None,
     ) -> None:
-        self._api_key = api_key if api_key is not None else (env or os.environ).get(SHARADAR_API_KEY_ENV)
+        self._api_key = api_key if api_key is not None else (env.get(SHARADAR_API_KEY_ENV) if env is not None else get_env(SHARADAR_API_KEY_ENV))
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
