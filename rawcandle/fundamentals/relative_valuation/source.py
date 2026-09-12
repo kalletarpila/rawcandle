@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
@@ -131,11 +131,13 @@ def load_relative_valuation_source(
         peers_by_company[int(row["company_id"])].append(row)
 
     inputs = []
+    classification_counts: Counter[str] = Counter()
     with _readonly(paths.market_db) as market:
         for company_id, anchor in sorted(latest_ttm.items()):
             source_security_id = int(anchor["security_id"]) if anchor.get("security_id") is not None else None
             _, security_id, ticker = peer_source.resolve_observation_security(identity, company_id, source_security_id)
-            classification = classifications.get(ticker or "", {})
+            classification = peer_source.resolve_classification(classifications, identity, company_id, security_id, ticker)
+            classification_counts[classification.status] += 1
             histories = history_by_company.get(company_id, [])
             filing = histories[-1] if histories else None
             available = str(anchor["ttm_source_available_date"])
@@ -158,8 +160,8 @@ def load_relative_valuation_source(
                 shares_outstanding=anchor.get("shares_outstanding"),
                 cash=anchor.get("cash"),
                 total_debt=anchor.get("total_debt"),
-                sector=classification.get("sector"),
-                industry=classification.get("industry"),
+                sector=classification.sector,
+                industry=classification.industry,
             )
             history = tuple(
                 HistoricalEndpoint(
@@ -182,8 +184,8 @@ def load_relative_valuation_source(
                     company_id=company_id,
                     security_id=security_id,
                     ticker=ticker,
-                    sector=classification.get("sector"),
-                    industry=classification.get("industry"),
+                    sector=classification.sector,
+                    industry=classification.industry,
                     ecosystem_memberships=memberships.get(company_id, ()),
                     endpoint_available_date=available,
                     current_fresh=0 <= age <= freshness_days,
@@ -214,6 +216,7 @@ def load_relative_valuation_source(
         ),
         "taxonomy": taxonomy_metadata,
         "taxonomy_audit_rows": len(taxonomy_audit),
+        "classification_resolution_counts": dict(sorted(classification_counts.items())),
     }
     return RelativeValuationSource(
         inputs=tuple(inputs),

@@ -56,6 +56,14 @@ class CurrentRelativeSource:
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ClassificationLookupResult:
+    status: str
+    sector: str | None
+    industry: str | None
+    market: str | None
+
+
 def _hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
@@ -80,10 +88,30 @@ def _validate_paths(paths: ReadOnlySourcePaths) -> None:
             raise FileNotFoundError(path)
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _market_from_security(security: Mapping[str, Any] | None) -> str | None:
+    if security is None:
+        return None
+    value = security.get("market") or security.get("exchange")
+    if value is None:
+        return "usa"
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return "usa"
+    if normalized in {"nasdaq", "nyse", "nysemkt", "amex", "arca", "otc", "otcqx", "otcqb"}:
+        return "usa"
+    return normalized
+
+
 def build_identity_index(canonical_db: Path) -> IdentityIndex:
     with _readonly(canonical_db) as conn:
+        security_columns = _table_columns(conn, "security")
+        market_expr = "market" if "market" in security_columns else "exchange AS market" if "exchange" in security_columns else "'usa' AS market"
         securities = [dict(row) for row in conn.execute(
-            "SELECT security_id,company_id,current_ticker,active FROM security ORDER BY security_id"
+            f"SELECT security_id,company_id,current_ticker,active,{market_expr} FROM security ORDER BY security_id"
         )]
         aliases = [dict(row) for row in conn.execute(
             "SELECT security_id,ticker FROM ticker_alias ORDER BY alias_id"
@@ -150,21 +178,51 @@ def resolve_taxonomy_ticker(
 
 def _classification_source(
     market_db: Path,
-) -> tuple[dict[str, dict[str, str | None]], str]:
+) -> tuple[dict[tuple[str, str], dict[str, str | None]], str]:
     with _readonly(market_db) as conn:
+        columns = _table_columns(conn, "ticker_meta")
+        market_expr = "market" if "market" in columns else "'usa' AS market"
         rows = [dict(row) for row in conn.execute(
-            "SELECT ticker,sector,industry FROM ticker_meta ORDER BY ticker"
+            f"SELECT ticker,{market_expr},sector,industry FROM ticker_meta ORDER BY ticker,market"
         )]
-    by_ticker: dict[str, dict[str, str | None]] = {}
+    by_ticker: dict[tuple[str, str], dict[str, str | None]] = {}
     for row in rows:
-        ticker = str(row["ticker"])
-        if ticker in by_ticker:
-            raise ValueError(f"DUPLICATE_TICKER_META:{ticker}")
-        by_ticker[ticker] = {
+        ticker = str(row["ticker"]).upper()
+        market = str(row["market"]).lower()
+        key = (ticker, market)
+        if key in by_ticker:
+            raise ValueError(f"DUPLICATE_TICKER_META:{ticker}:{market}")
+        by_ticker[key] = {
             "sector": normalize_classification(row.get("sector")),
             "industry": normalize_classification(row.get("industry")),
+            "market": market,
         }
     return by_ticker, _hash(rows)
+
+
+def resolve_classification(
+    classifications: Mapping[tuple[str, str], Mapping[str, str | None]],
+    index: IdentityIndex,
+    company_id: int,
+    security_id: int | None,
+    ticker: str | None,
+) -> ClassificationLookupResult:
+    if ticker is None:
+        return ClassificationLookupResult("CLASSIFICATION_IDENTITY_UNRESOLVED", None, None, None)
+    security = index.security_by_id.get(security_id) if security_id is not None else None
+    if security is None or int(security["company_id"]) != company_id:
+        return ClassificationLookupResult("CLASSIFICATION_SECURITY_UNRESOLVED", None, None, None)
+    market = _market_from_security(security)
+    if market is None:
+        return ClassificationLookupResult("CLASSIFICATION_MARKET_UNRESOLVED", None, None, None)
+    direct = classifications.get((ticker.upper(), market))
+    if direct is None:
+        same_ticker = [value for (candidate_ticker, _), value in classifications.items() if candidate_ticker == ticker.upper()]
+        status = "CLASSIFICATION_MARKET_MISMATCH" if same_ticker else "CLASSIFICATION_MISSING"
+        return ClassificationLookupResult(status, None, None, market)
+    if direct.get("sector") is None or direct.get("industry") is None:
+        return ClassificationLookupResult("CLASSIFICATION_INCOMPLETE", None, None, market)
+    return ClassificationLookupResult("CLASSIFICATION_READY", direct.get("sector"), direct.get("industry"), market)
 
 
 def _taxonomy_source(
@@ -318,6 +376,7 @@ def load_current_relative_source(
 
     observations: list[RelativeObservation] = []
     identity_counts: Counter[str] = Counter()
+    classification_counts: Counter[str] = Counter()
     for row in fundamental:
         company_id = int(row["company_id"])
         source_security_id = int(row["security_id"]) if row.get("security_id") is not None else None
@@ -325,7 +384,8 @@ def load_current_relative_source(
             identity, company_id, source_security_id
         )
         identity_counts[identity_status] += 1
-        classification = classifications.get(ticker or "", {})
+        classification = resolve_classification(classifications, identity, company_id, security_id, ticker)
+        classification_counts[classification.status] += 1
         age = _age_days(snapshot, row.get("source_availability_date"))
         fresh = age is not None and 0 <= age <= freshness_days
         source_status = str(row["readiness_status"])
@@ -355,8 +415,8 @@ def load_current_relative_source(
             source_model_version=FUNDAMENTAL_MODEL_VERSION,
             source_model_fingerprint=FUNDAMENTAL_MODEL_FINGERPRINT,
             source_result_fingerprint=_hash(source_payload),
-            sector=classification.get("sector"),
-            industry=classification.get("industry"),
+            sector=classification.sector,
+            industry=classification.industry,
             ecosystem_memberships=memberships.get(company_id, ()),
         ))
 
@@ -367,7 +427,8 @@ def load_current_relative_source(
             identity, company_id, source_security_id
         )
         identity_counts[identity_status] += 1
-        classification = classifications.get(ticker or "", {})
+        classification = resolve_classification(classifications, identity, company_id, security_id, ticker)
+        classification_counts[classification.status] += 1
         age = _age_days(snapshot, row.get("fundamental_available_date"))
         fresh = age is not None and 0 <= age <= freshness_days
         source_status = str(row["valuation_status"])
@@ -390,8 +451,8 @@ def load_current_relative_source(
             source_model_version=VALUATION_MODEL_VERSION,
             source_model_fingerprint=VALUATION_MODEL_FINGERPRINT,
             source_result_fingerprint=str(row["result_fingerprint"]),
-            sector=classification.get("sector"),
-            industry=classification.get("industry"),
+            sector=classification.sector,
+            industry=classification.industry,
             ecosystem_memberships=memberships.get(company_id, ()),
         ))
 
@@ -428,6 +489,7 @@ def load_current_relative_source(
         ).items())),
         "identity_resolution_counts": dict(sorted(identity_counts.items())),
         "classification_rows": len(classifications),
+        "classification_resolution_counts": dict(sorted(classification_counts.items())),
         "taxonomy": taxonomy_metadata,
     }
     return CurrentRelativeSource(

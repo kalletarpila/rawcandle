@@ -135,18 +135,41 @@ def _readonly(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _attached_table_columns(conn: sqlite3.Connection, schema: str, table: str) -> set[str]:
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA {schema}.table_info({table})")}
+
+
+def _market_identity_sql(expr: str) -> str:
+    return (
+        f"CASE LOWER(COALESCE({expr},'usa')) "
+        "WHEN 'nasdaq' THEN 'usa' WHEN 'nyse' THEN 'usa' WHEN 'nysemkt' THEN 'usa' "
+        "WHEN 'amex' THEN 'usa' WHEN 'arca' THEN 'usa' WHEN 'otc' THEN 'usa' "
+        "WHEN 'otcqx' THEN 'usa' WHEN 'otcqb' THEN 'usa' ELSE LOWER(COALESCE("
+        f"{expr},'usa')) END"
+    )
+
+
 def load_canonical_source(canonical_db: Path, market_db: Path) -> ValuationSource:
     with _readonly(canonical_db) as conn:
         conn.execute(f"ATTACH DATABASE 'file:{market_db}?mode=ro' AS market")
+        security_columns = _table_columns(conn, "security")
+        market_columns = _attached_table_columns(conn, "market", "ticker_meta")
+        security_market = "s.market" if "market" in security_columns else "s.exchange" if "exchange" in security_columns else "'usa'"
+        ticker_meta_market = "tm.market" if "market" in market_columns else "'usa'"
         rows = conn.execute(
-            """
+            f"""
             SELECT t.*, s.current_ticker AS ticker, s.active AS security_active,
                    tm.sector, tm.industry,
                    px.pvm AS price_date, px.open AS price_open, px.high AS price_high,
                    px.low AS price_low, px.close AS price_close
             FROM v4_ttm_values t
             LEFT JOIN security s ON s.security_id=t.security_id AND s.company_id=t.company_id
-            LEFT JOIN market.ticker_meta tm ON tm.ticker=s.current_ticker
+            LEFT JOIN market.ticker_meta tm ON UPPER(tm.ticker)=UPPER(s.current_ticker)
+                 AND {_market_identity_sql(ticker_meta_market)}={_market_identity_sql(security_market)}
             LEFT JOIN market.osakedata px ON px.id=(
                 SELECT p.id FROM market.osakedata p
                 WHERE p.osake=s.current_ticker AND p.pvm<=t.ttm_source_available_date

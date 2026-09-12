@@ -11,7 +11,10 @@ from rawcandle.fundamentals.relative_position.engine import RelativeMeasure
 from rawcandle.fundamentals.relative_position.source import (
     IdentityIndex,
     ReadOnlySourcePaths,
+    _classification_source,
+    build_identity_index,
     load_current_relative_source,
+    resolve_classification,
     resolve_observation_security,
     resolve_taxonomy_ticker,
 )
@@ -90,11 +93,11 @@ def create_sources(root: Path) -> ReadOnlySourcePaths:
             (2, 2, 2, "TWO", 8105, 4, stale, None, "VALUATION_NOT_APPLICABLE", "UNSUPPORTED_REIT_MODEL", "Old", "Old", "ABSOLUTE_VALUATION_SCORE_V1", VAL_MODEL, "s", "e", "v2", "REVISED_HISTORY"),
         ])
     with sqlite3.connect(market) as conn:
-        conn.execute("CREATE TABLE ticker_meta(ticker TEXT,sector TEXT,industry TEXT)")
-        conn.executemany("INSERT INTO ticker_meta VALUES (?,?,?)", [
-            ("ONE", "Technology", "Software - Application"),
-            ("TWO", "Real Estate", "REIT - Retail"),
-            ("THREE", "Healthcare", "Biotechnology"),
+        conn.execute("CREATE TABLE ticker_meta(ticker TEXT,market TEXT,sector TEXT,industry TEXT)")
+        conn.executemany("INSERT INTO ticker_meta VALUES (?,?,?,?)", [
+            ("ONE", "usa", "Technology", "Software - Application"),
+            ("TWO", "usa", "Real Estate", "REIT - Retail"),
+            ("THREE", "usa", "Healthcare", "Biotechnology"),
         ])
     with sqlite3.connect(taxonomy) as conn:
         conn.executescript("""
@@ -129,7 +132,36 @@ def test_adapter_selects_latest_asof_applies_freshness_and_current_classificatio
     assert valuation[0].sector == "Technology"
     assert valuation[0].source_eligible is True
     assert valuation[1].source_eligible is False
+    assert source.metadata["classification_resolution_counts"] == {"CLASSIFICATION_READY": 5}
     assert source.metadata["taxonomy"]["unique_ticker_mapping_counts"] == {"ALIAS_ONLY": 1}
+
+
+def test_ticker_meta_is_authoritative_and_datacenter_taxonomy_does_not_override_sector(tmp_path: Path) -> None:
+    paths = create_sources(tmp_path)
+    source = load_current_relative_source(paths, as_of_date="2026-09-01", freshness_days=180)
+    company1 = next(
+        row for row in source.observations
+        if row.company_id == 1 and row.measure == RelativeMeasure.FUNDAMENTAL_SCORE
+    )
+
+    assert company1.sector == "Technology"
+    assert company1.industry == "Software - Application"
+    assert company1.ecosystem_memberships[0].ecosystem_id == "DATACENTER"
+
+
+def test_classification_lookup_requires_market_identity_and_does_not_cross_reuse_boundary(tmp_path: Path) -> None:
+    paths = create_sources(tmp_path)
+    with sqlite3.connect(paths.market_db) as conn:
+        conn.execute("DELETE FROM ticker_meta WHERE ticker='ONE'")
+        conn.execute("INSERT INTO ticker_meta VALUES ('ONE','hel','Industrials','Commercial Services')")
+
+    identity = build_identity_index(paths.canonical_db)
+    classifications, _ = _classification_source(paths.market_db)
+    status = resolve_classification(classifications, identity, 1, 1, "ONE")
+
+    assert status.status == "CLASSIFICATION_MARKET_MISMATCH"
+    assert status.sector is None
+    assert status.industry is None
 
 
 def test_adapter_rejects_duplicate_fundamental_source_result(tmp_path: Path) -> None:

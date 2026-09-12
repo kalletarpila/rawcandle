@@ -24,6 +24,10 @@ def _connect_readonly(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _attached_columns(conn: sqlite3.Connection, schema: str, table: str) -> set[str]:
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA {schema}.table_info({table})")}
+
+
 def load_production_source_inputs(
     canonical_db: Path,
     provider_db: Path,
@@ -34,8 +38,9 @@ def load_production_source_inputs(
     try:
         conn.execute(f"ATTACH DATABASE 'file:{provider_db}?mode=ro' AS provider")
         conn.execute(f"ATTACH DATABASE 'file:{market_db}?mode=ro' AS market")
+        ticker_meta_market = "tm.market" if "market" in _attached_columns(conn, "market", "ticker_meta") else "'usa'"
         rows = conn.execute(
-            """
+            f"""
             WITH common_income AS (
                 SELECT iq.ttm_id,
                        COUNT(*) AS input_count,
@@ -63,7 +68,8 @@ def load_production_source_inputs(
             FROM v4_ttm_values t
             LEFT JOIN endpoint_ticker et ON et.ttm_id=t.ttm_id
             LEFT JOIN common_income ci ON ci.ttm_id=t.ttm_id
-            LEFT JOIN market.ticker_meta tm ON tm.ticker=et.ticker
+            LEFT JOIN market.ticker_meta tm ON UPPER(tm.ticker)=UPPER(et.ticker)
+                 AND LOWER(COALESCE({ticker_meta_market},'usa'))='usa'
             LEFT JOIN market.osakedata px ON px.id=(
                 SELECT p2.id FROM market.osakedata p2
                 WHERE p2.osake=et.ticker AND p2.pvm<=t.ttm_source_available_date
