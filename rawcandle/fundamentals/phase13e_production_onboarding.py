@@ -261,13 +261,41 @@ def _restore_backups(backup_manifest: Mapping[str, Mapping[str, Any]]) -> dict[s
 
 def _diagnostic_endpoint_gate() -> dict[str, Any]:
     with _readonly(PRODUCTION["analysis"]) as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM ("
-            "SELECT package_id,company_id,fiscal_sequence,COUNT(*) n "
-            "FROM diagnostic_flag_endpoint GROUP BY package_id,company_id,fiscal_sequence HAVING n<>8)"
+        package = conn.execute(
+            "SELECT package_id,model_fingerprint,evaluation_count FROM diagnostic_flag_package "
+            "WHERE model_fingerprint='0ac66c6749afc889cf553c47436757a54f644b6a81febd161cf947885e444904' "
+            "ORDER BY applied_at_utc DESC LIMIT 1"
         ).fetchone()
-        endpoint_rows = conn.execute("SELECT COUNT(*) FROM diagnostic_flag_endpoint").fetchone()[0]
-    return {"non_eight_endpoint_groups": int(row[0]), "diagnostic_endpoint_rows": int(endpoint_rows), "ok": int(row[0]) == 0}
+        if package is None:
+            return {"active_diagnostic_package_id": None, "ok": False, "reason": "ACTIVE_DIAGNOSTIC_PACKAGE_NOT_FOUND"}
+        row = conn.execute(
+            "SELECT COUNT(*) AS endpoints,COALESCE(SUM(eval_count),0) AS evaluations,"
+            "MIN(eval_count) AS min_eval,MAX(eval_count) AS max_eval,"
+            "SUM(CASE WHEN eval_count=8 THEN 1 ELSE 0 END) AS eight_endpoints,"
+            "SUM(CASE WHEN eval_count<>8 THEN 1 ELSE 0 END) AS non_eight_endpoints "
+            "FROM ("
+            "  SELECT e.endpoint_id,COUNT(v.flag_id) AS eval_count "
+            "  FROM diagnostic_flag_endpoint e "
+            "  LEFT JOIN diagnostic_flag_evaluation v USING(endpoint_id) "
+            "  WHERE e.package_id=? "
+            "  GROUP BY e.endpoint_id"
+            ")",
+            (package["package_id"],),
+        ).fetchone()
+    endpoints = int(row["endpoints"])
+    evaluations = int(row["evaluations"])
+    return {
+        "active_diagnostic_package_id": int(package["package_id"]),
+        "model_fingerprint": str(package["model_fingerprint"]),
+        "endpoint_rows": endpoints,
+        "evaluation_rows": evaluations,
+        "package_evaluation_count": int(package["evaluation_count"]),
+        "min_evaluations_per_endpoint": int(row["min_eval"] or 0),
+        "max_evaluations_per_endpoint": int(row["max_eval"] or 0),
+        "eight_evaluation_endpoints": int(row["eight_endpoints"] or 0),
+        "non_eight_evaluation_endpoints": int(row["non_eight_endpoints"] or 0),
+        "ok": endpoints > 0 and evaluations == int(package["evaluation_count"]) and int(row["non_eight_endpoints"] or 0) == 0,
+    }
 
 
 def _counts_for_sndk() -> dict[str, Any]:
