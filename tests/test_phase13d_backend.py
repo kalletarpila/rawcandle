@@ -26,12 +26,13 @@ def _provider(path: Path) -> None:
             """
             CREATE TABLE sharadar_ticker_metadata(
                 ticker TEXT, permaticker TEXT, cik TEXT, name TEXT,
-                category TEXT, sector TEXT, industry TEXT
+                exchange TEXT, isdelisted TEXT, category TEXT, sector TEXT, industry TEXT
             );
             INSERT INTO sharadar_ticker_metadata VALUES
-                ('NEWC','1001','101','New Co','Domestic Common Stock','Technology','Software'),
-                ('BADF','1002','102','Bad Fund','ETF','Financials','Fund'),
-                ('LIMIT','1003','103','Limited Taxonomy','Domestic Common Stock','Industrials','Tools');
+                ('NEWC','1001','101','New Co','NASDAQ','N','Domestic Common Stock','Technology','Software'),
+                ('BADF','1002','102','Bad Fund','NYSE','N','ETF','Financials','Fund'),
+                ('LIMIT','1003','103','Limited Taxonomy','NASDAQ','N','Domestic Common Stock','Industrials','Tools'),
+                ('DLST','1004','104','Delisted Co','NASDAQ','Y','Domestic Common Stock','Industrials','Tools');
             """
         )
 
@@ -45,6 +46,7 @@ def _market(path: Path) -> None:
                 ('NEWC','usa','2026-09-10',10.0),
                 ('LIMIT','usa','2026-09-10',11.0),
                 ('BADF','usa','2026-09-10',12.0),
+                ('DLST','usa','2026-09-10',9.0),
                 ('AMBIG','usa','2026-09-10',13.0),
                 ('AMBIG','omxh','2026-09-10',14.0);
             """
@@ -80,8 +82,9 @@ def test_ticker_preview_is_read_only_and_classifies_evidence(tmp_path: Path) -> 
     paths = _paths(tmp_path)
     before = paths.canonical_db.stat().st_mtime_ns
 
-    preview = build_ticker_preview(paths, "AAA NEWC LIMIT MISS AMBIG BADF", now="2026-09-11T10:00:00Z")
+    preview = build_ticker_preview(paths, "AAA NEWC LIMIT MISS AMBIG BADF DLST", now="2026-09-11T10:00:00Z")
     statuses = {row["ticker"]: row["status"] for row in preview["ticker_results"]}
+    eligibility = {row["ticker"]: row["eligibility"] for row in preview["ticker_results"]}
 
     assert statuses == {
         "AAA": "ALREADY_PRESENT",
@@ -90,7 +93,10 @@ def test_ticker_preview_is_read_only_and_classifies_evidence(tmp_path: Path) -> 
         "MISS": "MARKET_DATA_NOT_FOUND",
         "AMBIG": "MARKET_AMBIGUOUS",
         "BADF": "UNSUPPORTED_SECURITY_TYPE",
+        "DLST": "NOT_ELIGIBLE",
     }
+    assert eligibility["DLST"]["primary_rejection_reason"] == "DELISTED_SECURITY"
+    assert "DELISTED_SECURITY" in eligibility["DLST"]["rejection_reasons"]
     assert preview["accepted_tickers"] == ["NEWC", "LIMIT"]
     assert paths.canonical_db.stat().st_mtime_ns == before
 

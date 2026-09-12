@@ -41,6 +41,12 @@ LOCAL_PHASE13A_CANDIDATES = (
     "ALUR", "AREB", "AVB", "BSLK", "CERO", "LBRDA", "LEG", "LYRA",
     "MAPS", "MSPR", "NOTE", "PTIX", "RMAX", "SSKN", "TALK", "VSTD",
 )
+SUPPORTED_ONBOARDING_CATEGORIES = {
+    "Domestic Common Stock",
+    "Domestic Common Stock Primary Class",
+}
+SUPPORTED_ONBOARDING_EXCHANGES = {"NASDAQ", "NYSE", "NYSEMKT"}
+MIN_CURRENT_MARKET_DATE = "2026-08-01"
 
 
 @dataclass(frozen=True)
@@ -139,6 +145,14 @@ def select_local_provider_candidate(
                 LOCAL_PHASE13A_CANDIDATES,
             )
         }
+        metadata_rows = {
+            row["ticker"]: dict(row)
+            for row in provider.execute(
+                f"SELECT ticker,permaticker,name,exchange,isdelisted,category,secfilings,firstpricedate,lastpricedate,lastupdated "
+                f"FROM sharadar_ticker_metadata WHERE ticker IN ({placeholders}) ORDER BY ticker,table_name",
+                LOCAL_PHASE13A_CANDIDATES,
+            )
+        }
         market_counts = {
             row["ticker"]: dict(row)
             for row in market.execute(
@@ -151,7 +165,7 @@ def select_local_provider_candidate(
         canonical_rows = {
             row["ticker"]: dict(row)
             for row in canonical.execute(
-                f"SELECT UPPER(s.current_ticker) AS ticker,c.company_id,s.security_id,s.active "
+                f"SELECT UPPER(s.current_ticker) AS ticker,c.company_id,s.security_id,s.active,COUNT(*) OVER (PARTITION BY UPPER(s.current_ticker)) AS identity_rows "
                 f"FROM security s JOIN company c USING(company_id) WHERE UPPER(s.current_ticker) IN ({placeholders})",
                 LOCAL_PHASE13A_CANDIDATES,
             )
@@ -167,10 +181,43 @@ def select_local_provider_candidate(
     rows = []
     for ticker in LOCAL_PHASE13A_CANDIDATES:
         provider = provider_counts.get(ticker, {})
+        metadata = metadata_rows.get(ticker, {})
         market = market_counts.get(ticker, {})
         canonical = canonical_rows.get(ticker, {})
+        reasons: list[str] = []
+        if not metadata:
+            reasons.append("PROVIDER_IDENTITY_MISSING")
+        elif metadata.get("isdelisted") == "Y":
+            reasons.append("DELISTED_SECURITY")
+        elif metadata.get("category") not in SUPPORTED_ONBOARDING_CATEGORIES:
+            reasons.append("UNSUPPORTED_SECURITY_TYPE")
+        if metadata and str(metadata.get("exchange") or "").upper() not in SUPPORTED_ONBOARDING_EXCHANGES:
+            reasons.append("INCOMPATIBLE_EXCHANGE")
+        if not canonical:
+            reasons.append("IDENTITY_NOT_RESOLVED")
+        elif int(canonical.get("identity_rows") or 0) > 1:
+            reasons.append("TICKER_REUSE_COLLISION")
+        elif int(canonical.get("active") or 0) != 1:
+            reasons.append("SECURITY_INACTIVE")
+        if not market:
+            reasons.append("MARKET_DATA_NOT_FOUND")
+        elif int(market.get("market_count") or 0) != 1:
+            reasons.append("MARKET_AMBIGUOUS")
+        elif str(market.get("markets") or "").lower() != "usa":
+            reasons.append("MARKET_INCOMPATIBLE")
+        elif str(market.get("last_price_date") or "") < MIN_CURRENT_MARKET_DATE:
+            reasons.append("MARKET_OHLC_STALE")
+        if int(provider.get("provider_rows") or 0) <= 0:
+            reasons.append("FUNDAMENTALS_NOT_AVAILABLE")
         rows.append({
             "ticker": ticker,
+            "permaticker": metadata.get("permaticker"),
+            "company_name": metadata.get("name"),
+            "provider_exchange": metadata.get("exchange"),
+            "provider_isdelisted": metadata.get("isdelisted"),
+            "provider_category": metadata.get("category"),
+            "provider_first_price_date": metadata.get("firstpricedate"),
+            "provider_last_price_date": metadata.get("lastpricedate"),
             "provider_rows": int(provider.get("provider_rows") or 0),
             "first_period": provider.get("first_period"),
             "last_period": provider.get("last_period"),
@@ -182,16 +229,20 @@ def select_local_provider_candidate(
             "canonical_security_id": canonical.get("security_id"),
             "canonical_active_security": canonical.get("active"),
             "taxonomy_present": ticker in taxonomy_tickers,
-            "eligible": bool(provider and market and canonical),
+            "eligibility_status": "ELIGIBLE" if not reasons else "NOT_ELIGIBLE",
+            "rejection_reasons": reasons,
+            "primary_rejection_reason": reasons[0] if reasons else None,
+            "eligible": not reasons,
         })
     eligible = [row for row in rows if row["eligible"]]
     selected = max(eligible, key=lambda row: (row["provider_rows"], row["market_rows"], row["ticker"])) if eligible else None
     return {
         "source": "Phase 13A candidates absent from active operational universe",
-        "selection_rule": "max provider_rows, then market_rows, then ticker",
+        "selection_rule": "filter active onboarding eligibility first; then max provider_rows, then market_rows, then ticker",
         "selected_ticker": selected["ticker"] if selected else None,
         "selected": selected,
         "candidates": rows,
+        "eligible_replacement_exists": bool(selected),
         "taxonomy_ready_candidates": [row["ticker"] for row in rows if row["taxonomy_present"]],
     }
 

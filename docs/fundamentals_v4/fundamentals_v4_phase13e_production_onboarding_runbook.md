@@ -1,6 +1,6 @@
 # Fundamentals V4 Phase 13E Production Onboarding Runbook
 
-Phase 13E must not activate production onboarding until the Phase 13D.2 and Phase 13D.3 blockers are closed on copies.
+Phase 13E must not activate production onboarding until the Phase 13D.2, Phase 13D.3 and Phase 13D.3.1 blockers are closed on copies.
 
 ## Required Preconditions
 
@@ -25,11 +25,11 @@ For a ticker such as SNDK:
 
 For SNDK specifically, permaticker `643888` and CIK `0002023554` must remain distinct from predecessor `SNDK1` / permaticker `197210`.
 
-For AREB specifically, production activation is blocked until local classification is reconciled with authoritative evidence. Phase 13D.3 confirmed the company identity but found local `ticker_meta` still classifies AREB as `Consumer Cyclical / Footwear & Accessories`, not the corrected expected `Industrials / Commercial Services & Supplies`. Do not create an AREB taxonomy membership solely to make onboarding succeed.
+For AREB specifically, production activation is blocked because AREB is delisted and therefore not operational-universe eligible. Phase 13D.3.1 corrected the earlier interpretation: the local classification mismatch remains secondary evidence, and AREB's lack of Datacenter taxonomy membership is `NOT_MEMBER_BY_DESIGN`. Do not include AREB in the Phase 13E batch and do not create an AREB taxonomy membership solely to make onboarding succeed.
 
 ## Apply Order
 
-Production activation must use one confirmed, lock-protected operation:
+The authorized Phase 13E production batch is SNDK only. Production activation must use one confirmed, lock-protected operation:
 
 1. Create online backups for every database that may change.
 2. Stage provider observations.
@@ -80,9 +80,9 @@ Activation-only rollback is not sufficient. Phase 13D.2 did not prove the full f
 
 ## Phase 13D.2 Carry-Forward Blockers
 
-Phase 13D.2 completed the economic copy-only rebuild and manual Relative Valuation refresh. Phase 13D.3 narrowed some blockers, but production remains blocked by:
+Phase 13D.2 completed the economic copy-only rebuild and manual Relative Valuation refresh. Phase 13D.3 narrowed some blockers. Phase 13D.3.1 corrected AREB's decision and allowed SNDK-only production planning:
 
-- AREB classification/taxonomy ambiguity: local classification mismatch must be resolved before batch AREB+SNDK production onboarding.
+- AREB is delisted and must be excluded from active onboarding; no AREB+SNDK batch is authorized.
 - Pre-refresh Snapshot/UI rendering still produced reports with Relative Valuation content although the dependency state was `OPERATIONAL_UNIVERSE_MISMATCH`.
 - Full multi-database failure injection and exact restoration remain unproven.
 - Full onboarding second-apply `NO_CHANGE` remains unproven.
@@ -93,7 +93,7 @@ Snapshot correction established by Phase 13D.3 must remain in place: full `sourc
 
 ## SNDK-Only Readiness
 
-A narrower SNDK-only protected production proposal may be reviewed separately from AREB only if it excludes AREB from the production batch, preserves SNDK/SNDK1 separation, proves deterministic Snapshot output, proves full rollback/restore for every modified database, and reruns the explicit manual full-universe Relative Valuation refresh with a second `NO_CHANGE` pass.
+SNDK-only protected production onboarding may proceed to owner review if it excludes AREB from the production batch, preserves SNDK/SNDK1 separation, proves deterministic Snapshot output, proves full rollback/restore for every modified database at execution time, and reruns the explicit manual full-universe Relative Valuation refresh with a second `NO_CHANGE` pass.
 
 ## Required Final Evidence
 

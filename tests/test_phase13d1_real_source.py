@@ -25,6 +25,8 @@ def _provider(path: Path) -> None:
               firstquarter TEXT,lastquarter TEXT,lastupdated TEXT
             );
             INSERT INTO sharadar_ticker_metadata VALUES
+              ('fundamentals','AREB','637535','AMERICAN REBEL HOLDINGS INC','NASDAQ','Y','Domestic Common Stock Primary Class',NULL,'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001648087','2022-02-07','2026-05-12','2022-03-31','2026-03-31','2026-05-13'),
+              ('fundamentals','AVB','197515','AVALONBAY COMMUNITIES INC','NYSE','N','Domestic Common Stock',NULL,'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000915912','1994-03-11','2026-09-11','1994-03-31','2026-06-30','2026-09-11'),
               ('fundamentals','SNDK','643888','SANDISK CORP','NASDAQ','N','Domestic Common Stock','SNDKV','https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0002023554','2025-02-24','2026-08-28','2023-06-30','2026-06-30','2026-08-18'),
               ('fundamentals','SNDK1','197210','SANDISK CORP','NASDAQ','Y','Domestic Common Stock','SNDK','https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000315213','1995-11-08','2016-05-11','1995-12-31','2016-03-31','2025-02-03');
             """
@@ -37,7 +39,7 @@ def _market(path: Path) -> None:
             """
             CREATE TABLE osakedata(osake TEXT, market TEXT, pvm TEXT);
             INSERT INTO osakedata VALUES
-              ('AREB','usa','2026-09-11'),('AREB','usa','2026-09-10'),
+              ('AREB','usa','2026-05-12'),('AREB','usa','2026-05-11'),
               ('AVB','usa','2026-09-11'),('SNDK','usa','2026-09-11');
             """
         )
@@ -52,7 +54,7 @@ def _canonical(path: Path) -> None:
             CREATE TABLE ticker_alias(alias_id INTEGER PRIMARY KEY,security_id INTEGER,ticker TEXT,provider TEXT,valid_from TEXT,valid_to TEXT,source TEXT);
             CREATE TABLE provider_company_identity(provider TEXT,provider_identifier_type TEXT,provider_identifier_value TEXT,company_id INTEGER,provider_ticker TEXT,source TEXT,source_type TEXT,source_value TEXT,created_at_utc TEXT);
             INSERT INTO company VALUES (1,'T:AREB','AREB','ACTIVE','n','n'),(2,'T:AVB','AVB','ACTIVE','n','n');
-            INSERT INTO security VALUES (1,1,'AREB','NASDAQ',0,NULL,NULL,'n','n'),(2,2,'AVB','NYSE',0,NULL,NULL,'n','n');
+            INSERT INTO security VALUES (1,1,'AREB','NASDAQ',0,NULL,NULL,'n','n'),(2,2,'AVB','NYSE',1,NULL,NULL,'n','n');
             """
         )
 
@@ -76,7 +78,7 @@ def _taxonomy(path: Path) -> None:
         )
 
 
-def test_local_provider_selection_is_evidence_based(tmp_path: Path) -> None:
+def test_local_provider_selection_rejects_delisted_before_ranking(tmp_path: Path) -> None:
     provider = tmp_path / "provider.db"
     market = tmp_path / "market.db"
     canonical = tmp_path / "canonical.db"
@@ -92,11 +94,16 @@ def test_local_provider_selection_is_evidence_based(tmp_path: Path) -> None:
         canonical_db=canonical,
         taxonomy_db=taxonomy,
     )
-    assert selection["selected_ticker"] == "AREB"
+    assert selection["selected_ticker"] == "AVB"
+    assert selection["eligible_replacement_exists"] is True
+    areb = next(row for row in selection["candidates"] if row["ticker"] == "AREB")
+    assert areb["eligibility_status"] == "NOT_ELIGIBLE"
+    assert areb["primary_rejection_reason"] == "DELISTED_SECURITY"
+    assert "DELISTED_SECURITY" in areb["rejection_reasons"]
     selected = selection["selected"]
     assert selected["provider_rows"] > 0
     assert selected["market_rows"] > 0
-    assert selected["canonical_active_security"] == 0
+    assert selected["canonical_active_security"] == 1
     assert selected["taxonomy_present"] is False
 
 

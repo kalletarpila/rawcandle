@@ -55,6 +55,7 @@ Focused tests cover:
 - strictly read-only ticker preview;
 - market ambiguity and unsupported security category classification;
 - limited curated taxonomy absence not blocking eligible local-provider onboarding;
+- delisted and inactive securities rejected before candidate ranking while remaining visible in deterministic audit output;
 - dry-run apply behavior;
 - confirmed ticker apply with operational-universe dependency rebuild on copies;
 - second apply returning `NO_CHANGE` without physical inventory drift;

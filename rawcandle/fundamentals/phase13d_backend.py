@@ -38,6 +38,12 @@ ARTIFACT_ROOT = ROOT / "temp/fundamentals_v4_phase13d_backend"
 LOCK_PATH = ROOT / "temp/.fundamentals_phase9e.lock"
 PROTECTED_PATHS = {path.resolve() for path in PRODUCTION.values()}
 TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,15}$")
+SUPPORTED_ONBOARDING_CATEGORIES = {
+    "Domestic Common Stock",
+    "Domestic Common Stock Primary Class",
+}
+SUPPORTED_ONBOARDING_EXCHANGES = {"NASDAQ", "NYSE", "NYSEMKT"}
+MIN_CURRENT_MARKET_DATE = "2026-08-01"
 
 
 @dataclass(frozen=True)
@@ -209,7 +215,19 @@ def _provider_lookup(paths: Phase13DPaths, ticker: str) -> dict[str, Any]:
                 ).fetchall()
                 if len(row) == 1:
                     data = dict(row[0])
-                    return {"status": "FOUND", "source": "sharadar_ticker_metadata", "identity": {key: data.get(key) for key in ("ticker", "permaticker", "cik", "name", "category", "sector", "industry") if key in data}}
+                    return {
+                        "status": "FOUND",
+                        "source": "sharadar_ticker_metadata",
+                        "identity": {
+                            key: data.get(key)
+                            for key in (
+                                "ticker", "permaticker", "cik", "name", "exchange",
+                                "isdelisted", "category", "sector", "industry",
+                                "firstpricedate", "lastpricedate",
+                            )
+                            if key in data
+                        },
+                    }
                 if len(row) > 1:
                     return {"status": "IDENTITY_AMBIGUOUS", "source": "sharadar_ticker_metadata", "identity": {}}
         if _table_exists(conn, "provider_company_identity"):
@@ -222,6 +240,43 @@ def _provider_lookup(paths: Phase13DPaths, ticker: str) -> dict[str, Any]:
             if len(rows) > 1:
                 return {"status": "IDENTITY_AMBIGUOUS", "source": "provider_company_identity", "identity": {}}
     return {"status": "API_FETCH_REQUIRED", "source": None, "identity": {}}
+
+
+def _preview_eligibility_reasons(
+    *,
+    canonical: Mapping[str, Any],
+    market: Mapping[str, Any],
+    provider: Mapping[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+    identity = provider.get("identity") if isinstance(provider.get("identity"), Mapping) else {}
+    if provider.get("status") == "IDENTITY_AMBIGUOUS" or canonical.get("ambiguous"):
+        reasons.append("IDENTITY_AMBIGUOUS")
+    elif provider.get("status") == "API_FETCH_REQUIRED":
+        reasons.append("PROVIDER_IDENTITY_MISSING")
+    if str(identity.get("isdelisted") or "").upper() == "Y":
+        reasons.append("DELISTED_SECURITY")
+    category = identity.get("category")
+    if category in {"ETF", "FUND", "ADR_UNSUPPORTED"} or (
+        category is not None and category not in SUPPORTED_ONBOARDING_CATEGORIES
+    ):
+        reasons.append("UNSUPPORTED_SECURITY_TYPE")
+    exchange = str(identity.get("exchange") or "").upper()
+    if exchange and exchange not in SUPPORTED_ONBOARDING_EXCHANGES:
+        reasons.append("INCOMPATIBLE_EXCHANGE")
+    if market.get("status") == "MARKET_DATA_NOT_FOUND":
+        reasons.append("MARKET_DATA_NOT_FOUND")
+    elif market.get("status") == "MARKET_AMBIGUOUS":
+        reasons.append("MARKET_AMBIGUOUS")
+    elif market.get("status") == "FOUND":
+        markets = [str(item).lower() for item in market.get("markets", [])]
+        if markets != ["usa"]:
+            reasons.append("MARKET_INCOMPATIBLE")
+        if str(market.get("latest_date") or "") < MIN_CURRENT_MARKET_DATE:
+            reasons.append("MARKET_OHLC_STALE")
+    if canonical.get("ambiguous"):
+        reasons.append("TICKER_REUSE_COLLISION")
+    return list(dict.fromkeys(reasons))
 
 
 def _taxonomy_lookup(paths: Phase13DPaths, ticker: str) -> dict[str, Any]:
@@ -250,16 +305,21 @@ def build_ticker_preview(paths: Phase13DPaths, raw_tickers: str | Sequence[str],
         market = _market_lookup(paths, ticker)
         provider = _provider_lookup(paths, ticker)
         taxonomy = _taxonomy_lookup(paths, ticker)
+        rejection_reasons = _preview_eligibility_reasons(canonical=canonical, market=market, provider=provider)
         if canonical["ambiguous"] or provider["status"] == "IDENTITY_AMBIGUOUS":
             status = "IDENTITY_AMBIGUOUS"
         elif canonical["exists"]:
             status = "ALREADY_PRESENT"
+        elif "DELISTED_SECURITY" in rejection_reasons:
+            status = "NOT_ELIGIBLE"
         elif market["status"] in {"MARKET_DATA_NOT_FOUND", "MARKET_AMBIGUOUS"}:
             status = market["status"]
         elif provider["status"] == "API_FETCH_REQUIRED":
             status = "API_FETCH_REQUIRED"
         elif provider["identity"].get("category") in {"ETF", "FUND", "ADR_UNSUPPORTED"}:
             status = "UNSUPPORTED_SECURITY_TYPE"
+        elif rejection_reasons:
+            status = "NOT_ELIGIBLE"
         elif taxonomy["status"] == "TAXONOMY_LIMITED_OR_NO_MEMBERSHIP":
             status = "READY_WITH_LIMITATIONS"
         else:
@@ -275,6 +335,11 @@ def build_ticker_preview(paths: Phase13DPaths, raw_tickers: str | Sequence[str],
             "provider": provider,
             "canonical": canonical,
             "taxonomy": taxonomy,
+            "eligibility": {
+                "status": "ELIGIBLE" if ready else "NOT_ELIGIBLE",
+                "rejection_reasons": rejection_reasons,
+                "primary_rejection_reason": rejection_reasons[0] if rejection_reasons else None,
+            },
             "estimated_impact": {
                 "canonical_company_rebuild": ready,
                 "full_universe_relative_position_rebuild_required": ready,
