@@ -4,6 +4,7 @@ from rawcandle.fundamentals.phase13e_production_onboarding import (
     OUTCOME_B,
     REPORT_DATE,
     _diagnostic_endpoint_gate,
+    _apply_sndk,
     _verify_source_archive,
     run_phase13e,
 )
@@ -43,3 +44,9 @@ def test_phase13e_diagnostic_gate_counts_evaluations_not_endpoint_rows() -> None
     assert gate["min_evaluations_per_endpoint"] == 8
     assert gate["max_evaluations_per_endpoint"] == 8
     assert gate["evaluation_rows"] == gate["package_evaluation_count"]
+
+
+def test_phase13e_second_apply_can_skip_required_mismatch_gate() -> None:
+    annotations = _apply_sndk.__annotations__
+
+    assert annotations["require_pre_refresh_mismatch"] in {bool, "bool"}

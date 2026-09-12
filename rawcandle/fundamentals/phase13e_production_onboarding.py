@@ -433,7 +433,7 @@ def _manual_rv_refresh(output: Path, *, applied_at_utc: str) -> dict[str, Any]:
     return result
 
 
-def _apply_sndk(output: Path, *, applied_at_utc: str) -> dict[str, Any]:
+def _apply_sndk(output: Path, *, applied_at_utc: str, require_pre_refresh_mismatch: bool) -> dict[str, Any]:
     rows = archive_rows_for_ticker("SNDK")
     identity = create_sndk_canonical_identity(PRODUCTION["canonical"], now=applied_at_utc)
     if str(sndk_identity_evidence()["permanent_provider_identity"]["permaticker"]) != SNDK_PERMATICKER:
@@ -478,7 +478,7 @@ def _apply_sndk(output: Path, *, applied_at_utc: str) -> dict[str, Any]:
         expected_universe_fingerprint=universe["identity"]["economic_result_fingerprint"],
         expected_taxonomy_economic_fingerprint=taxonomy_identity_after["taxonomy_economic_fingerprint"],
     )
-    if pre_refresh["state"] != "OPERATIONAL_UNIVERSE_MISMATCH":
+    if require_pre_refresh_mismatch and pre_refresh["state"] != "OPERATIONAL_UNIVERSE_MISMATCH":
         raise RuntimeError(f"PHASE13E_REQUIRED_RV_MISMATCH_NOT_OBSERVED:{pre_refresh}")
     rv = _manual_rv_refresh(output, applied_at_utc=applied_at_utc)
     dependencies = attach_dependencies(
@@ -563,9 +563,9 @@ def run_phase13e(output: Path | None = None, *, apply: bool = False) -> dict[str
         write_json(output / "backup_manifest.json", backup_manifest)
         applied_at = utc_now()
         before_apply = production_inventory()
-        first = _apply_sndk(output, applied_at_utc=applied_at)
+        first = _apply_sndk(output, applied_at_utc=applied_at, require_pre_refresh_mismatch=True)
         second_before = production_inventory()
-        second = _apply_sndk(output, applied_at_utc=applied_at)
+        second = _apply_sndk(output, applied_at_utc=applied_at, require_pre_refresh_mismatch=False)
         second_after = production_inventory()
         second_no_change = {
             "provider_inserted_rows": second["stage"]["inserted_rows"],
