@@ -18,6 +18,18 @@ attempt failed in an acceptance-check field lookup after package/RV refresh and 
 writable database set from verified backups. See
 `docs/fundamentals_v4/fundamentals_v4_phase13f4_2_production_deployment.md`.
 
+Phase 13F.4.3 corrected the Relative Valuation snapshot accessor but failed in a separate
+acceptance-field mixup between structural source and structural regime fingerprints. It restored
+the full writable database set from fresh backups. See
+`docs/fundamentals_v4/fundamentals_v4_phase13f4_3_production_retry.md`.
+
+Phase 13F.4.4 added a normalized acceptance contract and proved it on a real-shaped copy
+candidate. The production first apply matched the accepted package and Relative Valuation
+identities, but the independent second full-pipeline pass changed the structural/score package
+fingerprints and failed the no-change gate. The full writable database set was restored from fresh
+Phase 13F.4.4 backups. See
+`docs/fundamentals_v4/fundamentals_v4_phase13f4_4_production_deployment.md`.
+
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
 ## Preconditions
