@@ -98,6 +98,17 @@ def test_acceptance_contract_artifact_enumerates_required_fields() -> None:
     assert all(row["failure_reason"] for row in rows)
 
 
+def test_acceptance_contract_uses_phase13f4_5_fixed_point_structural_source() -> None:
+    assert (
+        ACCEPTED["structural_source_fingerprint"]
+        == "c9fd41fdedc7b926d801bf7d56884746e552bc6593fba92c22db1e522c1a63d6"
+    )
+    assert (
+        ACCEPTED["structural_source_fingerprint"]
+        != "04339360f686ae6d68c6f502139a9af4cf6ebe38699c22ba30d6216a6ff06e1f"
+    )
+
+
 def test_acceptance_checker_fails_closed_when_rv_snapshot_identity_missing() -> None:
     result = _accepted_result()
     result["relative_valuation"]["first_apply"].pop("snapshot_id")

@@ -73,7 +73,7 @@ ACCEPTED = {
     "structural_contract": "ECONOMIC_STRUCTURAL_BREAK_CONTRACT_V1",
     "structural_package_fingerprint": "748cd15828bef0bd57f75f977aadea571053940e94b38c2a221b43335e0d6c9a",
     "event_fingerprint": "085690bdb3479a88f53cac4248e0ab970a0a743934eca29d1d867a8eba57096d",
-    "structural_source_fingerprint": "04339360f686ae6d68c6f502139a9af4cf6ebe38699c22ba30d6216a6ff06e1f",
+    "structural_source_fingerprint": "c9fd41fdedc7b926d801bf7d56884746e552bc6593fba92c22db1e522c1a63d6",
     "structural_regime_fingerprint": "57e2827981be62c9c300ac0e0a71a26afefd04dd9b9f85670593c57ebcdff8e5",
     "package_economic_result_fingerprint": "1700f71e13935fccf7509cf8b9e99fb9f6705cfe9ddf5f49157b53d59a85e4d5",
     "package_physical_content_fingerprint": "f6144cc126d1a5c3af8735841800903e5e233a1953712ca4b5dd1ba0b67f654a",
