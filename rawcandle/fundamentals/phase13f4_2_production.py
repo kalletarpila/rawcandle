@@ -8,7 +8,7 @@ import sqlite3
 import subprocess
 import time
 import traceback
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -85,6 +85,47 @@ OUTCOME_A = "OUTCOME A — STRUCTURAL-REGIME PACKAGE ACTIVE IN PRODUCTION AND VE
 OUTCOME_B = "OUTCOME B — PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED"
 OUTCOME_C = "OUTCOME C — DEPLOYMENT FAILED AND COMPLETE BACKUP SET RESTORED SUCCESSFULLY"
 OUTCOME_D = "OUTCOME D — PRODUCTION STATE UNRESOLVED; MANUAL RECOVERY REQUIRED"
+
+
+@dataclass(frozen=True)
+class AcceptanceField:
+    check_id: str
+    path: tuple[str, ...]
+    meaning: str
+    expected: Any
+    expected_type: str
+    nullable: bool
+    identity_kind: str
+    failure_reason: str
+
+
+ACCEPTANCE_CONTRACT: tuple[AcceptanceField, ...] = (
+    AcceptanceField("PROVIDER_STAGING_REPLAY_NO_CHANGE", ("provider_staging_replay_logical_changes",), "Second provider staging pass must be logical no-change.", 0, "int", False, "calculated result", "PROVIDER_STAGING_REPLAY_NOT_NO_CHANGE"),
+    AcceptanceField("STRUCTURAL_CONTRACT_VERSION", ("structural_contract_version",), "Versioned structural-break economic contract identity.", ACCEPTED["structural_contract"], "str", False, "source input", "STRUCTURAL_CONTRACT_VERSION"),
+    AcceptanceField("STRUCTURAL_EVENT_COUNT", ("structural_event_count",), "Accepted structural-event population size.", 5, "int", False, "source input", "STRUCTURAL_EVENT_COUNT"),
+    AcceptanceField("STRUCTURAL_QUARTER_REGIME_COUNT", ("structural_quarter_regime_count",), "Canonical quarters assigned to structural regimes.", 197, "int", False, "calculated result", "STRUCTURAL_QUARTER_REGIME_COUNT"),
+    AcceptanceField("STRUCTURAL_TTM_REGIME_COUNT", ("structural_ttm_regime_count",), "TTM endpoints assigned to structural regimes.", 197, "int", False, "calculated result", "STRUCTURAL_TTM_REGIME_COUNT"),
+    AcceptanceField("STRUCTURAL_SOURCE_FINGERPRINT", ("structural_source_fingerprint",), "Current structural source/dependency fingerprint exposed by Relative Valuation source metadata.", ACCEPTED["structural_source_fingerprint"], "str", False, "dependency state", "STRUCTURAL_SOURCE_FINGERPRINT"),
+    AcceptanceField("STRUCTURAL_EVENT_FINGERPRINT", ("structural_event_fingerprint",), "Structural event economic fingerprint.", ACCEPTED["event_fingerprint"], "str", False, "source input", "STRUCTURAL_EVENT_FINGERPRINT"),
+    AcceptanceField("STRUCTURAL_REGIME_FINGERPRINT", ("structural_regime_fingerprint",), "Full structural regime assignment fingerprint.", ACCEPTED["structural_regime_fingerprint"], "str", False, "calculated result", "STRUCTURAL_REGIME_FINGERPRINT"),
+    AcceptanceField("STRUCTURAL_PACKAGE_FINGERPRINT", ("structural_package_fingerprint",), "Structural package dependency fingerprint derived from the regime fingerprint.", ACCEPTED["structural_package_fingerprint"], "str", False, "dependency state", "STRUCTURAL_PACKAGE_FINGERPRINT"),
+    AcceptanceField("PACKAGE_FIRST_OUTCOME", ("package_first_outcome",), "First package apply must activate the accepted package.", "APPLIED", "str", False, "persisted content", "PACKAGE_FIRST_OUTCOME"),
+    AcceptanceField("PACKAGE_SECOND_OUTCOME", ("package_second_outcome",), "Inner package replay must be no-change.", "NO_CHANGE", "str", False, "persisted content", "PACKAGE_SECOND_OUTCOME"),
+    AcceptanceField("PACKAGE_SECOND_LOGICAL_CHANGES", ("package_second_logical_changes",), "Inner package replay must write zero logical rows.", 0, "int", False, "persisted content", "PACKAGE_SECOND_LOGICAL_CHANGES"),
+    AcceptanceField("PACKAGE_PHYSICAL_NO_CHANGE", ("package_second_physical_no_change",), "Inner package replay must preserve physical content fingerprint.", True, "bool", False, "persisted content", "PACKAGE_PHYSICAL_NO_CHANGE"),
+    AcceptanceField("PACKAGE_ECONOMIC_FINGERPRINT", ("package_economic_fingerprint",), "Accepted Operating-Income V2 package economic result fingerprint.", ACCEPTED["package_economic_result_fingerprint"], "str", False, "persisted content", "PACKAGE_ECONOMIC_FINGERPRINT"),
+    AcceptanceField("PACKAGE_PHYSICAL_FINGERPRINT", ("package_physical_fingerprint",), "Accepted Operating-Income V2 package physical content fingerprint.", ACCEPTED["package_physical_content_fingerprint"], "str", False, "persisted content", "PACKAGE_PHYSICAL_FINGERPRINT"),
+    AcceptanceField("DIAGNOSTIC_EVALUATION_MULTIPLIER", ("diagnostic_evaluation_multiplier_ok",), "All eight diagnostic evaluations must exist for every diagnostic endpoint.", True, "bool", False, "persisted content", "DIAGNOSTIC_EVALUATION_MULTIPLIER"),
+    AcceptanceField("DEPENDENCY_ATTACHMENT_STATUS", ("dependency_status",), "Operational-universe, taxonomy and structural dependencies must be compatible.", "COMPATIBLE", "str", False, "dependency state", "DEPENDENCY_ATTACHMENT_STATUS"),
+    AcceptanceField("POST_REFRESH_COMPATIBILITY", ("post_refresh_compatibility_state",), "Relative Valuation dependencies must be compatible after manual refresh and dependency attachment.", "COMPATIBLE", "str", False, "dependency state", "POST_REFRESH_COMPATIBILITY"),
+    AcceptanceField("RV_FIRST_OUTCOME", ("rv_first_outcome",), "Manual full-universe Relative Valuation refresh must activate the accepted snapshot.", "ACTIVATED", "str", False, "active pointer", "RV_FIRST_OUTCOME"),
+    AcceptanceField("RV_SECOND_OUTCOME", ("rv_second_outcome",), "Manual Relative Valuation replay must be no-change.", "NO_CHANGE", "str", False, "persisted content", "RV_SECOND_OUTCOME"),
+    AcceptanceField("RV_SECOND_LOGICAL_ZERO_WRITES", ("rv_second_logical_zero_writes",), "Manual Relative Valuation replay must perform zero logical writes.", True, "bool", False, "persisted content", "RV_SECOND_LOGICAL_ZERO_WRITES"),
+    AcceptanceField("RV_SECOND_PHYSICAL_NO_CHANGE", ("rv_second_physical_no_change",), "Manual Relative Valuation replay must preserve physical content fingerprint.", True, "bool", False, "persisted content", "RV_SECOND_PHYSICAL_NO_CHANGE"),
+    AcceptanceField("RV_SNAPSHOT_ID", ("rv_snapshot_id",), "Accepted Relative Valuation active snapshot identity from the apply report.", ACCEPTED["rv_snapshot"], "str", False, "active pointer", "RV_SNAPSHOT_ID"),
+    AcceptanceField("RV_RESULT_FINGERPRINT", ("rv_result_fingerprint",), "Accepted Relative Valuation result fingerprint from persisted snapshot metadata.", ACCEPTED["rv_result_fingerprint"], "str", False, "persisted content", "RV_RESULT_FINGERPRINT"),
+    AcceptanceField("AREB_POST_DELISTING_RV_ROWS", ("areb_post_delisting_relative_valuation_rows",), "AREB must have no post-delisting current Relative Valuation participation.", 0, "int", False, "calculated result", "AREB_POST_DELISTING_RV_ROWS"),
+)
 
 
 def utc_now() -> str:
@@ -249,7 +290,7 @@ def _preflight(output: Path, backup_dir: Path, *, require_clean: bool) -> dict[s
     if require_clean and git_status:
         raise RuntimeError("PHASE13F4_2_CLEAN_GIT_WORKTREE_REQUIRED")
     required = {}
-    for commit in ("0804609", "34be0c6", "a01fc83"):
+    for commit in ("0804609", "34be0c6", "a01fc83", "a825dd9", "7c18d90", "58d5b16", "68ab231"):
         required[commit] = _run_git(("cat-file", "-e", f"{commit}^{{commit}}"), check=False).returncode == 0
     if not all(required.values()):
         raise RuntimeError("PHASE13F4_2_REQUIRED_COMMIT_MISSING:" + json.dumps(required, sort_keys=True))
@@ -359,72 +400,72 @@ def _structural_dependency_metadata(structural_contract: Mapping[str, Any], stru
     }
 
 
-def _apply_pipeline(output: Path, *, source: Mapping[str, Any], applied_at: str) -> dict[str, Any]:
-    paths = CandidatePaths(
-        PRODUCTION["canonical"],
-        PRODUCTION["analysis"],
-        PRODUCTION["taxonomy"],
-        provider_db=PRODUCTION["provider"],
-        market_db=PRODUCTION["market"],
-    )
+def _apply_pipeline_for_paths(
+    paths: CandidatePaths,
+    output: Path,
+    *,
+    source: Mapping[str, Any],
+    applied_at: str,
+    allow_production: bool,
+) -> dict[str, Any]:
     result: dict[str, Any] = {"applied_at_utc": applied_at}
-    result["provider_identity_links"] = _apply_provider_identity_links(PRODUCTION["canonical"], allow_production=True)
-    result["transition_identities"] = _apply_transition_identities(PRODUCTION["canonical"], allow_production=True)
+    result["provider_identity_links"] = _apply_provider_identity_links(paths.canonical_db, allow_production=allow_production)
+    result["transition_identities"] = _apply_transition_identities(paths.canonical_db, allow_production=allow_production)
     result["provider_staging"] = stage_provider_rows(
-        PRODUCTION["provider"],
-        PRODUCTION["canonical"],
+        paths.provider_db,
+        paths.canonical_db,
         source["rows_by_ticker"],
-        allow_production=True,
+        allow_production=allow_production,
     )
     result["provider_staging_replay"] = stage_provider_rows(
-        PRODUCTION["provider"],
-        PRODUCTION["canonical"],
+        paths.provider_db,
+        paths.canonical_db,
         source["rows_by_ticker"],
-        allow_production=True,
+        allow_production=allow_production,
     )
-    result["canonical"] = reconcile_canonical(PRODUCTION["provider"], PRODUCTION["canonical"], applied_at=applied_at)
-    result["ttm"] = rebuild_ttm(PRODUCTION["canonical"], applied_at=applied_at)
-    result["successor_canonical_ttm"] = successor_canonical_ttm_report(PRODUCTION["canonical"])
+    result["canonical"] = reconcile_canonical(paths.provider_db, paths.canonical_db, applied_at=applied_at)
+    result["ttm"] = rebuild_ttm(paths.canonical_db, applied_at=applied_at)
+    result["successor_canonical_ttm"] = successor_canonical_ttm_report(paths.canonical_db)
     result["structural_contract"] = structural_break.apply_contract(
-        PRODUCTION["canonical"],
+        paths.canonical_db,
         events=_events(),
         applied_at_utc=applied_at,
     )
-    result["structural_evidence"] = _structural_evidence(PRODUCTION["canonical"])
+    result["structural_evidence"] = _structural_evidence(paths.canonical_db)
     structural_package_fingerprint = _structural_package_fingerprint(result["structural_contract"])
     result["structural_package_fingerprint"] = structural_package_fingerprint
     result["valuation_classification"] = _valuation_classification_update(
-        PRODUCTION["analysis"],
-        PRODUCTION["market"],
-        PRODUCTION["canonical"],
-        allow_production=True,
+        paths.analysis_db,
+        paths.market_db,
+        paths.canonical_db,
+        allow_production=allow_production,
     )
-    result["schema"] = ensure_candidate_schema(paths, applied_at_utc=applied_at, apply=True, allow_production=True)
-    universe = backfill_universe(paths, applied_at_utc=applied_at, apply=True, allow_production=True)
+    result["schema"] = ensure_candidate_schema(paths, applied_at_utc=applied_at, apply=True, allow_production=allow_production)
+    universe = backfill_universe(paths, applied_at_utc=applied_at, apply=True, allow_production=allow_production)
     result["universe"] = universe
     result["package"] = instrumented_package_refresh(
         {
-            "provider": PRODUCTION["provider"],
-            "canonical": PRODUCTION["canonical"],
-            "analysis": PRODUCTION["analysis"],
-            "market": PRODUCTION["market"],
-            "taxonomy": PRODUCTION["taxonomy"],
+            "provider": paths.provider_db,
+            "canonical": paths.canonical_db,
+            "analysis": paths.analysis_db,
+            "market": paths.market_db,
+            "taxonomy": paths.taxonomy_db,
         },
         output,
-        allow_production=True,
+        allow_production=allow_production,
     )
     result["relative_position"] = asdict(refresh_relative_position(
-        canonical_db=PRODUCTION["canonical"],
-        analysis_db=PRODUCTION["analysis"],
-        market_db=PRODUCTION["market"],
-        taxonomy_db=PRODUCTION["taxonomy"],
+        canonical_db=paths.canonical_db,
+        analysis_db=paths.analysis_db,
+        market_db=paths.market_db,
+        taxonomy_db=paths.taxonomy_db,
         snapshot_date=REPORT_DATE,
         model_fingerprint=RP_MODEL_FINGERPRINT,
         applied_at_utc=applied_at,
     ))
-    taxonomy = taxonomy_identity(PRODUCTION["taxonomy"])
+    taxonomy = taxonomy_identity(paths.taxonomy_db)
     result["pre_refresh_compatibility"] = candidate_relative_valuation_dependency_state(
-        PRODUCTION["analysis"],
+        paths.analysis_db,
         report_date=REPORT_DATE,
         expected_universe_fingerprint=universe["identity"]["economic_result_fingerprint"],
         expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
@@ -436,58 +477,178 @@ def _apply_pipeline(output: Path, *, source: Mapping[str, Any], applied_at: str)
         universe=universe["identity"],
         applied_at_utc=applied_at,
         apply=True,
-        allow_production=True,
+        allow_production=allow_production,
         structural_metadata=structural_metadata,
     )
     result["post_refresh_compatibility"] = candidate_relative_valuation_dependency_state(
-        PRODUCTION["analysis"],
+        paths.analysis_db,
         report_date=REPORT_DATE,
         expected_universe_fingerprint=universe["identity"]["economic_result_fingerprint"],
         expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
     )
     result["snapshots"] = _snapshot_smoke(paths, output)
-    result["areb"] = _areb_counts(PRODUCTION["analysis"])
+    result["areb"] = _areb_counts(paths.analysis_db)
     return result
+
+
+def _apply_pipeline(output: Path, *, source: Mapping[str, Any], applied_at: str) -> dict[str, Any]:
+    paths = CandidatePaths(
+        PRODUCTION["canonical"],
+        PRODUCTION["analysis"],
+        PRODUCTION["taxonomy"],
+        provider_db=PRODUCTION["provider"],
+        market_db=PRODUCTION["market"],
+    )
+    return _apply_pipeline_for_paths(paths, output, source=source, applied_at=applied_at, allow_production=True)
+
+
+def _copy_acceptance_candidate(output: Path, *, source: Mapping[str, Any], applied_at: str) -> dict[str, Any]:
+    candidate_dir = output / "prewrite_candidate"
+    copies = candidate_dir / "copies"
+    copies.mkdir(parents=True, exist_ok=True)
+    paths = CandidatePaths(
+        copies / PRODUCTION["canonical"].name,
+        copies / PRODUCTION["analysis"].name,
+        PRODUCTION["taxonomy"],
+        provider_db=copies / PRODUCTION["provider"].name,
+        market_db=PRODUCTION["market"],
+    )
+    result: dict[str, Any] = {
+        "started_at_utc": utc_now(),
+        "paths": {
+            "provider": str(paths.provider_db),
+            "canonical": str(paths.canonical_db),
+            "analysis": str(paths.analysis_db),
+            "market": str(paths.market_db),
+            "taxonomy": str(paths.taxonomy_db),
+        },
+    }
+    try:
+        result["backups"] = {
+            "provider": online_backup(PRODUCTION["provider"], paths.provider_db),
+            "canonical": online_backup(PRODUCTION["canonical"], paths.canonical_db),
+            "analysis": online_backup(PRODUCTION["analysis"], paths.analysis_db),
+        }
+        result["before"] = {
+            "provider": database_inventory(paths.provider_db),
+            "canonical": database_inventory(paths.canonical_db),
+            "analysis": database_inventory(paths.analysis_db),
+        }
+        candidate = _apply_pipeline_for_paths(paths, candidate_dir / "candidate_apply", source=source, applied_at=applied_at, allow_production=False)
+        result["candidate"] = candidate
+        result["acceptance_view"] = _acceptance_view(candidate)
+        result["acceptance_blockers"] = _acceptance_blockers(candidate)
+        result["final_inventory"] = {
+            "provider": database_inventory(paths.provider_db),
+            "canonical": database_inventory(paths.canonical_db),
+            "analysis": database_inventory(paths.analysis_db),
+        }
+        write_json(candidate_dir / "prewrite_candidate_result.json", result)
+        return result
+    finally:
+        if copies.exists():
+            shutil.rmtree(copies)
+        write_json(candidate_dir / "cleanup.json", {
+            "transient_copies_removed": not copies.exists(),
+            "remaining_database_artifacts": [
+                str(path) for path in candidate_dir.rglob("*")
+                if path.suffix in {".db", ".sqlite"} or path.name.endswith(("-wal", "-shm", "-journal"))
+            ],
+        })
+
+
+def _required(result: Mapping[str, Any], path: tuple[str, ...]) -> Any:
+    current: Any = result
+    for part in path:
+        if not isinstance(current, Mapping) or part not in current:
+            raise KeyError(".".join(path))
+        current = current[part]
+    return current
+
+
+def _acceptance_view(result: Mapping[str, Any]) -> dict[str, Any]:
+    package_first = _required(result, ("package", "first_apply"))
+    package_second = _required(result, ("package", "second_apply"))
+    package_rows = _required(package_first, ("rows",))
+    rv = _required(result, ("relative_valuation",))
+    structural_source = _required(rv, ("source_metadata", "structural_break", "fingerprint"))
+    diagnostic_endpoint = int(_required(package_rows, ("diagnostic_endpoint",)))
+    diagnostic_evaluation = int(_required(package_rows, ("diagnostic_evaluation",)))
+    return {
+        "provider_staging_replay_logical_changes": int(_required(result, ("provider_staging_replay", "logical_changes"))),
+        "structural_contract_version": str(_required(result, ("structural_contract", "contract_version"))),
+        "structural_event_count": int(_required(result, ("structural_contract", "event_count"))),
+        "structural_quarter_regime_count": int(_required(result, ("structural_contract", "quarter_regime_count"))),
+        "structural_ttm_regime_count": int(_required(result, ("structural_contract", "ttm_regime_count"))),
+        "structural_source_fingerprint": str(structural_source),
+        "structural_event_fingerprint": str(_required(result, ("structural_contract", "economic_event_fingerprint"))),
+        "structural_regime_fingerprint": str(_required(result, ("structural_contract", "regime_fingerprint"))),
+        "structural_package_fingerprint": str(_required(result, ("structural_package_fingerprint",))),
+        "package_first_outcome": str(_required(package_first, ("outcome",))),
+        "package_second_outcome": str(_required(package_second, ("outcome",))),
+        "package_second_logical_changes": int(_required(package_second, ("logical_changes",))),
+        "package_second_physical_no_change": bool(_required(result, ("package", "second_physical_no_change"))),
+        "package_economic_fingerprint": str(_required(package_first, ("economic_result_fingerprint",))),
+        "package_physical_fingerprint": str(_required(package_first, ("physical_content_fingerprint",))),
+        "diagnostic_evaluation_multiplier_ok": diagnostic_endpoint > 0 and diagnostic_evaluation == diagnostic_endpoint * 8,
+        "dependency_status": str(_required(result, ("dependencies", "status"))),
+        "post_refresh_compatibility_state": str(_required(result, ("post_refresh_compatibility", "state"))),
+        "rv_first_outcome": str(_required(rv, ("first_apply", "outcome"))),
+        "rv_second_outcome": str(_required(rv, ("second_apply", "outcome"))),
+        "rv_second_logical_zero_writes": bool(_required(rv, ("second_logical_zero_writes",))),
+        "rv_second_physical_no_change": bool(_required(rv, ("second_physical_no_change",))),
+        "rv_snapshot_id": str(_required(rv, ("first_apply", "snapshot_id"))),
+        "rv_result_fingerprint": str(_required(rv, ("snapshot", "result_fingerprint"))),
+        "areb_post_delisting_relative_valuation_rows": int(_required(result, ("areb", "post_delisting_relative_valuation_rows"))),
+    }
+
+
+def acceptance_contract_artifact() -> list[dict[str, Any]]:
+    return [
+        {
+            "stable_check_identifier": field.check_id,
+            "semantic_field": ".".join(field.path),
+            "economic_meaning": field.meaning,
+            "expected_value_or_rule": field.expected,
+            "authoritative_runtime_object": "canonical acceptance view built from production/copy pipeline result",
+            "actual_accessor_or_normalized_field_name": field.path[-1],
+            "expected_type": field.expected_type,
+            "nullable": field.nullable,
+            "identity_kind": field.identity_kind,
+            "failure_reason": field.failure_reason,
+        }
+        for field in ACCEPTANCE_CONTRACT
+    ]
 
 
 def _acceptance_blockers(result: Mapping[str, Any]) -> list[str]:
     blockers: list[str] = []
-    if result["provider_staging_replay"]["logical_changes"] != 0:
-        blockers.append("PROVIDER_STAGING_REPLAY_NOT_NO_CHANGE")
-    if result["structural_contract"]["event_count"] != 5:
-        blockers.append("STRUCTURAL_EVENT_COUNT")
-    if result["structural_contract"]["quarter_regime_count"] != 197:
-        blockers.append("STRUCTURAL_QUARTER_REGIME_COUNT")
-    if result["structural_contract"]["ttm_regime_count"] != 197:
-        blockers.append("STRUCTURAL_TTM_REGIME_COUNT")
-    if result["structural_package_fingerprint"] != ACCEPTED["structural_package_fingerprint"]:
-        blockers.append("STRUCTURAL_PACKAGE_FINGERPRINT")
-    if result["structural_contract"]["economic_event_fingerprint"] != ACCEPTED["event_fingerprint"]:
-        blockers.append("STRUCTURAL_EVENT_FINGERPRINT")
-    if result["structural_contract"]["regime_fingerprint"] != ACCEPTED["structural_regime_fingerprint"]:
-        blockers.append("STRUCTURAL_REGIME_FINGERPRINT")
-    package = result["package"]["first_apply"]
-    if package["economic_result_fingerprint"] != ACCEPTED["package_economic_result_fingerprint"]:
-        blockers.append("PACKAGE_ECONOMIC_FINGERPRINT")
-    if package["physical_content_fingerprint"] != ACCEPTED["package_physical_content_fingerprint"]:
-        blockers.append("PACKAGE_PHYSICAL_FINGERPRINT")
-    rv = result.get("relative_valuation", {}).get("snapshot", {})
-    rv_apply = result.get("relative_valuation", {}).get("first_apply", {})
-    rv_snapshot_id = rv_apply.get("snapshot_id")
-    if not rv_snapshot_id:
-        blockers.append("RV_SNAPSHOT_ID_MISSING")
-    elif rv_snapshot_id != ACCEPTED["rv_snapshot"]:
-        blockers.append("RV_SNAPSHOT_ID")
-    rv_result = rv.get("result_fingerprint")
-    if not rv_result:
-        blockers.append("RV_RESULT_FINGERPRINT_MISSING")
-    elif rv_result != ACCEPTED["rv_result_fingerprint"]:
-        blockers.append("RV_RESULT_FINGERPRINT")
-    compatibility = result.get("post_refresh_compatibility", {}).get("state")
-    if compatibility != "COMPATIBLE":
-        blockers.append(f"POST_REFRESH_COMPATIBILITY:{compatibility}")
-    if int(result["areb"]["post_delisting_relative_valuation_rows"]) != 0:
-        blockers.append("AREB_POST_DELISTING_RV_ROWS")
+    try:
+        view = _acceptance_view(result)
+    except (KeyError, TypeError, ValueError) as exc:
+        path = str(exc).strip("'")
+        missing_reasons = {
+            "relative_valuation.first_apply.snapshot_id": "RV_SNAPSHOT_ID_MISSING",
+            "first_apply.snapshot_id": "RV_SNAPSHOT_ID_MISSING",
+            "relative_valuation.snapshot.result_fingerprint": "RV_RESULT_FINGERPRINT_MISSING",
+            "snapshot.result_fingerprint": "RV_RESULT_FINGERPRINT_MISSING",
+            "relative_valuation.source_metadata.structural_break.fingerprint": "STRUCTURAL_SOURCE_FINGERPRINT_MISSING",
+            "source_metadata.structural_break.fingerprint": "STRUCTURAL_SOURCE_FINGERPRINT_MISSING",
+            "structural_contract.regime_fingerprint": "STRUCTURAL_REGIME_FINGERPRINT_MISSING",
+            "structural_contract.economic_event_fingerprint": "STRUCTURAL_EVENT_FINGERPRINT_MISSING",
+            "structural_package_fingerprint": "STRUCTURAL_PACKAGE_FINGERPRINT_MISSING",
+            "package.first_apply.economic_result_fingerprint": "PACKAGE_ECONOMIC_FINGERPRINT_MISSING",
+            "economic_result_fingerprint": "PACKAGE_ECONOMIC_FINGERPRINT_MISSING",
+            "package.first_apply.physical_content_fingerprint": "PACKAGE_PHYSICAL_FINGERPRINT_MISSING",
+            "physical_content_fingerprint": "PACKAGE_PHYSICAL_FINGERPRINT_MISSING",
+            "dependencies.status": "DEPENDENCY_ATTACHMENT_STATUS_MISSING",
+            "post_refresh_compatibility.state": "POST_REFRESH_COMPATIBILITY_MISSING",
+        }
+        return [missing_reasons.get(path, f"ACCEPTANCE_VIEW_INCOMPLETE:{path}")]
+    for field in ACCEPTANCE_CONTRACT:
+        actual = view.get(field.path[-1])
+        if actual != field.expected:
+            blockers.append(field.failure_reason)
     return blockers
 
 
@@ -528,6 +689,7 @@ def run_phase13f4_2(
         return result
     source = archive_reconciliation()
     write_json(output / "production_preflight.json", preflight)
+    write_json(output / "acceptance_contract.json", acceptance_contract_artifact())
     if not apply:
         result = {
             "phase": phase,
@@ -543,8 +705,23 @@ def run_phase13f4_2(
         return result
 
     backup_manifest: dict[str, Any] | None = None
-    lock_handle = LOCK_PATH.open("w")
+    lock_handle = None
     try:
+        prewrite_candidate = _copy_acceptance_candidate(output, source=source, applied_at=APPLIED_AT)
+        if prewrite_candidate["acceptance_blockers"]:
+            result = {
+                "phase": phase,
+                "outcome": OUTCOME_B,
+                "artifact_dir": str(output),
+                "preflight": preflight,
+                "prewrite_candidate": prewrite_candidate,
+                "acceptance_contract": acceptance_contract_artifact(),
+                "reason": "PREWRITE_ACCEPTANCE_BLOCKERS:" + ",".join(prewrite_candidate["acceptance_blockers"]),
+                "elapsed_seconds": round(time.monotonic() - started, 3),
+            }
+            write_json(output / result_filename, result)
+            return result
+        lock_handle = LOCK_PATH.open("w")
         fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         backup_manifest = _backup_write_set(backup_dir)
         restore_rehearsal = _restore_rehearsal(backup_manifest, output)
@@ -577,6 +754,8 @@ def run_phase13f4_2(
             "backup_dir": str(backup_dir),
             "activation_timestamp": applied_at,
             "preflight": preflight,
+            "prewrite_candidate": prewrite_candidate,
+            "acceptance_contract": acceptance_contract_artifact(),
             "backup_manifest": backup_manifest,
             "restore_rehearsal": restore_rehearsal,
             "first_apply": first,
@@ -613,7 +792,8 @@ def run_phase13f4_2(
         write_json(output / result_filename, result)
         return result
     finally:
-        try:
-            fcntl.flock(lock_handle, fcntl.LOCK_UN)
-        finally:
-            lock_handle.close()
+        if lock_handle is not None:
+            try:
+                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+            finally:
+                lock_handle.close()
