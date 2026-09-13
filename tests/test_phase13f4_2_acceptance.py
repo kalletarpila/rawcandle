@@ -34,7 +34,7 @@ def _accepted_result() -> dict[str, object]:
             "quarter_regime_count": 197,
             "ttm_regime_count": 197,
             "economic_event_fingerprint": ACCEPTED["event_fingerprint"],
-            "regime_fingerprint": ACCEPTED["structural_source_fingerprint"],
+            "regime_fingerprint": ACCEPTED["structural_regime_fingerprint"],
         },
         "structural_package_fingerprint": ACCEPTED["structural_package_fingerprint"],
         "package": {
@@ -57,6 +57,13 @@ def test_acceptance_checker_uses_apply_report_snapshot_id() -> None:
     result["relative_valuation"]["snapshot"]["snapshot_id"] = "stale-or-wrong-location"
 
     assert _acceptance_blockers(result) == []
+
+
+def test_acceptance_checker_distinguishes_structural_source_and_regime_fingerprints() -> None:
+    result = _accepted_result()
+    result["structural_contract"]["regime_fingerprint"] = ACCEPTED["structural_source_fingerprint"]
+
+    assert "STRUCTURAL_REGIME_FINGERPRINT" in _acceptance_blockers(result)
 
 
 def test_acceptance_checker_fails_closed_when_rv_snapshot_identity_missing() -> None:

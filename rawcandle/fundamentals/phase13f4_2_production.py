@@ -74,6 +74,7 @@ ACCEPTED = {
     "structural_package_fingerprint": "4ba542c7e28c2d92ba65863f2932e2683a60b053cb4b2debe344b051a84441ad",
     "event_fingerprint": "5ec6403d231e41a52fdf04609892df1c9bdd841805180a52578b638114bf5bfd",
     "structural_source_fingerprint": "04339360f686ae6d68c6f502139a9af4cf6ebe38699c22ba30d6216a6ff06e1f",
+    "structural_regime_fingerprint": "b6c1fbed8182ee589e3f85ee7057571ff34b75f56de7d92f4b1a3d74aac64852",
     "package_economic_result_fingerprint": "55a9713c9f20d122e493bb3c0c3485bf729724ce1914703ad637d2a16346002d",
     "package_physical_content_fingerprint": "718e3fbe838f273775d77042fa0dbaa706c822277a3e23d5dd7eeaaa4ebb8811",
     "rv_snapshot": "1f360f0b2dfd8e06eaffd3edcffaf87b604e59a63d0b0e272823b46fada02f6b",
@@ -351,7 +352,7 @@ def _structural_dependency_metadata(structural_contract: Mapping[str, Any], stru
         "structural_contract_version": structural_break.CONTRACT_VERSION,
         "structural_package_fingerprint": structural_package_fingerprint,
         "structural_event_fingerprint": structural_contract["economic_event_fingerprint"],
-        "structural_source_fingerprint": structural_contract["regime_fingerprint"],
+        "structural_regime_fingerprint": structural_contract["regime_fingerprint"],
         "structural_event_count": structural_contract["event_count"],
         "structural_quarter_regime_count": structural_contract["quarter_regime_count"],
         "structural_ttm_regime_count": structural_contract["ttm_regime_count"],
@@ -463,8 +464,8 @@ def _acceptance_blockers(result: Mapping[str, Any]) -> list[str]:
         blockers.append("STRUCTURAL_PACKAGE_FINGERPRINT")
     if result["structural_contract"]["economic_event_fingerprint"] != ACCEPTED["event_fingerprint"]:
         blockers.append("STRUCTURAL_EVENT_FINGERPRINT")
-    if result["structural_contract"]["regime_fingerprint"] != ACCEPTED["structural_source_fingerprint"]:
-        blockers.append("STRUCTURAL_SOURCE_FINGERPRINT")
+    if result["structural_contract"]["regime_fingerprint"] != ACCEPTED["structural_regime_fingerprint"]:
+        blockers.append("STRUCTURAL_REGIME_FINGERPRINT")
     package = result["package"]["first_apply"]
     if package["economic_result_fingerprint"] != ACCEPTED["package_economic_result_fingerprint"]:
         blockers.append("PACKAGE_ECONOMIC_FINGERPRINT")
