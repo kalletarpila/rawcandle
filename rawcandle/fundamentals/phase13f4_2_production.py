@@ -470,14 +470,21 @@ def _acceptance_blockers(result: Mapping[str, Any]) -> list[str]:
         blockers.append("PACKAGE_ECONOMIC_FINGERPRINT")
     if package["physical_content_fingerprint"] != ACCEPTED["package_physical_content_fingerprint"]:
         blockers.append("PACKAGE_PHYSICAL_FINGERPRINT")
-    rv = result["relative_valuation"]["snapshot"]
-    rv_apply = result["relative_valuation"]["first_apply"]
-    if rv_apply["snapshot_id"] != ACCEPTED["rv_snapshot"]:
+    rv = result.get("relative_valuation", {}).get("snapshot", {})
+    rv_apply = result.get("relative_valuation", {}).get("first_apply", {})
+    rv_snapshot_id = rv_apply.get("snapshot_id")
+    if not rv_snapshot_id:
+        blockers.append("RV_SNAPSHOT_ID_MISSING")
+    elif rv_snapshot_id != ACCEPTED["rv_snapshot"]:
         blockers.append("RV_SNAPSHOT_ID")
-    if rv["result_fingerprint"] != ACCEPTED["rv_result_fingerprint"]:
+    rv_result = rv.get("result_fingerprint")
+    if not rv_result:
+        blockers.append("RV_RESULT_FINGERPRINT_MISSING")
+    elif rv_result != ACCEPTED["rv_result_fingerprint"]:
         blockers.append("RV_RESULT_FINGERPRINT")
-    if result["post_refresh_compatibility"]["state"] != "COMPATIBLE":
-        blockers.append(f"POST_REFRESH_COMPATIBILITY:{result['post_refresh_compatibility']['state']}")
+    compatibility = result.get("post_refresh_compatibility", {}).get("state")
+    if compatibility != "COMPATIBLE":
+        blockers.append(f"POST_REFRESH_COMPATIBILITY:{compatibility}")
     if int(result["areb"]["post_delisting_relative_valuation_rows"]) != 0:
         blockers.append("AREB_POST_DELISTING_RV_ROWS")
     return blockers
@@ -498,22 +505,31 @@ def _second_no_change(first: Mapping[str, Any], second: Mapping[str, Any], befor
     }
 
 
-def run_phase13f4_2(output: Path | None = None, *, apply: bool = False) -> dict[str, Any]:
+def run_phase13f4_2(
+    output: Path | None = None,
+    *,
+    apply: bool = False,
+    phase: str = PHASE,
+    artifact_root: Path = ARTIFACT_ROOT,
+    backup_root: Path = BACKUP_ROOT,
+    default_run_id: str = DEFAULT_RUN_ID,
+    result_filename: str = "phase13f4_2_result.json",
+) -> dict[str, Any]:
     started = time.monotonic()
-    output = (output or ARTIFACT_ROOT / DEFAULT_RUN_ID).resolve()
-    backup_dir = BACKUP_ROOT / output.name
+    output = (output or artifact_root / default_run_id).resolve()
+    backup_dir = backup_root / output.name
     output.mkdir(parents=True, exist_ok=True)
     try:
         preflight = _preflight(output, backup_dir, require_clean=apply)
     except Exception as exc:
-        result = {"phase": PHASE, "outcome": OUTCOME_B, "artifact_dir": str(output), "error": type(exc).__name__, "reason": str(exc)}
-        write_json(output / "phase13f4_2_result.json", result)
+        result = {"phase": phase, "outcome": OUTCOME_B, "artifact_dir": str(output), "error": type(exc).__name__, "reason": str(exc)}
+        write_json(output / result_filename, result)
         return result
     source = archive_reconciliation()
     write_json(output / "production_preflight.json", preflight)
     if not apply:
         result = {
-            "phase": PHASE,
+            "phase": phase,
             "outcome": OUTCOME_B,
             "mode": "DRY_RUN",
             "artifact_dir": str(output),
@@ -522,7 +538,7 @@ def run_phase13f4_2(output: Path | None = None, *, apply: bool = False) -> dict[
             "read_only_roles": list(READ_ONLY_ROLES),
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
-        write_json(output / "phase13f4_2_result.json", result)
+        write_json(output / result_filename, result)
         return result
 
     backup_manifest: dict[str, Any] | None = None
@@ -554,7 +570,7 @@ def run_phase13f4_2(output: Path | None = None, *, apply: bool = False) -> dict[
             for role, path in PRODUCTION.items()
         }
         result = {
-            "phase": PHASE,
+            "phase": phase,
             "outcome": OUTCOME_A,
             "artifact_dir": str(output),
             "backup_dir": str(backup_dir),
@@ -571,7 +587,7 @@ def run_phase13f4_2(output: Path | None = None, *, apply: bool = False) -> dict[
             "final_integrity": final_integrity,
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
-        write_json(output / "phase13f4_2_result.json", result)
+        write_json(output / result_filename, result)
         return result
     except Exception as exc:
         restored = None
@@ -583,7 +599,7 @@ def run_phase13f4_2(output: Path | None = None, *, apply: bool = False) -> dict[
                 restore_error = {"type": type(restore_exc).__name__, "message": str(restore_exc), "traceback": traceback.format_exc()}
         outcome = OUTCOME_C if restored is not None and restore_error is None else (OUTCOME_B if backup_manifest is None else OUTCOME_D)
         result = {
-            "phase": PHASE,
+            "phase": phase,
             "outcome": outcome,
             "artifact_dir": str(output),
             "backup_dir": str(backup_dir) if backup_manifest else None,
@@ -593,7 +609,7 @@ def run_phase13f4_2(output: Path | None = None, *, apply: bool = False) -> dict[
             "restore_error": restore_error,
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
-        write_json(output / "phase13f4_2_result.json", result)
+        write_json(output / result_filename, result)
         return result
     finally:
         try:
