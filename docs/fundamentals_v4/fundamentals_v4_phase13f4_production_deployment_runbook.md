@@ -1,6 +1,11 @@
 # Phase 13F.4 Structural Regime Production Deployment Runbook
 
-Status: prepared after Phase 13F.3.4 OUTCOME A.
+Status: attempted on 2026-09-13 and stopped at the mandatory pre-write identity gate.
+
+Phase 13F.4 returned `OUTCOME B - PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED`.
+See `docs/fundamentals_v4/fundamentals_v4_phase13f4_production_deployment.md` for the
+executed record. The runbook remains the required procedure for a later deployment after a
+copy-only verification proves durable structural package/dependency identity.
 
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
@@ -17,8 +22,8 @@ This runbook is intentionally non-executing documentation. It does not authorize
 - Canonical database: `data/fundamentals_v4.db`.
 - Provider database: `data/fundamentals_provider.db`.
 - Analysis database: `data/fundamentals_analysis.db`.
-- Market database: `data/market_data.db`.
-- Taxonomy database: `data/datacenter_taxonomy.db`.
+- Market database: `data/osakedata.db`.
+- Taxonomy database: `data/analysis.db`.
 - Report date: `2026-09-12`, unless a later production prompt explicitly replaces it.
 - Expected current active package family: `OPERATING_INCOME_MODEL_FAMILY_V2`.
 - Expected current active package family fingerprint: `634824f179652da81ea6f38962d9a7c87df37c0627fed089a918ce9efa83d8e9`.
@@ -48,6 +53,14 @@ Verify the candidate being activated matches the Phase 13F.3.4 rehearsal evidenc
 - Relative Valuation refreshed snapshot candidate: `1f360f0b2dfd8e06eaffd3edcffaf87b604e59a63d0b0e272823b46fada02f6b`.
 
 If any fingerprint differs, stop and run a new copy-only rehearsal. Do not activate.
+
+Additional Phase 13F.4 identity gate requirement:
+
+- The persisted package or deterministic package dependencies must name
+  `ECONOMIC_STRUCTURAL_BREAK_CONTRACT_V1`, the structural package fingerprint, the event
+  fingerprint and the structural source/regime fingerprint. Formula/model identities may remain
+  unchanged, but changed structural economics must not be able to masquerade as the prior
+  active package under indistinguishable persisted metadata.
 
 ## Gate 3 - Backup And Rollback
 
