@@ -474,7 +474,7 @@ def _manual_rv_refresh(paths: CandidatePaths, *, output: Path) -> dict[str, Any]
         },
         "first_apply": asdict(first),
         "second_apply": asdict(second),
-        "second_logical_zero_writes": asdict(second)["logical_bulk_writes"] == 0 and asdict(second)["pointer_changes"] == 0,
+        "second_logical_zero_writes": second.logical_bulk_writes == 0 and second.pointer_changes == 0,
         "second_physical_no_change": second_before == second_after,
         "pre_first_inventory": before_second,
         "quick_check": check,

@@ -369,9 +369,22 @@ def validate_candidate_package(conn: sqlite3.Connection) -> dict[str, Any]:
         persistence_fingerprint=PACKAGE_FINGERPRINT,
     )
     rows = persistence.row_counts(conn, diagnostic_model=diagnostic_flags_eight)
-    expected = 50_585
-    if rows["diagnostic_endpoint"] != expected or rows["diagnostic_evaluation"] != expected * 8:
-        raise RuntimeError("PHASE10B_PERSISTED_ROW_COUNT_MISMATCH")
+    expected = {
+        "score_component": rows["score"] * 7,
+        "lifecycle": rows["score"],
+        "valuation": rows["score"],
+        "delta": rows["score"],
+        "delta_component": rows["delta"] * 7,
+        "diagnostic_endpoint": rows["score"],
+        "diagnostic_evaluation": rows["diagnostic_endpoint"] * 8,
+    }
+    mismatches = {
+        name: {"actual": rows[name], "expected": value}
+        for name, value in expected.items()
+        if rows[name] != value
+    }
+    if mismatches:
+        raise RuntimeError("PHASE10B_PERSISTED_ROW_COUNT_MISMATCH:" + json.dumps(mismatches, sort_keys=True))
     duplicates = conn.execute(
         f"SELECT COUNT(*) FROM (SELECT e.package_id,e.company_id,e.fiscal_sequence,v.flag_id,COUNT(*) n "
         f"FROM {diagnostic_v1.ENDPOINT_TABLE} e JOIN {diagnostic_v1.EVALUATION_TABLE} v USING(endpoint_id) "
