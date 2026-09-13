@@ -192,7 +192,7 @@ def validate_production_request(args: Any) -> dict[str, str]:
 def calculate_plan(args: Any) -> tuple[Any, tuple[Any, ...], ProductionPlan]:
     source = load_relative_valuation_source(
         ReadOnlySourcePaths(
-            args.analysis_db, args.canonical_db, args.market_db, args.taxonomy_db
+            args.analysis_db, args.canonical_db, args.market_db, args.taxonomy_db, args.provider_db
         ),
         as_of_date=args.as_of_date,
     )

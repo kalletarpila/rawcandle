@@ -25,6 +25,7 @@ class ReadOnlySourcePaths:
     canonical_db: Path
     market_db: Path
     taxonomy_db: Path
+    provider_db: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -46,13 +47,97 @@ def _readonly(path: Path) -> sqlite3.Connection:
 
 
 def _validate_paths(paths: ReadOnlySourcePaths) -> None:
-    configured = (paths.analysis_db, paths.canonical_db, paths.market_db, paths.taxonomy_db)
+    configured = tuple(
+        path for path in (
+            paths.analysis_db,
+            paths.canonical_db,
+            paths.market_db,
+            paths.taxonomy_db,
+            paths.provider_db,
+        )
+        if path is not None
+    )
     for path in configured:
         if not path.is_file() or path.is_symlink():
             raise FileNotFoundError(path)
     resolved = tuple(path.resolve() for path in configured)
     if len(set(resolved)) != len(resolved):
         raise ValueError("RELATIVE_VALUATION_SOURCE_PATHS_MUST_BE_DISTINCT")
+
+
+def _active_universe_members(canonical_db: Path, as_of_date: str) -> tuple[set[int] | None, dict[str, Any]]:
+    with _readonly(canonical_db) as conn:
+        has_schema = conn.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='fundamentals_operational_universe_active_version'"
+        ).fetchone()
+        if has_schema is None:
+            return None, {"status": "UNIVERSE_SCHEMA_ABSENT_LEGACY_ALLOWED"}
+        active = conn.execute(
+            "SELECT universe_version_id FROM fundamentals_operational_universe_active_version WHERE singleton=1"
+        ).fetchone()
+        if active is None:
+            return None, {"status": "ACTIVE_UNIVERSE_ABSENT_LEGACY_ALLOWED"}
+        rows = [dict(row) for row in conn.execute(
+            "SELECT company_id,security_id,current_ticker,membership_status,effective_start_date,effective_end_date "
+            "FROM fundamentals_operational_universe_member WHERE universe_version_id=? ORDER BY company_id",
+            (active["universe_version_id"],),
+        )]
+    eligible = {
+        int(row["company_id"])
+        for row in rows
+        if str(row["membership_status"]) in {"ACTIVE_SINGLE_SECURITY", "ACTIVE_MULTI_SECURITY"}
+    }
+    return eligible, {
+        "status": "ACTIVE_UNIVERSE_FILTER_APPLIED",
+        "universe_version_id": str(active["universe_version_id"]),
+        "member_rows": len(rows),
+        "eligible_companies": len(eligible),
+    }
+
+
+def _listing_eligibility(
+    paths: ReadOnlySourcePaths, as_of_date: str
+) -> tuple[dict[int, tuple[bool, str]], dict[str, Any]]:
+    with _readonly(paths.canonical_db) as conn:
+        securities = [dict(row) for row in conn.execute(
+            "SELECT security_id,company_id,current_ticker,exchange,active,valid_from,valid_to FROM security ORDER BY security_id"
+        )]
+    provider: dict[str, dict[str, Any]] = {}
+    if paths.provider_db is not None:
+        with _readonly(paths.provider_db) as conn:
+            rows = [dict(row) for row in conn.execute(
+                "SELECT ticker,permaticker,isdelisted,firstpricedate,lastpricedate,lastupdated "
+                "FROM sharadar_ticker_metadata WHERE table_name='fundamentals' ORDER BY ticker,lastupdated DESC"
+            )]
+        for row in rows:
+            provider.setdefault(str(row["ticker"]).upper(), row)
+    eligibility: dict[int, tuple[bool, str]] = {}
+    reason_counts: Counter[str] = Counter()
+    for security in securities:
+        ticker = str(security["current_ticker"]).upper()
+        meta = provider.get(ticker)
+        start = (meta or {}).get("firstpricedate") or security.get("valid_from")
+        end = (meta or {}).get("lastpricedate") if (meta or {}).get("isdelisted") == "Y" else security.get("valid_to")
+        reason = "ELIGIBLE_ON_DATE"
+        eligible = True
+        if start is not None and as_of_date < str(start):
+            eligible, reason = False, "PRELISTING"
+        elif end is not None and as_of_date > str(end):
+            eligible, reason = False, "POST_DELISTING"
+        elif start is None and int(security.get("active") or 0) == 0:
+            eligible, reason = False, "LISTING_START_UNRESOLVED_FOR_INACTIVE_SECURITY"
+        elif int(security.get("active") or 0) == 0 and end is None and meta is None:
+            eligible, reason = False, "LISTING_INTERVAL_UNRESOLVED_FOR_INACTIVE_SECURITY"
+        eligibility[int(security["security_id"])] = (eligible, reason)
+        reason_counts[reason] += 1
+    return eligibility, {
+        "status": "PROVIDER_METADATA_APPLIED" if paths.provider_db is not None else "CANONICAL_SECURITY_DATES_ONLY",
+        "as_of_date": as_of_date,
+        "security_count": len(securities),
+        "provider_metadata_tickers": len(provider),
+        "eligible_securities": sum(1 for eligible, _ in eligibility.values() if eligible),
+        "reason_counts": dict(sorted(reason_counts.items())),
+    }
 
 
 def _bars(connection: sqlite3.Connection, ticker: str, as_of_date: str) -> tuple[valuation.PriceBar, ...]:
@@ -97,6 +182,8 @@ def load_relative_valuation_source(
     identity = peer_source.build_identity_index(paths.canonical_db)
     classifications, classification_fp = peer_source._classification_source(paths.market_db)
     memberships, taxonomy_audit, taxonomy_fp, taxonomy_metadata = peer_source._taxonomy_source(paths.taxonomy_db, identity)
+    universe_members, universe_metadata = _active_universe_members(paths.canonical_db, as_of_date)
+    security_eligibility, listing_metadata = _listing_eligibility(paths, as_of_date)
     with _readonly(paths.analysis_db) as analysis:
         assert_v2_active(analysis)
         valuation_rows = [_strip_filing_valuation_run_metadata(dict(row)) for row in analysis.execute(
@@ -132,10 +219,24 @@ def load_relative_valuation_source(
 
     inputs = []
     classification_counts: Counter[str] = Counter()
+    exclusion_counts: Counter[str] = Counter()
     with _readonly(paths.market_db) as market:
         for company_id, anchor in sorted(latest_ttm.items()):
             source_security_id = int(anchor["security_id"]) if anchor.get("security_id") is not None else None
             _, security_id, ticker = peer_source.resolve_observation_security(identity, company_id, source_security_id)
+            if universe_members is not None and company_id not in universe_members:
+                exclusion_counts["NOT_ACTIVE_OPERATIONAL_UNIVERSE_MEMBER"] += 1
+                continue
+            if security_id is None:
+                exclusion_counts["SECURITY_ID_UNRESOLVED"] += 1
+                continue
+            security_eligible, security_reason = security_eligibility.get(
+                int(security_id),
+                (False, "SECURITY_LISTING_INTERVAL_MISSING"),
+            )
+            if not security_eligible:
+                exclusion_counts[security_reason] += 1
+                continue
             classification = peer_source.resolve_classification(classifications, identity, company_id, security_id, ticker)
             classification_counts[classification.status] += 1
             histories = history_by_company.get(company_id, [])
@@ -217,6 +318,9 @@ def load_relative_valuation_source(
         "taxonomy": taxonomy_metadata,
         "taxonomy_audit_rows": len(taxonomy_audit),
         "classification_resolution_counts": dict(sorted(classification_counts.items())),
+        "operational_universe": universe_metadata,
+        "listing_eligibility": listing_metadata,
+        "excluded_input_counts": dict(sorted(exclusion_counts.items())),
     }
     return RelativeValuationSource(
         inputs=tuple(inputs),

@@ -441,7 +441,7 @@ def _valuation_classification_update(analysis_db: Path, market_db: Path, canonic
 
 def _manual_rv_refresh(paths: CandidatePaths, *, output: Path) -> dict[str, Any]:
     source = load_relative_valuation_source(
-        RVSourcePaths(paths.analysis_db, paths.canonical_db, PRODUCTION["market"], paths.taxonomy_db),
+        RVSourcePaths(paths.analysis_db, paths.canonical_db, PRODUCTION["market"], paths.taxonomy_db, paths.provider_db),
         as_of_date=REPORT_DATE,
     )
     snapshot = calculate_relative_valuation(
