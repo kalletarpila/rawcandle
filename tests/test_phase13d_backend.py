@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from rawcandle.fundamentals import phase13d_backend
 from rawcandle.fundamentals.phase13d_backend import (
     Phase13DPaths,
     apply_taxonomy_preview,
@@ -101,10 +102,13 @@ def test_ticker_preview_is_read_only_and_classifies_evidence(tmp_path: Path) -> 
     assert paths.canonical_db.stat().st_mtime_ns == before
 
 
-def test_ticker_apply_rebuilds_copy_dependencies_and_second_apply_no_changes(tmp_path: Path) -> None:
+def test_ticker_apply_rebuilds_copy_dependencies_and_second_apply_no_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     paths = _paths(tmp_path)
     preview = build_ticker_preview(paths, "NEWC", now="2026-09-12T10:00:00Z")
     preview_path = _write(tmp_path / "preview.json", preview)
+    monkeypatch.setattr(phase13d_backend, "utc_now", lambda: "2026-09-12T11:00:00Z")
 
     dry = apply_ticker_preview(
         paths,
@@ -132,10 +136,13 @@ def test_ticker_apply_rebuilds_copy_dependencies_and_second_apply_no_changes(tmp
         assert conn.execute("SELECT COUNT(*) FROM security WHERE current_ticker='NEWC'").fetchone()[0] == 1
 
 
-def test_ticker_apply_failure_restores_all_copies(tmp_path: Path) -> None:
+def test_ticker_apply_failure_restores_all_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     paths = _paths(tmp_path)
     preview = build_ticker_preview(paths, "NEWC", now="2026-09-12T10:00:00Z")
     preview_path = _write(tmp_path / "preview.json", preview)
+    monkeypatch.setattr(phase13d_backend, "utc_now", lambda: "2026-09-12T11:00:00Z")
 
     with pytest.raises(RuntimeError, match="PHASE13D_INJECTED_AFTER_IDENTITY"):
         apply_ticker_preview(

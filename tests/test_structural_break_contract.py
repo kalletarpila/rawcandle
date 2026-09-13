@@ -182,3 +182,132 @@ def test_period_after_material_event_without_period_start_is_unresolved(tmp_path
     assert tuple(row) == ("UNRESOLVED", "UNRESOLVED_FISCAL_BOUNDARY")
     assert tuple(ttm) == ("STRUCTURAL_NOT_READY", "UNRESOLVED_FISCAL_BOUNDARY")
 
+
+def test_availability_after_event_does_not_reclassify_pre_event_period(tmp_path: Path) -> None:
+    db = tmp_path / "canonical.db"
+    _schema(db)
+    structural_break.apply_contract(
+        db,
+        events=[
+            {
+                "successor_ticker": "VMRK",
+                "event_type": "MAJOR_BUSINESS_COMBINATION",
+                "event_date": "2026-07-15",
+                "comparability_status": "MAJOR_BUSINESS_COMBINATION",
+                "review_status": "ACCEPTED",
+                "provider": "SHARADAR",
+                "provider_security_id": "197624",
+                "reason": "event after Q2 period end but before Q2 filing availability",
+                "evidence": {},
+            }
+        ],
+        applied_at_utc="2026-09-13T00:00:00Z",
+    )
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        q2 = conn.execute(
+            f"SELECT economic_regime,regime_reason FROM {structural_break.QUARTER_TABLE} WHERE quarter_id=104"
+        ).fetchone()
+        ttm = conn.execute(
+            f"SELECT ttm_regime_status,regime_reason FROM {structural_break.TTM_TABLE} WHERE ttm_id=1001"
+        ).fetchone()
+        eligibility, _ = structural_break.latest_ttm_eligibility(conn, as_of_date="2026-09-12")
+
+    assert tuple(q2) == ("PRE_EVENT", "PERIOD_END_BEFORE_EVENT")
+    assert tuple(ttm) == ("PRE_EVENT_COHERENT", "FOUR_PRE_EVENT_INPUT_QUARTERS")
+    assert eligibility[1].eligible is False
+    assert eligibility[1].reason_code == "CURRENT_REPORT_REQUIRES_POST_EVENT_CLEAN_TTM"
+
+
+def test_boundary_events_fail_closed_without_period_start(tmp_path: Path) -> None:
+    for event_date in ("2026-06-29", "2026-06-30"):
+        db = tmp_path / f"canonical-{event_date}.db"
+        _schema(db)
+        structural_break.apply_contract(
+            db,
+            events=[
+                {
+                    "successor_ticker": "VMRK",
+                    "event_type": "MAJOR_BUSINESS_COMBINATION",
+                    "event_date": event_date,
+                    "comparability_status": "MAJOR_BUSINESS_COMBINATION",
+                    "review_status": "ACCEPTED",
+                    "provider": "SHARADAR",
+                    "provider_security_id": "197624",
+                    "reason": "boundary event",
+                    "evidence": {},
+                }
+            ],
+            applied_at_utc="2026-09-13T00:00:00Z",
+        )
+        with sqlite3.connect(db) as conn:
+            q2 = conn.execute(
+                f"SELECT economic_regime,regime_reason FROM {structural_break.QUARTER_TABLE} WHERE quarter_id=104"
+            ).fetchone()
+            ttm = conn.execute(
+                f"SELECT ttm_regime_status,regime_reason FROM {structural_break.TTM_TABLE} WHERE ttm_id=1001"
+            ).fetchone()
+        assert tuple(q2) == ("UNRESOLVED", "UNRESOLVED_FISCAL_BOUNDARY")
+        assert tuple(ttm) == ("STRUCTURAL_NOT_READY", "UNRESOLVED_FISCAL_BOUNDARY")
+
+
+def test_missing_event_date_and_no_event_companies_fail_safely(tmp_path: Path) -> None:
+    db = tmp_path / "canonical.db"
+    _schema(db)
+    structural_break.apply_contract(
+        db,
+        events=[
+            {
+                "successor_ticker": "VMRK",
+                "event_type": "UNRESOLVED_EVENT_DATE",
+                "event_date": None,
+                "comparability_status": "UNRESOLVED_EVENT_DATE",
+                "review_status": "REVIEW_REQUIRED",
+                "provider": "SHARADAR",
+                "provider_security_id": "197624",
+                "reason": "missing event date",
+                "evidence": {},
+            }
+        ],
+        applied_at_utc="2026-09-13T00:00:00Z",
+    )
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        eligibility, metadata = structural_break.latest_ttm_eligibility(conn, as_of_date="2026-09-12")
+
+    assert eligibility[1].eligible is False
+    assert eligibility[1].reason_code == "UNRESOLVED_EVENT_DATE"
+    assert 2 not in eligibility
+    assert metadata["eligibility_reason_counts"] == {"UNRESOLVED_EVENT_DATE": 1}
+
+
+def test_no_fixed_90_day_clean_quarter_inference(tmp_path: Path) -> None:
+    db = tmp_path / "canonical.db"
+    _schema(db)
+    structural_break.apply_contract(
+        db,
+        events=[
+            {
+                "successor_ticker": "VMRK",
+                "event_type": "MAJOR_BUSINESS_COMBINATION",
+                "event_date": "2026-07-01",
+                "comparability_status": "MAJOR_BUSINESS_COMBINATION",
+                "review_status": "ACCEPTED",
+                "provider": "SHARADAR",
+                "provider_security_id": "197624",
+                "reason": "no fixed-day inference",
+                "evidence": {},
+            }
+        ],
+        applied_at_utc="2026-09-13T00:00:00Z",
+    )
+    with sqlite3.connect(db) as conn:
+        q3 = conn.execute(
+            f"SELECT economic_regime,regime_reason FROM {structural_break.QUARTER_TABLE} WHERE quarter_id=105"
+        ).fetchone()
+        ttm = conn.execute(
+            f"SELECT ttm_regime_status,regime_reason FROM {structural_break.TTM_TABLE} WHERE ttm_id=1002"
+        ).fetchone()
+
+    assert tuple(q3) == ("UNRESOLVED", "UNRESOLVED_FISCAL_BOUNDARY")
+    assert tuple(ttm) == ("STRUCTURAL_NOT_READY", "UNRESOLVED_FISCAL_BOUNDARY")
