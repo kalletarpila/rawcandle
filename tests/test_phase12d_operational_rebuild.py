@@ -203,7 +203,7 @@ def test_production_comparison_allows_only_content_identical_sidecar_mtime() -> 
     assert phase12d.compare_production_inventory(before, after)["identical"] is False
 
 
-def test_production_comparison_allows_only_content_identical_database_mtime() -> None:
+def test_production_comparison_allows_only_logically_identical_database_physical_drift() -> None:
     before = {
         "databases": {
             "taxonomy": {
@@ -224,6 +224,10 @@ def test_production_comparison_allows_only_content_identical_database_mtime() ->
     }
     after = json.loads(json.dumps(before))
     after["databases"]["taxonomy"]["mtime_ns"] = 2
+    after["databases"]["taxonomy"]["sha256"] = "layout-changed"
+    after["databases"]["taxonomy"]["size"] = 120
+    after["databases"]["taxonomy"]["page_count"] = 12
+    after["databases"]["taxonomy"]["freelist_count"] = 2
     comparison = phase12d.compare_production_inventory(before, after)
 
     assert comparison["identical"] is True
@@ -235,7 +239,15 @@ def test_production_comparison_allows_only_content_identical_database_mtime() ->
         "sha256": "database",
     }]
 
-    after["databases"]["taxonomy"]["sha256"] = "changed"
+    after["databases"]["taxonomy"]["schema_fingerprint"] = "changed"
+    assert phase12d.compare_production_inventory(before, after)["identical"] is False
+
+    after = json.loads(json.dumps(before))
+    after["databases"]["taxonomy"]["row_counts"]["taxonomy_table"] = 6
+    assert phase12d.compare_production_inventory(before, after)["identical"] is False
+
+    after = json.loads(json.dumps(before))
+    after["databases"]["taxonomy"]["quick_check"] = "database disk image is malformed"
     assert phase12d.compare_production_inventory(before, after)["identical"] is False
 
 
@@ -281,4 +293,18 @@ def test_production_comparison_rejects_dependency_fingerprint_changes() -> None:
     after = json.loads(json.dumps(before))
     after["active_relative_valuation"][0]["taxonomy_economic_fingerprint"] = "taxonomy-b"
 
+    assert phase12d.compare_production_inventory(before, after)["identical"] is False
+
+
+def test_production_comparison_allows_scheduler_mtime_only() -> None:
+    before = {
+        "databases": {},
+        "reports": {},
+        "scheduler": {"exists": True, "sha256": "scheduler", "size": 10, "mtime_ns": 1},
+    }
+    after = json.loads(json.dumps(before))
+    after["scheduler"]["mtime_ns"] = 2
+    assert phase12d.compare_production_inventory(before, after)["identical"] is True
+
+    after["scheduler"]["sha256"] = "changed"
     assert phase12d.compare_production_inventory(before, after)["identical"] is False

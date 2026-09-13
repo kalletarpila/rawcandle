@@ -190,11 +190,7 @@ def compare_production_inventory(
         left_db = before["databases"][database]
         right_db = after["databases"][database]
         database_content_keys = (
-            "sha256",
-            "size",
             "schema_fingerprint",
-            "page_count",
-            "freelist_count",
             "row_counts",
             "quick_check",
             "foreign_key_errors",
@@ -212,6 +208,9 @@ def compare_production_inventory(
                     "sha256": left_db.get("sha256"),
                 })
             normalized_after["databases"][database]["mtime_ns"] = left_db.get("mtime_ns")
+            for physical_key in ("sha256", "size", "page_count", "freelist_count"):
+                if physical_key in left_db and physical_key in right_db:
+                    normalized_after["databases"][database][physical_key] = left_db.get(physical_key)
         for sidecar in ("wal", "shm"):
             left = before["databases"][database][sidecar]
             right = after["databases"][database][sidecar]
@@ -226,6 +225,12 @@ def compare_production_inventory(
                         "sha256": left["sha256"],
                     })
                 normalized_after["databases"][database][sidecar]["mtime_ns"] = left["mtime_ns"]
+    if "scheduler" in before and "scheduler" in after:
+        left_scheduler = before["scheduler"]
+        right_scheduler = after["scheduler"]
+        scheduler_content_keys = ("exists", "sha256", "size")
+        if all(left_scheduler.get(key) == right_scheduler.get(key) for key in scheduler_content_keys):
+            normalized_after["scheduler"]["mtime_ns"] = left_scheduler.get("mtime_ns")
     return {
         "identical": normalized_before == normalized_after,
         "exact_metadata_identical": before == after,

@@ -55,6 +55,19 @@ content-identical main database `mtime_ns` drift as metadata-only, matching the 
 content-identical WAL/SHM mtime handling. No second Phase 13F.4.7 production attempt was made. See
 `docs/fundamentals_v4/fundamentals_v4_phase13f4_7_production_activation.md`.
 
+Phase 13F.4.8 simplified acceptance to five blocking gates: accepted economic results, independent
+logical idempotency, correct active package/dependency/RV identities, database integrity and working
+Snapshot readers. Raw SQLite file SHA, file mtime, page-layout/allocation differences,
+content-identical WAL/SHM timestamp drift and run-local audit timestamps are audit evidence, not
+deployment blockers, when normalized logical content and active identities are unchanged. The
+attempt again activated the accepted package/RV in the first pass and returned logical `NO_CHANGE`
+in the second pass, but the legacy runner still failed the inventory gate before the last
+physical-layout normalization was in place and restored the writable set from fresh Phase 13F.4.8
+backups. A post-attempt comparator correction now treats raw database SHA, size, page count and
+freelist drift as nonblocking when schema, row counts and integrity are unchanged. No second
+Phase 13F.4.8 production attempt was made. See
+`docs/fundamentals_v4/fundamentals_v4_phase13f4_8_simplified_activation.md`.
+
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
 ## Preconditions
