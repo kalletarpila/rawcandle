@@ -151,6 +151,40 @@ def _continuous_chain(rows: Mapping[int, Mapping[str, Any]], start: int, end: in
     return all(ordinal in rows for ordinal in range(start, end + 1))
 
 
+def _structural_regime(row: Mapping[str, Any] | None) -> str | None:
+    if row is None:
+        return None
+    value = row.get("structural_regime_id")
+    return str(value) if value not in {None, ""} else None
+
+
+def _structural_ready(row: Mapping[str, Any] | None) -> bool:
+    if row is None:
+        return False
+    status = row.get("structural_readiness_status")
+    return status in {None, "", "STRUCTURAL_READY"}
+
+
+def _same_structural_regime(current: Mapping[str, Any], other: Mapping[str, Any] | None) -> bool:
+    if other is None:
+        return False
+    current_regime = _structural_regime(current)
+    other_regime = _structural_regime(other)
+    if current_regime is None and other_regime is None:
+        return True
+    return current_regime == other_regime and _structural_ready(current) and _structural_ready(other)
+
+
+def _structural_chain_ok(rows: Mapping[int, Mapping[str, Any]], start: int, end: int) -> bool:
+    window = [rows.get(ordinal) for ordinal in range(start, end + 1)]
+    if any(row is None for row in window):
+        return False
+    regimes = {_structural_regime(row) for row in window}
+    if regimes == {None}:
+        return True
+    return len(regimes) == 1 and all(_structural_ready(row) for row in window)
+
+
 def _metric_levels(row: Mapping[str, Any], previous_year: Mapping[str, Any] | None, chain_ok: bool) -> dict[str, float | None]:
     revenue = _number(row.get("ttm_revenue"))
     ebit = _number(row.get("ttm_ebit"))
@@ -210,6 +244,8 @@ def trajectory_points(
     if any(row is None for row in window):
         return None, {**base_evidence, "blocker": "NON_CONTIGUOUS_FIVE_SNAPSHOT_WINDOW"}
     snapshots = [row for row in window if row is not None]
+    if not _structural_chain_ok(rows_by_ordinal, endpoint_ordinal - 4, endpoint_ordinal):
+        return None, {**base_evidence, "blocker": "STRUCTURAL_REGIME_INCOMPATIBLE"}
     if any(int(row.get("core_ttm_ready") or 0) != 1 for row in snapshots):
         return None, {**base_evidence, "blocker": "WINDOW_TTM_NOT_CORE_READY"}
     if any(_number(row.get("ttm_revenue")) is None or float(row["ttm_revenue"]) <= 0.0 for row in snapshots):
@@ -274,17 +310,28 @@ def compute_score_rows(
         levels: dict[int, dict[str, float | None]] = {}
         for row in ordered:
             ordinal = fiscal_ordinal(row["endpoint_fiscal_year"], row["endpoint_fiscal_quarter"])
-            levels[ordinal] = _metric_levels(row, by_ordinal.get(ordinal - 4), _continuous_chain(by_ordinal, ordinal - 4, ordinal))
+            chain_ok = (
+                _continuous_chain(by_ordinal, ordinal - 4, ordinal)
+                and _structural_chain_ok(by_ordinal, ordinal - 4, ordinal)
+            )
+            levels[ordinal] = _metric_levels(row, by_ordinal.get(ordinal - 4), chain_ok)
 
         for row in ordered:
             ordinal = fiscal_ordinal(row["endpoint_fiscal_year"], row["endpoint_fiscal_quarter"])
             previous_year = by_ordinal.get(ordinal - 4)
             previous_quarter = by_ordinal.get(ordinal - 1)
-            chain_ok = _continuous_chain(by_ordinal, ordinal - 4, ordinal)
+            chain_ok = (
+                _continuous_chain(by_ordinal, ordinal - 4, ordinal)
+                and _structural_chain_ok(by_ordinal, ordinal - 4, ordinal)
+            )
             current = levels[ordinal]
             shares = _number(row.get("shares_outstanding"))
             previous_shares = _number(previous_year.get("shares_outstanding")) if previous_year and chain_ok else None
-            prior_quarter_shares = _number(previous_quarter.get("shares_outstanding")) if previous_quarter else None
+            prior_quarter_shares = (
+                _number(previous_quarter.get("shares_outstanding"))
+                if _same_structural_regime(row, previous_quarter)
+                else None
+            )
             share_change_yoy = safe_growth(shares, previous_shares)
             share_change_qoq = safe_growth(shares, prior_quarter_shares)
             ticker = str(row["ticker"])
@@ -310,7 +357,24 @@ def compute_score_rows(
                 "FUNDAMENTAL_TRAJECTORY": _evidence(metric="fundamental_trajectory_points", value=trajectory, inputs={"window": "five_contiguous_ttm_snapshots", "transition_count": 4}, observed=trajectory is not None, extra=trajectory_evidence),
             }
 
-            current_ready = int(row.get("core_ttm_ready") or 0) == 1 and bool(row.get("ttm_source_available_date"))
+            structural_ready = _structural_ready(row)
+            structural_reason = row.get("structural_reason_code")
+            if not structural_ready:
+                for name in COMPONENTS:
+                    scores[name] = None
+                    evidence[name] = {
+                        **evidence[name],
+                        "value_status": "STRUCTURAL_NOT_READY",
+                        "structural_readiness_status": row.get("structural_readiness_status"),
+                        "structural_reason_code": structural_reason,
+                        "structural_regime_id": row.get("structural_regime_id"),
+                    }
+
+            current_ready = (
+                int(row.get("core_ttm_ready") or 0) == 1
+                and bool(row.get("ttm_source_available_date"))
+                and structural_ready
+            )
             imputed_components: list[str] = []
 
             missing = [name for name in COMPONENTS if scores[name] is None]
@@ -337,6 +401,13 @@ def compute_score_rows(
                 "ttm_core_ready": bool(row.get("core_ttm_ready")),
                 "ttm_source_available_date": row.get("ttm_source_available_date"),
             }
+            if row.get("structural_readiness_status") is not None:
+                status_detail.update({
+                    "structural_readiness_status": row.get("structural_readiness_status"),
+                    "structural_reason_code": structural_reason,
+                    "structural_regime_id": row.get("structural_regime_id"),
+                    "structural_contract_fingerprint": row.get("structural_contract_fingerprint"),
+                })
             output.append({
                 "company_id": int(row["company_id"]),
                 "quarter_id": int(row["endpoint_quarter_id"]),

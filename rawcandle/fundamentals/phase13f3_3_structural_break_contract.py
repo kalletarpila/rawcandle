@@ -4,6 +4,7 @@ import json
 import shutil
 import sqlite3
 import time
+import traceback
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping
@@ -203,7 +204,7 @@ def _copy_rehearsal(output: Path, lane: str, source: Mapping[str, Any]) -> dict[
         write_json(lane_dir / "rehearsal_result.json", result)
         return result
     except BaseException as exc:
-        result["failure"] = {"type": type(exc).__name__, "message": str(exc)}
+        result["failure"] = {"type": type(exc).__name__, "message": str(exc), "traceback": traceback.format_exc()}
         write_json(lane_dir / "rehearsal_failure.json", result)
         raise
     finally:

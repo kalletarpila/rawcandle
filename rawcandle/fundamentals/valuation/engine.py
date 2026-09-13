@@ -369,6 +369,17 @@ def calculate_valuation(
         return _result(observation, valuation_status="VALUATION_NOT_READY", reason_code=applicability.reason_code)
 
     blocker_set = set(observation.ttm_blocker_codes)
+    structural_blockers = {
+        "STRUCTURAL_REGIME_NOT_READY",
+        "CURRENT_REPORT_REQUIRES_POST_EVENT_CLEAN_TTM",
+        "TTM_INPUTS_CROSS_ECONOMIC_REGIME",
+        "UNRESOLVED_FISCAL_BOUNDARY",
+        "UNRESOLVED_EVENT_DATE",
+        "BUSINESS_COMPARABILITY_REVIEW_REQUIRED",
+    }
+    structural_reason = next((reason for reason in observation.ttm_blocker_codes if reason in structural_blockers), None)
+    if structural_reason is not None:
+        return _result(observation, valuation_status="VALUATION_NOT_READY", reason_code=structural_reason)
     if {"TTM_NON_CONTIGUOUS_WINDOW", "TTM_FISCAL_SEQUENCE_BLOCKED"} & blocker_set:
         return _result(observation, valuation_status="VALUATION_NOT_READY", reason_code="INVALID_FISCAL_CHAIN")
     if observation.ttm_readiness_status != "TTM_READY":

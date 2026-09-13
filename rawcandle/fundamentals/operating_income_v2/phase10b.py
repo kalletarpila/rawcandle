@@ -99,6 +99,7 @@ def calculate(
     paths: Mapping[str, Path], *, verify_v1_overlap: bool = True
 ) -> dict[str, Any]:
     calculated = rehearsal.calculate(paths, verify_v1_overlap=verify_v1_overlap)
+    structural_applied = calculated.get("structural_metadata", {}).get("status") == "STRUCTURAL_CONTRACT_APPLIED"
     input_audit = _ttm_input_audit(paths["canonical"])
     rows = calculated["rows"]
     ttm_by_key = {
@@ -175,6 +176,7 @@ def calculate(
         source_payload.append(asdict(current))
         consecutive = bool(
             prior_source
+            and rehearsal._same_structural_regime(row, prior_source)
             and str(prior_source["period_end"]) < str(row["period_end"])
             and prior_source.get("ttm_source_available_date")
             and row.get("ttm_source_available_date")
@@ -182,6 +184,7 @@ def calculate(
         )
         canonical_consecutive = bool(
             prior_source
+            and rehearsal._same_structural_regime(row, prior_source)
             and str(prior_source["period_end"]) < str(row["period_end"])
             and prior_source.get("quarter_source_available_date")
             and row.get("quarter_source_available_date")
@@ -206,7 +209,7 @@ def calculate(
                 "model_version": result.model_version,
                 "model_fingerprint": result.model_fingerprint,
             }
-            if result.flag_name in diagnostic_flags.FLAG_NAMES:
+            if result.flag_name in diagnostic_flags.FLAG_NAMES and not structural_applied:
                 old = old_by_key[(key[0], key[1], result.flag_name)]
                 for field in ("flag_name", "status", "reason_code", "triggered", "comparison_quarter_id", "effective_available_date", "evidence"):
                     if item[field] != old[field]:

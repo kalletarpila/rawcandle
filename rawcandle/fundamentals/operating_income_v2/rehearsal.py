@@ -16,6 +16,7 @@ from rawcandle.fundamentals.score.engine import MODEL_FINGERPRINT as SCORE_V1_FI
 from rawcandle.fundamentals.lifecycle.engine import MODEL_FINGERPRINT as LIFECYCLE_V1_FINGERPRINT
 from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_V1_FINGERPRINT
 from rawcandle.fundamentals.valuation.persistence import load_canonical_source as load_valuation_source
+from rawcandle.fundamentals import structural_break
 
 from . import delta, diagnostic_flags, lifecycle, relative_position, score, snapshot, valuation
 from .contract import FAMILY_FINGERPRINT, TTM_MODEL_VERSION, fingerprint
@@ -102,6 +103,126 @@ def _load_ttm(canonical: Path) -> list[dict[str, Any]]:
         """)]
 
 
+def _load_structural_context(canonical: Path) -> tuple[dict[int, dict[str, Any]], dict[str, Any]]:
+    with _ro(canonical) as connection:
+        if not structural_break.has_structural_contract(connection):
+            return {}, {
+                "status": "STRUCTURAL_CONTRACT_ABSENT_LEGACY_ALLOWED",
+                "fingerprint": None,
+                "ttm_regime_counts": {},
+            }
+        rows = [
+            dict(row)
+            for row in connection.execute(
+                f"""
+                SELECT r.ttm_id,r.event_id,r.company_id,r.endpoint_quarter_id,
+                       r.ttm_regime_status,r.regime_reason,r.input_regimes_json,
+                       r.same_regime_observation_count,r.regime_fingerprint,
+                       e.event_type,e.event_date,e.comparability_status,e.review_status
+                  FROM {structural_break.TTM_TABLE} r
+                  JOIN {structural_break.EVENT_TABLE} e USING(event_id)
+                 ORDER BY r.company_id,r.endpoint_quarter_id,r.ttm_id
+                """
+            )
+        ]
+        return {int(row["ttm_id"]): row for row in rows}, {
+            "status": "STRUCTURAL_CONTRACT_APPLIED",
+            "contract_version": structural_break.CONTRACT_VERSION,
+            "fingerprint": structural_break.contract_fingerprint(connection),
+            "ttm_regime_counts": dict(sorted(Counter(row["ttm_regime_status"] for row in rows).items())),
+        }
+
+
+def _append_blocker_codes(row: Mapping[str, Any], *codes: str) -> str:
+    try:
+        existing = list(json.loads(str(row.get("blocker_codes_json") or "[]")))
+    except json.JSONDecodeError:
+        existing = []
+    for code in codes:
+        if code and code not in existing:
+            existing.append(code)
+    return json.dumps(existing, sort_keys=True, separators=(",", ":"))
+
+
+def _structural_row_ready(context: Mapping[str, Any]) -> bool:
+    status = structural_break.normalize_status(str(context.get("comparability_status") or ""))
+    regime = str(context.get("ttm_regime_status") or "UNRESOLVED")
+    if status in structural_break.CONTINUOUS_STATUSES:
+        return True
+    return regime in {"PRE_EVENT_COHERENT", "POST_EVENT_COHERENT"}
+
+
+def _annotate_structural_rows(
+    rows: Sequence[Mapping[str, Any]], canonical: Path
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    context_by_ttm, metadata = _load_structural_context(canonical)
+    if not context_by_ttm:
+        return [dict(row) for row in rows], metadata
+    annotated: list[dict[str, Any]] = []
+    readiness_counts: Counter[str] = Counter()
+    reason_counts: Counter[str] = Counter()
+    for source in rows:
+        row = dict(source)
+        context = context_by_ttm.get(int(row["ttm_id"]))
+        if context is None:
+            row.update({
+                "structural_contract_version": structural_break.CONTRACT_VERSION,
+                "structural_contract_fingerprint": metadata["fingerprint"],
+                "structural_readiness_status": "STRUCTURAL_READY",
+                "structural_reason_code": "NO_STRUCTURAL_EVENT",
+                "structural_regime_status": "NO_STRUCTURAL_EVENT",
+                "structural_regime_id": f"NO_EVENT:{row['company_id']}",
+            })
+        else:
+            ready = _structural_row_ready(context)
+            regime_status = str(context.get("ttm_regime_status") or "UNRESOLVED")
+            reason = "STRUCTURAL_READY" if ready else str(context.get("regime_reason") or regime_status)
+            row.update({
+                "structural_contract_version": structural_break.CONTRACT_VERSION,
+                "structural_contract_fingerprint": metadata["fingerprint"],
+                "structural_event_id": context["event_id"],
+                "structural_event_type": context["event_type"],
+                "structural_event_date": context["event_date"],
+                "structural_comparability_status": structural_break.normalize_status(str(context["comparability_status"])),
+                "structural_readiness_status": "STRUCTURAL_READY" if ready else "STRUCTURAL_NOT_READY",
+                "structural_reason_code": reason,
+                "structural_regime_status": regime_status,
+                "structural_regime_id": structural_break.stable_hash({
+                    "event_id": context["event_id"],
+                    "ttm_regime_status": regime_status,
+                    "comparability_status": structural_break.normalize_status(str(context["comparability_status"])),
+                }),
+                "structural_regime_fingerprint": context["regime_fingerprint"],
+                "structural_input_regimes_json": context["input_regimes_json"],
+            })
+            if not ready:
+                row["core_ttm_ready"] = 0
+                row["readiness_status"] = "STRUCTURAL_NOT_READY"
+                row["blocker_codes_json"] = _append_blocker_codes(row, "STRUCTURAL_REGIME_NOT_READY", reason)
+        readiness_counts[str(row["structural_readiness_status"])] += 1
+        reason_counts[str(row["structural_reason_code"])] += 1
+        annotated.append(row)
+    return annotated, {
+        **metadata,
+        "structural_readiness_counts": dict(sorted(readiness_counts.items())),
+        "structural_reason_counts": dict(sorted(reason_counts.items())),
+    }
+
+
+def _same_structural_regime(current: Mapping[str, Any], other: Mapping[str, Any] | None) -> bool:
+    if other is None:
+        return False
+    current_regime = current.get("structural_regime_id")
+    other_regime = other.get("structural_regime_id")
+    if current_regime is None and other_regime is None:
+        return True
+    return (
+        current_regime == other_regime
+        and current.get("structural_readiness_status") == "STRUCTURAL_READY"
+        and other.get("structural_readiness_status") == "STRUCTURAL_READY"
+    )
+
+
 def _load_quarter_revenues(canonical: Path, rows: Sequence[Mapping[str, Any]]) -> dict[int, tuple[float | None, ...]]:
     with _ro(canonical) as connection:
         values = {int(row[0]): row[1] for row in connection.execute("SELECT quarter_id,revenue FROM v4_quarter_financials")}
@@ -160,7 +281,11 @@ def _diagnostic_endpoint(
         source_available_date=source["quarter_source_available_date"],
         ttm_available_date=source["ttm_source_available_date"],
         valuation_available_date=source["ttm_source_available_date"],
-        ttm_status="TTM_READY" if source.get("core_ttm_ready") else "TTM_NOT_READY",
+        ttm_status=(
+            "TTM_READY"
+            if source.get("core_ttm_ready")
+            else str(source.get("readiness_status") or source.get("structural_reason_code") or "TTM_NOT_READY")
+        ),
         revenue=source.get("ttm_revenue"),
         operating_income=source.get("ttm_operating_income"),
         common_earnings=source.get("ttm_net_income_common"),
@@ -204,9 +329,18 @@ def _lifecycle(rows: Sequence[Mapping[str, Any]], revenues: Mapping[int, tuple[f
     output = {}
     for company_id, history in sorted(grouped.items()):
         state = lifecycle.LifecycleMachineState()
+        previous_regime: str | None = None
         for sequence, row in sorted(history.items()):
             lag = history.get(sequence - 4)
-            chain = lag is not None and all(value in history for value in range(sequence - 4, sequence + 1))
+            regime = row.get("structural_regime_id")
+            if regime is not None and previous_regime is not None and regime != previous_regime:
+                state = lifecycle.LifecycleMachineState()
+            previous_regime = str(regime) if regime is not None else previous_regime
+            chain = (
+                lag is not None
+                and all(value in history for value in range(sequence - 4, sequence + 1))
+                and all(_same_structural_regime(row, history[value]) for value in range(sequence - 4, sequence + 1))
+            )
             observation = lifecycle.LifecycleObservation(
                 company_id, int(row["endpoint_quarter_id"]), int(row["endpoint_fiscal_year"]),
                 str(row["endpoint_fiscal_quarter"]), str(row["period_end"]), row.get("ttm_source_available_date"),
@@ -269,13 +403,24 @@ def _score_delta_observation(row: Mapping[str, Any], ttm: Mapping[str, Any]) -> 
     fiscal = delta.FiscalObservation(str(ttm["endpoint_quarter_id"]), int(ttm["company_id"]), int(ttm["endpoint_fiscal_year"]), str(ttm["endpoint_fiscal_quarter"]), sequence, str(ttm["period_end"]), str(ttm["ttm_source_available_date"]))
     maxima = dict(zip(score.COMPONENTS, (20.0, 15.0, 15.0, 15.0, 15.0, 10.0, 10.0)))
     components = tuple(delta.ScoreComponentObservation(item["component_name"], item["component_score"], maxima[item["component_name"]], "OBSERVED" if item["component_score"] is not None else "MISSING") for item in row["components"])
-    return delta.ScoreObservation(fiscal, int(ttm["endpoint_quarter_id"]), score.MODEL_VERSION, score.MODEL_FINGERPRINT, row["total_score"], row["readiness_status"], "TTM_READY" if ttm.get("core_ttm_ready") else "TTM_NOT_READY", components)
+    return delta.ScoreObservation(
+        fiscal,
+        int(ttm["endpoint_quarter_id"]),
+        score.MODEL_VERSION,
+        score.MODEL_FINGERPRINT,
+        row["total_score"],
+        row["readiness_status"],
+        "TTM_READY" if ttm.get("core_ttm_ready") else str(ttm.get("readiness_status") or "TTM_NOT_READY"),
+        components,
+    )
 
 
 def calculate(
     paths: Mapping[str, Path], *, verify_v1_overlap: bool = True
 ) -> dict[str, Any]:
-    rows = _load_ttm(paths["canonical"]); ttm_index = {(int(row["company_id"]), int(row["endpoint_quarter_id"])): row for row in rows}
+    raw_rows = _load_ttm(paths["canonical"])
+    rows, structural_metadata = _annotate_structural_rows(raw_rows, paths["canonical"])
+    ttm_index = {(int(row["company_id"]), int(row["endpoint_quarter_id"])): row for row in rows}
     fresh = _fresh(rows); fresh_keys = {(int(row["company_id"]), int(row["endpoint_quarter_id"])) for row in fresh}
     split_events = _load_split_events(paths["market"])
     v2_scores = score.compute_score_rows(rows, split_events, generated_at="REHEARSAL", run_id="PHASE9C")
@@ -289,7 +434,7 @@ def calculate(
         persisted_components = {item["component_name"]: item["component_score"] for item in persisted["components"]}
         replayed_components = {item["component_name"]: item["component_score"] for item in replayed["components"]}
         v2_components = {item["component_name"]: item["component_score"] for item in score_index[key]["components"]}
-        if verify_v1_overlap:
+        if verify_v1_overlap and structural_metadata["status"] == "STRUCTURAL_CONTRACT_ABSENT_LEGACY_ALLOWED":
             assert persisted["readiness_status"] == replayed["readiness_status"]
             assert persisted["total_score"] == replayed["total_score"]
             assert persisted_components == replayed_components
@@ -348,7 +493,18 @@ def calculate(
     delta_full=[]; delta_results=[]
     for key in sorted(score_index):
         current=delta_observations[key]
-        result=delta.calculate_fundamental_delta(current,histories[key[0]],source_fingerprint="PHASE9C")
+        current_ttm = ttm_index[key]
+        compatible_history = [
+            observation
+            for observation in histories[key[0]]
+            if int(observation.fiscal.observation_id) == key[1]
+            or _same_structural_regime(current_ttm, ttm_index[(key[0], int(observation.fiscal.observation_id))])
+        ]
+        result=delta.calculate_fundamental_delta(
+            current,
+            compatible_history,
+            source_fingerprint=fingerprint({"phase": "PHASE13F3_4", "structural": structural_metadata}),
+        )
         delta_results.append(result)
         delta_full.append({"company_id":key[0],"quarter_id":key[1],"ticker":score_index[key]["ticker"],**{item["horizon"].value:item["delta_points"] for item in result.horizons}})
     delta_current=[row for row in delta_full if (row["company_id"],row["quarter_id"]) in fresh_keys]
@@ -374,10 +530,22 @@ def calculate(
         sequence=value.fiscal_year*4+int(value.fiscal_quarter[1]); current=relative_valuation_rows.get(key[0])
         if current is None or sequence>current[0]: relative_valuation_rows[key[0]]=(sequence,key,value)
     relative_observations=[]
+    structural_current_eligibility: dict[int, structural_break.StructuralEligibility] = {}
+    if structural_metadata["status"] == "STRUCTURAL_CONTRACT_APPLIED":
+        with _ro(paths["canonical"]) as connection:
+            structural_current_eligibility, _ = structural_break.latest_ttm_eligibility(
+                connection, as_of_date=AS_OF.isoformat()
+            )
     for _,row in sorted(relative_score_rows.values(),key=lambda item:int(item[1]["company_id"])):
+        eligibility = structural_current_eligibility.get(int(row["company_id"]))
+        if eligibility is not None and not eligibility.eligible:
+            continue
         key=(int(row["company_id"]),int(row["endpoint_quarter_id"])); ticker=str(row["ticker"]); sector,industry=classes.get(ticker,(None,None)); scored=score_index[key]
         relative_observations.append(relative_position.RelativeObservation(f"S:{key[0]}",key[0],int(row["security_id"]),ticker,relative_position.RelativeMeasure.FUNDAMENTAL_SCORE,scored["total_score"],scored["readiness_status"],scored["readiness_status"]=="SCORE_FULL",scored["readiness_status"],row["quarter_source_available_date"],score.MODEL_VERSION,score.MODEL_FINGERPRINT,f"S:{key}",sector,industry,tuple(memberships[key[0]])))
     for company_id,(_,key,value) in sorted(relative_valuation_rows.items()):
+        eligibility = structural_current_eligibility.get(company_id)
+        if eligibility is not None and not eligibility.eligible:
+            continue
         source=ttm_index[key]; ticker=str(source["ticker"]); sector,industry=classes.get(ticker,(None,None))
         relative_observations.append(relative_position.RelativeObservation(f"V:{company_id}",company_id,int(source["security_id"]),ticker,relative_position.RelativeMeasure.ABSOLUTE_VALUATION_SCORE,value.total_valuation_score,value.valuation_status,value.valuation_status=="VALUATION_FULL",value.reason_code,value.fundamental_available_date,valuation.MODEL_VERSION,valuation.MODEL_FINGERPRINT,value.result_fingerprint,sector,industry,tuple(memberships[company_id])))
     relative=relative_position.calculate_snapshot(relative_observations,snapshot_date=AS_OF.isoformat(),freshness_days=FRESHNESS_DAYS,classification_fingerprint=fingerprint(classes),taxonomy_fingerprint=fingerprint({k:[asdict(x) for x in v] for k,v in memberships.items()}))
@@ -407,16 +575,16 @@ def calculate(
             )
         current_endpoint=endpoint(row); prior_endpoint=endpoint(prior) if prior else None
         diagnostic_source_rows.append(asdict(current_endpoint))
-        consecutive=bool(prior and str(prior["period_end"])<str(row["period_end"]) and prior.get("ttm_source_available_date") and row.get("ttm_source_available_date") and str(prior["ttm_source_available_date"])<=str(row["ttm_source_available_date"]))
-        canonical_consecutive=bool(prior and str(prior["period_end"])<str(row["period_end"]) and prior.get("quarter_source_available_date") and row.get("quarter_source_available_date") and str(prior["quarter_source_available_date"])<=str(row["quarter_source_available_date"]))
+        consecutive=bool(prior and _same_structural_regime(row, prior) and str(prior["period_end"])<str(row["period_end"]) and prior.get("ttm_source_available_date") and row.get("ttm_source_available_date") and str(prior["ttm_source_available_date"])<=str(row["ttm_source_available_date"]))
+        canonical_consecutive=bool(prior and _same_structural_regime(row, prior) and str(prior["period_end"])<str(row["period_end"]) and prior.get("quarter_source_available_date") and row.get("quarter_source_available_date") and str(prior["quarter_source_available_date"])<=str(row["quarter_source_available_date"]))
         diagnostic_input=diagnostic_flags.DiagnosticInput(current_endpoint,prior_endpoint,consecutive,canonical_consecutive)
         for result in diagnostic_flags.evaluate_diagnostic_flags(diagnostic_input):
             diagnostics_full.append({"company_id":key[0],"quarter_id":key[1],"ticker":row["ticker"],"flag_name":result.flag_name,"status":result.status.value,"reason_code":result.reason_code,"triggered":result.triggered,"comparison_quarter_id":result.comparison_quarter_id,"effective_available_date":result.effective_available_date,"evidence":{item.name:item.value for item in result.evidence},"model_version":result.model_version,"model_fingerprint":result.model_fingerprint})
     diagnostics=[row for row in diagnostics_full if (row["company_id"],row["quarter_id"]) in fresh_keys]
 
     snapshot.validate_model_bundle({layer:snapshot.ModelIdentity(*identity) for layer,identity in snapshot.MODEL_CONTRACT["required_models"].items()})
-    outputs={"rows":rows,"fresh":fresh,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_v1_rows":valuation_source_rows,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostic_source_fingerprint":fingerprint(diagnostic_source_rows),"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
-    outputs["fingerprints"]={"score":fingerprint(v2_scores),"lifecycle":fingerprint([asdict(life_v2[key]) for key in sorted(life_v2)]),"valuation":fingerprint([valuation_v2[key].to_dict() for key in sorted(valuation_v2)]),"delta":fingerprint(delta_full),"relative":relative.result_fingerprint,"diagnostic":fingerprint(diagnostics_full)}
+    outputs={"rows":rows,"fresh":fresh,"structural_metadata":structural_metadata,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_v1_rows":valuation_source_rows,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostic_source_fingerprint":fingerprint({"structural":structural_metadata,"rows":diagnostic_source_rows}),"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
+    outputs["fingerprints"]={"structural":fingerprint(structural_metadata),"score":fingerprint(v2_scores),"lifecycle":fingerprint([asdict(life_v2[key]) for key in sorted(life_v2)]),"valuation":fingerprint([valuation_v2[key].to_dict() for key in sorted(valuation_v2)]),"delta":fingerprint(delta_full),"relative":relative.result_fingerprint,"diagnostic":fingerprint(diagnostics_full)}
     return outputs
 
 
