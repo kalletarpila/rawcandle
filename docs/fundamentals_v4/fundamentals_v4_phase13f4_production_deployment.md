@@ -142,3 +142,9 @@ fingerprints, package economic and physical fingerprints, persistence/layout ide
 calculation as-of semantics.
 
 Only after that copy-only evidence exists should the production deployment be retried.
+
+Phase 13F.4.1 later classified this as an architecture-level blocker rather than a small metadata
+gap: the Operating-Income V2 package rows are not fully package-namespaced, so old and
+structural-aware package row generations cannot coexist safely under the current schema. The next
+production deployment attempt must therefore be a separately authorized Phase 13F.4.2 only after a
+copy-only redesign proves coherent package-generation identity.

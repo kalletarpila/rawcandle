@@ -7,6 +7,11 @@ See `docs/fundamentals_v4/fundamentals_v4_phase13f4_production_deployment.md` fo
 executed record. The runbook remains the required procedure for a later deployment after a
 copy-only verification proves durable structural package/dependency identity.
 
+Phase 13F.4.1 subsequently returned `OUTCOME C - CURRENT PERSISTENCE ARCHITECTURE CANNOT
+SAFELY VERSION STRUCTURAL-AWARE PACKAGES; REDESIGN REQUIRED`. Do not use this runbook for
+production until a redesign has proven package-generation coexistence on copies. The next
+production attempt, if later authorized, must be named Phase 13F.4.2.
+
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
 ## Preconditions
