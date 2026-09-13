@@ -10,6 +10,7 @@ from rawcandle.fundamentals.phase13f4_2_production import (
     _acceptance_blockers,
     _acceptance_view,
     acceptance_contract_artifact,
+    run_phase13f4_2,
 )
 from rawcandle.fundamentals.relative_valuation.persistence import ApplyReport
 
@@ -180,3 +181,16 @@ def test_acceptance_checker_missing_required_field_matrix(path: tuple[str, ...],
 
 def test_acceptance_checker_rejects_malformed_result_object() -> None:
     assert _acceptance_blockers({"relative_valuation": {}})[0].startswith("ACCEPTANCE_VIEW_INCOMPLETE:")
+
+
+def test_runner_accepts_phase_specific_outcome_labels(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr("rawcandle.fundamentals.phase13f4_2_production._preflight", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr("rawcandle.fundamentals.phase13f4_2_production.archive_reconciliation", lambda: {"ok": True})
+
+    result = run_phase13f4_2(
+        tmp_path / "out",
+        apply=False,
+        outcome_b="OUTCOME B - CUSTOM",
+    )
+
+    assert result["outcome"] == "OUTCOME B - CUSTOM"

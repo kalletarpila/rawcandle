@@ -237,3 +237,48 @@ def test_production_comparison_allows_only_content_identical_database_mtime() ->
 
     after["databases"]["taxonomy"]["sha256"] = "changed"
     assert phase12d.compare_production_inventory(before, after)["identical"] is False
+
+
+def test_production_comparison_rejects_active_identity_changes() -> None:
+    before = {
+        "databases": {},
+        "reports": {},
+        "active_package": {"persistence_fingerprint": "package-a"},
+        "active_relative_valuation": [{"snapshot_id": "rv-a"}],
+    }
+    after = json.loads(json.dumps(before))
+    after["active_package"]["persistence_fingerprint"] = "package-b"
+    assert phase12d.compare_production_inventory(before, after)["identical"] is False
+
+    after = json.loads(json.dumps(before))
+    after["active_relative_valuation"][0]["snapshot_id"] = "rv-b"
+    assert phase12d.compare_production_inventory(before, after)["identical"] is False
+
+
+def test_production_comparison_rejects_dependency_fingerprint_changes() -> None:
+    before = {
+        "databases": {
+            "analysis": {
+                "sha256": "database",
+                "size": 100,
+                "mtime_ns": 1,
+                "schema_fingerprint": "schema",
+                "page_count": 10,
+                "freelist_count": 0,
+                "row_counts": {"relative_valuation_snapshot_dependency": 1},
+                "quick_check": "ok",
+                "foreign_key_errors": 0,
+                "wal": {"exists": False, "size": None, "mtime_ns": None, "sha256": None},
+                "shm": {"exists": False, "size": None, "mtime_ns": None, "sha256": None},
+            }
+        },
+        "reports": {},
+        "active_relative_valuation": [{
+            "snapshot_id": "rv",
+            "taxonomy_economic_fingerprint": "taxonomy-a",
+        }],
+    }
+    after = json.loads(json.dumps(before))
+    after["active_relative_valuation"][0]["taxonomy_economic_fingerprint"] = "taxonomy-b"
+
+    assert phase12d.compare_production_inventory(before, after)["identical"] is False

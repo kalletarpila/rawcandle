@@ -676,6 +676,10 @@ def run_phase13f4_2(
     backup_root: Path = BACKUP_ROOT,
     default_run_id: str = DEFAULT_RUN_ID,
     result_filename: str = "phase13f4_2_result.json",
+    outcome_a: str = OUTCOME_A,
+    outcome_b: str = OUTCOME_B,
+    outcome_c: str = OUTCOME_C,
+    outcome_d: str = OUTCOME_D,
 ) -> dict[str, Any]:
     started = time.monotonic()
     output = (output or artifact_root / default_run_id).resolve()
@@ -684,7 +688,7 @@ def run_phase13f4_2(
     try:
         preflight = _preflight(output, backup_dir, require_clean=apply)
     except Exception as exc:
-        result = {"phase": phase, "outcome": OUTCOME_B, "artifact_dir": str(output), "error": type(exc).__name__, "reason": str(exc)}
+        result = {"phase": phase, "outcome": outcome_b, "artifact_dir": str(output), "error": type(exc).__name__, "reason": str(exc)}
         write_json(output / result_filename, result)
         return result
     source = archive_reconciliation()
@@ -693,7 +697,7 @@ def run_phase13f4_2(
     if not apply:
         result = {
             "phase": phase,
-            "outcome": OUTCOME_B,
+            "outcome": outcome_b,
             "mode": "DRY_RUN",
             "artifact_dir": str(output),
             "preflight": preflight,
@@ -711,7 +715,7 @@ def run_phase13f4_2(
         if prewrite_candidate["acceptance_blockers"]:
             result = {
                 "phase": phase,
-                "outcome": OUTCOME_B,
+                "outcome": outcome_b,
                 "artifact_dir": str(output),
                 "preflight": preflight,
                 "prewrite_candidate": prewrite_candidate,
@@ -749,7 +753,7 @@ def run_phase13f4_2(
         }
         result = {
             "phase": phase,
-            "outcome": OUTCOME_A,
+            "outcome": outcome_a,
             "artifact_dir": str(output),
             "backup_dir": str(backup_dir),
             "activation_timestamp": applied_at,
@@ -777,7 +781,7 @@ def run_phase13f4_2(
                 restored = _restore_backups(backup_manifest)
             except Exception as restore_exc:  # pragma: no cover - production recovery path
                 restore_error = {"type": type(restore_exc).__name__, "message": str(restore_exc), "traceback": traceback.format_exc()}
-        outcome = OUTCOME_C if restored is not None and restore_error is None else (OUTCOME_B if backup_manifest is None else OUTCOME_D)
+        outcome = outcome_c if restored is not None and restore_error is None else (outcome_b if backup_manifest is None else outcome_d)
         result = {
             "phase": phase,
             "outcome": outcome,
