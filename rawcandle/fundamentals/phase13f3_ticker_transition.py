@@ -361,8 +361,9 @@ def classification_summary(paths: AuditPaths) -> dict[str, Any]:
     return {"counts": counts, "rows": reviewed, "fingerprint": stable_hash(reviewed)}
 
 
-def _apply_transition_identities(canonical_db: Path) -> dict[str, Any]:
-    reject_production_path(canonical_db, "canonical")
+def _apply_transition_identities(canonical_db: Path, *, allow_production: bool = False) -> dict[str, Any]:
+    if not allow_production:
+        reject_production_path(canonical_db, "canonical")
     before = _canonical_rows(canonical_db, [str(row["historical_ticker"]) for row in TRANSITIONS])
     writes = 0
     with sqlite3.connect(canonical_db) as conn:
@@ -402,8 +403,15 @@ def _apply_transition_identities(canonical_db: Path) -> dict[str, Any]:
     return {"outcome": "APPLIED", "before": before, "after": after, "fingerprint": stable_hash(after)}
 
 
-def _valuation_classification_update(analysis_db: Path, market_db: Path, canonical_db: Path) -> dict[str, Any]:
-    reject_production_path(analysis_db, "analysis")
+def _valuation_classification_update(
+    analysis_db: Path,
+    market_db: Path,
+    canonical_db: Path,
+    *,
+    allow_production: bool = False,
+) -> dict[str, Any]:
+    if not allow_production:
+        reject_production_path(analysis_db, "analysis")
     changed = 0
     targets = {str(row["current_ticker"]) for row in TRANSITIONS} | {"BATRK", "BELFB"}
     meta = _ticker_meta_rows(market_db, sorted(targets))

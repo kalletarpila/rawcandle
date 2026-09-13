@@ -135,9 +135,10 @@ class StageTelemetry:
             thread.join(timeout=interval_seconds)
 
 
-def instrumented_package_refresh(paths: Mapping[str, Path], output: Path) -> dict[str, Any]:
+def instrumented_package_refresh(paths: Mapping[str, Path], output: Path, *, allow_production: bool = False) -> dict[str, Any]:
     analysis = paths["analysis"]
-    reject_production_path(analysis, "analysis")
+    if not allow_production:
+        reject_production_path(analysis, "analysis")
     telemetry = StageTelemetry(output, analysis_db=analysis)
     telemetry.emit("package_refresh", "STARTED", paths={key: str(value.resolve()) for key, value in paths.items()})
     with sqlite3.connect(f"file:{analysis.resolve()}?mode=ro", uri=True) as reader:

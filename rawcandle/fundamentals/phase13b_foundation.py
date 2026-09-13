@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from rawcandle.fundamentals import structural_break
 from rawcandle.fundamentals.phase12d import PRODUCTION, ROOT, compare_production_inventory, production_inventory
 from rawcandle.fundamentals.relative_valuation.engine import MODEL_FINGERPRINT as RV_MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_valuation.persistence import (
@@ -473,10 +474,40 @@ def backfill_universe(paths: CandidatePaths, *, applied_at_utc: str, apply: bool
     return {"outcome": "APPLIED", "identity": identity}
 
 
-def attach_dependencies(paths: CandidatePaths, *, universe: Mapping[str, Any], applied_at_utc: str, apply: bool, force_unknown: bool = False, allow_production: bool = False) -> dict[str, Any]:
+def attach_dependencies(
+    paths: CandidatePaths,
+    *,
+    universe: Mapping[str, Any],
+    applied_at_utc: str,
+    apply: bool,
+    force_unknown: bool = False,
+    allow_production: bool = False,
+    structural_metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     if not allow_production:
         reject_production_path(paths.analysis_db, "analysis")
     taxonomy = taxonomy_identity(paths.taxonomy_db)
+    with readonly(paths.canonical_db) as canonical:
+        structural_contract_fingerprint = structural_break.contract_fingerprint(canonical)
+        structural_dependency: dict[str, Any] = {
+            "structural_contract_version": structural_break.CONTRACT_VERSION if structural_contract_fingerprint else None,
+            "structural_contract_fingerprint": structural_contract_fingerprint,
+        }
+        if structural_contract_fingerprint:
+            events = [
+                dict(row)
+                for row in canonical.execute(
+                    f"SELECT event_id,successor_ticker,event_type,event_date,comparability_status,"
+                    f"review_status,economic_event_fingerprint FROM {structural_break.EVENT_TABLE} "
+                    "ORDER BY successor_ticker,event_id"
+                )
+            ]
+            structural_dependency.update({
+                "structural_event_fingerprint": stable_hash(events),
+                "structural_event_count": len(events),
+            })
+        if structural_metadata:
+            structural_dependency.update(dict(structural_metadata))
     with readonly(paths.analysis_db) as conn:
         rv_snapshots = [dict(row) for row in conn.execute(
             "SELECT snapshot_id,as_of_date,source_fingerprint,result_fingerprint FROM relative_valuation_snapshot WHERE model_fingerprint=? AND status='COMPLETE' ORDER BY as_of_date",
@@ -500,7 +531,12 @@ def attach_dependencies(paths: CandidatePaths, *, universe: Mapping[str, Any], a
             "taxonomy_presentation_fingerprint": taxonomy["taxonomy_presentation_fingerprint"],
             "dependency_as_of_date": row["as_of_date"],
             "compatibility_status": status,
-            "provenance_json": stable_json({"phase": PHASE, "source_fingerprint": row["source_fingerprint"], "result_fingerprint": row["result_fingerprint"]}),
+            "provenance_json": stable_json({
+                "phase": PHASE,
+                "source_fingerprint": row["source_fingerprint"],
+                "result_fingerprint": row["result_fingerprint"],
+                "structural_dependency": structural_dependency,
+            }),
             "created_at_utc": applied_at_utc,
         })
         generic_dependency_rows.append({
@@ -516,7 +552,7 @@ def attach_dependencies(paths: CandidatePaths, *, universe: Mapping[str, Any], a
             "taxonomy_presentation_fingerprint": taxonomy["taxonomy_presentation_fingerprint"],
             "dependency_as_of_date": row["as_of_date"],
             "compatibility_status": status,
-            "provenance_json": stable_json({"phase": PHASE}),
+            "provenance_json": stable_json({"phase": PHASE, "structural_dependency": structural_dependency}),
             "created_at_utc": applied_at_utc,
         })
     for row in rp_snapshots:
@@ -533,7 +569,7 @@ def attach_dependencies(paths: CandidatePaths, *, universe: Mapping[str, Any], a
             "taxonomy_presentation_fingerprint": taxonomy["taxonomy_presentation_fingerprint"],
             "dependency_as_of_date": row["snapshot_date"],
             "compatibility_status": status,
-            "provenance_json": stable_json({"phase": PHASE}),
+            "provenance_json": stable_json({"phase": PHASE, "structural_dependency": structural_dependency}),
             "created_at_utc": applied_at_utc,
         })
     for row in packages:
@@ -550,7 +586,13 @@ def attach_dependencies(paths: CandidatePaths, *, universe: Mapping[str, Any], a
             "taxonomy_presentation_fingerprint": taxonomy["taxonomy_presentation_fingerprint"],
             "dependency_as_of_date": applied_at_utc[:10],
             "compatibility_status": status,
-            "provenance_json": stable_json({"phase": PHASE, "family_fingerprint": row["family_fingerprint"]}),
+            "provenance_json": stable_json({
+                "phase": PHASE,
+                "family_fingerprint": row["family_fingerprint"],
+                "economic_result_fingerprint": row["economic_result_fingerprint"],
+                "physical_content_fingerprint": row["physical_content_fingerprint"],
+                "structural_dependency": structural_dependency,
+            }),
             "created_at_utc": applied_at_utc,
         })
     with sqlite3.connect(paths.analysis_db) as conn:

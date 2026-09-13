@@ -274,8 +274,9 @@ def nxh_contamination_artifact(nxh_rows: Sequence[Mapping[str, Any]], meta: Mapp
     }
 
 
-def _apply_provider_identity_links(canonical_db: Path) -> dict[str, Any]:
-    reject_production_path(canonical_db, "canonical")
+def _apply_provider_identity_links(canonical_db: Path, *, allow_production: bool = False) -> dict[str, Any]:
+    if not allow_production:
+        reject_production_path(canonical_db, "canonical")
     writes = 0
     rows = []
     meta = _provider_metadata(PRODUCTION["provider"])
@@ -329,8 +330,10 @@ def stage_provider_rows(
     rows_by_ticker: Mapping[str, Sequence[Mapping[str, Any]]],
     *,
     inject_failure: bool = False,
+    allow_production: bool = False,
 ) -> dict[str, Any]:
-    reject_production_path(provider_db, "provider")
+    if not allow_production:
+        reject_production_path(provider_db, "provider")
     run_id = "PHASE13F3_2_" + stable_hash({ticker: len(rows) for ticker, rows in rows_by_ticker.items()})[:24]
     now = APPLIED_AT
     inserted = Counter()
