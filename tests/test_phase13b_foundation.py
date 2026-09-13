@@ -138,6 +138,8 @@ def test_production_path_refusal() -> None:
 
     with pytest.raises(PermissionError):
         reject_production_path(PRODUCTION["canonical"], "canonical")
+    with pytest.raises(PermissionError):
+        reject_production_path(f"{PRODUCTION['canonical'].resolve().as_uri()}?mode=rw", "canonical")
 
 
 def test_stable_hash_is_deterministic() -> None:

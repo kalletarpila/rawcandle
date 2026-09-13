@@ -151,6 +151,64 @@ def test_material_break_preserves_pre_event_history_but_blocks_post_event_curren
     assert metadata["fingerprint"]
 
 
+def test_structural_fingerprints_ignore_identity_resolution_path_not_economics(tmp_path: Path) -> None:
+    db = tmp_path / "canonical.db"
+    _schema(db)
+    event = {
+        "successor_ticker": "VMRK",
+        "predecessor_ticker": "EQR",
+        "event_type": "MAJOR_BUSINESS_COMBINATION",
+        "event_date": "2026-08-17",
+        "effective_date": "2026-08-18",
+        "comparability_status": "MAJOR_BUSINESS_COMBINATION",
+        "review_status": "ACCEPTED",
+        "provider": "SHARADAR",
+        "provider_security_id": "197624",
+        "reason": "merger close",
+        "evidence": {"source": "test"},
+    }
+    provider_report = structural_break.apply_contract(
+        db,
+        events=[event],
+        applied_at_utc="2026-09-13T00:00:00Z",
+    )
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        provider_contract = structural_break.contract_fingerprint(conn)
+        conn.execute("DELETE FROM provider_security_identity WHERE provider_security_id='197624'")
+        evidence = conn.execute(
+            f"SELECT evidence_json FROM {structural_break.EVENT_TABLE}"
+        ).fetchone()[0]
+    assert json.loads(evidence)["identity_status"] == "PROVIDER_SECURITY_IDENTITY"
+
+    fallback_report = structural_break.apply_contract(
+        db,
+        events=[event],
+        applied_at_utc="2026-09-13T00:00:00Z",
+    )
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        fallback_contract = structural_break.contract_fingerprint(conn)
+        evidence = conn.execute(
+            f"SELECT evidence_json FROM {structural_break.EVENT_TABLE}"
+        ).fetchone()[0]
+    assert json.loads(evidence)["identity_status"] == "UNIQUE_ACTIVE_TICKER_FALLBACK"
+
+    assert fallback_report["events"][0]["event_id"] == provider_report["events"][0]["event_id"]
+    assert fallback_report["economic_event_fingerprint"] == provider_report["economic_event_fingerprint"]
+    assert fallback_report["regime_fingerprint"] == provider_report["regime_fingerprint"]
+    assert fallback_contract == provider_contract
+
+    changed_event = {**event, "event_date": "2026-07-01"}
+    changed_report = structural_break.apply_contract(
+        db,
+        events=[changed_event],
+        applied_at_utc="2026-09-13T00:00:00Z",
+    )
+    assert changed_report["economic_event_fingerprint"] != provider_report["economic_event_fingerprint"]
+    assert changed_report["regime_fingerprint"] != provider_report["regime_fingerprint"]
+
+
 def test_period_after_material_event_without_period_start_is_unresolved(tmp_path: Path) -> None:
     db = tmp_path / "canonical.db"
     _schema(db)

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import unquote, urlparse
 
 from rawcandle.fundamentals import structural_break
 from rawcandle.fundamentals.phase12d import PRODUCTION, ROOT, compare_production_inventory, production_inventory
@@ -200,9 +201,21 @@ def readonly(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def reject_production_path(path: Path, role: str) -> None:
-    resolved = path.resolve()
-    if resolved in PROTECTED_PRODUCTION_PATHS or path.is_symlink():
+def _sqlite_path_candidate(path: Path | str) -> Path:
+    raw = str(path)
+    if raw.startswith("file:"):
+        parsed = urlparse(raw)
+        raw_path = parsed.path or parsed.netloc
+        if parsed.netloc and parsed.path:
+            raw_path = f"/{parsed.netloc}{parsed.path}"
+        return Path(unquote(raw_path))
+    return Path(raw)
+
+
+def reject_production_path(path: Path | str, role: str) -> None:
+    candidate = _sqlite_path_candidate(path)
+    resolved = candidate.resolve()
+    if resolved in PROTECTED_PRODUCTION_PATHS or candidate.is_symlink():
         raise PermissionError(f"PHASE13B_PRODUCTION_PATH_REFUSED:{role}:{resolved}")
 
 

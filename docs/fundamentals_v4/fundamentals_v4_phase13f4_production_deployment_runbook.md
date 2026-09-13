@@ -30,6 +30,13 @@ fingerprints and failed the no-change gate. The full writable database set was r
 Phase 13F.4.4 backups. See
 `docs/fundamentals_v4/fundamentals_v4_phase13f4_4_production_deployment.md`.
 
+Phase 13F.4.5 reproduced the second-run drift on isolated copies and repaired the fixed-point
+defect. The root cause was identity-resolution-path metadata (`identity_status`) participating in
+structural event IDs and downstream fingerprints. Phase 13F.4.5 proved A/B/C/D fixed-point
+stability and an independent replay lane. A future Phase 13F.4.6 production retry is justified only
+after a separate explicit production authorization. See
+`docs/fundamentals_v4/fundamentals_v4_phase13f4_5_determinism.md`.
+
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
 ## Preconditions
@@ -66,13 +73,14 @@ Verify:
 
 ## Gate 2 - Expected Candidate Identity
 
-Verify the candidate being activated matches the Phase 13F.3.4 rehearsal evidence:
+Verify the candidate being activated matches the Phase 13F.4.5 fixed-point evidence:
 
-- Structural package fingerprint: `4ba542c7e28c2d92ba65863f2932e2683a60b053cb4b2debe344b051a84441ad`.
-- Event fingerprint: `5ec6403d231e41a52fdf04609892df1c9bdd841805180a52578b638114bf5bfd`.
+- Structural package fingerprint: `748cd15828bef0bd57f75f977aadea571053940e94b38c2a221b43335e0d6c9a`.
+- Event fingerprint: `085690bdb3479a88f53cac4248e0ab970a0a743934eca29d1d867a8eba57096d`.
 - Current structural source fingerprint: `04339360f686ae6d68c6f502139a9af4cf6ebe38699c22ba30d6216a6ff06e1f`.
-- Package economic result fingerprint: `55a9713c9f20d122e493bb3c0c3485bf729724ce1914703ad637d2a16346002d`.
-- Package physical content fingerprint: `718e3fbe838f273775d77042fa0dbaa706c822277a3e23d5dd7eeaaa4ebb8811`.
+- Structural regime fingerprint: `57e2827981be62c9c300ac0e0a71a26afefd04dd9b9f85670593c57ebcdff8e5`.
+- Package economic result fingerprint: `1700f71e13935fccf7509cf8b9e99fb9f6705cfe9ddf5f49157b53d59a85e4d5`.
+- Package physical content fingerprint: `f6144cc126d1a5c3af8735841800903e5e233a1953712ca4b5dd1ba0b67f654a`.
 - Relative Valuation refreshed snapshot candidate: `1f360f0b2dfd8e06eaffd3edcffaf87b604e59a63d0b0e272823b46fada02f6b`.
 
 If any fingerprint differs, stop and run a new copy-only rehearsal. Do not activate.
@@ -109,7 +117,7 @@ Only after explicit authorization:
 5. Invoke the separate explicit full-universe Relative Valuation refresh.
 6. Verify the refreshed Relative Valuation snapshot is active and compatible.
 7. Re-run Relative Valuation refresh and verify `NO_CHANGE`.
-8. Generate production Snapshots for `AREB`, `IA`, `NMAD`, `NVDA`, `NXH`, `VAI` and `VMRK`.
+8. Generate production Snapshots for `AREB`, `IA`, `NMAD`, `NVDA`, `NXH`, `SNDK`, `VAI` and `VMRK`.
 
 The Relative Valuation refresh must remain a separate explicit operation. Compatibility must not be restored by silently reusing or mutating the old snapshot.
 

@@ -228,8 +228,9 @@ def apply_contract(
                     "evidence": event.get("evidence") or {},
                     "reason": str(event.get("reason") or event["event_type"]),
                 }
-                event_id = stable_hash(payload)
-                economic_fp = stable_hash({k: v for k, v in payload.items() if k not in {"identity_status"}})
+                economic_payload = {k: v for k, v in payload.items() if k not in {"identity_status"}}
+                event_id = stable_hash(economic_payload)
+                economic_fp = stable_hash(economic_payload)
                 conn.execute(
                     f"INSERT INTO {EVENT_TABLE} VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
@@ -253,7 +254,7 @@ def apply_contract(
                         applied_at_utc,
                     ),
                 )
-                event_rows.append({**payload, "event_id": event_id, "economic_event_fingerprint": economic_fp})
+                event_rows.append({**economic_payload, "event_id": event_id, "economic_event_fingerprint": economic_fp})
                 quarters = conn.execute(
                     "SELECT quarter_id,period_end,source_availability_date FROM v4_quarter "
                     "WHERE company_id=? ORDER BY fiscal_year,CASE fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 ELSE 4 END",

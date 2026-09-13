@@ -71,12 +71,12 @@ READ_ONLY_ROLES = ("market", "taxonomy")
 
 ACCEPTED = {
     "structural_contract": "ECONOMIC_STRUCTURAL_BREAK_CONTRACT_V1",
-    "structural_package_fingerprint": "4ba542c7e28c2d92ba65863f2932e2683a60b053cb4b2debe344b051a84441ad",
-    "event_fingerprint": "5ec6403d231e41a52fdf04609892df1c9bdd841805180a52578b638114bf5bfd",
+    "structural_package_fingerprint": "748cd15828bef0bd57f75f977aadea571053940e94b38c2a221b43335e0d6c9a",
+    "event_fingerprint": "085690bdb3479a88f53cac4248e0ab970a0a743934eca29d1d867a8eba57096d",
     "structural_source_fingerprint": "04339360f686ae6d68c6f502139a9af4cf6ebe38699c22ba30d6216a6ff06e1f",
-    "structural_regime_fingerprint": "b6c1fbed8182ee589e3f85ee7057571ff34b75f56de7d92f4b1a3d74aac64852",
-    "package_economic_result_fingerprint": "55a9713c9f20d122e493bb3c0c3485bf729724ce1914703ad637d2a16346002d",
-    "package_physical_content_fingerprint": "718e3fbe838f273775d77042fa0dbaa706c822277a3e23d5dd7eeaaa4ebb8811",
+    "structural_regime_fingerprint": "57e2827981be62c9c300ac0e0a71a26afefd04dd9b9f85670593c57ebcdff8e5",
+    "package_economic_result_fingerprint": "1700f71e13935fccf7509cf8b9e99fb9f6705cfe9ddf5f49157b53d59a85e4d5",
+    "package_physical_content_fingerprint": "f6144cc126d1a5c3af8735841800903e5e233a1953712ca4b5dd1ba0b67f654a",
     "rv_snapshot": "1f360f0b2dfd8e06eaffd3edcffaf87b604e59a63d0b0e272823b46fada02f6b",
     "rv_result_fingerprint": "9c642e80b06fdbb8c6e703a46a6bda2c7031bc270fbd195b0a3acd7cdeba30f3",
 }

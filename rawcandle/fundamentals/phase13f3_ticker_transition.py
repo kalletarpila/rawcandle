@@ -497,7 +497,7 @@ def _snapshot_smoke(paths: CandidatePaths, output: Path) -> dict[str, Any]:
     report_dir.mkdir(parents=True, exist_ok=True)
     snapshot_paths = SnapshotPaths(paths.canonical_db, paths.analysis_db, PRODUCTION["market"], paths.taxonomy_db, PRODUCTION["provider"])
     results = {}
-    for ticker in ("VMRK", "IA", "VAI", "NXH", "NMAD", "AREB", "NVDA"):
+    for ticker in ("VMRK", "IA", "VAI", "NXH", "NMAD", "AREB", "NVDA", "SNDK"):
         try:
             generated = generate_active_company_snapshot(
                 snapshot_paths,
