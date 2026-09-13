@@ -471,7 +471,8 @@ def _acceptance_blockers(result: Mapping[str, Any]) -> list[str]:
     if package["physical_content_fingerprint"] != ACCEPTED["package_physical_content_fingerprint"]:
         blockers.append("PACKAGE_PHYSICAL_FINGERPRINT")
     rv = result["relative_valuation"]["snapshot"]
-    if rv["snapshot_id"] != ACCEPTED["rv_snapshot"]:
+    rv_apply = result["relative_valuation"]["first_apply"]
+    if rv_apply["snapshot_id"] != ACCEPTED["rv_snapshot"]:
         blockers.append("RV_SNAPSHOT_ID")
     if rv["result_fingerprint"] != ACCEPTED["rv_result_fingerprint"]:
         blockers.append("RV_RESULT_FINGERPRINT")

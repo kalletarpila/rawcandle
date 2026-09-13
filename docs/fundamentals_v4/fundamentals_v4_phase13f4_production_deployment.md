@@ -148,3 +148,9 @@ gap: the Operating-Income V2 package rows are not fully package-namespaced, so o
 structural-aware package row generations cannot coexist safely under the current schema. The next
 production deployment attempt must therefore be a separately authorized Phase 13F.4.2 only after a
 copy-only redesign proves coherent package-generation identity.
+
+Phase 13F.4.2 subsequently superseded the immutable-coexistence requirement by accepting mutable
+package persistence with full coordinated database-backup rollback. The first Phase 13F.4.2
+production attempt failed in acceptance checking and restored provider, canonical and analysis
+from the verified backup set. See
+`docs/fundamentals_v4/fundamentals_v4_phase13f4_2_production_deployment.md`.

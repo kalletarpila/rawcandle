@@ -12,6 +12,12 @@ SAFELY VERSION STRUCTURAL-AWARE PACKAGES; REDESIGN REQUIRED`. Do not use this ru
 production until a redesign has proven package-generation coexistence on copies. The next
 production attempt, if later authorized, must be named Phase 13F.4.2.
 
+Phase 13F.4.2 later superseded the immutable-coexistence requirement by accepting full coordinated
+database-backup rollback as the only rollback mechanism. The first Phase 13F.4.2 production
+attempt failed in an acceptance-check field lookup after package/RV refresh and restored the full
+writable database set from verified backups. See
+`docs/fundamentals_v4/fundamentals_v4_phase13f4_2_production_deployment.md`.
+
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
 ## Preconditions
