@@ -22,6 +22,7 @@ from rawcandle.fundamentals.operating_income_v2.persistence import (
 )
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
 from rawcandle.fundamentals.snapshot import assembler as v1
+from rawcandle.fundamentals import structural_break
 
 
 REPORT_CONTRACT = "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V6"
@@ -462,6 +463,31 @@ def _relative(analysis: sqlite3.Connection, company_id: int, report_date: str, m
     return {"available": True, "reason": None, "metadata": dict(metadata), "rows": rows, "coverage": coverage}
 
 
+def _structural_state(
+    canonical: sqlite3.Connection,
+    *,
+    company_id: int,
+    report_date: str,
+) -> dict[str, Any] | None:
+    eligibility, metadata = structural_break.latest_ttm_eligibility(
+        canonical, as_of_date=report_date
+    )
+    row = eligibility.get(company_id)
+    if row is None:
+        return None
+    return {
+        "contract_version": structural_break.CONTRACT_VERSION,
+        "eligible": row.eligible,
+        "reason_code": row.reason_code,
+        "event_id": row.event_id,
+        "event_type": row.event_type,
+        "event_date": row.event_date,
+        "comparability_status": row.comparability_status,
+        "ttm_regime_status": row.ttm_regime_status,
+        "contract_fingerprint": metadata.get("fingerprint"),
+    }
+
+
 def _source_state(
     analysis: sqlite3.Connection,
     base: Mapping[str, Any],
@@ -518,7 +544,7 @@ def _assemble_company_snapshot_v2(
     diagnostic_model_contract: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     base = v1.assemble_company_snapshot(paths, ticker=ticker, report_date=report_date)
-    with _readonly(paths.analysis_db) as analysis, _readonly(paths.market_db) as market:
+    with _readonly(paths.analysis_db) as analysis, _readonly(paths.market_db) as market, _readonly(paths.canonical_db) as canonical:
         is_explicit_candidate = candidate_model_map is not None
         if is_explicit_candidate:
             if candidate_package_fingerprint is None or diagnostic_model_contract is None:
@@ -559,6 +585,20 @@ def _assemble_company_snapshot_v2(
         base["lifecycle"] = v1.lifecycle_presentation(lifecycle_rows, anchor_year=anchor["fiscal_year"], anchor_quarter=anchor["fiscal_quarter"])
         base["delta"] = _delta(analysis, company_id, anchor["fiscal_year"], anchor["fiscal_quarter"], model_map["delta"][1])
         base["current_price_valuation"] = _current_price_valuation(market, ticker=base["identity"]["ticker"], report_date=report_date, anchor=canonical_anchor, classification=base["identity"])
+        structural_state = _structural_state(canonical, company_id=company_id, report_date=report_date)
+        if structural_state is not None:
+            base["structural_break"] = structural_state
+            if not structural_state["eligible"]:
+                base["current_price_valuation"] = {
+                    "label": v1.CURRENT_PRICE_LABEL,
+                    "valuation_status": "VALUATION_NOT_READY",
+                    "reason_code": structural_state["reason_code"],
+                    "fundamental_anchor_available_date": canonical_anchor.get("ttm_source_available_date"),
+                    "price_date": base["current_price_valuation"].get("price_date"),
+                    "price_age_calendar_days": base["current_price_valuation"].get("price_age_calendar_days"),
+                    "selected_price": base["current_price_valuation"].get("selected_price"),
+                    "structural_break": structural_state,
+                }
         base["valuation_multiples"] = _three_point_multiples(base["history"], base["current_price_valuation"])
         base["relative_position"] = _relative(analysis, company_id, report_date, model_map["relative_position"][1])
         base["diagnostic"] = _diagnostic(repository, company_id, anchor["fiscal_year"], anchor["fiscal_quarter"], model_map["diagnostic_flags"][1])
@@ -591,6 +631,8 @@ def _assemble_company_snapshot_v2(
             analysis, base["source_state"], model_map, package_fingerprint,
             candidate=is_explicit_candidate,
         )
+        if base.get("structural_break"):
+            source_state_audit_v2["structural_break"] = base["structural_break"]
         base["source_state_audit_v2"] = source_state_audit_v2
         base["source_state"] = _report_source_state(source_state_audit_v2)
         base["source_state_fingerprint"] = hashlib.sha256(json.dumps(base["source_state"], sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()

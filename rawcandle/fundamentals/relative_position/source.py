@@ -26,6 +26,7 @@ from rawcandle.fundamentals.valuation.engine import (
     MODEL_VERSION as VALUATION_MODEL_VERSION,
 )
 from rawcandle.fundamentals.valuation.persistence import HISTORY_MODE
+from rawcandle.fundamentals import structural_break
 
 
 DEFAULT_FRESHNESS_DAYS = CURRENT_FRESHNESS_DAYS
@@ -373,6 +374,10 @@ def load_current_relative_source(
     )
     fundamental = _fundamental_rows(paths.analysis_db, paths.canonical_db, as_of_date)
     valuation = _valuation_rows(paths.analysis_db, as_of_date)
+    with _readonly(paths.canonical_db) as canonical:
+        structural_eligibility, structural_metadata = structural_break.latest_ttm_eligibility(
+            canonical, as_of_date=as_of_date
+        )
 
     observations: list[RelativeObservation] = []
     identity_counts: Counter[str] = Counter()
@@ -394,6 +399,10 @@ def load_current_relative_source(
             "SOURCE_OBSERVATION_DATE_INVALID" if age is None else
             "SOURCE_OBSERVATION_STALE" if not fresh else source_status
         )
+        structural = structural_eligibility.get(company_id)
+        if eligible and structural is not None and not structural.eligible:
+            eligible = False
+            reason = structural.reason_code
         source_payload = {
             key: row.get(key) for key in (
                 "score_result_id", "company_id", "quarter_id", "total_score",
@@ -401,6 +410,13 @@ def load_current_relative_source(
                 "model_fingerprint", "source_availability_date", "ttm_fingerprint",
             )
         }
+        if structural is not None:
+            source_payload["structural_break"] = {
+                "event_id": structural.event_id,
+                "ttm_regime_status": structural.ttm_regime_status,
+                "eligible": structural.eligible,
+                "reason_code": structural.reason_code,
+            }
         observations.append(RelativeObservation(
             source_observation_id=f"score_result:{row['score_result_id']}",
             company_id=company_id,
@@ -437,6 +453,10 @@ def load_current_relative_source(
             "SOURCE_OBSERVATION_DATE_INVALID" if age is None else
             "SOURCE_OBSERVATION_STALE" if not fresh else source_status
         )
+        structural = structural_eligibility.get(company_id)
+        if eligible and structural is not None and not structural.eligible:
+            eligible = False
+            reason = structural.reason_code
         observations.append(RelativeObservation(
             source_observation_id=f"valuation_revised_result:{row['valuation_revised_result_id']}",
             company_id=company_id,
@@ -450,7 +470,15 @@ def load_current_relative_source(
             source_observation_date=row.get("fundamental_available_date"),
             source_model_version=VALUATION_MODEL_VERSION,
             source_model_fingerprint=VALUATION_MODEL_FINGERPRINT,
-            source_result_fingerprint=str(row["result_fingerprint"]),
+            source_result_fingerprint=_hash({
+                "valuation_result_fingerprint": row["result_fingerprint"],
+                "structural_break": None if structural is None else {
+                    "event_id": structural.event_id,
+                    "ttm_regime_status": structural.ttm_regime_status,
+                    "eligible": structural.eligible,
+                    "reason_code": structural.reason_code,
+                },
+            }),
             sector=classification.sector,
             industry=classification.industry,
             ecosystem_memberships=memberships.get(company_id, ()),
@@ -491,6 +519,7 @@ def load_current_relative_source(
         "classification_rows": len(classifications),
         "classification_resolution_counts": dict(sorted(classification_counts.items())),
         "taxonomy": taxonomy_metadata,
+        "structural_break": structural_metadata,
     }
     return CurrentRelativeSource(
         observations=tuple(observations),

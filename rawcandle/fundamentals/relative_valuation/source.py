@@ -12,6 +12,7 @@ from typing import Any
 from rawcandle.fundamentals.operating_income_v2 import valuation
 from rawcandle.fundamentals.operating_income_v2 import relative_position as active_relative_position
 from rawcandle.fundamentals.operating_income_v2.activation import assert_v2_active
+from rawcandle.fundamentals import structural_break
 from rawcandle.fundamentals.relative_position import source as peer_source
 from rawcandle.fundamentals.relative_position.engine import CURRENT_FRESHNESS_DAYS
 from rawcandle.fundamentals.score.engine import TTM_MODEL_VERSION
@@ -207,6 +208,18 @@ def load_relative_valuation_source(
             "ORDER BY company_id,endpoint_fiscal_year,CASE endpoint_fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 ELSE 4 END",
             (TTM_MODEL_VERSION, as_of_date),
         )]
+        structural_eligibility, structural_metadata = structural_break.latest_ttm_eligibility(
+            canonical, as_of_date=as_of_date
+        )
+        structural_history_quarters = {
+            int(row["company_id"]): structural_break.allowed_history_quarter_ids(
+                canonical,
+                company_id=int(row["company_id"]),
+                current_quarter_id=int(row["endpoint_quarter_id"]),
+            )
+            for row in ttm_rows
+            if int(row["company_id"]) in structural_eligibility
+        }
     latest_ttm: dict[int, dict[str, Any]] = {}
     for row in ttm_rows:
         latest_ttm[int(row["company_id"])] = row
@@ -237,9 +250,16 @@ def load_relative_valuation_source(
             if not security_eligible:
                 exclusion_counts[security_reason] += 1
                 continue
+            structural = structural_eligibility.get(company_id)
+            if structural is not None and not structural.eligible:
+                exclusion_counts[structural.reason_code] += 1
+                continue
             classification = peer_source.resolve_classification(classifications, identity, company_id, security_id, ticker)
             classification_counts[classification.status] += 1
             histories = history_by_company.get(company_id, [])
+            allowed_quarters = structural_history_quarters.get(company_id)
+            if allowed_quarters is not None:
+                histories = [row for row in histories if int(row["quarter_id"]) in allowed_quarters]
             filing = histories[-1] if histories else None
             available = str(anchor["ttm_source_available_date"])
             age = (snapshot_date - date.fromisoformat(available)).days
@@ -301,6 +321,7 @@ def load_relative_valuation_source(
         "as_of_date": as_of_date,
         "classification_fingerprint": classification_fp,
         "taxonomy_fingerprint": taxonomy_fp,
+        "structural_break_fingerprint": structural_metadata.get("fingerprint"),
         "inputs": [asdict(row) for row in inputs],
     }
     metadata = {
@@ -320,6 +341,7 @@ def load_relative_valuation_source(
         "classification_resolution_counts": dict(sorted(classification_counts.items())),
         "operational_universe": universe_metadata,
         "listing_eligibility": listing_metadata,
+        "structural_break": structural_metadata,
         "excluded_input_counts": dict(sorted(exclusion_counts.items())),
     }
     return RelativeValuationSource(
