@@ -201,3 +201,39 @@ def test_production_comparison_allows_only_content_identical_sidecar_mtime() -> 
 
     after["databases"]["analysis"]["shm"]["sha256"] = "changed"
     assert phase12d.compare_production_inventory(before, after)["identical"] is False
+
+
+def test_production_comparison_allows_only_content_identical_database_mtime() -> None:
+    before = {
+        "databases": {
+            "taxonomy": {
+                "sha256": "database",
+                "size": 100,
+                "mtime_ns": 1,
+                "schema_fingerprint": "schema",
+                "page_count": 10,
+                "freelist_count": 0,
+                "row_counts": {"taxonomy_table": 5},
+                "quick_check": "ok",
+                "foreign_key_errors": 0,
+                "wal": {"exists": True, "size": 0, "mtime_ns": 1, "sha256": "empty"},
+                "shm": {"exists": True, "size": 32768, "mtime_ns": 1, "sha256": "sidecar"},
+            }
+        },
+        "reports": {},
+    }
+    after = json.loads(json.dumps(before))
+    after["databases"]["taxonomy"]["mtime_ns"] = 2
+    comparison = phase12d.compare_production_inventory(before, after)
+
+    assert comparison["identical"] is True
+    assert comparison["exact_metadata_identical"] is False
+    assert comparison["ignored_content_identical_database_mtime_changes"] == [{
+        "database": "taxonomy",
+        "before_mtime_ns": 1,
+        "after_mtime_ns": 2,
+        "sha256": "database",
+    }]
+
+    after["databases"]["taxonomy"]["sha256"] = "changed"
+    assert phase12d.compare_production_inventory(before, after)["identical"] is False

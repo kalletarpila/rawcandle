@@ -184,8 +184,34 @@ def compare_production_inventory(
 ) -> dict[str, Any]:
     normalized_before = json.loads(json.dumps(before))
     normalized_after = json.loads(json.dumps(after))
+    ignored_database_mtime_changes: list[dict[str, Any]] = []
     ignored_sidecar_mtime_changes: list[dict[str, Any]] = []
     for database in sorted(set(before["databases"]) & set(after["databases"])):
+        left_db = before["databases"][database]
+        right_db = after["databases"][database]
+        database_content_keys = (
+            "sha256",
+            "size",
+            "schema_fingerprint",
+            "page_count",
+            "freelist_count",
+            "row_counts",
+            "quick_check",
+            "foreign_key_errors",
+        )
+        if (
+            "mtime_ns" in left_db
+            and "mtime_ns" in right_db
+            and all(left_db.get(key) == right_db.get(key) for key in database_content_keys)
+        ):
+            if left_db.get("mtime_ns") != right_db.get("mtime_ns"):
+                ignored_database_mtime_changes.append({
+                    "database": database,
+                    "before_mtime_ns": left_db.get("mtime_ns"),
+                    "after_mtime_ns": right_db.get("mtime_ns"),
+                    "sha256": left_db.get("sha256"),
+                })
+            normalized_after["databases"][database]["mtime_ns"] = left_db.get("mtime_ns")
         for sidecar in ("wal", "shm"):
             left = before["databases"][database][sidecar]
             right = after["databases"][database][sidecar]
@@ -203,6 +229,7 @@ def compare_production_inventory(
     return {
         "identical": normalized_before == normalized_after,
         "exact_metadata_identical": before == after,
+        "ignored_content_identical_database_mtime_changes": ignored_database_mtime_changes,
         "ignored_content_identical_sidecar_mtime_changes": ignored_sidecar_mtime_changes,
         "preflight_fingerprint": stable_hash(before),
         "postflight_fingerprint": stable_hash(after),

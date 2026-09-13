@@ -45,6 +45,16 @@ lane, replay lane and Phase 13F.4.6 prewrite candidate all proved the current st
 fingerprint is `c9fd41fdedc7b926d801bf7d56884746e552bc6593fba92c22db1e522c1a63d6`. See
 `docs/fundamentals_v4/fundamentals_v4_phase13f4_6_production_deployment.md`.
 
+Phase 13F.4.7 used the corrected acceptance expectation and crossed the production write boundary.
+The first production apply activated the accepted package and Relative Valuation snapshot, and the
+independent second full pass returned logical `NO_CHANGE` for provider staging, package, Relative
+Position and Relative Valuation. The run nevertheless failed closed at the final inventory
+no-change gate because metadata-only SQLite mtime drift was not fully normalized. The full writable
+set was restored from fresh Phase 13F.4.7 backups. A follow-up comparison correction now treats
+content-identical main database `mtime_ns` drift as metadata-only, matching the existing
+content-identical WAL/SHM mtime handling. No second Phase 13F.4.7 production attempt was made. See
+`docs/fundamentals_v4/fundamentals_v4_phase13f4_7_production_activation.md`.
+
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
 ## Preconditions
