@@ -1,0 +1,37 @@
+{
+  "artifact_dir": "temp/fundamentals_v4_phase13f4_11_structural_production/20260914T_PHASE13F4_11_PRODUCTION_ACTIVATION",
+  "backup_dir_created": false,
+  "baseline_active_package": "f9621556445ef7c85f5486ea170e2366cbd356fa9283cd8528436abeab0d0d40",
+  "baseline_active_relative_valuation_snapshot": "11bdf3367e4099f25afbc750836a1a95488af13d09a226f7357c8cbce978fada",
+  "compile_check": "PASS",
+  "diff_check": "PASS",
+  "focused_tests": {
+    "command": "pytest -q tests/test_phase13f4_2_acceptance.py tests/test_phase13f3_4_structural_integration.py tests/test_phase13f3_2_successor_recovery.py tests/test_phase13f3_ticker_transition.py tests/test_phase13b_foundation.py",
+    "result": "46 passed"
+  },
+  "full_active_suite": {
+    "command": "pytest -q > temp/fundamentals_v4_phase13f4_11_structural_production/20260914T_PHASE13F4_11_PRODUCTION_ACTIVATION/prewrite_tests/full_active_suite.log 2>&1",
+    "exit_code_file": "temp/fundamentals_v4_phase13f4_11_structural_production/20260914T_PHASE13F4_11_PRODUCTION_ACTIVATION/prewrite_tests/full_active_suite.exit_code",
+    "exit_code_file_created": false,
+    "last_visible_log_position": "tests/test_phase13f_historical_delisted.py after eight visible passing dots; log stopped at 66%",
+    "log_path": "temp/fundamentals_v4_phase13f4_11_structural_production/20260914T_PHASE13F4_11_PRODUCTION_ACTIVATION/prewrite_tests/full_active_suite.log",
+    "log_line_count": 197,
+    "result": "INCONCLUSIVE_PREWRITE_BLOCKER"
+  },
+  "outcome": "OUTCOME B \u2014 PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED",
+  "production_hashes_after": {
+    "analysis": "a46ab948a9b6b3d12078b7f09158ccde603d28ab649e6bd9015273aa3e54e8d2",
+    "canonical": "554aaa3c8fc359b08ed0c9171f62e08e2cd59c3be2bfed1fa6ff09713275e736",
+    "provider": "7957c44632ff98eda87b12014152eb26b9fd3d445c5d8d2510b7b0f9eca03e11"
+  },
+  "production_quick_check_after": {
+    "analysis": "ok",
+    "canonical": "ok",
+    "market": "ok",
+    "provider": "ok",
+    "taxonomy": "ok"
+  },
+  "production_write_boundary_crossed": false,
+  "temporary_code_commit_before_prewrite": "89e63ac",
+  "workspace_free_space_after_gib": 621
+}

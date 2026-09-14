@@ -62,7 +62,10 @@ def _accepted_result() -> dict[str, object]:
         },
         "dependencies": {"status": "COMPATIBLE"},
         "relative_valuation": {
-            "snapshot": {"result_fingerprint": ACCEPTED["rv_result_fingerprint"]},
+            "snapshot": {
+                "source_fingerprint": ACCEPTED["rv_source_fingerprint"],
+                "result_fingerprint": ACCEPTED["rv_result_fingerprint"],
+            },
             "first_apply": _rv_apply(ACCEPTED["rv_snapshot"]),
             "second_apply": {**_rv_apply(ACCEPTED["rv_snapshot"]), "outcome": "NO_CHANGE"},
             "second_logical_zero_writes": True,
@@ -96,6 +99,7 @@ def test_acceptance_contract_artifact_enumerates_required_fields() -> None:
     assert "STRUCTURAL_SOURCE_FINGERPRINT" in ids
     assert "STRUCTURAL_REGIME_FINGERPRINT" in ids
     assert "RV_SNAPSHOT_ID" in ids
+    assert "RV_SOURCE_FINGERPRINT" in ids
     assert all(row["failure_reason"] for row in rows)
 
 
@@ -142,6 +146,7 @@ def _pop_path(result: dict[str, object], path: tuple[str, ...]) -> None:
     ("path", "value", "reason"),
     [
         (("relative_valuation", "source_metadata", "structural_break", "fingerprint"), ACCEPTED["structural_regime_fingerprint"], "STRUCTURAL_SOURCE_FINGERPRINT"),
+        (("relative_valuation", "snapshot", "source_fingerprint"), ACCEPTED["structural_source_fingerprint"], "RV_SOURCE_FINGERPRINT"),
         (("structural_contract", "regime_fingerprint"), ACCEPTED["structural_source_fingerprint"], "STRUCTURAL_REGIME_FINGERPRINT"),
         (("relative_valuation", "first_apply", "snapshot_id"), "wrong", "RV_SNAPSHOT_ID"),
         (("relative_valuation", "snapshot", "result_fingerprint"), "wrong", "RV_RESULT_FINGERPRINT"),
@@ -167,6 +172,7 @@ def test_acceptance_checker_negative_matrix(path: tuple[str, ...], value: object
         (("relative_valuation", "source_metadata", "structural_break", "fingerprint"), "STRUCTURAL_SOURCE_FINGERPRINT_MISSING"),
         (("structural_contract", "regime_fingerprint"), "STRUCTURAL_REGIME_FINGERPRINT_MISSING"),
         (("relative_valuation", "first_apply", "snapshot_id"), "RV_SNAPSHOT_ID_MISSING"),
+        (("relative_valuation", "snapshot", "source_fingerprint"), "RV_SOURCE_FINGERPRINT_MISSING"),
         (("relative_valuation", "snapshot", "result_fingerprint"), "RV_RESULT_FINGERPRINT_MISSING"),
         (("package", "first_apply", "economic_result_fingerprint"), "PACKAGE_ECONOMIC_FINGERPRINT_MISSING"),
         (("dependencies", "status"), "DEPENDENCY_ATTACHMENT_STATUS_MISSING"),

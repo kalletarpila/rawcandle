@@ -152,6 +152,10 @@ Additional Phase 13F.4.10 fixed-point gate requirement:
 - Phase 13F.4.10 itself does not authorize production activation. Treat the next production write
   as a separate Phase 13F.4.11 action requiring explicit user authorization, fresh verified backups
   and the full preflight/postflight gates below.
+- Phase 13F.4.11 prepared the final activation path but stopped with
+  `OUTCOME B - PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED` because the mandatory full active
+  repository suite did not return a conclusive final pytest result. Do not cross the production
+  write boundary until that full-suite gate is conclusively green.
 
 ## Gate 3 - Backup And Rollback
 

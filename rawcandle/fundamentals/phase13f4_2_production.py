@@ -79,6 +79,7 @@ ACCEPTED = {
     "package_physical_content_fingerprint": "f6144cc126d1a5c3af8735841800903e5e233a1953712ca4b5dd1ba0b67f654a",
     "rv_snapshot": "1f360f0b2dfd8e06eaffd3edcffaf87b604e59a63d0b0e272823b46fada02f6b",
     "rv_result_fingerprint": "9c642e80b06fdbb8c6e703a46a6bda2c7031bc270fbd195b0a3acd7cdeba30f3",
+    "rv_source_fingerprint": "af0e480b64d57bfc8f65fe2ddf9777cfdf5d7b8afbb801bcf95aaea44ebc61ee",
 }
 
 OUTCOME_A = "OUTCOME A — STRUCTURAL-REGIME PACKAGE ACTIVE IN PRODUCTION AND VERIFIED STABLE UNDER FULL-BACKUP ROLLBACK POLICY"
@@ -124,6 +125,7 @@ ACCEPTANCE_CONTRACT: tuple[AcceptanceField, ...] = (
     AcceptanceField("RV_SECOND_PHYSICAL_NO_CHANGE", ("rv_second_physical_no_change",), "Manual Relative Valuation replay must preserve physical content fingerprint.", True, "bool", False, "persisted content", "RV_SECOND_PHYSICAL_NO_CHANGE"),
     AcceptanceField("RV_SNAPSHOT_ID", ("rv_snapshot_id",), "Accepted Relative Valuation active snapshot identity from the apply report.", ACCEPTED["rv_snapshot"], "str", False, "active pointer", "RV_SNAPSHOT_ID"),
     AcceptanceField("RV_RESULT_FINGERPRINT", ("rv_result_fingerprint",), "Accepted Relative Valuation result fingerprint from persisted snapshot metadata.", ACCEPTED["rv_result_fingerprint"], "str", False, "persisted content", "RV_RESULT_FINGERPRINT"),
+    AcceptanceField("RV_SOURCE_FINGERPRINT", ("rv_source_fingerprint",), "Accepted Relative Valuation source fingerprint from calculated snapshot metadata.", ACCEPTED["rv_source_fingerprint"], "str", False, "source input", "RV_SOURCE_FINGERPRINT"),
     AcceptanceField("AREB_POST_DELISTING_RV_ROWS", ("areb_post_delisting_relative_valuation_rows",), "AREB must have no post-delisting current Relative Valuation participation.", 0, "int", False, "calculated result", "AREB_POST_DELISTING_RV_ROWS"),
 )
 
@@ -290,7 +292,7 @@ def _preflight(output: Path, backup_dir: Path, *, require_clean: bool) -> dict[s
     if require_clean and git_status:
         raise RuntimeError("PHASE13F4_2_CLEAN_GIT_WORKTREE_REQUIRED")
     required = {}
-    for commit in ("0804609", "34be0c6", "a01fc83", "a825dd9", "7c18d90", "58d5b16", "68ab231"):
+    for commit in ("0804609", "34be0c6", "a01fc83", "a825dd9", "7c18d90", "58d5b16", "68ab231", "1c35b1c"):
         required[commit] = _run_git(("cat-file", "-e", f"{commit}^{{commit}}"), check=False).returncode == 0
     if not all(required.values()):
         raise RuntimeError("PHASE13F4_2_REQUIRED_COMMIT_MISSING:" + json.dumps(required, sort_keys=True))
@@ -409,7 +411,6 @@ def _apply_pipeline_for_paths(
     allow_production: bool,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"applied_at_utc": applied_at}
-    result["provider_identity_links"] = _apply_provider_identity_links(paths.canonical_db, allow_production=allow_production)
     result["transition_identities"] = _apply_transition_identities(paths.canonical_db, allow_production=allow_production)
     result["provider_staging"] = stage_provider_rows(
         paths.provider_db,
@@ -417,6 +418,17 @@ def _apply_pipeline_for_paths(
         source["rows_by_ticker"],
         allow_production=allow_production,
     )
+    result["provider_identity_links"] = _apply_provider_identity_links(
+        paths.canonical_db,
+        provider_db=paths.provider_db,
+        allow_production=allow_production,
+    )
+    result["provider_identity_links_replay"] = _apply_provider_identity_links(
+        paths.canonical_db,
+        provider_db=paths.provider_db,
+        allow_production=allow_production,
+    )
+    result["transition_identities_replay"] = _apply_transition_identities(paths.canonical_db, allow_production=allow_production)
     result["provider_staging_replay"] = stage_provider_rows(
         paths.provider_db,
         paths.canonical_db,
@@ -599,6 +611,7 @@ def _acceptance_view(result: Mapping[str, Any]) -> dict[str, Any]:
         "rv_second_physical_no_change": bool(_required(rv, ("second_physical_no_change",))),
         "rv_snapshot_id": str(_required(rv, ("first_apply", "snapshot_id"))),
         "rv_result_fingerprint": str(_required(rv, ("snapshot", "result_fingerprint"))),
+        "rv_source_fingerprint": str(_required(rv, ("snapshot", "source_fingerprint"))),
         "areb_post_delisting_relative_valuation_rows": int(_required(result, ("areb", "post_delisting_relative_valuation_rows"))),
     }
 
@@ -632,6 +645,8 @@ def _acceptance_blockers(result: Mapping[str, Any]) -> list[str]:
             "first_apply.snapshot_id": "RV_SNAPSHOT_ID_MISSING",
             "relative_valuation.snapshot.result_fingerprint": "RV_RESULT_FINGERPRINT_MISSING",
             "snapshot.result_fingerprint": "RV_RESULT_FINGERPRINT_MISSING",
+            "relative_valuation.snapshot.source_fingerprint": "RV_SOURCE_FINGERPRINT_MISSING",
+            "snapshot.source_fingerprint": "RV_SOURCE_FINGERPRINT_MISSING",
             "relative_valuation.source_metadata.structural_break.fingerprint": "STRUCTURAL_SOURCE_FINGERPRINT_MISSING",
             "source_metadata.structural_break.fingerprint": "STRUCTURAL_SOURCE_FINGERPRINT_MISSING",
             "structural_contract.regime_fingerprint": "STRUCTURAL_REGIME_FINGERPRINT_MISSING",
