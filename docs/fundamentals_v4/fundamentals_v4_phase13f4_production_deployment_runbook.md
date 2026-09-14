@@ -68,6 +68,19 @@ freelist drift as nonblocking when schema, row counts and integrity are unchange
 Phase 13F.4.8 production attempt was made. See
 `docs/fundamentals_v4/fundamentals_v4_phase13f4_8_simplified_activation.md`.
 
+Phase 13F.4.9 added protected logical table-content fingerprints for every non-`sqlite_` user table
+in the writable production inventory. The guard accepted simulated physical SQLite drift but
+rejected same-row-count numeric, status/reason, structural, row-count, schema and integrity
+mutations. The one authorized production attempt crossed the write boundary and restored from fresh
+backups after the independent second pass changed protected logical content despite package/RP/RV
+outcomes reporting `NO_CHANGE`. Blocking tables were canonical identity tables
+(`company_cik`, `provider_company_identity`, `provider_security_identity`),
+`fundamentals_economic_structural_event`, `fundamentals_result_dependency` and
+`relative_position_refresh_audit`. The last table may be audit-only in a future contract, but the
+identity, structural and dependency changes are protected content and cannot be normalized away. No
+second Phase 13F.4.9 production attempt was made. See
+`docs/fundamentals_v4/fundamentals_v4_phase13f4_9_logical_guard_activation.md`.
+
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
 ## Preconditions
