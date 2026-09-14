@@ -6,6 +6,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import threading
 import time
 import traceback
 from dataclasses import asdict, dataclass
@@ -86,6 +87,90 @@ OUTCOME_A = "OUTCOME A — STRUCTURAL-REGIME PACKAGE ACTIVE IN PRODUCTION AND VE
 OUTCOME_B = "OUTCOME B — PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED"
 OUTCOME_C = "OUTCOME C — DEPLOYMENT FAILED AND COMPLETE BACKUP SET RESTORED SUCCESSFULLY"
 OUTCOME_D = "OUTCOME D — PRODUCTION STATE UNRESOLVED; MANUAL RECOVERY REQUIRED"
+
+
+class PhaseStageJournal:
+    def __init__(self, output: Path, backup_dir: Path, phase: str, *, heartbeat_seconds: float = 10.0) -> None:
+        self.output = output
+        self.backup_dir = backup_dir
+        self.phase = phase
+        self.heartbeat_seconds = heartbeat_seconds
+        self.journal_path = output / "stage_journal.jsonl"
+        self.current_path = output / "stage_current.json"
+        self.heartbeat_path = output / "heartbeat.jsonl"
+        self.exit_code_path = output / "exit_code"
+        self._previous_stage: str | None = None
+        self._sequence = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _atomic_json(self, path: Path, payload: Mapping[str, Any]) -> None:
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        tmp.replace(path)
+
+    def _append_jsonl(self, path: Path, payload: Mapping[str, Any]) -> None:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def checkpoint(
+        self,
+        stage: str,
+        *,
+        writes_may_have_occurred: bool,
+        details: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._sequence += 1
+        payload = {
+            "phase": self.phase,
+            "run_id": self.output.name,
+            "timestamp_utc": utc_now(),
+            "pid": os.getpid(),
+            "sequence": self._sequence,
+            "stage": stage,
+            "writes_may_have_occurred": writes_may_have_occurred,
+            "artifact_dir": str(self.output),
+            "backup_dir": str(self.backup_dir),
+            "preceding_completed_stage": self._previous_stage,
+            "details": dict(details or {}),
+        }
+        self._append_jsonl(self.journal_path, payload)
+        self._atomic_json(self.current_path, payload)
+        self._previous_stage = stage
+        print(f"[{payload['timestamp_utc']}] {self.phase} {stage}", flush=True)
+        return payload
+
+    def start_heartbeat(self) -> None:
+        if self._thread is not None:
+            return
+
+        def beat() -> None:
+            while not self._stop.wait(self.heartbeat_seconds):
+                self._append_jsonl(self.heartbeat_path, {
+                    "phase": self.phase,
+                    "run_id": self.output.name,
+                    "timestamp_utc": utc_now(),
+                    "pid": os.getpid(),
+                    "stage": self._previous_stage,
+                    "artifact_dir": str(self.output),
+                    "backup_dir": str(self.backup_dir),
+                })
+
+        self._thread = threading.Thread(target=beat, name=f"{self.phase}_heartbeat", daemon=True)
+        self._thread.start()
+
+    def stop_heartbeat(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
+
+    def write_exit_code(self, code: int) -> None:
+        tmp = self.exit_code_path.with_name(f".{self.exit_code_path.name}.{os.getpid()}.tmp")
+        tmp.write_text(f"{code}\n", encoding="utf-8")
+        tmp.replace(self.exit_code_path)
 
 
 @dataclass(frozen=True)
@@ -357,6 +442,35 @@ def _restore_to_path(source: Path, destination: Path) -> None:
         src.backup(dst)
 
 
+def _restore_rehearsal_inventory(path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    with _readonly(path) as conn:
+        tables = [
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name")
+        ]
+        user_tables = [table for table in tables if not table.startswith("sqlite_")]
+        row_counts = {
+            table: int(conn.execute(f"SELECT COUNT(*) FROM \"{table.replace(chr(34), chr(34) * 2)}\"").fetchone()[0])
+            for table in user_tables
+        }
+        schema = [tuple(row) for row in conn.execute(
+            "SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name"
+        )]
+        quick = str(conn.execute("PRAGMA quick_check").fetchone()[0])
+        foreign = len(conn.execute("PRAGMA foreign_key_check").fetchall())
+    return {
+        "path": str(path.resolve()),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "sha256": sha256(path),
+        "schema_fingerprint": stable_hash(schema),
+        "row_counts": row_counts,
+        "quick_check": quick,
+        "foreign_key_errors": foreign,
+    }
+
+
 def _restore_rehearsal(backup_manifest: Mapping[str, Mapping[str, Any]], output: Path) -> dict[str, Any]:
     restore_dir = output / "restore_rehearsal"
     restore_dir.mkdir(parents=True, exist_ok=True)
@@ -365,7 +479,7 @@ def _restore_rehearsal(backup_manifest: Mapping[str, Mapping[str, Any]], output:
         source = Path(str(backup_manifest[role]["destination"]))
         target = restore_dir / f"{role}.restored.db"
         _restore_to_path(source, target)
-        inventory = database_inventory(target)
+        inventory = _restore_rehearsal_inventory(target)
         backup_inventory = backup_manifest[role]["inventory"]
         ok = (
             inventory["schema_fingerprint"] == backup_inventory["schema_fingerprint"]
@@ -700,16 +814,38 @@ def run_phase13f4_2(
     output = (output or artifact_root / default_run_id).resolve()
     backup_dir = backup_root / output.name
     output.mkdir(parents=True, exist_ok=True)
+    journal = PhaseStageJournal(output, backup_dir, phase)
+    journal.start_heartbeat()
+    final_exit_code = 1
     try:
+        journal.checkpoint("PREFLIGHT_STARTED", writes_may_have_occurred=False)
         preflight = _preflight(output, backup_dir, require_clean=apply)
-    except Exception as exc:
-        result = {"phase": phase, "outcome": outcome_b, "artifact_dir": str(output), "error": type(exc).__name__, "reason": str(exc)}
+        journal.checkpoint("PREFLIGHT_ACCEPTED", writes_may_have_occurred=False, details={
+            "active_package": preflight.get("production_inventory", {}).get("active_package", {}).get("persistence_fingerprint"),
+            "active_relative_valuation_count": len(preflight.get("production_inventory", {}).get("active_relative_valuation", [])),
+        })
+    except BaseException as exc:
+        journal.checkpoint("FAILED_PREWRITE", writes_may_have_occurred=False, details={"error_type": type(exc).__name__})
+        final_exit_code = 130 if isinstance(exc, KeyboardInterrupt) else 2
+        result = {"phase": phase, "outcome": outcome_b, "artifact_dir": str(output), "error": type(exc).__name__, "reason": str(exc), "traceback": traceback.format_exc()}
         write_json(output / result_filename, result)
+        journal.write_exit_code(final_exit_code)
+        journal.stop_heartbeat()
         return result
-    source = archive_reconciliation()
+    try:
+        source = archive_reconciliation()
+    except BaseException as exc:
+        journal.checkpoint("FAILED_PREWRITE", writes_may_have_occurred=False, details={"error_type": type(exc).__name__})
+        final_exit_code = 130 if isinstance(exc, KeyboardInterrupt) else 2
+        result = {"phase": phase, "outcome": outcome_b, "artifact_dir": str(output), "error": type(exc).__name__, "reason": str(exc), "traceback": traceback.format_exc()}
+        write_json(output / result_filename, result)
+        journal.write_exit_code(final_exit_code)
+        journal.stop_heartbeat()
+        return result
     write_json(output / "production_preflight.json", preflight)
     write_json(output / "acceptance_contract.json", acceptance_contract_artifact())
     if not apply:
+        journal.checkpoint("SUCCESS", writes_may_have_occurred=False, details={"mode": "DRY_RUN"})
         result = {
             "phase": phase,
             "outcome": outcome_b,
@@ -721,13 +857,20 @@ def run_phase13f4_2(
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
         write_json(output / result_filename, result)
+        journal.write_exit_code(0)
+        journal.stop_heartbeat()
         return result
 
     backup_manifest: dict[str, Any] | None = None
     lock_handle = None
+    write_boundary_armed = False
     try:
         prewrite_candidate = _copy_acceptance_candidate(output, source=source, applied_at=APPLIED_AT)
         if prewrite_candidate["acceptance_blockers"]:
+            journal.checkpoint("FAILED_PREWRITE", writes_may_have_occurred=False, details={
+                "acceptance_blockers": prewrite_candidate["acceptance_blockers"],
+            })
+            final_exit_code = 2
             result = {
                 "phase": phase,
                 "outcome": outcome_b,
@@ -739,19 +882,41 @@ def run_phase13f4_2(
                 "elapsed_seconds": round(time.monotonic() - started, 3),
             }
             write_json(output / result_filename, result)
+            journal.write_exit_code(final_exit_code)
             return result
         lock_handle = LOCK_PATH.open("w")
         fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        journal.checkpoint("BACKUP_STARTED", writes_may_have_occurred=False)
         backup_manifest = _backup_write_set(backup_dir)
+        journal.checkpoint("BACKUP_COMPLETE", writes_may_have_occurred=False, details={
+            role: backup_manifest[role].get("sha256") for role in WRITE_ROLES
+        })
+        journal.checkpoint("RESTORE_REHEARSAL_STARTED", writes_may_have_occurred=False)
         restore_rehearsal = _restore_rehearsal(backup_manifest, output)
+        journal.checkpoint("RESTORE_REHEARSAL_COMPLETE", writes_may_have_occurred=False, details={
+            role: restore_rehearsal["roles"][role]["ok"] for role in WRITE_ROLES
+        })
+        journal.checkpoint("WRITE_BOUNDARY_ARMED", writes_may_have_occurred=False)
         before_apply = _targeted_production_inventory()
         applied_at = utc_now()
+        write_boundary_armed = True
+        journal.checkpoint("FIRST_APPLY_STARTED", writes_may_have_occurred=True, details={"applied_at_utc": applied_at})
         first = _apply_pipeline(output / "first_apply", source=source, applied_at=applied_at)
+        journal.checkpoint("FIRST_APPLY_COMPLETE", writes_may_have_occurred=True, details={
+            "package_outcome": first.get("package", {}).get("first_apply", {}).get("outcome"),
+            "rv_outcome": first.get("relative_valuation", {}).get("first_apply", {}).get("outcome"),
+        })
         blockers = _acceptance_blockers(first)
         if blockers:
             raise RuntimeError("PHASE13F4_2_ACCEPTANCE_BLOCKERS:" + ",".join(blockers))
         second_before = _targeted_production_inventory()
+        journal.checkpoint("SECOND_APPLY_STARTED", writes_may_have_occurred=True)
         second = _apply_pipeline(output / "second_apply", source=source, applied_at=applied_at)
+        journal.checkpoint("SECOND_APPLY_COMPLETE", writes_may_have_occurred=True, details={
+            "package_outcome": second.get("package", {}).get("first_apply", {}).get("outcome"),
+            "rv_outcome": second.get("relative_valuation", {}).get("first_apply", {}).get("outcome"),
+        })
+        journal.checkpoint("POSTFLIGHT_STARTED", writes_may_have_occurred=True)
         second_after = _targeted_production_inventory()
         no_change = _second_no_change(first, second, second_before, second_after)
         if not (
@@ -766,6 +931,10 @@ def run_phase13f4_2(
             role: (database_inventory(path) if role in WRITE_ROLES else _light_database_inventory(path))
             for role, path in PRODUCTION.items()
         }
+        journal.checkpoint("POSTFLIGHT_COMPLETE", writes_may_have_occurred=True, details={
+            "active_package": postflight.get("active_package", {}).get("persistence_fingerprint"),
+            "active_relative_valuation_count": len(postflight.get("active_relative_valuation", [])),
+        })
         result = {
             "phase": phase,
             "outcome": outcome_a,
@@ -787,16 +956,36 @@ def run_phase13f4_2(
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
         write_json(output / result_filename, result)
+        journal.checkpoint("SUCCESS", writes_may_have_occurred=True, details={
+            "active_package": postflight.get("active_package", {}).get("persistence_fingerprint"),
+            "result_file": result_filename,
+        })
+        final_exit_code = 0
+        journal.write_exit_code(final_exit_code)
         return result
-    except Exception as exc:
+    except BaseException as exc:
         restored = None
         restore_error = None
-        if backup_manifest is not None:
+        if backup_manifest is not None and write_boundary_armed:
             try:
+                journal.checkpoint("ROLLBACK_STARTED", writes_may_have_occurred=True, details={"error_type": type(exc).__name__})
                 restored = _restore_backups(backup_manifest)
-            except Exception as restore_exc:  # pragma: no cover - production recovery path
+                journal.checkpoint("ROLLBACK_COMPLETE", writes_may_have_occurred=True, details={
+                    role: restored[role].get("sha256") for role in WRITE_ROLES
+                })
+            except BaseException as restore_exc:  # pragma: no cover - production recovery path
                 restore_error = {"type": type(restore_exc).__name__, "message": str(restore_exc), "traceback": traceback.format_exc()}
-        outcome = outcome_c if restored is not None and restore_error is None else (outcome_b if backup_manifest is None else outcome_d)
+        failure_stage = "FAILED_POSTWRITE" if write_boundary_armed else "FAILED_PREWRITE"
+        journal.checkpoint(failure_stage, writes_may_have_occurred=write_boundary_armed, details={
+            "error_type": type(exc).__name__,
+            "restored": restored is not None,
+            "restore_error": restore_error is not None,
+        })
+        outcome = (
+            outcome_c if restored is not None and restore_error is None
+            else (outcome_b if not write_boundary_armed else outcome_d)
+        )
+        final_exit_code = 130 if isinstance(exc, KeyboardInterrupt) else 2
         result = {
             "phase": phase,
             "outcome": outcome,
@@ -809,6 +998,7 @@ def run_phase13f4_2(
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
         write_json(output / result_filename, result)
+        journal.write_exit_code(final_exit_code)
         return result
     finally:
         if lock_handle is not None:
@@ -816,3 +1006,6 @@ def run_phase13f4_2(
                 fcntl.flock(lock_handle, fcntl.LOCK_UN)
             finally:
                 lock_handle.close()
+        journal.stop_heartbeat()
+        if not journal.exit_code_path.exists():
+            journal.write_exit_code(final_exit_code)

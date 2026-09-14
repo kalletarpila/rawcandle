@@ -168,6 +168,18 @@ Additional Phase 13F.4.10 fixed-point gate requirement:
   active package/RV pointers remained at the verified baseline, so the phase returned
   `OUTCOME B - PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED`. See
   `docs/fundamentals_v4/fundamentals_v4_phase13f4_12_production_activation.md`.
+- Phase 13F.4.13 diagnosed the Phase 13F.4.12 non-return as an external interrupt of a long
+  uncheckpointed runner region plus missing `KeyboardInterrupt`/final-result handling. It added a
+  durable stage journal, heartbeat, exit-code file, bounded restore-rehearsal validation and
+  pre-write/post-write failure distinction without changing economic calculations. The one protected
+  activation attempt completed with
+  `OUTCOME A - STRUCTURAL-REGIME PACKAGE AND RELATIVE VALUATION ACTIVE AND STABLE IN PRODUCTION`.
+  The active Relative Valuation snapshot is
+  `1f360f0b2dfd8e06eaffd3edcffaf87b604e59a63d0b0e272823b46fada02f6b`; the package manifest and
+  dependencies carry package economic fingerprint
+  `1700f71e13935fccf7509cf8b9e99fb9f6705cfe9ddf5f49157b53d59a85e4d5` and content fingerprint
+  `f6144cc126d1a5c3af8735841800903e5e233a1953712ca4b5dd1ba0b67f654a`. See
+  `docs/fundamentals_v4/fundamentals_v4_phase13f4_13_durable_activation.md`.
 
 ## Gate 3 - Backup And Rollback
 
