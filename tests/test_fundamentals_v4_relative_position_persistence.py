@@ -171,11 +171,13 @@ def test_identical_and_date_only_second_apply_are_bulk_noops() -> None:
         assert report.outcome == "NO_CHANGE"
         assert report.result_rows_inserted == report.result_rows_deleted == 0
         assert report.activation_changes == 0
+        assert report.audit_rows_inserted == 0
         assert report.snapshot_id == initial.snapshot_id
+    assert conn.execute("SELECT COUNT(*) FROM relative_position_refresh_audit").fetchone()[0] == 1
     metadata = RelativePositionRepository(conn).active_metadata(
         model_fingerprint=MODEL_FINGERPRINT
     )
-    assert metadata and metadata["validated_through_date"] == "2026-09-02"
+    assert metadata and metadata["validated_through_date"] == "2026-09-01"
 
 
 def test_changed_source_activation_eliminates_stale_rows_and_bounds_retention() -> None:

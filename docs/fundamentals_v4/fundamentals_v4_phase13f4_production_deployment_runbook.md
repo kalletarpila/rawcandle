@@ -137,6 +137,22 @@ Additional Phase 13F.4 identity gate requirement:
   unchanged, but changed structural economics must not be able to masquerade as the prior
   active package under indistinguishable persisted metadata.
 
+Additional Phase 13F.4.10 fixed-point gate requirement:
+
+- Before any new production activation attempt, the copy-only Phase 13F.4.10 fixed-point rehearsal
+  must have `OUTCOME A`, empty protected table diffs for primary cycles B/C and replay cycle B, and
+  production immutability under the Phase 13F.4.9 logical-content comparator. The accepted evidence
+  root is
+  `temp/fundamentals_v4_phase13f4_10_fixed_point/20260914T_PHASE13F4_10_FIXED_POINT_R2`.
+- The production deployment phase must include the Phase 13F.4.10 corrections: Relative Position
+  identical-content no-change must not write refresh audit rows, transition identity replay must
+  report real row-change semantics, provider identity links must read provider metadata from the
+  active copy or production lane path, and dependency persistence must preserve existing
+  `dependency_id` values for unchanged natural dependency keys.
+- Phase 13F.4.10 itself does not authorize production activation. Treat the next production write
+  as a separate Phase 13F.4.11 action requiring explicit user authorization, fresh verified backups
+  and the full preflight/postflight gates below.
+
 ## Gate 3 - Backup And Rollback
 
 Before production writes:

@@ -101,11 +101,28 @@ def test_universe_backfill_classifies_security_cardinality(tmp_path: Path) -> No
 def test_candidate_apply_is_idempotent_and_dependency_states_detect_mismatch(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     first = run_candidate_apply(paths, apply=True, applied_at_utc="now")
+    with sqlite3.connect(paths.analysis_db) as conn:
+        first_dependency_ids = {
+            tuple(row[:3]): row[3]
+            for row in conn.execute(
+                "SELECT consumer_family,consumer_object_type,consumer_object_id,dependency_id "
+                "FROM fundamentals_result_dependency ORDER BY consumer_family,consumer_object_type,consumer_object_id"
+            )
+        }
     second = run_candidate_apply(paths, apply=True, applied_at_utc="now")
+    with sqlite3.connect(paths.analysis_db) as conn:
+        second_dependency_ids = {
+            tuple(row[:3]): row[3]
+            for row in conn.execute(
+                "SELECT consumer_family,consumer_object_type,consumer_object_id,dependency_id "
+                "FROM fundamentals_result_dependency ORDER BY consumer_family,consumer_object_type,consumer_object_id"
+            )
+        }
     universe = first["universe"]["identity"]
     taxonomy = taxonomy_identity(paths.taxonomy_db)
     assert second["universe"]["outcome"] == "NO_CHANGE"
     assert second["dependencies"]["outcome"] == "NO_CHANGE"
+    assert second_dependency_ids == first_dependency_ids
     assert candidate_relative_valuation_dependency_state(
         paths.analysis_db,
         report_date="2026-09-11",

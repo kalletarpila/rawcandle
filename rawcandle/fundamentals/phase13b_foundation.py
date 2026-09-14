@@ -651,10 +651,22 @@ def attach_dependencies(
             )
         for row in generic_dependency_rows:
             conn.execute(
-                "INSERT OR REPLACE INTO fundamentals_result_dependency(consumer_family,consumer_object_type,consumer_object_id,model_fingerprint,"
+                "INSERT INTO fundamentals_result_dependency(consumer_family,consumer_object_type,consumer_object_id,model_fingerprint,"
                 "operational_universe_version_id,operational_universe_fingerprint,taxonomy_source_version,taxonomy_source_fingerprint,"
                 "taxonomy_economic_fingerprint,taxonomy_presentation_fingerprint,dependency_as_of_date,compatibility_status,provenance_json,created_at_utc) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(consumer_family,consumer_object_type,consumer_object_id) DO UPDATE SET "
+                "model_fingerprint=excluded.model_fingerprint,"
+                "operational_universe_version_id=excluded.operational_universe_version_id,"
+                "operational_universe_fingerprint=excluded.operational_universe_fingerprint,"
+                "taxonomy_source_version=excluded.taxonomy_source_version,"
+                "taxonomy_source_fingerprint=excluded.taxonomy_source_fingerprint,"
+                "taxonomy_economic_fingerprint=excluded.taxonomy_economic_fingerprint,"
+                "taxonomy_presentation_fingerprint=excluded.taxonomy_presentation_fingerprint,"
+                "dependency_as_of_date=excluded.dependency_as_of_date,"
+                "compatibility_status=excluded.compatibility_status,"
+                "provenance_json=excluded.provenance_json,"
+                "created_at_utc=excluded.created_at_utc",
                 tuple(row[key] for key in (
                     "consumer_family", "consumer_object_type", "consumer_object_id", "model_fingerprint",
                     "operational_universe_version_id", "operational_universe_fingerprint", "taxonomy_source_version",

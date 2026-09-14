@@ -100,8 +100,11 @@ def test_copy_identity_apply_moves_old_tickers_to_successors(tmp_path: Path) -> 
     _minimal_canonical(db)
 
     result = _apply_transition_identities(db)
+    second = _apply_transition_identities(db)
 
     assert result["outcome"] == "APPLIED"
+    assert second["outcome"] == "NO_CHANGE"
+    assert second["rows_changed"] == 0
     conn = sqlite3.connect(db)
     try:
         current = {row[0] for row in conn.execute("SELECT current_ticker FROM security")}

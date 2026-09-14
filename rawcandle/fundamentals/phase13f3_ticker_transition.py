@@ -382,25 +382,36 @@ def _apply_transition_identities(canonical_db: Path, *, allow_production: bool =
                     continue
                 security_id = int(row["security_id"])
                 if str(row["current_ticker"]).upper() != new:
+                    before_changes = conn.total_changes
                     conn.execute(
                         "UPDATE security SET current_ticker=?,updated_at_utc=? WHERE security_id=?",
                         (new, APPLIED_AT, security_id),
                     )
-                    writes += conn.total_changes
+                    writes += conn.total_changes - before_changes
+                before_changes = conn.total_changes
                 conn.execute(
                     "INSERT OR IGNORE INTO ticker_alias(security_id,ticker,provider,valid_from,valid_to,source) VALUES (?,?,?,?,?,?)",
                     (security_id, old, "PHASE13F3_TRANSITION", None, transition["effective_date"], PHASE),
                 )
+                writes += conn.total_changes - before_changes
+                before_changes = conn.total_changes
                 conn.execute(
                     "INSERT OR IGNORE INTO ticker_alias(security_id,ticker,provider,valid_from,valid_to,source) VALUES (?,?,?,?,?,?)",
                     (security_id, new, "PHASE13F3_TRANSITION", transition["effective_date"], None, PHASE),
                 )
+                writes += conn.total_changes - before_changes
             conn.commit()
         except Exception:
             conn.rollback()
             raise
     after = _canonical_rows(canonical_db, [str(row["current_ticker"]) for row in TRANSITIONS])
-    return {"outcome": "APPLIED", "before": before, "after": after, "fingerprint": stable_hash(after)}
+    return {
+        "outcome": "APPLIED" if writes else "NO_CHANGE",
+        "rows_changed": writes,
+        "before": before,
+        "after": after,
+        "fingerprint": stable_hash(after),
+    }
 
 
 def _valuation_classification_update(

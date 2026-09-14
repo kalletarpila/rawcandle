@@ -274,12 +274,17 @@ def nxh_contamination_artifact(nxh_rows: Sequence[Mapping[str, Any]], meta: Mapp
     }
 
 
-def _apply_provider_identity_links(canonical_db: Path, *, allow_production: bool = False) -> dict[str, Any]:
+def _apply_provider_identity_links(
+    canonical_db: Path,
+    *,
+    provider_db: Path | None = None,
+    allow_production: bool = False,
+) -> dict[str, Any]:
     if not allow_production:
         reject_production_path(canonical_db, "canonical")
     writes = 0
     rows = []
-    meta = _provider_metadata(PRODUCTION["provider"])
+    meta = _provider_metadata(provider_db or PRODUCTION["provider"])
     with sqlite3.connect(canonical_db) as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")

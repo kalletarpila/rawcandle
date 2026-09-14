@@ -513,20 +513,6 @@ def apply_snapshot(
         (snapshot.model_fingerprint,),
     ).fetchone()
     if active is not None and str(active["source_content_fingerprint"]) == content_fp:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            _insert_audit(
-                conn,
-                snapshot,
-                content_fp,
-                str(active["snapshot_id"]),
-                checked_at_utc=applied_at_utc,
-                outcome="NO_CHANGE",
-            )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
         retained = int(conn.execute(
             "SELECT COUNT(*) FROM relative_position_snapshot WHERE model_fingerprint=?",
             (snapshot.model_fingerprint,),
@@ -547,7 +533,7 @@ def apply_snapshot(
             activation_changes=0,
             snapshots_inserted=0,
             snapshots_deleted=0,
-            audit_rows_inserted=1,
+            audit_rows_inserted=0,
             active_snapshot_count=1,
             retained_snapshot_count=retained,
             outcome="NO_CHANGE",
