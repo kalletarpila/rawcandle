@@ -161,6 +161,13 @@ Additional Phase 13F.4.10 fixed-point gate requirement:
   exit-code evidence live under
   `temp/fundamentals_v4_phase13f4_11_1_full_suite_gate/full_active_suite_after_fix`.
   This authorizes only preparation of a separately authorized Phase 13F.4.12 production activation.
+- Phase 13F.4.12 was explicitly authorized for one protected production activation attempt. The
+  prewrite copy candidate passed all accepted fingerprint and dependency gates, and a fresh verified
+  backup set was created, but the protected apply command did not return an authoritative production
+  apply result and no `first_apply`/`second_apply` artifacts were present. Production hashes and
+  active package/RV pointers remained at the verified baseline, so the phase returned
+  `OUTCOME B - PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED`. See
+  `docs/fundamentals_v4/fundamentals_v4_phase13f4_12_production_activation.md`.
 
 ## Gate 3 - Backup And Rollback
 
