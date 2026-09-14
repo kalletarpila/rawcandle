@@ -113,6 +113,44 @@ def readonly(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def _logical_sqlite_value(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return {"blob_hex": value.hex()}
+    if isinstance(value, float):
+        return {"binary64_hex": value.hex()}
+    return value
+
+
+def table_content_fingerprint(connection: sqlite3.Connection, table: str) -> str:
+    columns = [
+        dict(row)
+        for row in connection.execute(f"PRAGMA table_info({_quote_identifier(table)})")
+    ]
+    names = [str(row["name"]) for row in columns]
+    primary = [
+        str(row["name"])
+        for row in sorted(columns, key=lambda item: int(item["pk"]))
+        if int(row["pk"]) > 0
+    ]
+    order = primary or names
+    select = ",".join(_quote_identifier(name) for name in names)
+    order_by = ",".join(_quote_identifier(name) for name in order)
+    digest = hashlib.sha256()
+    for row in connection.execute(
+        f"SELECT {select} FROM {_quote_identifier(table)} ORDER BY {order_by}"
+    ):
+        values = [_logical_sqlite_value(row[name]) for name in names]
+        digest.update(
+            json.dumps(values, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+        )
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def _sidecar(path: Path, suffix: str) -> dict[str, Any]:
     sidecar = Path(str(path) + suffix)
     return {
@@ -129,10 +167,14 @@ def database_inventory(path: Path) -> dict[str, Any]:
         tables = [str(row[0]) for row in connection.execute(
             "SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name"
         )]
+        user_tables = [table for table in tables if not table.startswith("sqlite_")]
         row_counts = {
-            table: int(connection.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
-            for table in tables
-            if not table.startswith("sqlite_")
+            table: int(
+                connection.execute(
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
+                ).fetchone()[0]
+            )
+            for table in user_tables
         }
         schema = [tuple(row) for row in connection.execute(
             "SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name"
@@ -142,10 +184,15 @@ def database_inventory(path: Path) -> dict[str, Any]:
         journal_mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0])
         quick = str(connection.execute("PRAGMA quick_check").fetchone()[0])
         foreign = len(connection.execute("PRAGMA foreign_key_check").fetchall())
+        logical_fingerprints = {
+            table: table_content_fingerprint(connection, table)
+            for table in user_tables
+        }
     return {
         "path": str(path.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
         "sha256": sha256(path), "schema_fingerprint": stable_hash(schema),
         "row_counts": row_counts, "page_count": page_count, "freelist_count": freelist,
+        "logical_fingerprints": logical_fingerprints,
         "journal_mode": journal_mode, "quick_check": quick, "foreign_key_errors": foreign,
         "wal": _sidecar(path, "-wal"), "shm": _sidecar(path, "-shm"),
         "journal": _sidecar(path, "-journal"),
@@ -186,15 +233,37 @@ def compare_production_inventory(
     normalized_after = json.loads(json.dumps(after))
     ignored_database_mtime_changes: list[dict[str, Any]] = []
     ignored_sidecar_mtime_changes: list[dict[str, Any]] = []
+    blocking_database_content_differences: list[dict[str, Any]] = []
     for database in sorted(set(before["databases"]) & set(after["databases"])):
         left_db = before["databases"][database]
         right_db = after["databases"][database]
         database_content_keys = (
             "schema_fingerprint",
             "row_counts",
+            "logical_fingerprints",
             "quick_check",
             "foreign_key_errors",
         )
+        for key in database_content_keys:
+            if left_db.get(key) == right_db.get(key):
+                continue
+            difference: dict[str, Any] = {"database": database, "layer": key}
+            if key in {"row_counts", "logical_fingerprints"}:
+                left_values = left_db.get(key, {}) or {}
+                right_values = right_db.get(key, {}) or {}
+                left_names = set(left_values)
+                right_names = set(right_values)
+                difference.update({
+                    "added": sorted(right_names - left_names),
+                    "removed": sorted(left_names - right_names),
+                    "changed": sorted(
+                        name for name in left_names & right_names
+                        if left_values.get(name) != right_values.get(name)
+                    ),
+                })
+            else:
+                difference.update({"before": left_db.get(key), "after": right_db.get(key)})
+            blocking_database_content_differences.append(difference)
         if (
             "mtime_ns" in left_db
             and "mtime_ns" in right_db
@@ -236,6 +305,7 @@ def compare_production_inventory(
         "exact_metadata_identical": before == after,
         "ignored_content_identical_database_mtime_changes": ignored_database_mtime_changes,
         "ignored_content_identical_sidecar_mtime_changes": ignored_sidecar_mtime_changes,
+        "blocking_database_content_differences": blocking_database_content_differences,
         "preflight_fingerprint": stable_hash(before),
         "postflight_fingerprint": stable_hash(after),
         "normalized_preflight_fingerprint": stable_hash(normalized_before),

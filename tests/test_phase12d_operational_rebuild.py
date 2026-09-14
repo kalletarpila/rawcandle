@@ -71,6 +71,41 @@ def _insert(provider: Path, row: dict[str, object]) -> None:
         )
 
 
+def _logical_guard_db(path: Path) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE guarded("
+            "id INTEGER PRIMARY KEY, amount REAL, status TEXT, reason TEXT, payload BLOB)"
+        )
+        connection.executemany(
+            "INSERT INTO guarded(id,amount,status,reason,payload) VALUES(?,?,?,?,?)",
+            [
+                (1, 10.5, "READY", "BASELINE", b"alpha"),
+                (2, None, "LIMITED", None, b"beta"),
+            ],
+        )
+
+
+def _inventory_wrapper(role: str, path: Path) -> dict[str, object]:
+    return {
+        "databases": {role: phase12d.database_inventory(path)},
+        "reports": {},
+        "scheduler": {"exists": False, "sha256": None, "size": None, "mtime_ns": None},
+    }
+
+
+def _logical_guard_inventories(
+    tmp_path: Path, role: str, mutation_sql: str
+) -> tuple[dict[str, object], dict[str, object]]:
+    db = tmp_path / f"{role}.db"
+    _logical_guard_db(db)
+    before = _inventory_wrapper(role, db)
+    with sqlite3.connect(db) as connection:
+        connection.execute(mutation_sql)
+    after = _inventory_wrapper(role, db)
+    return before, after
+
+
 def test_revision_aware_canonical_rebuild_preserves_identity_and_is_idempotent(
     tmp_path: Path,
 ) -> None:
@@ -249,6 +284,110 @@ def test_production_comparison_allows_only_logically_identical_database_physical
     after = json.loads(json.dumps(before))
     after["databases"]["taxonomy"]["quick_check"] = "database disk image is malformed"
     assert phase12d.compare_production_inventory(before, after)["identical"] is False
+
+
+@pytest.mark.parametrize("role", ["provider", "canonical", "analysis"])
+def test_production_comparison_rejects_same_row_count_numeric_value_mutation(
+    tmp_path: Path, role: str
+) -> None:
+    before, after = _logical_guard_inventories(
+        tmp_path, role, "UPDATE guarded SET amount=11.5 WHERE id=1"
+    )
+    comparison = phase12d.compare_production_inventory(before, after)
+
+    assert comparison["identical"] is False
+    assert comparison["blocking_database_content_differences"] == [{
+        "database": role,
+        "layer": "logical_fingerprints",
+        "added": [],
+        "removed": [],
+        "changed": ["guarded"],
+    }]
+
+
+def test_production_comparison_rejects_same_row_count_status_and_reason_mutation(
+    tmp_path: Path,
+) -> None:
+    before, after = _logical_guard_inventories(
+        tmp_path,
+        "analysis",
+        "UPDATE guarded SET status='REVIEW', reason='STRUCTURAL_REVIEW' WHERE id=2",
+    )
+    comparison = phase12d.compare_production_inventory(before, after)
+
+    assert comparison["identical"] is False
+    assert {
+        "database": "analysis",
+        "layer": "logical_fingerprints",
+        "added": [],
+        "removed": [],
+        "changed": ["guarded"],
+    } in comparison["blocking_database_content_differences"]
+
+
+def test_production_comparison_rejects_structural_value_mutation(tmp_path: Path) -> None:
+    db = tmp_path / "analysis.db"
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "CREATE TABLE structural_regime("
+            "security_id INTEGER PRIMARY KEY, structural_regime TEXT, reason TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO structural_regime VALUES(1,'POST_EVENT_CLEAN','ACCEPTED')"
+        )
+    before = _inventory_wrapper("analysis", db)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "UPDATE structural_regime SET structural_regime='COMPARABILITY_REVIEW' "
+            "WHERE security_id=1"
+        )
+    after = _inventory_wrapper("analysis", db)
+    comparison = phase12d.compare_production_inventory(before, after)
+
+    assert comparison["identical"] is False
+    assert {
+        "database": "analysis",
+        "layer": "logical_fingerprints",
+        "added": [],
+        "removed": [],
+        "changed": ["structural_regime"],
+    } in comparison["blocking_database_content_differences"]
+
+
+def test_production_comparison_rejects_row_addition_and_removal(tmp_path: Path) -> None:
+    db = tmp_path / "provider.db"
+    _logical_guard_db(db)
+    before = _inventory_wrapper("provider", db)
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "INSERT INTO guarded(id,amount,status,reason,payload) "
+            "VALUES(3,1.0,'READY','NEW',X'03')"
+        )
+    after_add = _inventory_wrapper("provider", db)
+    add_comparison = phase12d.compare_production_inventory(before, after_add)
+
+    assert add_comparison["identical"] is False
+    assert {
+        "database": "provider",
+        "layer": "row_counts",
+        "added": [],
+        "removed": [],
+        "changed": ["guarded"],
+    } in add_comparison["blocking_database_content_differences"]
+
+    with sqlite3.connect(db) as connection:
+        connection.execute("DELETE FROM guarded WHERE id=2")
+    after_remove = _inventory_wrapper("provider", db)
+    remove_comparison = phase12d.compare_production_inventory(after_add, after_remove)
+
+    assert remove_comparison["identical"] is False
+    assert {
+        "database": "provider",
+        "layer": "row_counts",
+        "added": [],
+        "removed": [],
+        "changed": ["guarded"],
+    } in remove_comparison["blocking_database_content_differences"]
 
 
 def test_production_comparison_rejects_active_identity_changes() -> None:
