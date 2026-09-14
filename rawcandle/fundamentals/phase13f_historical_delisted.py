@@ -156,6 +156,74 @@ def _storage(label: str) -> dict[str, Any]:
     }
 
 
+def _light_database_inventory(path: Path) -> dict[str, Any]:
+    def sidecar(suffix: str) -> dict[str, Any]:
+        item = Path(str(path) + suffix)
+        return {
+            "exists": item.exists(),
+            "size": item.stat().st_size if item.exists() else None,
+            "mtime_ns": item.stat().st_mtime_ns if item.exists() else None,
+            "sha256": _sha256(item) if item.exists() else None,
+        }
+
+    stat = path.stat()
+    with _readonly(path) as conn:
+        tables = [str(row[0]) for row in conn.execute(
+            "SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name"
+        )]
+        user_tables = [table for table in tables if not table.startswith("sqlite_")]
+        row_counts = {
+            table: int(conn.execute(f"SELECT COUNT(*) FROM \"{table.replace(chr(34), chr(34) * 2)}\"").fetchone()[0])
+            for table in user_tables
+        }
+        schema = [tuple(row) for row in conn.execute(
+            "SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name"
+        )]
+        page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
+        freelist = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        journal_mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0])
+        quick = str(conn.execute("PRAGMA quick_check").fetchone()[0])
+        foreign = len(conn.execute("PRAGMA foreign_key_check").fetchall())
+    return {
+        "path": str(path.resolve()),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "sha256": _sha256(path),
+        "schema_fingerprint": stable_hash(schema),
+        "row_counts": row_counts,
+        "page_count": page_count,
+        "freelist_count": freelist,
+        "logical_fingerprints": {},
+        "journal_mode": journal_mode,
+        "quick_check": quick,
+        "foreign_key_errors": foreign,
+        "wal": sidecar("-wal"),
+        "shm": sidecar("-shm"),
+        "journal": sidecar("-journal"),
+    }
+
+
+def _light_production_inventory() -> dict[str, Any]:
+    with _readonly(PRODUCTION["analysis"]) as conn:
+        active = dict(conn.execute(
+            "SELECT * FROM fundamentals_active_model_family WHERE singleton=1"
+        ).fetchone())
+        relative = [dict(row) for row in conn.execute(
+            "SELECT * FROM relative_valuation_active_snapshot ORDER BY model_fingerprint"
+        )]
+    return {
+        "databases": {
+            name: _light_database_inventory(path)
+            for name, path in PRODUCTION.items()
+        },
+        "reports": {},
+        "reports_fingerprint": stable_hash({}),
+        "scheduler": {"exists": False, "sha256": None, "size": None, "mtime_ns": None},
+        "active_package": active,
+        "active_relative_valuation": relative,
+    }
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
@@ -170,8 +238,8 @@ def resolve_output(output: Path | None) -> Path:
     return (output or ARTIFACT_ROOT / DEFAULT_RUN_ID).resolve()
 
 
-def production_preflight() -> dict[str, Any]:
-    inventory = production_inventory()
+def production_preflight(*, light_inventory: bool = False) -> dict[str, Any]:
+    inventory = _light_production_inventory() if light_inventory else production_inventory()
     active = inventory["active_package"]
     active_rv = inventory["active_relative_valuation"]
     with _readonly(PRODUCTION["canonical"]) as conn:
@@ -749,12 +817,13 @@ def run_copy_only_pilot(output: Path | None = None, *, run_heavy: bool = True) -
     estimated_peak = PRODUCTION["canonical"].stat().st_size + PRODUCTION["analysis"].stat().st_size
     if storage_start["free_bytes"] < estimated_peak * 4:
         raise RuntimeError("PHASE13F_INSUFFICIENT_DISK_SAFETY_MARGIN")
-    preflight = production_preflight()
+    light_inventory = not run_heavy
+    preflight = production_preflight(light_inventory=light_inventory)
     evidence = areb_identity_and_listing_evidence()
     copies = create_copy_set(output, "pilot_a")
     copy_manifest = {
-        "canonical": database_inventory(copies.canonical),
-        "analysis": database_inventory(copies.analysis),
+        "canonical": _light_database_inventory(copies.canonical) if light_inventory else database_inventory(copies.canonical),
+        "analysis": _light_database_inventory(copies.analysis) if light_inventory else database_inventory(copies.analysis),
         "provider_read_only": str(copies.provider),
         "market_read_only": str(copies.market),
         "taxonomy_read_only": str(copies.taxonomy),
@@ -789,7 +858,7 @@ def run_copy_only_pilot(output: Path | None = None, *, run_heavy: bool = True) -
         "report_sha256": report["sha256"],
     }
     determinism_fingerprint = stable_hash(logical)
-    postflight = production_preflight()
+    postflight = production_preflight(light_inventory=light_inventory)
     production_compare = compare_production_inventory(preflight["inventory"], postflight["inventory"])
     output_manifest = {
         "phase": PHASE,

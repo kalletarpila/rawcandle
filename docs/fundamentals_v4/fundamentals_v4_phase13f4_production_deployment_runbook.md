@@ -156,6 +156,11 @@ Additional Phase 13F.4.10 fixed-point gate requirement:
   `OUTCOME B - PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED` because the mandatory full active
   repository suite did not return a conclusive final pytest result. Do not cross the production
   write boundary until that full-suite gate is conclusively green.
+- Phase 13F.4.11.1 closed that pre-write test gate with durable evidence:
+  `2961 passed, 14 deselected, 8 warnings in 795.83s (0:13:15)`. The durable log and atomic
+  exit-code evidence live under
+  `temp/fundamentals_v4_phase13f4_11_1_full_suite_gate/full_active_suite_after_fix`.
+  This authorizes only preparation of a separately authorized Phase 13F.4.12 production activation.
 
 ## Gate 3 - Backup And Rollback
 
