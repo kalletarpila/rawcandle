@@ -3,11 +3,12 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import MutableMapping
+from typing import Iterable, MutableMapping
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_PATH = REPO_ROOT / ".env"
+DEFAULT_EXTRA_ENV_PATHS = (Path.home() / ".config" / "rawcandle" / "sharadar.env",)
 _KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -53,20 +54,22 @@ def parse_env_file(path: Path) -> dict[str, str]:
 def load_repo_env(
     *,
     env_file: Path = DEFAULT_ENV_PATH,
+    extra_env_files: Iterable[Path] | None = None,
     environ: MutableMapping[str, str] | None = None,
     override: bool = False,
 ) -> dict[str, str]:
     target = environ if environ is not None else os.environ
     loaded: dict[str, str] = {}
-    for key, value in parse_env_file(env_file).items():
-        if override or key not in target:
-            target[key] = value
-            loaded[key] = value
+    for path in (env_file, *(extra_env_files or ())):
+        for key, value in parse_env_file(path).items():
+            if override or key not in target:
+                target[key] = value
+                loaded[key] = value
     return loaded
 
 
 def get_env(name: str, *, env_file: Path = DEFAULT_ENV_PATH) -> str | None:
-    load_repo_env(env_file=env_file)
+    load_repo_env(env_file=env_file, extra_env_files=DEFAULT_EXTRA_ENV_PATHS)
     return os.environ.get(name)
 
 

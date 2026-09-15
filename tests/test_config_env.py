@@ -37,6 +37,20 @@ def test_load_repo_env_does_not_override_existing_values(tmp_path: Path) -> None
     assert environ["OTHER"] == "value"
 
 
+def test_load_repo_env_reads_extra_env_files_as_fallback(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    extra_file = tmp_path / "sharadar.env"
+    env_file.write_text("OTHER=value\n", encoding="utf-8")
+    extra_file.write_text("SHARADAR_API_KEY=user-config-key\nOTHER=extra-value\n", encoding="utf-8")
+    environ: dict[str, str] = {}
+
+    loaded = load_repo_env(env_file=env_file, extra_env_files=(extra_file,), environ=environ)
+
+    assert loaded == {"OTHER": "value", "SHARADAR_API_KEY": "user-config-key"}
+    assert environ["OTHER"] == "value"
+    assert environ["SHARADAR_API_KEY"] == "user-config-key"
+
+
 def test_require_env_loads_from_explicit_file(tmp_path: Path, monkeypatch) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("SHARADAR_API_KEY=file-key\n", encoding="utf-8")
