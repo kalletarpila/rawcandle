@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from rawcandle.fundamentals.admin.batch_add_tickers import (
@@ -10,6 +11,7 @@ from rawcandle.fundamentals.admin.batch_add_tickers import (
     run_preview,
 )
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT
+from rawcandle.fundamentals.admin.progress import progress_line
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-root", type=Path)
     parser.add_argument("--temp-root", type=Path)
     parser.add_argument("--keep-copies", action="store_true")
+    parser.add_argument("--quiet-progress", action="store_true", help="Suppress line-oriented progress output on stderr.")
     return parser
 
 
@@ -53,6 +56,7 @@ def _paths(args: argparse.Namespace) -> BatchAddTickerPaths:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    progress_callback = None if args.quiet_progress else lambda event: print(progress_line(event), file=sys.stderr, flush=True)
     try:
         if args.apply:
             if not args.preview_payload or not args.preview_fingerprint:
@@ -65,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
                 temp_root=args.temp_root or ADMIN_TEMP_ROOT,
                 confirm_apply=args.confirm_apply,
                 keep_copies=args.keep_copies,
+                progress_callback=progress_callback,
             )
         else:
             result = run_preview(
@@ -74,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                 temp_root=args.temp_root or ADMIN_TEMP_ROOT,
                 network_allowed=args.allow_network,
                 market=args.market,
+                progress_callback=progress_callback,
             )
         print(json.dumps({"ok": True, "run_id": result["run_id"], "outcome": result.get("outcome"), "artifact_dir": result["artifact_dir"]}, sort_keys=True))
         return 0 if result.get("outcome") == "COMPLETED" else 1

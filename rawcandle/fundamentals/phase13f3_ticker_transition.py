@@ -276,16 +276,18 @@ def transition_evidence(paths: AuditPaths) -> list[dict[str, Any]]:
 
 def enhanced_listing_population(paths: AuditPaths) -> dict[str, Any]:
     base = listing_population_audit(paths)
-    transitions = _transition_by_old()
+    transitions_by_old = _transition_by_old()
+    transitions_by_new = _transition_by_new()
     providers = _provider_rows(paths.provider, [str(row["current_ticker"]) for row in TRANSITIONS])
     prices = _price_rows(paths.market, [str(row["current_ticker"]) for row in TRANSITIONS])
     rows = []
     for row in base["rows"]:
         ticker = str(row["current_ticker"]).upper()
-        transition = transitions.get(ticker)
+        transition = transitions_by_old.get(ticker) or transitions_by_new.get(ticker)
         if transition is None:
             rows.append(row)
             continue
+        historical = str(transition["historical_ticker"]).upper()
         current = str(transition["current_ticker"]).upper()
         provider = providers.get(current, {})
         price = prices.get(current, {})
@@ -301,7 +303,7 @@ def enhanced_listing_population(paths: AuditPaths) -> dict[str, Any]:
         eligible, reason = eligible_on_date(interval, AUDIT_DATE)
         updated = dict(row)
         updated.update({
-            "historical_ticker": ticker,
+            "historical_ticker": historical,
             "current_ticker": current,
             "provider_permaticker": provider.get("permaticker"),
             "provider_isdelisted": provider.get("isdelisted"),

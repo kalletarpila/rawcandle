@@ -154,7 +154,7 @@ def test_v2_report_uses_operating_income_and_ten_three_point_metrics(nvda_report
 
 
 def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, dict]) -> None:
-    report, _ = nvda_report
+    report, snapshot = nvda_report
     assert "197.58B" in report
     assert "65.21%" in report
     assert "3.55%" in report
@@ -162,7 +162,13 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "Currency: N/A (source currency not available in the validated contract)" in report
     assert "Datacenter" in report
     assert "Overall eligible universe" in report
-    assert "n=2199" in report
+    universe_counts = {
+        row["measure"]: row["peer_count"]
+        for row in snapshot["relative_position"]["rows"]
+        if row["peer_scope"] == "UNIVERSE"
+    }
+    assert f"n={universe_counts['FUNDAMENTAL_SCORE']}" in report
+    assert f"n={universe_counts['ABSOLUTE_VALUATION_SCORE']}" in report
     assert "Non-Operating Earnings Gap: TARKASTETTAVA EHDOKAS" in report
     assert (
         "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7" in report

@@ -21,6 +21,20 @@ class RunHistoryEntry:
     run_dir: str
 
 
+@dataclass(frozen=True)
+class RunProgressSummary:
+    run_id: str
+    operation_type: str
+    status: str
+    current_stage: str
+    current_stage_number: int | None
+    total_declared_stages: int | None
+    completed_stages: int
+    heartbeat_age_seconds: float | None
+    terminal_outcome: str | None
+    artifacts: tuple[str, ...]
+
+
 class AdminRunHistory:
     def __init__(self, root: Path = ADMIN_RUN_ROOT, *, stale_seconds: int = 3600) -> None:
         self.root = root.resolve()
@@ -130,3 +144,52 @@ class AdminRunHistory:
         if not path.is_file():
             raise FileNotFoundError("admin artifact not found")
         return path
+
+    def progress(self, run_id: str) -> RunProgressSummary:
+        run_dir = self._resolve_run_dir(run_id)
+        if not run_dir.exists() or not run_dir.is_dir():
+            raise FileNotFoundError("admin run not found")
+        status = self._load_json(run_dir / "progress_status.json") or self._load_json(run_dir / "status.json") or {}
+        stages = self._load_json(run_dir / "progress_stages.json") or {}
+        result = self._load_json(run_dir / "result.json")
+        heartbeat_path = run_dir / "progress_events.jsonl"
+        if not heartbeat_path.exists():
+            heartbeat_path = run_dir / "heartbeat.jsonl"
+        heartbeat_age = None
+        if heartbeat_path.exists():
+            heartbeat_age = max(0.0, __import__("time").time() - heartbeat_path.stat().st_mtime)
+        terminal = str(result.get("outcome")) if result else None
+        if result:
+            state = "completed" if terminal == "COMPLETED" else str(terminal).lower()
+        elif heartbeat_age is not None and heartbeat_age <= self.stale_seconds:
+            state = "running"
+        elif status:
+            state = "interrupted"
+        else:
+            state = "corrupt_or_incomplete"
+        event_states: dict[str, str] = {}
+        events_path = run_dir / "progress_events.jsonl"
+        if events_path.exists() and not events_path.is_symlink():
+            try:
+                for line in events_path.read_text(encoding="utf-8").splitlines():
+                    event = json.loads(line)
+                    event_states[str(event.get("current_stage_id"))] = str(event.get("stage_state"))
+            except Exception:
+                event_states = {}
+        completed = sum(1 for value in event_states.values() if value in {"COMPLETED", "SKIPPED", "ROLLED_BACK"})
+        artifacts = tuple(
+            path.name for path in sorted(run_dir.iterdir())
+            if path.is_file() and not path.is_symlink()
+        )
+        return RunProgressSummary(
+            run_id=run_id,
+            operation_type=str(status.get("operation_type", result.get("operation_type") if result else "UNKNOWN")),
+            status=state,
+            current_stage=str(status.get("current_stage_id", status.get("stage", "UNKNOWN"))),
+            current_stage_number=status.get("current_stage_number"),
+            total_declared_stages=status.get("total_declared_stages"),
+            completed_stages=completed,
+            heartbeat_age_seconds=heartbeat_age,
+            terminal_outcome=terminal,
+            artifacts=artifacts,
+        )

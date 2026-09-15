@@ -120,19 +120,27 @@ def test_preview_fingerprint_and_mixed_statuses_are_stable(tmp_path: Path) -> No
 
 
 def test_run_preview_writes_durable_artifacts_and_history(tmp_path: Path) -> None:
+    events: list[dict[str, object]] = []
     result = run_preview(
         "NEWC LIMIT",
         source_paths=_paths(tmp_path / "source"),
         run_root=tmp_path / "runs",
         temp_root=tmp_path / "temp",
+        progress_callback=events.append,
     )
 
     run_dir = Path(result["artifact_dir"])
     assert (run_dir / "preview.json").is_file()
+    assert (run_dir / "progress_stages.json").is_file()
+    assert (run_dir / "progress_status.json").is_file()
+    assert (run_dir / "progress_events.jsonl").is_file()
     assert (run_dir / "report.md").read_text(encoding="utf-8").startswith("# Fundamentals Administration Run")
     assert result["cleanup"]["removed_count"] == 5
+    assert events[0]["current_stage_id"] == "PREFLIGHT"
+    assert events[-1]["current_stage_id"] == "COMPLETED"
     history = AdminRunHistory(tmp_path / "runs")
     assert history.summarize(result["run_id"]).outcome == "COMPLETED"
+    assert history.progress(result["run_id"]).terminal_outcome == "COMPLETED"
 
 
 def test_copy_only_apply_is_idempotent_and_does_not_mutate_source(tmp_path: Path) -> None:
@@ -183,6 +191,7 @@ def test_apply_rejects_stale_preview(tmp_path: Path) -> None:
 def test_failure_after_partial_mutation_rolls_back_copy_lane(tmp_path: Path) -> None:
     source = _paths(tmp_path / "source")
     preview = run_preview("NEWC", source_paths=source, run_root=tmp_path / "runs", temp_root=tmp_path / "temp")
+    events: list[dict[str, object]] = []
 
     result = run_apply(
         preview_payload_path=Path(preview["phase13d_preview_payload_path"]),
@@ -193,9 +202,11 @@ def test_failure_after_partial_mutation_rolls_back_copy_lane(tmp_path: Path) -> 
         confirm_apply=True,
         failure_boundary="identity",
         keep_copies=True,
+        progress_callback=events.append,
     )
 
     assert result["outcome"] == "ROLLED_BACK"
+    assert [event["stage_state"] for event in events if event["current_stage_id"] == "ROLLBACK"] == ["ROLLING_BACK", "ROLLED_BACK"]
     copy_dir = Path(result["cleanup"]["retained"])
     with sqlite3.connect(copy_dir / "canonical.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM security WHERE current_ticker='NEWC'").fetchone()[0] == 0
@@ -238,10 +249,35 @@ def test_cli_preview_smoke(tmp_path: Path, capsys) -> None:
         "--temp-root", str(tmp_path / "cli_temp"),
         "NEWC",
     ])
-    out = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    out = json.loads(captured.out)
 
     assert code == 0
     assert out["ok"] is True
+    assert "[1/19] PREFLIGHT" in captured.err
+    assert captured.err.endswith("\n")
+
+
+def test_cli_quiet_progress_preserves_json_only_output(tmp_path: Path, capsys) -> None:
+    from rawcandle.cli.run_fundamentals_admin_add_tickers import main
+
+    paths = _paths(tmp_path / "source")
+    code = main([
+        "--provider-db", str(paths.provider_db),
+        "--canonical-db", str(paths.canonical_db),
+        "--analysis-db", str(paths.analysis_db),
+        "--market-db", str(paths.market_db),
+        "--taxonomy-db", str(paths.taxonomy_db),
+        "--run-root", str(tmp_path / "cli_runs"),
+        "--temp-root", str(tmp_path / "cli_temp"),
+        "--quiet-progress",
+        "NEWC",
+    ])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert json.loads(captured.out)["ok"] is True
+    assert captured.err == ""
 
 
 def test_generic_plan_uses_fundamentals_metadata_and_verified_archive(tmp_path: Path) -> None:
@@ -343,7 +379,7 @@ def test_generic_apply_stages_all_items_before_one_downstream_batch(tmp_path: Pa
     monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers.DEFAULT_ARCHIVE", archive)
     calls: list[dict[str, object]] = []
 
-    def fake_downstream(copy_paths: BatchAddTickerPaths, output: Path, *, accepted_tickers, applied_at: str):
+    def fake_downstream(copy_paths: BatchAddTickerPaths, output: Path, *, accepted_tickers, applied_at: str, progress=None):
         with sqlite3.connect(copy_paths.canonical_db) as canonical, sqlite3.connect(copy_paths.provider_db) as provider:
             staged_tickers = {
                 row[0]
@@ -376,6 +412,13 @@ def test_generic_apply_stages_all_items_before_one_downstream_batch(tmp_path: Pa
     assert result["downstream"]["mode"] == "GENERIC_AUTHORITATIVE_BATCH"
     assert result["downstream"]["invocation_counts"] == {"package": 1, "relative_position": 1, "relative_valuation": 1}
     assert calls == [{"accepted": ("NEWC", "ADR"), "staged": {"NEWC", "ADR"}, "securities": {"NEWC", "ADR"}}]
+    progress_summary = AdminRunHistory(tmp_path / "runs").progress(result["run_id"])
+    assert progress_summary.current_stage == "COMPLETED"
+    progress_events = [
+        json.loads(line)
+        for line in Path(result["artifact_dir"], "progress_events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["current_stage_id"] for event in progress_events if event["stage_state"] == "COMPLETED"].count("NO_CHANGE_VERIFICATION") == 1
 
 
 def test_generic_apply_rolls_back_after_identity_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

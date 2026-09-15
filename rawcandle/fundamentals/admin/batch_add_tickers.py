@@ -25,7 +25,14 @@ from rawcandle.fundamentals.admin.contracts import (
     fingerprint,
     utc_now,
 )
+from rawcandle.fundamentals.admin.progress import (
+    BATCH_ADD_TICKERS_STAGES,
+    ProgressCallback,
+    ProgressStage,
+    ProgressTracker,
+)
 from rawcandle.fundamentals.admin.reporting import render_markdown_report
+from rawcandle.fundamentals.admin.rv_identity import active_relative_valuation_identity
 from rawcandle.fundamentals import structural_break
 from rawcandle.fundamentals.phase12d import PRODUCTION, ROOT, database_inventory, rebuild_ttm, reconcile_canonical, stable_hash, write_json
 from rawcandle.fundamentals.phase13b_foundation import database_fingerprint, online_backup
@@ -212,9 +219,12 @@ def reject_production_write_targets(paths: BatchAddTickerPaths) -> None:
 
 
 def source_state(paths: BatchAddTickerPaths) -> dict[str, Any]:
+    rv_identity = active_relative_valuation_identity(paths.analysis_db)
+    rv_identity_for_fingerprint = {key: value for key, value in rv_identity.items() if key != "database_path"}
     return {
         "contract_version": CONTRACT_VERSION,
         "databases": {role: database_fingerprint(path) for role, path in paths.as_dict().items()},
+        "active_relative_valuation": rv_identity_for_fingerprint,
     }
 
 
@@ -1005,20 +1015,57 @@ def _snapshot_smoke_generic(paths: BatchAddTickerPaths, output: Path, *, tickers
     return results
 
 
-def _run_authoritative_downstream(paths: BatchAddTickerPaths, output: Path, *, accepted_tickers: Sequence[str], applied_at: str) -> dict[str, Any]:
+def _run_authoritative_downstream(
+    paths: BatchAddTickerPaths,
+    output: Path,
+    *,
+    accepted_tickers: Sequence[str],
+    applied_at: str,
+    progress: ProgressTracker | None = None,
+) -> dict[str, Any]:
     candidate = CandidatePaths(paths.canonical_db, paths.analysis_db, paths.taxonomy_db, provider_db=paths.provider_db, market_db=paths.market_db)
     result: dict[str, Any] = {"applied_at_utc": applied_at, "accepted_tickers": list(accepted_tickers)}
+    if progress:
+        progress.running(ProgressStage.CANONICAL_REBUILD, "Rebuilding canonical quarters from staged provider rows.")
     result["canonical"] = reconcile_canonical(paths.provider_db, paths.canonical_db, applied_at=applied_at)
+    if progress:
+        progress.completed(
+            ProgressStage.CANONICAL_REBUILD,
+            "Canonical rebuild completed.",
+            processed_rows=int(result["canonical"].get("canonical_rows") or 0),
+        )
+        progress.running(ProgressStage.TTM_REBUILD, "Rebuilding TTM endpoints.")
     result["ttm"] = rebuild_ttm(paths.canonical_db, applied_at=applied_at)
+    if progress:
+        progress.completed(ProgressStage.TTM_REBUILD, "TTM rebuild completed.", processed_rows=int(result["ttm"].get("rows") or 0))
+        progress.running(ProgressStage.STRUCTURAL_DEPENDENCIES, "Applying structural dependency contract.")
     result["structural_contract"] = structural_break.apply_contract(paths.canonical_db, events=_events(), applied_at_utc=applied_at)
     result["structural_evidence"] = _structural_evidence(paths.canonical_db)
     structural_package_fingerprint = _structural_package_fingerprint(result["structural_contract"])
     result["structural_package_fingerprint"] = structural_package_fingerprint
     result["valuation_classification"] = _valuation_classification_update_generic(paths, tickers=accepted_tickers, applied_at=applied_at)
+    if progress:
+        progress.completed(
+            ProgressStage.STRUCTURAL_DEPENDENCIES,
+            "Structural dependencies applied.",
+            processed_rows=int(result["structural_contract"].get("quarter_regime_count") or 0),
+        )
     result["schema"] = ensure_candidate_schema(candidate, applied_at_utc=applied_at, apply=True, allow_production=False)
     universe = backfill_universe(candidate, applied_at_utc=applied_at, apply=True, allow_production=False)
     result["universe"] = universe
+    if progress:
+        progress.running(ProgressStage.PACKAGE_CALCULATION, "Running Operating-Income V2 package calculation.")
     result["package"] = instrumented_package_refresh(paths.as_dict(), output, allow_production=False)
+    if progress:
+        package_rows = result["package"].get("first_apply", {}).get("rows", {})
+        progress.completed(
+            ProgressStage.PACKAGE_CALCULATION,
+            "Operating-Income V2 package calculation completed.",
+            processed_rows=int(package_rows.get("score") or 0) if isinstance(package_rows, Mapping) else None,
+        )
+        progress.running(ProgressStage.PACKAGE_APPLY, "Operating-Income V2 package apply verified.")
+        progress.completed(ProgressStage.PACKAGE_APPLY, "Operating-Income V2 package apply completed.")
+        progress.running(ProgressStage.RELATIVE_POSITION, "Refreshing full-universe Relative Position.")
     result["relative_position"] = asdict(refresh_relative_position(
         canonical_db=paths.canonical_db,
         analysis_db=paths.analysis_db,
@@ -1028,6 +1075,13 @@ def _run_authoritative_downstream(paths: BatchAddTickerPaths, output: Path, *, a
         model_fingerprint=RP_MODEL_FINGERPRINT,
         applied_at_utc=applied_at,
     ))
+    if progress:
+        progress.completed(
+            ProgressStage.RELATIVE_POSITION,
+            "Relative Position refresh completed.",
+            processed_rows=int(result["relative_position"].get("result_rows") or 0),
+        )
+        progress.running(ProgressStage.RELATIVE_VALUATION, "Refreshing full-universe Relative Valuation.")
     taxonomy = taxonomy_identity(paths.taxonomy_db)
     result["pre_refresh_compatibility"] = candidate_relative_valuation_dependency_state(
         paths.analysis_db,
@@ -1036,6 +1090,13 @@ def _run_authoritative_downstream(paths: BatchAddTickerPaths, output: Path, *, a
         expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
     )
     result["relative_valuation"] = _manual_rv_refresh_generic(paths, output=output, applied_at=applied_at)
+    if progress:
+        progress.completed(
+            ProgressStage.RELATIVE_VALUATION,
+            "Relative Valuation refresh completed.",
+            processed_rows=int(result["relative_valuation"].get("snapshot", {}).get("company_count") or 0),
+        )
+        progress.running(ProgressStage.DEPENDENCY_ATTACHMENT, "Attaching refreshed dependency identities.")
     structural_metadata = {
         "structural_contract_version": structural_break.CONTRACT_VERSION,
         "structural_package_fingerprint": structural_package_fingerprint,
@@ -1059,12 +1120,39 @@ def _run_authoritative_downstream(paths: BatchAddTickerPaths, output: Path, *, a
         expected_universe_fingerprint=universe["identity"]["economic_result_fingerprint"],
         expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
     )
+    if progress:
+        progress.completed(ProgressStage.DEPENDENCY_ATTACHMENT, "Dependency attachment completed.")
+        progress.running(ProgressStage.SNAPSHOT_SMOKE, "Generating eligible Snapshot smoke reports.")
     result["snapshots"] = _snapshot_smoke_generic(paths, output, tickers=accepted_tickers)
+    if progress:
+        progress.completed(ProgressStage.SNAPSHOT_SMOKE, "Snapshot smoke completed.", processed_items=len(result["snapshots"]), total_items=len(accepted_tickers))
     result["invocation_counts"] = {"package": 1, "relative_position": 1, "relative_valuation": 1}
     return result
 
 
-def _apply_generic_plan(paths: BatchAddTickerPaths, plan: Mapping[str, Any], *, output: Path, failure_boundary: str | None = None) -> dict[str, Any]:
+def _skip_authoritative_downstream_progress(progress: ProgressTracker, *, reason: str) -> None:
+    for stage in (
+        ProgressStage.CANONICAL_REBUILD,
+        ProgressStage.TTM_REBUILD,
+        ProgressStage.STRUCTURAL_DEPENDENCIES,
+        ProgressStage.PACKAGE_CALCULATION,
+        ProgressStage.PACKAGE_APPLY,
+        ProgressStage.RELATIVE_POSITION,
+        ProgressStage.RELATIVE_VALUATION,
+        ProgressStage.DEPENDENCY_ATTACHMENT,
+        ProgressStage.SNAPSHOT_SMOKE,
+    ):
+        progress.skipped(stage, reason)
+
+
+def _apply_generic_plan(
+    paths: BatchAddTickerPaths,
+    plan: Mapping[str, Any],
+    *,
+    output: Path,
+    failure_boundary: str | None = None,
+    progress: ProgressTracker | None = None,
+) -> dict[str, Any]:
     plan_fingerprint = str(plan.get("plan_fingerprint") or stable_hash(plan))
     items = [item for item in plan.get("items", []) if item.get("status") == "ELIGIBLE"]
     accepted = [str(item["ticker"]).upper() for item in items]
@@ -1074,14 +1162,42 @@ def _apply_generic_plan(paths: BatchAddTickerPaths, plan: Mapping[str, Any], *, 
         _ensure_identity_tables(conn)
         existing = conn.execute("SELECT 1 FROM phase13g2_applied_plan WHERE plan_fingerprint=?", (plan_fingerprint,)).fetchone()
     if existing:
+        if progress:
+            progress.running(ProgressStage.NO_CHANGE_VERIFICATION, "Verifying previously applied no-change batch.")
+            progress.completed(ProgressStage.NO_CHANGE_VERIFICATION, "No copy-lane changes required.", processed_items=0, total_items=len(accepted))
         return {"outcome": "NO_CHANGE", "preview_fingerprint": plan_fingerprint, "applied_tickers": [], "downstream": {"invocation_counts": {"package": 0, "relative_position": 0, "relative_valuation": 0}}}
+    if progress:
+        progress.running(ProgressStage.IDENTITY_AND_UNIVERSE, "Persisting canonical and provider identities.", processed_items=0, total_items=len(accepted))
     identities = _apply_identities(paths, items, applied_at=applied_at)
+    if progress:
+        progress.completed(ProgressStage.IDENTITY_AND_UNIVERSE, "Canonical and provider identities persisted.", processed_items=len(accepted), total_items=len(accepted))
     if failure_boundary == "identity":
         raise RuntimeError("PHASE13G2_INJECTED_AFTER_IDENTITY")
+    if progress:
+        progress.running(ProgressStage.PROVIDER_STAGING, "Staging provider rows for accepted tickers.", processed_items=0, total_items=len(accepted))
     provider = _stage_generic_provider_rows(paths, items, applied_at=applied_at, inject_failure=failure_boundary == "provider_staging")
+    if progress:
+        progress.completed(
+            ProgressStage.PROVIDER_STAGING,
+            "Provider staging completed.",
+            processed_items=len(accepted),
+            total_items=len(accepted),
+            processed_rows=int(provider.get("logical_changes") or 0),
+        )
     if failure_boundary == "provider":
         raise RuntimeError("PHASE13G2_INJECTED_AFTER_PROVIDER")
-    downstream = _run_authoritative_downstream(paths, output, accepted_tickers=accepted, applied_at=applied_at) if accepted else {"invocation_counts": {"package": 0, "relative_position": 0, "relative_valuation": 0}}
+    if accepted:
+        downstream = _run_authoritative_downstream(
+            paths,
+            output,
+            accepted_tickers=accepted,
+            applied_at=applied_at,
+            progress=progress,
+        )
+    else:
+        if progress:
+            _skip_authoritative_downstream_progress(progress, reason="No eligible accepted tickers; downstream rebuilds not required.")
+        downstream = {"invocation_counts": {"package": 0, "relative_position": 0, "relative_valuation": 0}}
     with sqlite3.connect(paths.canonical_db) as conn:
         _ensure_identity_tables(conn)
         conn.execute(
@@ -1107,17 +1223,31 @@ def run_preview(
     temp_root: Path = ADMIN_TEMP_ROOT,
     network_allowed: bool = False,
     market: str | None = "usa",
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     request = parse_batch_tickers(raw_inputs, market=market)
     run_id = stable_run_id(AdminOperationType.ADD_TICKERS, fingerprint(request))
     writer = AdminRunWriter(run_id, AdminOperationType.ADD_TICKERS, root=run_root)
+    progress = ProgressTracker(
+        run_id=run_id,
+        operation_type=AdminOperationType.ADD_TICKERS,
+        run_dir=writer.run_dir,
+        stages=BATCH_ADD_TICKERS_STAGES,
+        callback=progress_callback,
+    )
     started = utc_now()
+    progress.running(ProgressStage.PREFLIGHT, "Recording Batch Add Tickers preview request.", processed_items=0, total_items=len(request.normalized_inputs))
     writer.checkpoint(RunStage.REQUEST_CREATED, message="Batch Add Tickers preview request recorded.")
     writer.write_json("request.json", request.as_dict() | {"network_allowed": network_allowed})
+    progress.completed(ProgressStage.PREFLIGHT, "Preview request recorded.", processed_items=0, total_items=len(request.normalized_inputs))
+    progress.running(ProgressStage.PREVIEW_VALIDATION, "Creating copy lane for read-only preview.")
     writer.checkpoint(RunStage.PREVIEW_STARTED, message="Creating copy lane for read-only production-shaped preview.")
     lane = create_copy_lane(source_paths, lane_dir=temp_root / run_id / "preview_lane", writer=writer)
     try:
+        progress.completed(ProgressStage.PREVIEW_VALIDATION, "Preview copy lane ready.")
+        progress.running(ProgressStage.SOURCE_RESOLUTION, "Resolving provider, market, identity and classification evidence.", processed_items=0, total_items=len(request.normalized_inputs))
         preview, raw_preview = build_preview_from_copy(lane.paths, request, network_allowed=network_allowed)
+        progress.completed(ProgressStage.SOURCE_RESOLUTION, "Source resolution completed.", processed_items=len(request.normalized_inputs), total_items=len(request.normalized_inputs))
         preview_dict = preview.as_dict()
         preview_path = writer.write_json("preview.json", preview_dict)
         phase13d_preview_path = writer.run_dir / "phase13d_preview_payload.json"
@@ -1153,6 +1283,11 @@ def run_preview(
         result_dict = result.as_dict()
         writer.write_final_result(result)
         writer.write_text("report.md", render_markdown_report(result_dict))
+        progress.running(ProgressStage.CLEANUP, "Removing preview copy lane.")
+        cleanup = cleanup_copy_lane(lane)
+        progress.completed(ProgressStage.CLEANUP, "Preview copy lane removed.", processed_items=int(cleanup.get("removed_count") or 0))
+        progress.running(ProgressStage.COMPLETED, "Preview run completed.")
+        progress.completed(ProgressStage.COMPLETED, "Preview run completed.")
         writer.checkpoint(RunStage.COMPLETED, message="Preview run completed.", preview_fingerprint=preview_dict["preview_fingerprint"])
         writer.write_exit_code(0)
         writer.write_manifest()
@@ -1160,10 +1295,11 @@ def run_preview(
             "run_id": run_id,
             "artifact_dir": str(writer.run_dir),
             "phase13d_preview_payload_path": str(phase13d_preview_path),
-            "cleanup": cleanup_copy_lane(lane),
+            "cleanup": cleanup,
         }
     except Exception as exc:
         writer.write_error(exc)
+        progress.failed(ProgressStage.SOURCE_RESOLUTION, "Preview failed.", errors=(f"{type(exc).__name__}: {exc}",))
         writer.checkpoint(RunStage.FAILED_BEFORE_WRITE, message="Preview failed before any write boundary.")
         writer.write_exit_code(2)
         writer.write_manifest()
@@ -1181,6 +1317,7 @@ def run_apply(
     confirm_apply: bool = False,
     failure_boundary: str | None = None,
     keep_copies: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     if not confirm_apply:
         raise PermissionError("PHASE13G2_APPLY_REQUIRES_CONFIRMATION")
@@ -1199,19 +1336,32 @@ def run_apply(
     )
     run_id = stable_run_id(AdminOperationType.ADD_TICKERS, preview_fingerprint, suffix="apply")
     writer = AdminRunWriter(run_id, AdminOperationType.ADD_TICKERS, root=run_root)
+    progress = ProgressTracker(
+        run_id=run_id,
+        operation_type=AdminOperationType.ADD_TICKERS,
+        run_dir=writer.run_dir,
+        stages=BATCH_ADD_TICKERS_STAGES,
+        callback=progress_callback,
+    )
     started = utc_now()
+    progress.running(ProgressStage.PREFLIGHT, "Recording Batch Add Tickers apply request.", processed_items=0, total_items=len(request.normalized_inputs))
     writer.checkpoint(RunStage.REQUEST_CREATED, message="Copy-only apply request recorded.", preview_fingerprint=preview_fingerprint)
     writer.write_json("request.json", request.as_dict())
     writer.write_json("preview.json", phase_preview)
+    progress.completed(ProgressStage.PREFLIGHT, "Apply request recorded.", processed_items=0, total_items=len(request.normalized_inputs))
+    progress.running(ProgressStage.PREVIEW_VALIDATION, "Creating copy lane for copy-only apply.")
     writer.checkpoint(RunStage.APPLY_STARTED, message="Creating copy lane for copy-only apply.", preview_fingerprint=preview_fingerprint)
     lane = create_copy_lane(source_paths, lane_dir=temp_root / run_id / "apply_lane", writer=writer)
     rollback: dict[str, Any] = {}
     write_boundary_crossed = False
     try:
+        progress.completed(ProgressStage.PREVIEW_VALIDATION, "Apply copy lane ready.")
+        progress.running(ProgressStage.SOURCE_RESOLUTION, "Validating saved preview freshness and source plan.", processed_items=0, total_items=len(request.normalized_inputs))
         _assert_preview_not_stale(lane.paths, payload)
         writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Preview is fresh on apply copy.", preview_fingerprint=preview_fingerprint)
         copy_preview, raw_preview = build_preview_from_copy(lane.paths, request, now=payload.get("created_at_utc"))
         saved_plan = payload.get("generic_batch_plan") if isinstance(payload.get("generic_batch_plan"), Mapping) else raw_preview["generic_batch_plan"]
+        progress.completed(ProgressStage.SOURCE_RESOLUTION, "Saved preview and source plan validated.", processed_items=len(request.normalized_inputs), total_items=len(request.normalized_inputs))
         copy_preview_path = lane.lane_dir / "accepted_preview.json"
         write_json(copy_preview_path, raw_preview)
         writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Applying accepted tickers to database copies.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
@@ -1223,6 +1373,7 @@ def run_apply(
                 saved_plan,
                 output=lane.lane_dir / "generic_authoritative_apply",
                 failure_boundary=failure_boundary,
+                progress=progress,
             )
             applied["mode"] = "GENERIC_AUTHORITATIVE_BATCH"
         else:
@@ -1242,6 +1393,7 @@ def run_apply(
                 lane.paths,
                 saved_plan,
                 output=lane.lane_dir / "generic_authoritative_repeat",
+                progress=progress,
             )
         else:
             repeated = apply_ticker_preview(
@@ -1301,20 +1453,29 @@ def run_apply(
         writer.write_json("copy_apply_technical.json", result_dict["copy_apply"])
         writer.write_items_csv([item.as_dict() for item in decisions])
         writer.write_text("report.md", render_markdown_report(result_dict))
+        progress.running(ProgressStage.FINAL_VALIDATION, "Writing final apply artifacts.")
+        progress.completed(ProgressStage.FINAL_VALIDATION, "Final apply artifacts written.", processed_items=len(decisions), total_items=len(decisions))
         writer.checkpoint(RunStage.PARTIALLY_COMPLETED if result.outcome == AdminStatus.PARTIALLY_COMPLETED else RunStage.COMPLETED, message="Copy-only apply completed.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True, counters=counts)
         writer.write_exit_code(1 if result.outcome == AdminStatus.PARTIALLY_COMPLETED else 0)
         writer.write_manifest()
+        progress.running(ProgressStage.CLEANUP, "Cleaning copy lane." if not keep_copies else "Retaining copy lane by request.")
         cleanup = {"retained": str(lane.lane_dir)} if keep_copies else cleanup_copy_lane(lane)
+        progress.completed(ProgressStage.CLEANUP, "Copy lane cleanup completed.", processed_items=int(cleanup.get("removed_count") or 0) if "removed_count" in cleanup else None)
+        progress.running(ProgressStage.COMPLETED, "Copy-only apply completed.")
+        progress.completed(ProgressStage.COMPLETED, "Copy-only apply completed.")
         return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "cleanup": cleanup}
     except Exception as exc:
         writer.write_error(exc)
         if write_boundary_crossed:
+            progress.rolling_back("Copy apply failed after write boundary; restoring copied databases.", errors=(f"{type(exc).__name__}: {exc}",))
             writer.checkpoint(RunStage.ROLLBACK_STARTED, message="Copy apply failed; restoring copy lane from fresh source backups.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
             rollback = _restore_copy_lane_from_sources(source_paths, lane)
+            progress.rolled_back("Copied databases restored after failure.")
             writer.checkpoint(RunStage.ROLLBACK_COMPLETE, message="Copy lane restored after failure.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
             terminal_stage = RunStage.FAILED_AFTER_WRITE
             outcome = AdminStatus.ROLLED_BACK
         else:
+            progress.failed(ProgressStage.SOURCE_RESOLUTION, "Copy apply failed before write boundary.", errors=(f"{type(exc).__name__}: {exc}",))
             rollback = {"status": "NOT_REQUIRED", "message": "Failure occurred before the copy write boundary."}
             terminal_stage = RunStage.FAILED_BEFORE_WRITE
             outcome = AdminStatus.FAILED
@@ -1349,7 +1510,9 @@ def run_apply(
         writer.checkpoint(terminal_stage, message="Copy-only apply failed.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=write_boundary_crossed)
         writer.write_exit_code(3 if write_boundary_crossed else 2)
         writer.write_manifest()
+        progress.running(ProgressStage.CLEANUP, "Cleaning failed copy lane." if not keep_copies else "Retaining failed copy lane by request.")
         cleanup = {"retained": str(lane.lane_dir)} if keep_copies else cleanup_copy_lane(lane)
+        progress.completed(ProgressStage.CLEANUP, "Failed copy lane cleanup completed.", processed_items=int(cleanup.get("removed_count") or 0) if "removed_count" in cleanup else None)
         return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "cleanup": cleanup, "error": type(exc).__name__}
 
 
