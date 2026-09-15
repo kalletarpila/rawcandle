@@ -62,6 +62,57 @@ Filtered production preview:
 - Not applicable: `1`
 - Correctable: `0`
 
+## Phase 13G.3.1 Population Reconciliation
+
+Read-only audit run:
+
+- Run: `20260915T181656Z_check_update_sector_industry_4538db5d046d_phase13g31_audit`
+- Outcome: `OUTCOME A - SECTOR/INDUSTRY SCAN POPULATION FULLY RECONCILED`
+- Production databases changed: `no`
+- Production DB health: `quick_check=ok`, `foreign_key_check_rows=0` for provider, canonical, analysis, market and taxonomy databases
+- Active package, Relative Position and Relative Valuation identities: unchanged before/after audit
+
+The Phase 13G.3 full-scan denominator is the active operational-universe membership population:
+
+```text
+2469 total OU member rows
+- 16 historical retained/no-active rows
+= 2453 active OU member rows
+= 2453 Phase 13G.3 scan subjects
+= 2440 exact + 0 normalized + 11 identity-review + 2 not-applicable
+  + 0 missing-source + 0 ambiguous-source + 0 structural-review
+  + 0 change-required + 0 missing-persisted
+```
+
+The apparent mismatch with the active-security count is expected. The active universe has `2464` active securities because `11` active multi-security companies each have two active security components. Phase 13G.3 intentionally scans active membership rows and records these `11` multi-security companies as `IDENTITY_REVIEW_REQUIRED` instead of automatically expanding and mutating per-security classifications.
+
+SNDK and all ten Phase 13G.2.4 production-onboarded tickers (`AG`, `ALOY`, `ARM`, `ASML`, `ASX`, `BABA`, `BHP`, `BIDU`, `BTDR`, `CAMT`) are active single-security operational-universe members, included in the Phase 13G.3 scan, resolved with market `usa`, and classified as `EXACT_MATCH` against `ticker_meta`.
+
+The `IDENTITY_REVIEW_REQUIRED` cases are:
+
+```text
+CENT,CENTA
+FOX,FOXA
+FWONA,FWONK
+GOOG,GOOGL
+LBTYA,LBTYK
+LILA,LILAK
+LLYVA,LLYVK
+METC,METCB
+NWS,NWSA
+UA,UAA
+Z,ZG
+```
+
+The `NOT_APPLICABLE` cases are:
+
+```text
+BATRK
+BELFB
+```
+
+Durable 13G.3.1 artifacts include `population_reconciliation.json`, full `ticker_reconciliation.csv/json`, `named_ticker_reconciliation.csv/json`, `identity_review_not_applicable_cases.csv/json`, `production_db_integrity.json`, `active_identity_pre_post.json`, `disk_hygiene.json`, `report.md`, `result.json`, `status.json`, `exit_code` and `artifact_manifest.json`.
+
 ## Test Evidence
 
 Focused regression suite:
@@ -70,6 +121,8 @@ Focused regression suite:
 25 passed in 7.87s
 25 passed in 7.91s
 25 passed in 8.00s
+26 passed in 8.49s
+46 passed in 124.35s (admin regression)
 ```
 
 Covered behavior includes full scan classification, filtered ticker and alias resolution, durable progress artifacts, stale preview rejection, copy-lane correction and repeat no-change, downstream skip for no-change, and rollback after injected post-mutation failure.

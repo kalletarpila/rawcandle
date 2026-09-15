@@ -47,7 +47,7 @@ def _paths(tmp_path: Path) -> BatchAddTickerPaths:
             """
         )
         conn.execute("INSERT INTO fundamentals_operational_universe_active_version VALUES(1,'u1','2026-09-15T00:00:00Z')")
-        conn.execute("INSERT INTO fundamentals_operational_universe_version VALUES('u1','c','scope','2026-09-15','s','econ','phys','COMPLETE',8,8,8,0,0,'x','x')")
+        conn.execute("INSERT INTO fundamentals_operational_universe_version VALUES('u1','c','scope','2026-09-15','s','econ','phys','COMPLETE',9,9,8,1,1,'x','x')")
         members = [
             (1, 11, "EXACT", "NYSE", 1, 1),
             (2, 12, "NORM", "NYSE", 1, 1),
@@ -61,10 +61,19 @@ def _paths(tmp_path: Path) -> BatchAddTickerPaths:
         for company_id, security_id, ticker, exchange, active_count, all_count in members:
             conn.execute("INSERT INTO company VALUES(?,?)", (company_id, f"{ticker} Co"))
             conn.execute("INSERT INTO security VALUES(?,?,?,?,?,?,?)", (security_id, company_id, ticker, exchange, 1, "2020-01-01", None))
+            membership_status = "ACTIVE_MULTI_SECURITY" if ticker == "MULTI" else "ACTIVE"
+            membership_security_id = None if ticker == "MULTI" else security_id
             conn.execute(
                 "INSERT INTO fundamentals_operational_universe_member VALUES('u1',?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (company_id, security_id, ticker, "usa", "ACTIVE", "RESOLVED", active_count, all_count, "2020-01-01", None, "test", "test", "x", "x"),
+                (company_id, membership_security_id, ticker, "usa", membership_status, "RESOLVED", active_count, all_count, "2020-01-01", None, "test", "test", "x", "x"),
             )
+        conn.execute("INSERT INTO security VALUES(170,7,'MULTIB','NYSE',1,'2020-01-01',NULL)")
+        conn.execute("INSERT INTO company VALUES(9,'HIST Co')")
+        conn.execute("INSERT INTO security VALUES(19,9,'HIST','NYSE',0,'2020-01-01',NULL)")
+        conn.execute(
+            "INSERT INTO fundamentals_operational_universe_member VALUES('u1',?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (9, 19, "HIST", "usa", "HISTORICAL_RETAINED_NO_ACTIVE_SECURITY", "NO_ACTIVE_SECURITY", 0, 1, "2020-01-01", None, "test", "historical", "x", "x"),
+        )
         conn.execute("INSERT INTO ticker_alias VALUES(13,'OLDCHG','TEST','2020-01-01',NULL,'test')")
         conn.execute("INSERT INTO fundamentals_economic_structural_event VALUES(1,'c',8,18,'TEST','18','OLD','STRUCT','SPIN','2025-01-01','BREAK','REVIEWED','2025-01-01','{}','test','fp','x','x')")
     with _db(market) as conn:
@@ -113,6 +122,28 @@ def test_full_scan_classifies_core_decisions(tmp_path: Path) -> None:
     assert decisions["AMBIG"] == "AMBIGUOUS_SOURCE_CLASSIFICATION"
     assert decisions["MULTI"] == "IDENTITY_REVIEW_REQUIRED"
     assert decisions["STRUCT"] == "STRUCTURAL_BOUNDARY_REVIEW_REQUIRED"
+
+
+def test_denominator_uses_active_memberships_not_total_or_expanded_security_rows(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+
+    with sqlite3.connect(paths.canonical_db) as conn:
+        total_members = conn.execute("SELECT COUNT(*) FROM fundamentals_operational_universe_member").fetchone()[0]
+        active_members = conn.execute(
+            "SELECT COUNT(*) FROM fundamentals_operational_universe_member WHERE membership_status LIKE 'ACTIVE%'"
+        ).fetchone()[0]
+        expanded_active_securities = conn.execute("SELECT COUNT(*) FROM security WHERE active=1").fetchone()[0]
+
+    plan = build_sector_industry_plan(paths, parse_sector_industry_request(""))
+
+    assert total_members == 9
+    assert active_members == 8
+    assert expanded_active_securities == 9
+    assert plan.denominator_count == active_members
+    assert plan.denominator_count != total_members
+    assert plan.denominator_count != expanded_active_securities
+    assert {item["ticker"] for item in plan.items}.isdisjoint({"HIST"})
+    assert {item["decision"] for item in plan.items if item["ticker"] == "MULTI"} == {"IDENTITY_REVIEW_REQUIRED"}
 
 
 def test_filtered_scan_resolves_current_ticker_and_alias(tmp_path: Path) -> None:
