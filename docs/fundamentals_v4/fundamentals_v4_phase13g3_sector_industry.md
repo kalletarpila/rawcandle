@@ -113,6 +113,14 @@ BELFB
 
 Durable 13G.3.1 artifacts include `population_reconciliation.json`, full `ticker_reconciliation.csv/json`, `named_ticker_reconciliation.csv/json`, `identity_review_not_applicable_cases.csv/json`, `production_db_integrity.json`, `active_identity_pre_post.json`, `disk_hygiene.json`, `report.md`, `result.json`, `status.json`, `exit_code` and `artifact_manifest.json`.
 
+## Phase 13G.3.2 Protected Production Mode
+
+Phase 13G.3.2 added protected production-mode CLI wiring for `CHECK_UPDATE_SECTOR_INDUSTRY`.
+
+The production mode is no-change-only for this phase: it requires a saved full-universe preview, exact protected production paths, clean worktree, maintenance lock, accepted 13G.3.1 population counts and zero safely applicable changes. If any safe production classification change appears, the runner stops before the write boundary.
+
+Details and evidence are documented in [fundamentals_v4_phase13g3_2_protected_production_mode.md](fundamentals_v4_phase13g3_2_protected_production_mode.md).
+
 ## Test Evidence
 
 Focused regression suite:

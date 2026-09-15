@@ -9,9 +9,11 @@ import pytest
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.history import AdminRunHistory
 from rawcandle.fundamentals.admin.sector_industry import (
+    _production_logical_state,
     build_sector_industry_plan,
     parse_sector_industry_request,
     run_apply,
+    run_production_apply,
     run_preview,
 )
 
@@ -251,3 +253,130 @@ def test_apply_rolls_back_copy_lane_after_classification_mutation(tmp_path: Path
     assert result["outcome"] == "ROLLED_BACK"
     with sqlite3.connect(Path(result["cleanup"]["retained"]) / "analysis.db") as conn:
         assert conn.execute("SELECT DISTINCT sector,industry FROM valuation_revised_result WHERE ticker='CHG'").fetchall() == [("Technology", "Software")]
+
+
+def _remove_safe_sector_industry_changes(paths: BatchAddTickerPaths) -> None:
+    with sqlite3.connect(paths.analysis_db) as conn:
+        conn.execute("UPDATE valuation_revised_result SET sector='Industrials',industry='Machinery' WHERE ticker='CHG'")
+        conn.execute("UPDATE valuation_revised_result SET sector='Consumer Defensive',industry='Retail' WHERE ticker='NULLC'")
+
+
+def _accept_test_population(plan: dict[str, object]) -> dict[str, object]:
+    items = list(plan.get("items", []))
+    safe_changes = [item for item in items if isinstance(item, dict) and item.get("safe_to_apply")]
+    return {
+        "status": "ACCEPTED" if not safe_changes else "REJECTED",
+        "failures": [] if not safe_changes else ["SAFE_CHANGES_PRESENT_REQUIRES_SEPARATE_REVIEW"],
+        "safe_changes": safe_changes,
+        "denominator": plan.get("denominator_count"),
+    }
+
+
+def test_production_apply_requires_confirmation(tmp_path: Path) -> None:
+    paths = _paths(tmp_path / "source")
+    _remove_safe_sector_industry_changes(paths)
+    preview = run_preview("", source_paths=paths, run_root=tmp_path / "runs")
+
+    with pytest.raises(PermissionError, match="CONFIRM_PRODUCTION"):
+        run_production_apply(
+            preview_payload_path=Path(preview["preview_payload_path"]),
+            preview_fingerprint=preview["preview_fingerprint"],
+            source_paths=paths,
+            run_root=tmp_path / "runs",
+            backup_root=tmp_path / "backups",
+            temp_root=tmp_path / "temp",
+            confirm_production=False,
+        )
+
+
+def test_production_apply_requires_full_universe_preview(tmp_path: Path) -> None:
+    paths = _paths(tmp_path / "source")
+    preview = run_preview("EXACT", source_paths=paths, run_root=tmp_path / "runs")
+
+    with pytest.raises(PermissionError, match="FULL_UNIVERSE"):
+        run_production_apply(
+            preview_payload_path=Path(preview["preview_payload_path"]),
+            preview_fingerprint=preview["preview_fingerprint"],
+            source_paths=paths,
+            run_root=tmp_path / "runs",
+            backup_root=tmp_path / "backups",
+            temp_root=tmp_path / "temp",
+            confirm_production=True,
+        )
+
+
+def test_production_no_change_apply_crosses_no_write_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _paths(tmp_path / "source")
+    _remove_safe_sector_industry_changes(paths)
+    preview = run_preview("", source_paths=paths, run_root=tmp_path / "runs")
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry._production_preflight", lambda *args, **kwargs: {"status": "OK"})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry._accepted_population_gate", _accept_test_population)
+
+    result = run_production_apply(
+        preview_payload_path=Path(preview["preview_payload_path"]),
+        preview_fingerprint=preview["preview_fingerprint"],
+        source_paths=paths,
+        run_root=tmp_path / "runs",
+        backup_root=tmp_path / "backups",
+        temp_root=tmp_path / "temp",
+        confirm_production=True,
+    )
+
+    assert result["outcome"] == "COMPLETED"
+    assert result["mode"] == "PRODUCTION_NO_CHANGE_APPLY"
+    assert result["downstream"]["classification_writes"] == 0
+    assert result["downstream"]["invocation_counts"] == {"package": 0, "relative_position": 0, "relative_valuation": 0}
+    assert result["rollback"]["status"] == "NOT_REQUIRED"
+    assert result["production_apply"]["backup"]["status"] == "NOT_REQUIRED_NO_WRITE_BOUNDARY"
+    assert result["production_apply"]["logical_state_compare"]["identical"] is True
+
+
+def test_production_apply_rejects_stale_preview_before_write_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _paths(tmp_path / "source")
+    _remove_safe_sector_industry_changes(paths)
+    preview = run_preview("", source_paths=paths, run_root=tmp_path / "runs")
+    with sqlite3.connect(paths.market_db) as conn:
+        conn.execute("UPDATE ticker_meta SET sector='Utilities' WHERE ticker='EXACT'")
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry._production_preflight", lambda *args, **kwargs: {"status": "OK"})
+
+    result = run_production_apply(
+        preview_payload_path=Path(preview["preview_payload_path"]),
+        preview_fingerprint=preview["preview_fingerprint"],
+        source_paths=paths,
+        run_root=tmp_path / "runs",
+        backup_root=tmp_path / "backups",
+        temp_root=tmp_path / "temp",
+        confirm_production=True,
+    )
+
+    assert result["outcome"] == "FAILED"
+    assert result["rollback"]["status"] == "NOT_REQUIRED"
+    assert result["downstream"]["production_outcome"].startswith("OUTCOME B")
+
+
+def test_production_logical_state_ignores_physical_inventory_noise(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _paths(tmp_path)
+    calls = []
+
+    def fake_inventory(path: Path) -> dict[str, object]:
+        calls.append(path)
+        return {
+            "schema_fingerprint": "schema",
+            "row_counts": {"t": 1},
+            "logical_fingerprints": {"t": "logical"},
+            "quick_check": "ok",
+            "foreign_key_errors": 0,
+            "mtime_ns": len(calls),
+            "sha256": f"physical-{len(calls)}",
+        }
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry.database_inventory", fake_inventory)
+    monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry._active_identities", lambda _: {"active": "same"})
+
+    first = _production_logical_state(paths)
+    second = _production_logical_state(paths)
+
+    assert first == second
+    assert all("mtime_ns" not in item and "sha256" not in item for item in first["databases"].values())

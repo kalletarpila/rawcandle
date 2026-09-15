@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import fcntl
+import os
 import re
 import sqlite3
+import shutil
+import subprocess
 import traceback
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -12,10 +16,13 @@ from typing import Any, Mapping, Sequence
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import (
     BatchAddTickerPaths,
+    PRODUCTION_BACKUP_ROOT,
+    PRODUCTION_LOCK_PATH,
     _background_heartbeat,
     cleanup_copy_lane,
     create_copy_lane,
     disk_hygiene_snapshot,
+    validate_exact_production_paths,
 )
 from rawcandle.fundamentals.admin.contracts import (
     AdminBatchRequest,
@@ -38,7 +45,8 @@ from rawcandle.fundamentals.admin.reporting import render_markdown_report
 from rawcandle.fundamentals.admin.rv_identity import active_relative_valuation_identity
 from rawcandle.fundamentals.operating_income_v2 import activation
 from rawcandle.fundamentals.operating_income_v2 import valuation as valuation_engine
-from rawcandle.fundamentals.phase12d import PRODUCTION, ROOT, database_inventory, stable_hash, write_json
+from rawcandle.fundamentals.phase12d import PRODUCTION, ROOT, database_inventory, sha256, stable_hash, write_json
+from rawcandle.fundamentals.phase12d import production_inventory
 from rawcandle.fundamentals.phase13b_foundation import (
     CandidatePaths,
     attach_dependencies,
@@ -72,9 +80,36 @@ CONTRACT_VERSION = "PHASE13G3_CHECK_UPDATE_SECTOR_INDUSTRY_COPY_ONLY_V1"
 OUTCOME_A = "OUTCOME A - INDEPENDENT SECTOR AND INDUSTRY CLI VERIFIED COPY-ONLY AND READY FOR SEPARATELY AUTHORIZED PRODUCTION DEPLOYMENT"
 OUTCOME_B = "OUTCOME B - CORRECTABLE CLASSIFICATION, IDENTITY, STRUCTURAL-SCOPE OR DOWNSTREAM GAP REMAINS; PRODUCTION UNCHANGED"
 OUTCOME_C = "OUTCOME C - MATERIAL ARCHITECTURE OR SAFETY DEFECT; PRODUCTION UNCHANGED"
+PRODUCTION_OUTCOME_A = "OUTCOME A - PROTECTED SECTOR/INDUSTRY PRODUCTION MODE READY; PRODUCTION VERIFIED NO_CHANGE"
+PRODUCTION_OUTCOME_B = "OUTCOME B - PRE-WRITE DATA OR ACCEPTANCE DRIFT; PRODUCTION UNCHANGED"
+PRODUCTION_OUTCOME_C = "OUTCOME C - MATERIAL WRITE-PATH OR ROLLBACK DEFECT; PRODUCTION UNCHANGED OR RESTORED"
 WRITE_ROLES = ("analysis",)
 READONLY_ROLES = ("provider", "canonical", "market", "taxonomy")
 TEMP_ROOT = ROOT / "temp" / "fundamentals_admin_phase13g3_sector_industry"
+PRODUCTION_TEMP_ROOT = ROOT / "temp" / "fundamentals_admin_phase13g3_2_sector_industry"
+
+ACCEPTED_PHASE13G31_COUNTS = {
+    "denominator": 2453,
+    "EXACT_MATCH": 2440,
+    "IDENTITY_REVIEW_REQUIRED": 11,
+    "NOT_APPLICABLE": 2,
+    "correctable": 0,
+}
+ACCEPTED_PHASE13G31_REVIEW_TICKERS = {
+    "CENT,CENTA",
+    "FOX,FOXA",
+    "FWONA,FWONK",
+    "GOOG,GOOGL",
+    "LBTYA,LBTYK",
+    "LILA,LILAK",
+    "LLYVA,LLYVK",
+    "METC,METCB",
+    "NWS,NWSA",
+    "UA,UAA",
+    "Z,ZG",
+}
+ACCEPTED_PHASE13G31_NOT_APPLICABLE_TICKERS = {"BATRK", "BELFB"}
+ACCEPTED_PHASE13G31_EXACT_TICKERS = {"SNDK", "AG", "ALOY", "ARM", "ASML", "ASX", "BABA", "BHP", "BIDU", "BTDR", "CAMT"}
 
 SAFE_CORRECTABLE_DECISIONS = {"CHANGE_REQUIRED", "MISSING_PERSISTED_CLASSIFICATION"}
 NO_CHANGE_DECISIONS = {"EXACT_MATCH", "NORMALIZED_EQUIVALENT", "NO_CHANGE"}
@@ -563,6 +598,173 @@ def _read_active_universe_identity(paths: BatchAddTickerPaths) -> dict[str, Any]
     return dict(row) if row else {"status": "MISSING"}
 
 
+def _run_git(args: tuple[str, ...]) -> str:
+    return subprocess.run(("git", *args), cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _assert_clean_worktree() -> dict[str, Any]:
+    status = _run_git(("status", "--porcelain"))
+    if status:
+        raise RuntimeError("PHASE13G3_PRODUCTION_CLEAN_GIT_WORKTREE_REQUIRED")
+    return {
+        "head": _run_git(("rev-parse", "HEAD")),
+        "short_head": _run_git(("rev-parse", "--short", "HEAD")),
+        "branch": _run_git(("branch", "--show-current")),
+        "status_clean": True,
+    }
+
+
+def _process_inventory() -> dict[str, Any]:
+    rows = subprocess.run(("ps", "-eo", "pid=,args="), check=True, capture_output=True, text=True).stdout.splitlines()
+    own_pid = str(os.getpid())
+    relevant = [
+        row.strip()
+        for row in rows
+        if own_pid not in row
+        and any(term in row.lower() for term in ("rawcandle", "fundamental", "sharadar", "stock_update_scheduler"))
+    ]
+    conflicts = [
+        row
+        for row in relevant
+        if any(term in row for term in ("run_fundamentals_v4", "run_phase13", "run_phase12", "run_sharadar", "stock_update_scheduler"))
+    ]
+    if conflicts:
+        raise RuntimeError("PHASE13G3_CONFLICTING_WRITER:" + " | ".join(conflicts))
+    return {"relevant_processes": relevant, "conflicting_writers": conflicts}
+
+
+def _assert_no_sqlite_sidecars(paths: BatchAddTickerPaths, roles: Sequence[str] = WRITE_ROLES) -> dict[str, Any]:
+    sidecars: dict[str, list[dict[str, Any]]] = {}
+    for role in roles:
+        path = paths.as_dict()[role]
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = Path(str(path) + suffix)
+            if sidecar.exists() and sidecar.stat().st_size:
+                sidecars.setdefault(role, []).append({"path": str(sidecar), "size": sidecar.stat().st_size})
+    if sidecars:
+        raise RuntimeError("PHASE13G3_NONEMPTY_SQLITE_SIDECAR:" + json.dumps(sidecars, sort_keys=True))
+    return {"checked_roles": list(roles), "nonempty_sidecars": 0}
+
+
+def _storage_gate(output: Path, backup_dir: Path, paths: BatchAddTickerPaths) -> dict[str, Any]:
+    def existing_parent(path: Path) -> Path:
+        current = path
+        while not current.exists():
+            current = current.parent
+        return current
+
+    write_bytes = sum(paths.as_dict()[role].stat().st_size for role in WRITE_ROLES)
+    required = int((write_bytes * 0.25) + (256 * 1024 * 1024))
+    checks = []
+    for location in {ROOT, existing_parent(output.parent), existing_parent(backup_dir.parent), Path("/tmp")}:
+        usage = shutil.disk_usage(location)
+        checks.append({
+            "path": str(location.resolve()),
+            "free_bytes": usage.free,
+            "total_bytes": usage.total,
+            "required_bytes": required,
+            "ok": usage.free >= required,
+        })
+    if not all(row["ok"] for row in checks):
+        raise RuntimeError("PHASE13G3_INSUFFICIENT_FREE_SPACE")
+    return {"write_set_bytes": write_bytes, "required_bytes": required, "checks": checks}
+
+
+def _production_preflight(
+    paths: BatchAddTickerPaths,
+    *,
+    output: Path,
+    backup_dir: Path,
+    require_clean: bool = True,
+) -> dict[str, Any]:
+    resolved_paths = validate_exact_production_paths(paths)
+    sidecars = _assert_no_sqlite_sidecars(paths)
+    git = _assert_clean_worktree() if require_clean else {"status_clean": False, "skipped": True}
+    process = _process_inventory()
+    storage = _storage_gate(output, backup_dir, paths)
+    inventory = production_inventory()
+    bad_dbs = {
+        role: {
+            "quick_check": item["quick_check"],
+            "foreign_key_errors": item["foreign_key_errors"],
+        }
+        for role, item in inventory["databases"].items()
+        if item["quick_check"] != "ok" or item["foreign_key_errors"]
+    }
+    if bad_dbs:
+        raise RuntimeError("PHASE13G3_PRODUCTION_INTEGRITY_PRECHECK_FAILED:" + json.dumps(bad_dbs, sort_keys=True))
+    return {
+        "resolved_paths": resolved_paths,
+        "write_roles": list(WRITE_ROLES),
+        "read_only_roles": list(READONLY_ROLES),
+        "git": git,
+        "process": process,
+        "storage": storage,
+        "sidecars": sidecars,
+        "production_inventory": inventory,
+        "active_identities": _active_identities(paths),
+        "role_contract": {
+            "analysis": "Writable only if classification corrections or downstream refreshes are authorized; this phase permits production NO_CHANGE only.",
+            "provider": "Read-only fundamentals source for downstream readers.",
+            "canonical": "Read-only identity and operational-universe source.",
+            "market": "Read-only authoritative ticker_meta classification source.",
+            "taxonomy": "Read-only Datacenter taxonomy source; not part of Sector/Industry mutation.",
+        },
+    }
+
+
+def _production_logical_state(paths: BatchAddTickerPaths) -> dict[str, Any]:
+    database_keys = ("schema_fingerprint", "row_counts", "logical_fingerprints", "quick_check", "foreign_key_errors")
+    return {
+        "databases": {
+            role: {
+                key: database_inventory(path).get(key)
+                for key in database_keys
+            }
+            for role, path in paths.as_dict().items()
+        },
+        "active_identities": _active_identities(paths),
+    }
+
+
+def _accepted_population_gate(plan: Mapping[str, Any]) -> dict[str, Any]:
+    items = [dict(item) for item in plan.get("items", [])]
+    counts = _counts(items)
+    exact_tickers = {str(item.get("ticker")).upper() for item in items if item.get("decision") == "EXACT_MATCH"}
+    review_tickers = {str(item.get("ticker")).upper() for item in items if item.get("decision") == "IDENTITY_REVIEW_REQUIRED"}
+    not_applicable = {str(item.get("ticker")).upper() for item in items if item.get("decision") == "NOT_APPLICABLE"}
+    result = {
+        "accepted_baseline": dict(ACCEPTED_PHASE13G31_COUNTS),
+        "denominator": int(plan.get("denominator_count") or 0),
+        "counts": counts,
+        "review_tickers": sorted(review_tickers),
+        "not_applicable_tickers": sorted(not_applicable),
+        "named_exact_tickers": sorted(ticker for ticker in ACCEPTED_PHASE13G31_EXACT_TICKERS if ticker in exact_tickers),
+        "omitted_named_exact_tickers": sorted(ACCEPTED_PHASE13G31_EXACT_TICKERS - exact_tickers),
+        "safe_changes": [item for item in items if item.get("safe_to_apply")],
+        "omitted_active_memberships": 0 if int(plan.get("denominator_count") or 0) == len(items) else abs(int(plan.get("denominator_count") or 0) - len(items)),
+    }
+    failures = []
+    if result["denominator"] != ACCEPTED_PHASE13G31_COUNTS["denominator"]:
+        failures.append("DENOMINATOR_DRIFT")
+    for key in ("EXACT_MATCH", "IDENTITY_REVIEW_REQUIRED", "NOT_APPLICABLE", "correctable"):
+        if counts.get(key, 0) != ACCEPTED_PHASE13G31_COUNTS[key]:
+            failures.append(f"{key}_COUNT_DRIFT")
+    if result["omitted_active_memberships"] != 0:
+        failures.append("ACTIVE_MEMBERSHIP_OMISSION")
+    if review_tickers != ACCEPTED_PHASE13G31_REVIEW_TICKERS:
+        failures.append("REVIEW_TICKER_SET_DRIFT")
+    if not_applicable != ACCEPTED_PHASE13G31_NOT_APPLICABLE_TICKERS:
+        failures.append("NOT_APPLICABLE_TICKER_SET_DRIFT")
+    if result["omitted_named_exact_tickers"]:
+        failures.append("NAMED_TICKER_EXACT_MATCH_DRIFT")
+    if result["safe_changes"]:
+        failures.append("SAFE_CHANGES_PRESENT_REQUIRES_SEPARATE_REVIEW")
+    result["status"] = "ACCEPTED" if not failures else "REJECTED"
+    result["failures"] = failures
+    return result
+
+
 def _manual_rv_refresh(paths: BatchAddTickerPaths, *, output: Path, applied_at: str) -> dict[str, Any]:
     source = load_relative_valuation_source(
         RVSourcePaths(paths.analysis_db, paths.canonical_db, paths.market_db, paths.taxonomy_db, paths.provider_db),
@@ -956,6 +1158,209 @@ def run_apply(
         elif lane is not None:
             cleanup = {"retained": str(lane.lane_dir)}
         return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "cleanup": cleanup, "error": type(exc).__name__}
+
+
+def run_production_apply(
+    *,
+    preview_payload_path: Path,
+    preview_fingerprint: str,
+    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    run_root: Path = ADMIN_RUN_ROOT,
+    backup_root: Path = PRODUCTION_BACKUP_ROOT,
+    temp_root: Path = PRODUCTION_TEMP_ROOT,
+    confirm_production: bool = False,
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    del temp_root  # Reserved for future production write rehearsals; no production copies are made in no-change mode.
+    if not confirm_production:
+        raise PermissionError("PHASE13G3_PRODUCTION_APPLY_REQUIRES_CONFIRM_PRODUCTION")
+    payload = _load_payload(preview_payload_path)
+    preview = payload.get("sector_industry_preview") if isinstance(payload.get("sector_industry_preview"), Mapping) else {}
+    if preview.get("preview_fingerprint") != preview_fingerprint:
+        raise ValueError("PHASE13G3_PRODUCTION_PREVIEW_FINGERPRINT_MISMATCH")
+    plan = payload.get("sector_industry_plan") if isinstance(payload.get("sector_industry_plan"), Mapping) else {}
+    request_payload = preview.get("request") if isinstance(preview.get("request"), Mapping) else {}
+    request = AdminBatchRequest(
+        operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
+        requested_inputs=tuple(request_payload.get("requested_inputs") or ()),
+        normalized_inputs=tuple(request_payload.get("normalized_inputs") or ()),
+        rejected_inputs=tuple(request_payload.get("rejected_inputs") or ()),
+        market=request_payload.get("market"),
+        options=request_payload.get("options") or {},
+    )
+    if request.normalized_inputs:
+        raise PermissionError("PHASE13G3_PRODUCTION_REQUIRES_FULL_UNIVERSE_PREVIEW")
+    run_id = stable_run_id(AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY, preview_fingerprint, suffix="production")
+    writer = AdminRunWriter(run_id, AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY, root=run_root)
+    progress = ProgressTracker(
+        run_id=run_id,
+        operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
+        run_dir=writer.run_dir,
+        stages=SECTOR_INDUSTRY_STAGES,
+        callback=progress_callback,
+    )
+    backup_dir = (backup_root / run_id).resolve()
+    started = utc_now()
+    lock_handle = None
+    try:
+        progress.running(ProgressStage.PREFLIGHT, "Recording protected Sector/Industry production request.")
+        writer.checkpoint(RunStage.REQUEST_CREATED, message="Protected Sector/Industry production apply request recorded.", preview_fingerprint=preview_fingerprint)
+        writer.write_json("request.json", request.as_dict())
+        writer.write_json("preview.json", preview)
+        writer.write_json("preview_payload_identity.json", {
+            "path": str(preview_payload_path.resolve()),
+            "sha256": sha256(preview_payload_path),
+            "preview_fingerprint": preview_fingerprint,
+        })
+        writer.checkpoint(RunStage.APPLY_STARTED, message="Running protected production preflight.", preview_fingerprint=preview_fingerprint)
+        with _background_heartbeat(progress, "Sector/Industry production preflight is still running."):
+            preflight = _production_preflight(source_paths, output=writer.run_dir, backup_dir=backup_dir)
+        writer.write_json("production_preflight.json", preflight)
+        progress.completed(ProgressStage.PREFLIGHT, "Production preflight completed.")
+
+        progress.running(ProgressStage.PREVIEW_VALIDATION, "Validating immutable preview, source freshness and maintenance lock.")
+        _assert_preview_fresh(source_paths, payload)
+        PRODUCTION_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = PRODUCTION_LOCK_PATH.open("w")
+        try:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("PHASE13G3_MAINTENANCE_LOCK_BUSY") from exc
+        progress.completed(ProgressStage.PREVIEW_VALIDATION, "Saved preview is fresh and maintenance lock acquired.")
+
+        progress.running(ProgressStage.CLASSIFICATION_SCAN, "Recomputing fresh full production Sector/Industry scan.")
+        fresh_plan = build_sector_industry_plan(source_paths, request)
+        fresh_plan_dict = fresh_plan.safe_dict()
+        writer.write_json("fresh_production_plan.json", fresh_plan_dict)
+        progress.completed(ProgressStage.CLASSIFICATION_SCAN, "Fresh production scan completed.", processed_items=fresh_plan.inspected_count, total_items=fresh_plan.denominator_count)
+
+        progress.running(ProgressStage.CLASSIFICATION_RECONCILIATION, "Checking accepted Phase 13G.3.1 population contract.")
+        population_gate = _accepted_population_gate(fresh_plan_dict)
+        writer.write_json("production_population_gate.json", population_gate)
+        if population_gate["status"] != "ACCEPTED":
+            raise RuntimeError("PHASE13G3_PRODUCTION_POPULATION_GATE_REJECTED:" + ",".join(population_gate["failures"]))
+        if fingerprint(preview.get("proposed_changes") or []) != fingerprint([]):
+            raise RuntimeError("PHASE13G3_PRODUCTION_SAVED_PREVIEW_CONTAINS_CHANGES")
+        progress.completed(ProgressStage.CLASSIFICATION_RECONCILIATION, "Accepted population contract verified.", processed_items=fresh_plan.inspected_count, total_items=fresh_plan.denominator_count)
+        writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Production no-change gate accepted; no write boundary will be crossed.", preview_fingerprint=preview_fingerprint)
+
+        before_state = _production_logical_state(source_paths)
+        progress.running(ProgressStage.NO_CHANGE_VERIFICATION, "Verifying true production NO_CHANGE with zero writes and zero downstream invocations.")
+        repeat_plan = build_sector_industry_plan(source_paths, request)
+        repeat_gate = _accepted_population_gate(repeat_plan.safe_dict())
+        if repeat_gate["status"] != "ACCEPTED":
+            raise RuntimeError("PHASE13G3_PRODUCTION_REPEAT_GATE_REJECTED:" + ",".join(repeat_gate["failures"]))
+        downstream = {
+            "classification_writes": 0,
+            "invocation_counts": {"package": 0, "relative_position": 0, "relative_valuation": 0},
+            "package": "NOT_RUN_NO_CHANGE",
+            "relative_position": "NOT_RUN_NO_CHANGE",
+            "relative_valuation": "NOT_RUN_NO_CHANGE",
+            "repeat": {"outcome": "NO_CHANGE", "counts": _counts(repeat_plan.items)},
+        }
+        progress.completed(ProgressStage.NO_CHANGE_VERIFICATION, "Production NO_CHANGE verified.", processed_items=repeat_plan.inspected_count, total_items=repeat_plan.denominator_count)
+        after_state = _production_logical_state(source_paths)
+        logical_compare = {
+            "identical": before_state == after_state,
+            "before_fingerprint": stable_hash(before_state),
+            "after_fingerprint": stable_hash(after_state),
+        }
+        if not logical_compare["identical"]:
+            raise RuntimeError("PHASE13G3_PRODUCTION_LOGICAL_STATE_CHANGED_UNEXPECTEDLY")
+
+        final_items = tuple(_decision_from_item(item) for item in fresh_plan.items)
+        counts = _counts(fresh_plan.items)
+        result = AdminFinalResult(
+            run_id=run_id,
+            operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
+            outcome=AdminStatus.COMPLETED,
+            mode="PRODUCTION_NO_CHANGE_APPLY",
+            started_at_utc=started,
+            completed_at_utc=utc_now(),
+            preview_fingerprint=preview_fingerprint,
+            request=request.as_dict(),
+            item_results=final_items,
+            summary_counts=counts,
+            rollback={"status": "NOT_REQUIRED", "message": "No production write boundary was crossed; backup was not required."},
+            downstream=downstream | {
+                "production_outcome": PRODUCTION_OUTCOME_A,
+                "logical_state_compare": logical_compare,
+                "population_gate": population_gate,
+                "pre_active_identities": before_state["active_identities"],
+                "post_active_identities": after_state["active_identities"],
+            },
+            artifacts={
+                "fresh_production_plan": str(writer.run_dir / "fresh_production_plan.json"),
+                "population_gate": str(writer.run_dir / "production_population_gate.json"),
+                "preview_payload_identity": str(writer.run_dir / "preview_payload_identity.json"),
+            },
+            recommended_next_action=PRODUCTION_OUTCOME_A,
+        )
+        result_dict = result.as_dict()
+        result_dict["production_apply"] = {
+            "outcome": PRODUCTION_OUTCOME_A,
+            "classification_writes": 0,
+            "downstream_invocation_counts": downstream["invocation_counts"],
+            "backup": {"status": "NOT_REQUIRED_NO_WRITE_BOUNDARY"},
+            "preflight": preflight,
+            "population_gate": population_gate,
+            "logical_state_compare": logical_compare,
+            "before_state": before_state,
+            "after_state": after_state,
+        }
+        writer.write_final_result(result)
+        writer.write_json("production_apply_technical.json", result_dict["production_apply"])
+        writer.write_items_csv([item.as_dict() for item in final_items])
+        writer.write_text("report.md", render_markdown_report(result_dict))
+        progress.running(ProgressStage.FINAL_VALIDATION, "Writing final production no-change artifacts.")
+        progress.completed(ProgressStage.FINAL_VALIDATION, "Final production artifacts written.", processed_items=len(final_items), total_items=len(final_items))
+        writer.checkpoint(RunStage.COMPLETED, message=PRODUCTION_OUTCOME_A, preview_fingerprint=preview_fingerprint, counters=counts)
+        writer.write_exit_code(0)
+        writer.write_manifest()
+        progress.running(ProgressStage.CLEANUP, "Production cleanup completed; no backups or copies were created.")
+        progress.completed(ProgressStage.CLEANUP, "Production cleanup completed; no backups or copies were created.")
+        progress.running(ProgressStage.COMPLETED, PRODUCTION_OUTCOME_A)
+        progress.completed(ProgressStage.COMPLETED, PRODUCTION_OUTCOME_A)
+        return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir)}
+    except Exception as exc:
+        writer.write_error(exc)
+        try:
+            progress.failed(ProgressStage.PREVIEW_VALIDATION, "Protected production apply stopped before write boundary.", errors=(f"{type(exc).__name__}: {exc}",))
+        except Exception:
+            pass
+        error_items = tuple(
+            _decision_from_item(item)
+            for item in plan.get("items", [])
+        ) if isinstance(plan.get("items"), (list, tuple)) else ()
+        result = AdminFinalResult(
+            run_id=run_id,
+            operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
+            outcome=AdminStatus.FAILED,
+            mode="PRODUCTION_NO_CHANGE_APPLY",
+            started_at_utc=started,
+            completed_at_utc=utc_now(),
+            preview_fingerprint=preview_fingerprint,
+            request=request.as_dict(),
+            item_results=error_items,
+            summary_counts=_counts(plan.get("items", [])) if isinstance(plan.get("items"), (list, tuple)) else {},
+            rollback={"status": "NOT_REQUIRED", "message": "Failure occurred before production write boundary."},
+            downstream={"production_outcome": PRODUCTION_OUTCOME_B},
+            recommended_next_action="Inspect error.json and production_apply_technical.json before any future production attempt.",
+            errors=({"type": type(exc).__name__, "message": str(exc), "traceback": traceback.format_exc()},),
+        )
+        result_dict = result.as_dict()
+        writer.write_final_result(result)
+        writer.write_text("report.md", render_markdown_report(result_dict))
+        writer.checkpoint(RunStage.FAILED_BEFORE_WRITE, message=PRODUCTION_OUTCOME_B, preview_fingerprint=preview_fingerprint, write_boundary_crossed=False)
+        writer.write_exit_code(2)
+        writer.write_manifest()
+        return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "error": type(exc).__name__}
+    finally:
+        if lock_handle is not None:
+            try:
+                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+            finally:
+                lock_handle.close()
 
 
 def preflight_snapshot(paths: BatchAddTickerPaths = BatchAddTickerPaths()) -> dict[str, Any]:
