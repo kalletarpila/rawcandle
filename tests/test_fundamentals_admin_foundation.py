@@ -77,6 +77,7 @@ def test_lifecycle_transition_validation() -> None:
     validate_transition(RunStage.REQUEST_CREATED, RunStage.PREVIEW_STARTED)
     validate_transition(RunStage.PREVIEW_STARTED, RunStage.PREVIEW_READY)
     validate_transition(RunStage.PREVIEW_READY, RunStage.COMPLETED)
+    validate_transition(RunStage.WRITE_BOUNDARY_NOT_CROSSED, RunStage.COMPLETED)
 
     with pytest.raises(ValueError):
         validate_transition(RunStage.COMPLETED, RunStage.PREVIEW_STARTED)
