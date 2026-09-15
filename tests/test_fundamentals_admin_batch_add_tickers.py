@@ -16,7 +16,10 @@ from rawcandle.fundamentals.admin.batch_add_tickers import (
     parse_batch_tickers,
     reject_production_write_targets,
     run_apply,
+    run_production_apply,
     run_preview,
+    _snapshot_smoke_generic,
+    validate_exact_production_paths,
 )
 from rawcandle.fundamentals.admin.history import AdminRunHistory
 from rawcandle.fundamentals.phase12d import write_json
@@ -235,6 +238,45 @@ def test_production_path_and_sqlite_uri_refusal(tmp_path: Path) -> None:
         )
 
 
+def test_exact_production_path_validation_rejects_alias_symlink_and_uri(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import rawcandle.fundamentals.admin.batch_add_tickers as batch
+
+    files = {}
+    for role in ("provider", "canonical", "analysis", "market", "taxonomy"):
+        path = tmp_path / f"{role}.db"
+        sqlite3.connect(path).close()
+        files[role] = path
+        monkeypatch.setitem(batch.PRODUCTION, role, path)
+    paths = BatchAddTickerPaths(
+        provider_db=files["provider"],
+        canonical_db=files["canonical"],
+        analysis_db=files["analysis"],
+        market_db=files["market"],
+        taxonomy_db=files["taxonomy"],
+    )
+
+    assert validate_exact_production_paths(paths)["provider"] == str(files["provider"].resolve())
+
+    alias = tmp_path / "analysis_alias.db"
+    alias.symlink_to(files["analysis"])
+    with pytest.raises(PermissionError, match="EXACT_PRODUCTION_PATH_REQUIRED|ALIAS_REFUSED"):
+        validate_exact_production_paths(BatchAddTickerPaths(
+            provider_db=files["provider"],
+            canonical_db=files["canonical"],
+            analysis_db=alias,
+            market_db=files["market"],
+            taxonomy_db=files["taxonomy"],
+        ))
+    with pytest.raises(PermissionError, match="SQLITE_URI_REFUSED"):
+        validate_exact_production_paths(BatchAddTickerPaths(
+            provider_db=Path(f"file:{files['provider']}"),
+            canonical_db=files["canonical"],
+            analysis_db=files["analysis"],
+            market_db=files["market"],
+            taxonomy_db=files["taxonomy"],
+        ))
+
+
 def test_cli_preview_smoke(tmp_path: Path, capsys) -> None:
     from rawcandle.cli.run_fundamentals_admin_add_tickers import main
 
@@ -379,7 +421,7 @@ def test_generic_apply_stages_all_items_before_one_downstream_batch(tmp_path: Pa
     monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers.DEFAULT_ARCHIVE", archive)
     calls: list[dict[str, object]] = []
 
-    def fake_downstream(copy_paths: BatchAddTickerPaths, output: Path, *, accepted_tickers, applied_at: str, progress=None):
+    def fake_downstream(copy_paths: BatchAddTickerPaths, output: Path, *, accepted_tickers, applied_at: str, progress=None, **kwargs):
         with sqlite3.connect(copy_paths.canonical_db) as canonical, sqlite3.connect(copy_paths.provider_db) as provider:
             staged_tickers = {
                 row[0]
@@ -441,3 +483,178 @@ def test_generic_apply_rolls_back_after_identity_mutation(tmp_path: Path, monkey
     copy_dir = Path(result["cleanup"]["retained"])
     with sqlite3.connect(copy_dir / "canonical.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM security WHERE current_ticker='NEWC'").fetchone()[0] == 0
+
+
+def test_snapshot_smoke_classifies_missing_endpoint_as_readiness_limitation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _empty_prod_paths(tmp_path / "dbs")
+
+    def missing_endpoint(*args, **kwargs):
+        raise LookupError("NO_FUNDAMENTAL_ENDPOINT_ON_OR_BEFORE_REPORT_DATE:BHP:2026-09-12")
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers.generate_active_company_snapshot", missing_endpoint)
+
+    result = _snapshot_smoke_generic(paths, tmp_path / "out", tickers=("BHP",))
+
+    assert result["BHP"]["status"] == "READINESS_LIMITED"
+    assert result["BHP"]["readiness_limitation"] == "No eligible fundamental endpoint exists on or before the smoke report date."
+
+
+def _production_payload(path: Path, *, tickers: tuple[str, ...] = ("AG", "ALOY", "ARM", "ASML", "ASX", "BABA", "BHP", "BIDU", "BTDR", "CAMT")) -> tuple[Path, str]:
+    preview_fingerprint = "preview-fp"
+    items = [
+        {
+            "requested_ticker": ticker,
+            "ticker": ticker,
+            "status": "ELIGIBLE",
+            "reason": "Eligible from test evidence.",
+            "source_category": "verified_archive",
+            "provider_metadata": {"identity": {"name": ticker}},
+            "market": {"markets": ["usa"]},
+            "classification": {"status": "READY", "sector": "Technology", "industry": "Software"},
+            "canonical": {"exists": False},
+            "provider_row_count": 1,
+            "provider_arq_row_count": 1,
+            "source_fingerprint": ticker.lower(),
+            "rows": [],
+        }
+        for ticker in tickers
+    ]
+    payload = {
+        "phase13g2_preview": {
+            "preview_fingerprint": preview_fingerprint,
+            "request": {
+                "operation_type": "ADD_TICKERS",
+                "requested_inputs": list(tickers),
+                "normalized_inputs": list(tickers),
+                "rejected_inputs": [],
+                "market": "usa",
+                "options": {},
+            },
+            "source_state": {"test": "fresh"},
+        },
+        "generic_batch_plan": {"plan_fingerprint": "plan-fp", "items": items},
+    }
+    write_json(path, payload)
+    return path, preview_fingerprint
+
+
+def _empty_prod_paths(tmp_path: Path) -> BatchAddTickerPaths:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    files = {}
+    for role in ("provider", "canonical", "analysis", "market", "taxonomy"):
+        path = tmp_path / f"{role}.db"
+        sqlite3.connect(path).close()
+        files[role] = path
+    return BatchAddTickerPaths(files["provider"], files["canonical"], files["analysis"], files["market"], files["taxonomy"])
+
+
+def test_production_apply_requires_confirmation(tmp_path: Path) -> None:
+    payload, fp = _production_payload(tmp_path / "payload.json")
+
+    with pytest.raises(PermissionError, match="CONFIRM_PRODUCTION"):
+        run_production_apply(
+            preview_payload_path=payload,
+            preview_fingerprint=fp,
+            source_paths=_empty_prod_paths(tmp_path / "dbs"),
+            run_root=tmp_path / "runs",
+            backup_root=tmp_path / "backups",
+            temp_root=tmp_path / "temp",
+            confirm_production=False,
+        )
+
+
+def test_production_apply_rejects_non_authorized_batch(tmp_path: Path) -> None:
+    payload, fp = _production_payload(tmp_path / "payload.json", tickers=("ARM",))
+
+    with pytest.raises(PermissionError, match="AUTHORIZED_TICKERS"):
+        run_production_apply(
+            preview_payload_path=payload,
+            preview_fingerprint=fp,
+            source_paths=_empty_prod_paths(tmp_path / "dbs"),
+            run_root=tmp_path / "runs",
+            backup_root=tmp_path / "backups",
+            temp_root=tmp_path / "temp",
+            confirm_production=True,
+        )
+
+
+def test_production_apply_runs_one_batch_and_identical_no_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    payload, fp = _production_payload(tmp_path / "payload.json")
+    paths = _empty_prod_paths(tmp_path / "dbs")
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._production_preflight", lambda *args, **kwargs: {"status": "OK"})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._assert_preview_not_stale", lambda *args, **kwargs: None)
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._backup_write_set", lambda *args, **kwargs: {"roles": {"provider": {}, "canonical": {}, "analysis": {}}})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._restore_rehearsal", lambda *args, **kwargs: {"status": "OK"})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers.production_inventory", lambda: {"inventory": len(calls)})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers.compare_production_inventory", lambda before, after: {"identical": before == after})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers.database_inventory", lambda path: {"path": str(path), "quick_check": "ok", "foreign_key_errors": 0})
+
+    def fake_apply(copy_paths, plan, *, output, failure_boundary=None, progress=None, allow_production=False, snapshot_control_tickers=()):
+        calls.append({
+            "tickers": tuple(item["ticker"] for item in plan["items"] if item["status"] == "ELIGIBLE"),
+            "allow_production": allow_production,
+            "snapshot_control_tickers": tuple(snapshot_control_tickers),
+        })
+        if len(calls) == 1:
+            return {
+                "outcome": "APPLIED",
+                "applied_tickers": list(calls[-1]["tickers"]),
+                "downstream": {"invocation_counts": {"package": 1, "relative_position": 1, "relative_valuation": 1}},
+            }
+        return {"outcome": "NO_CHANGE", "applied_tickers": [], "downstream": {"invocation_counts": {"package": 0, "relative_position": 0, "relative_valuation": 0}}}
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._apply_generic_plan", fake_apply)
+
+    result = run_production_apply(
+        preview_payload_path=payload,
+        preview_fingerprint=fp,
+        source_paths=paths,
+        run_root=tmp_path / "runs",
+        backup_root=tmp_path / "backups",
+        temp_root=tmp_path / "temp",
+        confirm_production=True,
+    )
+
+    assert result["outcome"] == "COMPLETED"
+    assert calls[0]["tickers"] == ("AG", "ALOY", "ARM", "ASML", "ASX", "BABA", "BHP", "BIDU", "BTDR", "CAMT")
+    assert calls[0]["allow_production"] is True
+    assert calls[0]["snapshot_control_tickers"] == ("NVDA",)
+    assert result["downstream"]["repeat_apply_outcome"] == "NO_CHANGE"
+
+
+def test_production_apply_rolls_back_after_write_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    payload, fp = _production_payload(tmp_path / "payload.json")
+    paths = _empty_prod_paths(tmp_path / "dbs")
+    restored: list[bool] = []
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._production_preflight", lambda *args, **kwargs: {"status": "OK"})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._assert_preview_not_stale", lambda *args, **kwargs: None)
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._backup_write_set", lambda *args, **kwargs: {"roles": {"provider": {}, "canonical": {}, "analysis": {}}})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._restore_rehearsal", lambda *args, **kwargs: {"status": "OK"})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers.production_inventory", lambda: {"inventory": "before"})
+
+    def fail_apply(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    def fake_restore(*args, **kwargs):
+        restored.append(True)
+        return {"status": "ROLLED_BACK"}
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._apply_generic_plan", fail_apply)
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._restore_production_from_backups", fake_restore)
+
+    result = run_production_apply(
+        preview_payload_path=payload,
+        preview_fingerprint=fp,
+        source_paths=paths,
+        run_root=tmp_path / "runs",
+        backup_root=tmp_path / "backups",
+        temp_root=tmp_path / "temp",
+        confirm_production=True,
+    )
+
+    assert result["outcome"] == "ROLLED_BACK"
+    assert restored == [True]
+    assert result["downstream"]["production_outcome"] == "OUTCOME C — PRODUCTION DEPLOYMENT FAILED AND COMPLETE BACKUP SET RESTORED"

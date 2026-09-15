@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import csv
+import fcntl
 import io
 import json
+import os
 import re
 import shutil
 import sqlite3
+import subprocess
+import threading
+import traceback
+from contextlib import contextmanager
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -34,7 +40,18 @@ from rawcandle.fundamentals.admin.progress import (
 from rawcandle.fundamentals.admin.reporting import render_markdown_report
 from rawcandle.fundamentals.admin.rv_identity import active_relative_valuation_identity
 from rawcandle.fundamentals import structural_break
-from rawcandle.fundamentals.phase12d import PRODUCTION, ROOT, database_inventory, rebuild_ttm, reconcile_canonical, stable_hash, write_json
+from rawcandle.fundamentals.phase12d import (
+    PRODUCTION,
+    ROOT,
+    compare_production_inventory,
+    database_inventory,
+    production_inventory,
+    rebuild_ttm,
+    reconcile_canonical,
+    sha256,
+    stable_hash,
+    write_json,
+)
 from rawcandle.fundamentals.phase13b_foundation import database_fingerprint, online_backup
 from rawcandle.fundamentals.phase13b_foundation import (
     CandidatePaths,
@@ -79,6 +96,9 @@ PHASE = "PHASE13G2_BATCH_ADD_TICKERS"
 CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V2"
 OUTCOME_B = "OUTCOME B — BATCH ADD TICKERS COPY-ONLY FOUNDATION READY; AUTHORITATIVE FULL DOWNSTREAM GAP REMAINS"
 OUTCOME_A = "OUTCOME A — GENERIC BATCH ADD TICKERS AUTHORITATIVE COPY-ONLY PIPELINE VERIFIED AND READY FOR SEPARATELY AUTHORIZED PRODUCTION DEPLOYMENT"
+PRODUCTION_OUTCOME_A = "OUTCOME A — BATCH ADD TICKERS ACTIVE AND STABLE IN PRODUCTION"
+PRODUCTION_OUTCOME_B = "OUTCOME B — PRE-WRITE BLOCKER; PRODUCTION REMAINS UNCHANGED"
+PRODUCTION_OUTCOME_C = "OUTCOME C — PRODUCTION DEPLOYMENT FAILED AND COMPLETE BACKUP SET RESTORED"
 AUTHORITATIVE_DOWNSTREAM_LIMITATION = {
     "status": "NOT_AVAILABLE_FOR_GENERIC_BATCH_ADD_TICKERS",
     "reason": (
@@ -95,6 +115,9 @@ AUTHORITATIVE_DOWNSTREAM_LIMITATION = {
 WRITE_ROLES = ("provider", "canonical", "analysis")
 READONLY_COPY_ROLES = ("market", "taxonomy")
 ROLE_ORDER = ("provider", "canonical", "analysis", "market", "taxonomy")
+PRODUCTION_BATCH_TICKERS = ("AG", "ALOY", "ARM", "ASML", "ASX", "BABA", "BHP", "BIDU", "BTDR", "CAMT")
+PRODUCTION_BACKUP_ROOT = ROOT / "backups/fundamentals_v4_phase13g2_4_batch_add_tickers"
+PRODUCTION_LOCK_PATH = ROOT / "temp/.fundamentals_phase13g2_4_add_tickers.lock"
 DEFAULT_ARCHIVE = ROOT / "data/source_archives/sharadar/fundamentals/phase12c_20260910/sharadar_fundamentals_10y.zip"
 SUPPORTED_GENERIC_CATEGORIES = {
     "Domestic Common Stock",
@@ -105,6 +128,10 @@ SUPPORTED_GENERIC_CATEGORIES = {
 }
 SUPPORTED_EXCHANGES = {"NASDAQ", "NYSE", "NYSEMKT"}
 CIK_RE = re.compile(r"CIK=0*([0-9]+)", re.IGNORECASE)
+EXPECTED_PREWRITE_ACTIVE_PACKAGE = "f9621556445ef7c85f5486ea170e2366cbd356fa9283cd8528436abeab0d0d40"
+EXPECTED_PREWRITE_RV_MODEL = "76c2974108b2c5085b7dfa102acd4bb04eea36a5267bbdb1930a2bc7dc8cb35e"
+EXPECTED_PREWRITE_RV_SNAPSHOT = "1f360f0b2dfd8e06eaffd3edcffaf87b604e59a63d0b0e272823b46fada02f6b"
+EXPECTED_PREWRITE_RV_RESULT = "9c642e80b06fdbb8c6e703a46a6bda2c7031bc270fbd195b0a3acd7cdeba30f3"
 
 
 @dataclass(frozen=True)
@@ -216,6 +243,266 @@ def parse_batch_tickers(raw: str | Sequence[str], *, market: str | None = "usa")
 
 def reject_production_write_targets(paths: BatchAddTickerPaths) -> None:
     reject_production_or_alias(paths.as_phase13d())
+
+
+def validate_exact_production_paths(paths: BatchAddTickerPaths) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for role, path in paths.as_dict().items():
+        raw = str(path)
+        if raw.startswith("file:"):
+            raise PermissionError(f"PHASE13G2_PRODUCTION_SQLITE_URI_REFUSED:{role}:{raw}")
+        expected = PRODUCTION[role]
+        if path != expected:
+            raise PermissionError(f"PHASE13G2_EXACT_PRODUCTION_PATH_REQUIRED:{role}:{expected}")
+        if not path.is_absolute() or path.is_symlink() or not path.is_file() or path.resolve() != expected.resolve():
+            raise PermissionError(f"PHASE13G2_PRODUCTION_PATH_ALIAS_REFUSED:{role}:{path}")
+        resolved[role] = str(path.resolve())
+    if len(set(resolved.values())) != len(resolved):
+        raise ValueError("PHASE13G2_PRODUCTION_PATH_ROLES_MUST_BE_DISTINCT")
+    return resolved
+
+
+def _assert_no_sqlite_sidecars(paths: BatchAddTickerPaths, roles: Sequence[str] = WRITE_ROLES) -> dict[str, Any]:
+    sidecars: dict[str, list[dict[str, Any]]] = {}
+    for role in roles:
+        path = paths.as_dict()[role]
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = Path(str(path) + suffix)
+            if sidecar.exists() and sidecar.stat().st_size:
+                sidecars.setdefault(role, []).append({"path": str(sidecar), "size": sidecar.stat().st_size})
+    if sidecars:
+        raise RuntimeError("PHASE13G2_NONEMPTY_SQLITE_SIDECAR:" + json.dumps(sidecars, sort_keys=True))
+    return {"checked_roles": list(roles), "nonempty_sidecars": 0}
+
+
+def _run_git(args: tuple[str, ...]) -> str:
+    return subprocess.run(("git", *args), cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def _assert_clean_worktree() -> dict[str, Any]:
+    status = _run_git(("status", "--porcelain"))
+    if status:
+        raise RuntimeError("PHASE13G2_CLEAN_GIT_WORKTREE_REQUIRED")
+    return {
+        "head": _run_git(("rev-parse", "HEAD")),
+        "short_head": _run_git(("rev-parse", "--short", "HEAD")),
+        "branch": _run_git(("branch", "--show-current")),
+        "status_clean": True,
+    }
+
+
+def _process_inventory() -> dict[str, Any]:
+    rows = subprocess.run(("ps", "-eo", "pid=,args="), check=True, capture_output=True, text=True).stdout.splitlines()
+    own_pid = str(os.getpid())
+    relevant = [
+        row.strip()
+        for row in rows
+        if own_pid not in row
+        and any(term in row.lower() for term in ("rawcandle", "fundamental", "sharadar", "stock_update_scheduler"))
+    ]
+    conflicts = [
+        row
+        for row in relevant
+        if any(term in row for term in ("run_fundamentals_v4", "run_phase13", "run_phase12", "run_sharadar", "stock_update_scheduler"))
+    ]
+    if conflicts:
+        raise RuntimeError("PHASE13G2_CONFLICTING_WRITER:" + " | ".join(conflicts))
+    return {"relevant_processes": relevant, "conflicting_writers": conflicts}
+
+
+def _storage_gate(output: Path, backup_dir: Path, paths: BatchAddTickerPaths) -> dict[str, Any]:
+    def existing_parent(path: Path) -> Path:
+        current = path
+        while not current.exists():
+            current = current.parent
+        return current
+
+    write_bytes = sum(paths.as_dict()[role].stat().st_size for role in WRITE_ROLES)
+    required = int((write_bytes * 2.50) + (1024 * 1024 * 1024))
+    checks = []
+    for location in {ROOT, existing_parent(output.parent), existing_parent(backup_dir.parent), Path("/tmp")}:
+        usage = shutil.disk_usage(location)
+        checks.append({
+            "path": str(location.resolve()),
+            "free_bytes": usage.free,
+            "total_bytes": usage.total,
+            "required_bytes": required,
+            "ok": usage.free >= required,
+        })
+    if not all(row["ok"] for row in checks):
+        raise RuntimeError("PHASE13G2_INSUFFICIENT_FREE_SPACE")
+    return {"write_set_bytes": write_bytes, "required_bytes": required, "checks": checks}
+
+
+def _assert_authorized_production_batch(request: AdminBatchRequest) -> None:
+    if tuple(request.normalized_inputs) != PRODUCTION_BATCH_TICKERS:
+        raise PermissionError(
+            "PHASE13G2_PRODUCTION_BATCH_MUST_MATCH_AUTHORIZED_TICKERS:"
+            + " ".join(PRODUCTION_BATCH_TICKERS)
+        )
+    if request.rejected_inputs:
+        raise ValueError("PHASE13G2_PRODUCTION_BATCH_HAS_REJECTED_INPUTS")
+
+
+def _production_preflight(
+    paths: BatchAddTickerPaths,
+    *,
+    output: Path,
+    backup_dir: Path,
+    require_clean: bool = True,
+    require_expected_active_identities: bool = True,
+) -> dict[str, Any]:
+    resolved_paths = validate_exact_production_paths(paths)
+    sidecars = _assert_no_sqlite_sidecars(paths)
+    git = _assert_clean_worktree() if require_clean else {"status_clean": False, "skipped": True}
+    process = _process_inventory()
+    storage = _storage_gate(output, backup_dir, paths)
+    inventory = production_inventory()
+    bad_dbs = {
+        role: {
+            "quick_check": item["quick_check"],
+            "foreign_key_errors": item["foreign_key_errors"],
+        }
+        for role, item in inventory["databases"].items()
+        if item["quick_check"] != "ok" or item["foreign_key_errors"]
+    }
+    if bad_dbs:
+        raise RuntimeError("PHASE13G2_PRODUCTION_INTEGRITY_PRECHECK_FAILED:" + json.dumps(bad_dbs, sort_keys=True))
+    rv = active_relative_valuation_identity(paths.analysis_db)
+    active = {
+        "operating_income_package": inventory["active_package"].get("persistence_fingerprint"),
+        "relative_valuation_model": rv.get("active_model_fingerprint"),
+        "relative_valuation_snapshot": rv.get("active_snapshot_id"),
+        "relative_valuation_result": rv.get("active_result_fingerprint"),
+    }
+    expected = {
+        "operating_income_package": EXPECTED_PREWRITE_ACTIVE_PACKAGE,
+        "relative_valuation_model": EXPECTED_PREWRITE_RV_MODEL,
+        "relative_valuation_snapshot": EXPECTED_PREWRITE_RV_SNAPSHOT,
+        "relative_valuation_result": EXPECTED_PREWRITE_RV_RESULT,
+    }
+    if require_expected_active_identities and active != expected:
+        raise RuntimeError("PHASE13G2_PREWRITE_ACTIVE_IDENTITY_MISMATCH:" + json.dumps({"active": active, "expected": expected}, sort_keys=True))
+    return {
+        "resolved_paths": resolved_paths,
+        "write_roles": list(WRITE_ROLES),
+        "read_only_roles": list(READONLY_COPY_ROLES),
+        "git": git,
+        "process": process,
+        "storage": storage,
+        "sidecars": sidecars,
+        "production_inventory": inventory,
+        "active_identities": active,
+        "expected_prewrite_active_identities": expected,
+    }
+
+
+def _backup_write_set(
+    paths: BatchAddTickerPaths,
+    backup_dir: Path,
+    *,
+    progress: ProgressTracker | None = None,
+) -> dict[str, Any]:
+    backup_dir.mkdir(parents=True, exist_ok=False)
+    manifest: dict[str, Any] = {"created_at_utc": utc_now(), "roles": {}}
+    for role in WRITE_ROLES:
+        source = paths.as_dict()[role]
+        destination = backup_dir / f"{role}.{source.name}"
+        with _background_heartbeat(progress, f"Backing up {role} production database."):
+            copied = online_backup(source, destination)
+        inventory = database_inventory(destination)
+        copied = dict(copied)
+        copied["sha256"] = sha256(destination)
+        copied["inventory"] = inventory
+        if inventory["quick_check"] != "ok" or inventory["foreign_key_errors"]:
+            raise RuntimeError(f"PHASE13G2_BACKUP_INTEGRITY_FAILED:{role}")
+        manifest["roles"][role] = copied
+    write_json(backup_dir / "backup_manifest.json", manifest)
+    return manifest
+
+
+def _restore_rehearsal(
+    backup_manifest: Mapping[str, Any],
+    rehearsal_dir: Path,
+    *,
+    progress: ProgressTracker | None = None,
+) -> dict[str, Any]:
+    rehearsal_dir.mkdir(parents=True, exist_ok=True)
+    result: dict[str, Any] = {"started_at_utc": utc_now(), "roles": {}, "cleanup": {}}
+    try:
+        for role in WRITE_ROLES:
+            backup = Path(str(backup_manifest["roles"][role]["destination"]))
+            destination = rehearsal_dir / f"{role}.restore_rehearsal.db"
+            with _background_heartbeat(progress, f"Rehearsing restore for {role} database."):
+                shutil.copy2(backup, destination)
+            restored_sha = sha256(destination)
+            expected_sha = str(backup_manifest["roles"][role]["sha256"])
+            inventory = database_inventory(destination)
+            if restored_sha != expected_sha:
+                raise RuntimeError(f"PHASE13G2_RESTORE_REHEARSAL_SHA_MISMATCH:{role}")
+            if inventory["quick_check"] != "ok" or inventory["foreign_key_errors"]:
+                raise RuntimeError(f"PHASE13G2_RESTORE_REHEARSAL_INTEGRITY_FAILED:{role}")
+            result["roles"][role] = {
+                "backup": str(backup),
+                "rehearsal_path": str(destination),
+                "sha256": restored_sha,
+                "inventory": inventory,
+            }
+        return result
+    finally:
+        removed: list[str] = []
+        for path in sorted(rehearsal_dir.glob("*.db*")):
+            if path.is_file():
+                removed.append(str(path))
+                path.unlink(missing_ok=True)
+        result["cleanup"] = {"removed_files": removed, "removed_count": len(removed)}
+        write_json(rehearsal_dir / "restore_rehearsal_result.json", result)
+
+
+def _restore_production_from_backups(
+    paths: BatchAddTickerPaths,
+    backup_manifest: Mapping[str, Any],
+    *,
+    progress: ProgressTracker | None = None,
+) -> dict[str, Any]:
+    restored: dict[str, Any] = {"status": "ROLLED_BACK", "roles": {}}
+    for role in WRITE_ROLES:
+        source = Path(str(backup_manifest["roles"][role]["destination"]))
+        destination = paths.as_dict()[role]
+        for suffix in ("-wal", "-shm", "-journal"):
+            Path(str(destination) + suffix).unlink(missing_ok=True)
+        with _background_heartbeat(progress, f"Restoring {role} production database from backup."):
+            shutil.copy2(source, destination)
+        restored_sha = sha256(destination)
+        expected_sha = str(backup_manifest["roles"][role]["sha256"])
+        inventory = database_inventory(destination)
+        if restored_sha != expected_sha:
+            raise RuntimeError(f"PHASE13G2_PRODUCTION_RESTORE_SHA_MISMATCH:{role}")
+        if inventory["quick_check"] != "ok" or inventory["foreign_key_errors"]:
+            raise RuntimeError(f"PHASE13G2_PRODUCTION_RESTORE_INTEGRITY_FAILED:{role}")
+        restored["roles"][role] = {"sha256": restored_sha, "inventory": inventory}
+    restored["active_relative_valuation"] = active_relative_valuation_identity(paths.analysis_db)
+    return restored
+
+
+@contextmanager
+def _background_heartbeat(progress: ProgressTracker | None, message: str, *, interval_seconds: float = 30.0):
+    if progress is None:
+        yield
+        return
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(interval_seconds):
+            progress.heartbeat(message)
+
+    thread = threading.Thread(target=beat, name="phase13g2-progress-heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=interval_seconds)
 
 
 def source_state(paths: BatchAddTickerPaths) -> dict[str, Any]:
@@ -908,8 +1195,15 @@ def _stage_generic_provider_rows(paths: BatchAddTickerPaths, items: Sequence[Map
     }
 
 
-def _valuation_classification_update_generic(paths: BatchAddTickerPaths, *, tickers: Sequence[str], applied_at: str) -> dict[str, Any]:
-    reject_production_path(paths.analysis_db, "analysis")
+def _valuation_classification_update_generic(
+    paths: BatchAddTickerPaths,
+    *,
+    tickers: Sequence[str],
+    applied_at: str,
+    allow_production: bool = False,
+) -> dict[str, Any]:
+    if not allow_production:
+        reject_production_path(paths.analysis_db, "analysis")
     changed = 0
     classification = {ticker: _classification(paths, ticker) for ticker in tickers}
     with sqlite3.connect(paths.analysis_db) as conn:
@@ -1011,7 +1305,16 @@ def _snapshot_smoke_generic(paths: BatchAddTickerPaths, output: Path, *, tickers
                 "contains_internal_ids": any(term in text for term in ("company_id", "security_id", "quarter_id")),
             }
         except Exception as exc:
-            results[ticker] = {"status": "FAILED", "error": type(exc).__name__, "reason": str(exc)}
+            reason = str(exc)
+            if isinstance(exc, LookupError) and reason.startswith("NO_FUNDAMENTAL_ENDPOINT_ON_OR_BEFORE_REPORT_DATE:"):
+                results[ticker] = {
+                    "status": "READINESS_LIMITED",
+                    "error": type(exc).__name__,
+                    "reason": reason,
+                    "readiness_limitation": "No eligible fundamental endpoint exists on or before the smoke report date.",
+                }
+            else:
+                results[ticker] = {"status": "FAILED", "error": type(exc).__name__, "reason": reason}
     return results
 
 
@@ -1022,12 +1325,15 @@ def _run_authoritative_downstream(
     accepted_tickers: Sequence[str],
     applied_at: str,
     progress: ProgressTracker | None = None,
+    allow_production: bool = False,
+    snapshot_control_tickers: Sequence[str] = (),
 ) -> dict[str, Any]:
     candidate = CandidatePaths(paths.canonical_db, paths.analysis_db, paths.taxonomy_db, provider_db=paths.provider_db, market_db=paths.market_db)
     result: dict[str, Any] = {"applied_at_utc": applied_at, "accepted_tickers": list(accepted_tickers)}
     if progress:
         progress.running(ProgressStage.CANONICAL_REBUILD, "Rebuilding canonical quarters from staged provider rows.")
-    result["canonical"] = reconcile_canonical(paths.provider_db, paths.canonical_db, applied_at=applied_at)
+    with _background_heartbeat(progress, "Canonical rebuild is still running."):
+        result["canonical"] = reconcile_canonical(paths.provider_db, paths.canonical_db, applied_at=applied_at)
     if progress:
         progress.completed(
             ProgressStage.CANONICAL_REBUILD,
@@ -1035,7 +1341,8 @@ def _run_authoritative_downstream(
             processed_rows=int(result["canonical"].get("canonical_rows") or 0),
         )
         progress.running(ProgressStage.TTM_REBUILD, "Rebuilding TTM endpoints.")
-    result["ttm"] = rebuild_ttm(paths.canonical_db, applied_at=applied_at)
+    with _background_heartbeat(progress, "TTM rebuild is still running."):
+        result["ttm"] = rebuild_ttm(paths.canonical_db, applied_at=applied_at)
     if progress:
         progress.completed(ProgressStage.TTM_REBUILD, "TTM rebuild completed.", processed_rows=int(result["ttm"].get("rows") or 0))
         progress.running(ProgressStage.STRUCTURAL_DEPENDENCIES, "Applying structural dependency contract.")
@@ -1043,19 +1350,25 @@ def _run_authoritative_downstream(
     result["structural_evidence"] = _structural_evidence(paths.canonical_db)
     structural_package_fingerprint = _structural_package_fingerprint(result["structural_contract"])
     result["structural_package_fingerprint"] = structural_package_fingerprint
-    result["valuation_classification"] = _valuation_classification_update_generic(paths, tickers=accepted_tickers, applied_at=applied_at)
+    result["valuation_classification"] = _valuation_classification_update_generic(
+        paths,
+        tickers=accepted_tickers,
+        applied_at=applied_at,
+        allow_production=allow_production,
+    )
     if progress:
         progress.completed(
             ProgressStage.STRUCTURAL_DEPENDENCIES,
             "Structural dependencies applied.",
             processed_rows=int(result["structural_contract"].get("quarter_regime_count") or 0),
         )
-    result["schema"] = ensure_candidate_schema(candidate, applied_at_utc=applied_at, apply=True, allow_production=False)
-    universe = backfill_universe(candidate, applied_at_utc=applied_at, apply=True, allow_production=False)
+    result["schema"] = ensure_candidate_schema(candidate, applied_at_utc=applied_at, apply=True, allow_production=allow_production)
+    universe = backfill_universe(candidate, applied_at_utc=applied_at, apply=True, allow_production=allow_production)
     result["universe"] = universe
     if progress:
         progress.running(ProgressStage.PACKAGE_CALCULATION, "Running Operating-Income V2 package calculation.")
-    result["package"] = instrumented_package_refresh(paths.as_dict(), output, allow_production=False)
+    with _background_heartbeat(progress, "Operating-Income V2 package refresh is still running."):
+        result["package"] = instrumented_package_refresh(paths.as_dict(), output, allow_production=allow_production)
     if progress:
         package_rows = result["package"].get("first_apply", {}).get("rows", {})
         progress.completed(
@@ -1066,15 +1379,16 @@ def _run_authoritative_downstream(
         progress.running(ProgressStage.PACKAGE_APPLY, "Operating-Income V2 package apply verified.")
         progress.completed(ProgressStage.PACKAGE_APPLY, "Operating-Income V2 package apply completed.")
         progress.running(ProgressStage.RELATIVE_POSITION, "Refreshing full-universe Relative Position.")
-    result["relative_position"] = asdict(refresh_relative_position(
-        canonical_db=paths.canonical_db,
-        analysis_db=paths.analysis_db,
-        market_db=paths.market_db,
-        taxonomy_db=paths.taxonomy_db,
-        snapshot_date=REPORT_DATE,
-        model_fingerprint=RP_MODEL_FINGERPRINT,
-        applied_at_utc=applied_at,
-    ))
+    with _background_heartbeat(progress, "Relative Position refresh is still running."):
+        result["relative_position"] = asdict(refresh_relative_position(
+            canonical_db=paths.canonical_db,
+            analysis_db=paths.analysis_db,
+            market_db=paths.market_db,
+            taxonomy_db=paths.taxonomy_db,
+            snapshot_date=REPORT_DATE,
+            model_fingerprint=RP_MODEL_FINGERPRINT,
+            applied_at_utc=applied_at,
+        ))
     if progress:
         progress.completed(
             ProgressStage.RELATIVE_POSITION,
@@ -1089,7 +1403,8 @@ def _run_authoritative_downstream(
         expected_universe_fingerprint=universe["identity"]["economic_result_fingerprint"],
         expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
     )
-    result["relative_valuation"] = _manual_rv_refresh_generic(paths, output=output, applied_at=applied_at)
+    with _background_heartbeat(progress, "Relative Valuation refresh is still running."):
+        result["relative_valuation"] = _manual_rv_refresh_generic(paths, output=output, applied_at=applied_at)
     if progress:
         progress.completed(
             ProgressStage.RELATIVE_VALUATION,
@@ -1111,7 +1426,7 @@ def _run_authoritative_downstream(
         universe=universe["identity"],
         applied_at_utc=applied_at,
         apply=True,
-        allow_production=False,
+        allow_production=allow_production,
         structural_metadata=structural_metadata,
     )
     result["post_refresh_compatibility"] = candidate_relative_valuation_dependency_state(
@@ -1123,9 +1438,10 @@ def _run_authoritative_downstream(
     if progress:
         progress.completed(ProgressStage.DEPENDENCY_ATTACHMENT, "Dependency attachment completed.")
         progress.running(ProgressStage.SNAPSHOT_SMOKE, "Generating eligible Snapshot smoke reports.")
-    result["snapshots"] = _snapshot_smoke_generic(paths, output, tickers=accepted_tickers)
+    snapshot_tickers = tuple(dict.fromkeys([*accepted_tickers, *snapshot_control_tickers]))
+    result["snapshots"] = _snapshot_smoke_generic(paths, output, tickers=snapshot_tickers)
     if progress:
-        progress.completed(ProgressStage.SNAPSHOT_SMOKE, "Snapshot smoke completed.", processed_items=len(result["snapshots"]), total_items=len(accepted_tickers))
+        progress.completed(ProgressStage.SNAPSHOT_SMOKE, "Snapshot smoke completed.", processed_items=len(result["snapshots"]), total_items=len(snapshot_tickers))
     result["invocation_counts"] = {"package": 1, "relative_position": 1, "relative_valuation": 1}
     return result
 
@@ -1152,6 +1468,8 @@ def _apply_generic_plan(
     output: Path,
     failure_boundary: str | None = None,
     progress: ProgressTracker | None = None,
+    allow_production: bool = False,
+    snapshot_control_tickers: Sequence[str] = (),
 ) -> dict[str, Any]:
     plan_fingerprint = str(plan.get("plan_fingerprint") or stable_hash(plan))
     items = [item for item in plan.get("items", []) if item.get("status") == "ELIGIBLE"]
@@ -1193,6 +1511,8 @@ def _apply_generic_plan(
             accepted_tickers=accepted,
             applied_at=applied_at,
             progress=progress,
+            allow_production=allow_production,
+            snapshot_control_tickers=snapshot_control_tickers,
         )
     else:
         if progress:
@@ -1516,6 +1836,242 @@ def run_apply(
         return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "cleanup": cleanup, "error": type(exc).__name__}
 
 
+def run_production_apply(
+    *,
+    preview_payload_path: Path,
+    preview_fingerprint: str,
+    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    run_root: Path = ADMIN_RUN_ROOT,
+    backup_root: Path = PRODUCTION_BACKUP_ROOT,
+    temp_root: Path = ADMIN_TEMP_ROOT,
+    confirm_production: bool = False,
+    failure_boundary: str | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    if not confirm_production:
+        raise PermissionError("PHASE13G2_PRODUCTION_APPLY_REQUIRES_CONFIRM_PRODUCTION")
+    payload = _load_preview_payload(preview_payload_path)
+    phase_preview = payload.get("phase13g2_preview") if isinstance(payload.get("phase13g2_preview"), Mapping) else {}
+    if phase_preview.get("preview_fingerprint") != preview_fingerprint:
+        raise ValueError("PHASE13G2_PREVIEW_FINGERPRINT_MISMATCH")
+    request_payload = phase_preview.get("request") if isinstance(phase_preview.get("request"), Mapping) else {}
+    request = AdminBatchRequest(
+        operation_type=AdminOperationType.ADD_TICKERS,
+        requested_inputs=tuple(request_payload.get("requested_inputs") or ()),
+        normalized_inputs=tuple(request_payload.get("normalized_inputs") or ()),
+        rejected_inputs=tuple(request_payload.get("rejected_inputs") or ()),
+        market=request_payload.get("market"),
+        options=request_payload.get("options") or {},
+    )
+    _assert_authorized_production_batch(request)
+    run_id = stable_run_id(AdminOperationType.ADD_TICKERS, preview_fingerprint, suffix="production")
+    writer = AdminRunWriter(run_id, AdminOperationType.ADD_TICKERS, root=run_root)
+    progress = ProgressTracker(
+        run_id=run_id,
+        operation_type=AdminOperationType.ADD_TICKERS,
+        run_dir=writer.run_dir,
+        stages=BATCH_ADD_TICKERS_STAGES,
+        callback=progress_callback,
+    )
+    backup_dir = (backup_root / run_id).resolve()
+    rehearsal_dir = (temp_root / run_id / "restore_rehearsal").resolve()
+    started = utc_now()
+    lock_handle = None
+    backup_manifest: dict[str, Any] | None = None
+    write_boundary_crossed = False
+    try:
+        progress.running(ProgressStage.PREFLIGHT, "Recording protected production Batch Add Tickers request.", processed_items=0, total_items=len(request.normalized_inputs))
+        writer.checkpoint(RunStage.REQUEST_CREATED, message="Protected production apply request recorded.", preview_fingerprint=preview_fingerprint)
+        writer.write_json("request.json", request.as_dict())
+        writer.write_json("preview.json", phase_preview)
+        writer.write_json("preview_payload_identity.json", {
+            "path": str(preview_payload_path.resolve()),
+            "sha256": sha256(preview_payload_path),
+            "preview_fingerprint": preview_fingerprint,
+        })
+        writer.checkpoint(RunStage.APPLY_STARTED, message="Running protected production preflight.", preview_fingerprint=preview_fingerprint)
+        with _background_heartbeat(progress, "Production preflight is still running."):
+            preflight = _production_preflight(source_paths, output=writer.run_dir, backup_dir=backup_dir)
+        writer.write_json("production_preflight.json", preflight)
+        progress.completed(ProgressStage.PREFLIGHT, "Production preflight completed.", processed_items=0, total_items=len(request.normalized_inputs))
+
+        progress.running(ProgressStage.PREVIEW_VALIDATION, "Validating saved preview freshness and acquiring maintenance lock.")
+        _assert_preview_not_stale(source_paths, payload)
+        saved_plan = payload.get("generic_batch_plan")
+        if not isinstance(saved_plan, Mapping):
+            raise ValueError("PHASE13G2_GENERIC_BATCH_PLAN_REQUIRED_FOR_PRODUCTION")
+        accepted_from_plan = tuple(str(item.get("ticker")).upper() for item in saved_plan.get("items", []) if item.get("status") == "ELIGIBLE")
+        if not accepted_from_plan and not any(item.get("status") == "ALREADY_PRESENT" for item in saved_plan.get("items", [])):
+            raise ValueError("PHASE13G2_PRODUCTION_PREVIEW_HAS_NO_ACCEPTED_OR_PRESENT_TICKERS")
+        PRODUCTION_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = PRODUCTION_LOCK_PATH.open("w")
+        try:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("PHASE13G2_MAINTENANCE_LOCK_BUSY") from exc
+        progress.completed(ProgressStage.PREVIEW_VALIDATION, "Saved preview and maintenance lock validated.")
+
+        progress.running(ProgressStage.SOURCE_RESOLUTION, "Creating verified backup set and restore rehearsal.")
+        backup_manifest = _backup_write_set(source_paths, backup_dir, progress=progress)
+        writer.write_json("backup_manifest.json", backup_manifest)
+        restore_rehearsal = _restore_rehearsal(backup_manifest, rehearsal_dir, progress=progress)
+        writer.write_json("restore_rehearsal.json", restore_rehearsal)
+        progress.completed(ProgressStage.SOURCE_RESOLUTION, "Backup set verified and restore rehearsal completed.")
+        writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Production preview, backup and restore rehearsal are complete.", preview_fingerprint=preview_fingerprint)
+
+        before_apply = production_inventory()
+        writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Applying exact authorized ticker batch to production.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
+        write_boundary_crossed = True
+        first = _apply_generic_plan(
+            source_paths,
+            saved_plan,
+            output=writer.run_dir / "production_authoritative_apply",
+            failure_boundary=failure_boundary,
+            progress=progress,
+            allow_production=True,
+            snapshot_control_tickers=("NVDA",),
+        )
+        first["mode"] = "GENERIC_AUTHORITATIVE_PRODUCTION_BATCH"
+        second_before = production_inventory()
+        second = _apply_generic_plan(
+            source_paths,
+            saved_plan,
+            output=writer.run_dir / "production_authoritative_repeat",
+            progress=progress,
+            allow_production=True,
+            snapshot_control_tickers=("NVDA",),
+        )
+        second_after = production_inventory()
+        second_compare = compare_production_inventory(second_before, second_after)
+
+        after_apply = production_inventory()
+        production_compare = compare_production_inventory(before_apply, after_apply)
+        final_integrity = {role: database_inventory(path) for role, path in source_paths.as_dict().items()}
+        base_decisions = tuple(_decision_from_plan_mapping(item) for item in saved_plan.get("items", []))
+        decisions = _apply_decisions(base_decisions, first, mode_label="production")
+        counts = _counts(decisions)
+        downstream = first.get("downstream") if isinstance(first.get("downstream"), Mapping) else {}
+        result = AdminFinalResult(
+            run_id=run_id,
+            operation_type=AdminOperationType.ADD_TICKERS,
+            outcome=AdminStatus.PARTIALLY_COMPLETED if any(item.status in {AdminStatus.REJECTED, AdminStatus.REVIEW_REQUIRED} for item in decisions) else AdminStatus.COMPLETED,
+            mode="PRODUCTION_APPLY",
+            started_at_utc=started,
+            completed_at_utc=utc_now(),
+            preview_fingerprint=preview_fingerprint,
+            request=request.as_dict(),
+            item_results=decisions,
+            summary_counts=counts,
+            rollback={"status": "NOT_REQUIRED"},
+            downstream={
+                "mode": first.get("mode"),
+                "production_outcome": PRODUCTION_OUTCOME_A,
+                "accepted_tickers": first.get("applied_tickers") or [],
+                "package": downstream.get("package", "NOT_RUN") if isinstance(downstream, Mapping) else "NOT_RUN",
+                "relative_position": downstream.get("relative_position", "NOT_RUN") if isinstance(downstream, Mapping) else "NOT_RUN",
+                "relative_valuation": downstream.get("relative_valuation", "NOT_RUN") if isinstance(downstream, Mapping) else "NOT_RUN",
+                "invocation_counts": downstream.get("invocation_counts") if isinstance(downstream, Mapping) else None,
+                "repeat_apply_outcome": second.get("outcome"),
+                "repeat_inventory_compare": second_compare,
+                "production_compare": production_compare,
+                "final_integrity": final_integrity,
+            },
+            artifacts={
+                "apply": str(writer.run_dir / "production_authoritative_apply"),
+                "backup_manifest": str(backup_dir / "backup_manifest.json"),
+            },
+            recommended_next_action="Retain backups and production evidence. No push was performed.",
+        )
+        result_dict = result.as_dict()
+        result_dict["production_apply"] = {
+            "outcome": PRODUCTION_OUTCOME_A,
+            "first_apply": first,
+            "second_apply": second,
+            "second_inventory_compare": second_compare,
+            "backup_dir": str(backup_dir),
+            "restore_rehearsal": restore_rehearsal,
+            "preflight": preflight,
+            "before_inventory": before_apply,
+            "after_inventory": after_apply,
+            "production_compare": production_compare,
+        }
+        writer.write_final_result(result)
+        writer.write_json("production_apply_technical.json", result_dict["production_apply"])
+        writer.write_items_csv([item.as_dict() for item in decisions])
+        writer.write_text("report.md", render_markdown_report(result_dict))
+        progress.running(ProgressStage.FINAL_VALIDATION, "Writing final production artifacts.")
+        progress.completed(ProgressStage.FINAL_VALIDATION, "Final production artifacts written.", processed_items=len(decisions), total_items=len(decisions))
+        terminal = RunStage.PARTIALLY_COMPLETED if result.outcome == AdminStatus.PARTIALLY_COMPLETED else RunStage.COMPLETED
+        writer.checkpoint(terminal, message=PRODUCTION_OUTCOME_A, preview_fingerprint=preview_fingerprint, write_boundary_crossed=True, counters=counts)
+        writer.write_exit_code(1 if result.outcome == AdminStatus.PARTIALLY_COMPLETED else 0)
+        writer.write_manifest()
+        progress.running(ProgressStage.CLEANUP, "Production cleanup completed; verified backups retained.")
+        progress.completed(ProgressStage.CLEANUP, "Production cleanup completed; verified backups retained.")
+        progress.running(ProgressStage.COMPLETED, PRODUCTION_OUTCOME_A)
+        progress.completed(ProgressStage.COMPLETED, PRODUCTION_OUTCOME_A)
+        return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "backup_dir": str(backup_dir)}
+    except Exception as exc:
+        writer.write_error(exc)
+        if write_boundary_crossed and backup_manifest is not None:
+            progress.rolling_back("Production apply failed after write boundary; restoring coordinated backup set.", errors=(f"{type(exc).__name__}: {exc}",))
+            writer.checkpoint(RunStage.ROLLBACK_STARTED, message="Production apply failed; restoring backup set.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
+            restored = _restore_production_from_backups(source_paths, backup_manifest, progress=progress)
+            progress.rolled_back("Production backup set restored.")
+            writer.checkpoint(RunStage.ROLLBACK_COMPLETE, message="Production backup set restored.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
+            outcome = AdminStatus.ROLLED_BACK
+            terminal_stage = RunStage.FAILED_AFTER_WRITE
+            rollback = restored
+            production_outcome = PRODUCTION_OUTCOME_C
+            exit_code = 3
+        else:
+            failed_stage = ProgressStage.ROLLBACK if write_boundary_crossed else ProgressStage.PREVIEW_VALIDATION
+            progress.failed(failed_stage, "Production apply stopped before write boundary.", errors=(f"{type(exc).__name__}: {exc}",))
+            outcome = AdminStatus.FAILED
+            terminal_stage = RunStage.FAILED_BEFORE_WRITE
+            rollback = {"status": "NOT_REQUIRED", "message": "Failure occurred before the production write boundary."}
+            production_outcome = PRODUCTION_OUTCOME_B
+            exit_code = 2
+        error_decisions = tuple(
+            AdminItemDecision(
+                item_key=value,
+                requested_value=value,
+                normalized_value=value,
+                status=AdminStatus.FAILED,
+                reason=f"{production_outcome}: {type(exc).__name__}",
+            )
+            for value in request.normalized_inputs
+        )
+        result = AdminFinalResult(
+            run_id=run_id,
+            operation_type=AdminOperationType.ADD_TICKERS,
+            outcome=outcome,
+            mode="PRODUCTION_APPLY",
+            started_at_utc=started,
+            completed_at_utc=utc_now(),
+            preview_fingerprint=preview_fingerprint,
+            request=request.as_dict(),
+            item_results=error_decisions,
+            summary_counts=_counts(error_decisions),
+            rollback=rollback,
+            downstream={"production_outcome": production_outcome},
+            recommended_next_action="Inspect error.json and production_apply_technical.json before any future production attempt.",
+            errors=({"type": type(exc).__name__, "message": str(exc), "traceback": traceback.format_exc()},),
+        )
+        result_dict = result.as_dict()
+        writer.write_final_result(result)
+        writer.write_text("report.md", render_markdown_report(result_dict))
+        writer.checkpoint(terminal_stage, message=production_outcome, preview_fingerprint=preview_fingerprint, write_boundary_crossed=write_boundary_crossed)
+        writer.write_exit_code(exit_code)
+        writer.write_manifest()
+        return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "error": type(exc).__name__}
+    finally:
+        if lock_handle is not None:
+            try:
+                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+            finally:
+                lock_handle.close()
+
+
 def _restore_copy_lane_from_sources(source_paths: BatchAddTickerPaths, lane: CopyLane) -> dict[str, Any]:
     restored: dict[str, Any] = {"status": "ROLLED_BACK", "roles": {}}
     for role in ROLE_ORDER:
@@ -1526,7 +2082,12 @@ def _restore_copy_lane_from_sources(source_paths: BatchAddTickerPaths, lane: Cop
     return restored
 
 
-def _apply_decisions(decisions: Sequence[AdminItemDecision], applied: Mapping[str, Any]) -> tuple[AdminItemDecision, ...]:
+def _apply_decisions(
+    decisions: Sequence[AdminItemDecision],
+    applied: Mapping[str, Any],
+    *,
+    mode_label: str = "copy-lane",
+) -> tuple[AdminItemDecision, ...]:
     applied_tickers = {str(ticker).upper() for ticker in applied.get("applied_tickers") or ()}
     outcome = str(applied.get("outcome") or "")
     output: list[AdminItemDecision] = []
@@ -1534,13 +2095,23 @@ def _apply_decisions(decisions: Sequence[AdminItemDecision], applied: Mapping[st
         if item.status == AdminStatus.ELIGIBLE and item.normalized_value in applied_tickers and outcome == "APPLIED":
             output.append(
                 AdminItemDecision(
-                    **{**item.__dict__, "status": AdminStatus.APPLIED, "reason": "Applied on copy lane.", "applied_action": "COPY_ONBOARD_APPLIED"}
+                    **{
+                        **item.__dict__,
+                        "status": AdminStatus.APPLIED,
+                        "reason": f"Applied on {mode_label}.",
+                        "applied_action": "PRODUCTION_ONBOARD_APPLIED" if mode_label == "production" else "COPY_ONBOARD_APPLIED",
+                    }
                 )
             )
         elif item.status == AdminStatus.ELIGIBLE and outcome == "NO_CHANGE":
             output.append(
                 AdminItemDecision(
-                    **{**item.__dict__, "status": AdminStatus.NO_CHANGE, "reason": "No copy-lane change was required.", "applied_action": "NO_CHANGE"}
+                    **{
+                        **item.__dict__,
+                        "status": AdminStatus.NO_CHANGE,
+                        "reason": f"No {mode_label} change was required.",
+                        "applied_action": "NO_CHANGE",
+                    }
                 )
             )
         else:
