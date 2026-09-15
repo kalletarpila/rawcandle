@@ -17,7 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("tickers", nargs="*", help="Tickers separated by spaces. Commas/newlines are accepted inside values.")
     parser.add_argument("--input-file", type=Path, help="Optional file containing tickers.")
     parser.add_argument("--market", default="usa")
-    parser.add_argument("--allow-network", action="store_true", help="Permit provider network lookup when future handlers need it.")
+    parser.add_argument("--allow-network", action="store_true", help="Permit bounded Sharadar lookup for tickers missing local/archive fundamentals.")
     parser.add_argument("--apply", action="store_true", help="Run copy-only apply from a saved preview payload.")
     parser.add_argument("--confirm-apply", action="store_true")
     parser.add_argument("--preview-payload", type=Path, help="phase13d_preview_payload.json produced by preview.")
