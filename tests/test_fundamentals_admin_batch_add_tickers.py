@@ -97,6 +97,7 @@ def test_copy_only_apply_is_idempotent_and_does_not_mutate_source(tmp_path: Path
     assert result["copy_apply"]["phase13d_result"]["outcome"] == "APPLIED"
     assert result["copy_apply"]["repeat_result"]["outcome"] == "NO_CHANGE"
     assert result["downstream"]["phase13d_candidate_apply"] == "RUN_ONCE_FOR_BATCH"
+    assert result["downstream"]["authoritative_downstream"]["status"] == "NOT_AVAILABLE_FOR_GENERIC_BATCH_ADD_TICKERS"
     assert source.canonical_db.stat().st_mtime_ns == source_mtime
     with sqlite3.connect(source.canonical_db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM security WHERE current_ticker='NEWC'").fetchone()[0] == 0

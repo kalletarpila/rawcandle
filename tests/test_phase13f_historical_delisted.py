@@ -142,7 +142,8 @@ def test_downstream_summary_keeps_cross_sectional_layers_explicitly_blocked(tmp_
     assert summary["diagnostic_evaluation_count_distribution"]["7"] > 0
     assert summary["diagnostic_evaluation_count_distribution"]["8"] > 0
     assert summary["historical_peer_status"] == "HISTORICAL_PEER_UNIVERSE_NOT_READY"
-    assert "ACTIVE_UNIVERSE_FILTER" in summary["relative_valuation_status"]
+    assert summary["current_relative_valuation_rows_for_areb"] == 0
+    assert summary["relative_valuation_status"] == "CURRENT_RELATIVE_VALUATION_EXCLUDES_AREB"
 
 
 def test_report_states_delisted_historical_security_without_current_percentiles(tmp_path: Path) -> None:

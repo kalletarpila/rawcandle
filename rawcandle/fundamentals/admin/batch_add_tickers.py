@@ -34,6 +34,19 @@ from rawcandle.fundamentals.phase13d_backend import (
 PHASE = "PHASE13G2_BATCH_ADD_TICKERS"
 CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V1"
 OUTCOME_B = "OUTCOME B — BATCH ADD TICKERS COPY-ONLY FOUNDATION READY; AUTHORITATIVE FULL DOWNSTREAM GAP REMAINS"
+AUTHORITATIVE_DOWNSTREAM_LIMITATION = {
+    "status": "NOT_AVAILABLE_FOR_GENERIC_BATCH_ADD_TICKERS",
+    "reason": (
+        "The current authoritative Phase 13F.4 pipeline is transition-specific: "
+        "it stages source rows and identity repairs for the fixed Phase 13F ticker-transition set, "
+        "not arbitrary new ticker onboarding batches."
+    ),
+    "required_adapter": (
+        "A generic provider-source and identity adapter must stage accepted ticker fundamentals, "
+        "provider identities, canonical identities and aliases before invoking the existing "
+        "canonical/TTM/package/RP/RV/dependency sequence."
+    ),
+}
 WRITE_ROLES = ("provider", "canonical", "analysis")
 READONLY_COPY_ROLES = ("market", "taxonomy")
 ROLE_ORDER = ("provider", "canonical", "analysis", "market", "taxonomy")
@@ -412,6 +425,7 @@ def run_apply(
                 "relative_position": "GAP_NOT_AUTHORITATIVELY_REFRESHED_BY_PHASE13D_ADAPTER",
                 "relative_valuation": applied.get("relative_valuation_state"),
                 "repeat_apply_outcome": repeated.get("outcome"),
+                "authoritative_downstream": AUTHORITATIVE_DOWNSTREAM_LIMITATION,
             },
             artifacts={"phase13d_apply": str(lane.lane_dir / "phase13d_apply")},
             recommended_next_action="Treat this as copy-only backend evidence. Authoritative full downstream refresh integration remains for a later production-deployment-ready phase.",
