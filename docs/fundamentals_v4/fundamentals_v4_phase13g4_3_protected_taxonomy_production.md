@@ -4,6 +4,8 @@ Phase 13G.4.3 promotes `CHECK_UPDATE_TAXONOMY --taxonomy dc_ecosystem` to a prot
 
 The phase authorizes only a true production `NO_CHANGE` verification. It does not authorize applying a nonzero taxonomy change to production.
 
+Phase 13G.4.3 ended with Outcome B before the write boundary because candidate safety used an over-broad `AAOI` plus `EXTENDED` text heuristic. Phase 13G.4.3.1 supersedes that guard behavior with explicit fingerprinted provenance while preserving the failed run as audit evidence.
+
 ## Contract
 
 Production mode is selected with the established taxonomy CLI:

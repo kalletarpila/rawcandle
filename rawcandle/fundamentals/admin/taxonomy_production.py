@@ -28,12 +28,15 @@ from rawcandle.fundamentals.phase12d import ROOT, stable_hash
 from rawcandle.io_atomic import write_text_atomic
 
 
-CONTRACT_VERSION = "PHASE13G43_PROTECTED_DC_ECOSYSTEM_PRODUCTION_NO_CHANGE_V1"
+CONTRACT_VERSION = "PHASE13G431_TAXONOMY_SOURCE_RECONCILIATION_PRODUCTION_NO_CHANGE_V1"
 ACTIVE_BASELINE_PROVENANCE = "ACTIVE_PRODUCTION_BASELINE_NO_CHANGE"
+CURATED_PRODUCTION_PROVENANCE = "CURATED_PRODUCTION_CANDIDATE"
+TEST_ONLY_PROVENANCE = "TEST_ONLY_NOT_FOR_PRODUCTION"
+SUPPORTED_PROVENANCE_CLASSES = (ACTIVE_BASELINE_PROVENANCE, CURATED_PRODUCTION_PROVENANCE, TEST_ONLY_PROVENANCE)
 CONFIRMATION_TOKEN = "CONFIRM_PROTECTED_DC_ECOSYSTEM_PRODUCTION_NO_CHANGE"
-OUTCOME_A = "OUTCOME A - PROTECTED DC_ECOSYSTEM PRODUCTION MODE READY AND VERIFIED NO_CHANGE"
-OUTCOME_B = "OUTCOME B - PRE-WRITE CANDIDATE OR ACCEPTANCE BLOCKER; PRODUCTION UNCHANGED"
-OUTCOME_C = "OUTCOME C - UNEXPECTED POST-WRITE FAILURE; COMPLETE WRITABLE SET RESTORED"
+OUTCOME_A = "OUTCOME A - PROTECTED DC_ECOSYSTEM CONSUMPTION PATH VERIFIED NO_CHANGE"
+OUTCOME_B = "OUTCOME B - TAXONOMY SOURCE RECONCILIATION OR PRE-WRITE BLOCKER; PRODUCTION UNCHANGED"
+OUTCOME_C = "OUTCOME C - ACTIVE TAXONOMY DRIFT OR UNEXPECTED PRODUCTION WRITE"
 PRODUCTION_TEMP_ROOT = ADMIN_TEMP_ROOT.parent / "fundamentals_admin_phase13g4_3_taxonomy_production"
 
 _TEST_ONLY_MARKERS = (
@@ -142,16 +145,82 @@ def _active_dc_rows(paths: tax.TaxonomyPaths) -> tuple[dict[str, Any], list[dict
     return dict(active), rows, identities
 
 
+def _aaoi_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return [dict(row) for row in rows if str(row.get("ticker")).upper() == "AAOI"]
+
+
+def _source_database_identity(paths: tax.TaxonomyPaths, active: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    aaoi = _aaoi_rows(rows)
+    return {
+        "source_role": "taxonomy",
+        "source_database_path": str(paths.taxonomy_db.resolve(strict=False)),
+        "taxonomy_domain": "dc_ecosystem",
+        "ecosystem_code": tax.DATACENTER_ECOSYSTEM_CODE,
+        "active_version": str(active["taxonomy_version_code"]),
+        "active_version_id": int(active["taxonomy_version_id"]),
+        "active_version_filter": {
+            "taxonomy_version_code": str(active["taxonomy_version_code"]),
+            "status": str(active["status"]),
+            "is_active": int(active["is_active"]),
+        },
+        "semantic_fingerprint": stable_hash({"taxonomy_domain": "dc_ecosystem", "rows": tax._semantic_payload(rows)}),
+        "aaoi_active_memberships": [
+            {
+                "ticker": row["ticker"],
+                "layer": row["layer"],
+                "subindustry": row["subindustry"],
+                "report_group_status": row["report_group_status"],
+                "is_primary": int(row["is_primary"]),
+                "role_weight": float(row["role_weight"] or 0),
+            }
+            for row in aaoi
+        ],
+        "aaoi_authoritative_role": aaoi[0]["report_group_status"] if len(aaoi) == 1 else None,
+    }
+
+
+def _candidate_fingerprint(
+    *,
+    provenance: str,
+    rows: Sequence[Mapping[str, Any]],
+    content_sha256: str,
+    source_database_identity: Mapping[str, Any] | None,
+) -> str:
+    return stable_hash(
+        {
+            "taxonomy_domain": "dc_ecosystem",
+            "provenance": provenance,
+            "rows": tax._semantic_payload(rows),
+            "content_sha256": content_sha256,
+            "source_database_identity": source_database_identity,
+        }
+    )
+
+
 def export_active_baseline_candidate(paths: tax.TaxonomyPaths, output_dir: Path) -> dict[str, Any]:
     active, rows, _ = _active_dc_rows(paths)
     candidate_path = tax._write_candidate_csv(output_dir / "active_production_baseline_no_change.csv", str(active["taxonomy_version_code"]), rows)
+    content_sha256 = sha256_file(candidate_path)
+    source_identity = _source_database_identity(paths, active, rows)
+    if source_identity["aaoi_authoritative_role"] != "CORE":
+        raise ProductionTaxonomyError("PHASE13G431_AAOI_ACTIVE_ROLE_NOT_CORE")
     payload = {
         "provenance": ACTIVE_BASELINE_PROVENANCE,
+        "taxonomy_domain": "dc_ecosystem",
+        "generating_operation": "EXPORT_ACTIVE_PRODUCTION_BASELINE_NO_CHANGE",
+        "artifact_root_classification": "ADMIN_RUN_PRODUCTION_BASELINE_EVIDENCE",
         "path": str(candidate_path),
         "taxonomy_version": str(active["taxonomy_version_code"]),
-        "content_sha256": sha256_file(candidate_path),
+        "content_sha256": content_sha256,
+        "source_database_identity": source_identity,
         "row_count": len(rows),
         "semantic_fingerprint": stable_hash({"taxonomy_domain": "dc_ecosystem", "rows": tax._semantic_payload(rows)}),
+        "candidate_fingerprint": _candidate_fingerprint(
+            provenance=ACTIVE_BASELINE_PROVENANCE,
+            rows=rows,
+            content_sha256=content_sha256,
+            source_database_identity=source_identity,
+        ),
         "warning": "Baseline evidence only; not a new recommendation and not a production candidate for nonzero changes.",
     }
     _write_json(output_dir / "active_production_baseline_no_change.json", payload)
@@ -170,13 +239,17 @@ def guard_production_candidate(
         raise ProductionTaxonomyError("EC_TAXONOMY_UPDATE_CONTRACT_NOT_READY")
     if not candidate_provenance:
         raise ProductionTaxonomyError("PHASE13G43_CANDIDATE_PROVENANCE_REQUIRED")
+    if candidate_provenance not in SUPPORTED_PROVENANCE_CLASSES:
+        raise ProductionTaxonomyError(f"PHASE13G431_UNKNOWN_CANDIDATE_PROVENANCE:{candidate_provenance}")
+    if candidate_provenance == TEST_ONLY_PROVENANCE:
+        raise ProductionTaxonomyError("PHASE13G43_TEST_ONLY_CANDIDATE_REFUSED")
     values = [candidate_provenance, candidate_version or "", str(candidate_path or "")]
     marker_text = " ".join(values).upper()
     if any(marker in marker_text for marker in _TEST_ONLY_MARKERS) or candidate_version == TEST_ONLY_VERSION:
         raise ProductionTaxonomyError("PHASE13G43_TEST_ONLY_CANDIDATE_REFUSED")
     if candidate_path is not None:
         text = candidate_path.read_text(encoding="utf-8", errors="ignore")[:16384].upper()
-        if any(marker in text for marker in _TEST_ONLY_MARKERS) or "AAOI" in text and "EXTENDED" in text:
+        if any(marker in text for marker in _TEST_ONLY_MARKERS):
             raise ProductionTaxonomyError("PHASE13G43_TEST_ONLY_CANDIDATE_REFUSED")
 
 
@@ -195,6 +268,13 @@ def _load_or_export_candidate(
         version, rows, source_hash = tax._rows_from_candidate(Path(exported["path"]), exported["taxonomy_version"])
         return exported | {"source_hash": source_hash}, rows
     version, rows, source_hash = tax._rows_from_candidate(candidate_path, candidate_version)
+    source_identity = None
+    candidate_fingerprint = _candidate_fingerprint(
+        provenance=candidate_provenance,
+        rows=rows,
+        content_sha256=source_hash,
+        source_database_identity=source_identity,
+    )
     return {
         "provenance": candidate_provenance,
         "path": str(candidate_path),
@@ -202,6 +282,8 @@ def _load_or_export_candidate(
         "content_sha256": source_hash,
         "source_hash": source_hash,
         "row_count": len(rows),
+        "candidate_fingerprint": candidate_fingerprint,
+        "source_database_identity": source_identity,
     }, rows
 
 
@@ -223,7 +305,156 @@ def _production_preview_fingerprint(preview: Mapping[str, Any]) -> str:
     stable = dict(preview)
     for key in ("preview_fingerprint", "created_at_utc", "expires_at_utc", "preview_ttl_seconds", "production_state"):
         stable.pop(key, None)
+    candidate = dict(stable.get("candidate") or {})
+    candidate.pop("path", None)
+    stable["candidate"] = candidate
     return fingerprint(stable)
+
+
+def _candidate_source_from_preview(preview: Mapping[str, Any]) -> tuple[Path | None, str | None, str]:
+    candidate = preview.get("candidate") or {}
+    provenance = str(candidate.get("provenance") or "")
+    if provenance == ACTIVE_BASELINE_PROVENANCE:
+        return None, None, provenance
+    path = Path(str(candidate["path"])) if candidate.get("path") else None
+    version = str(candidate["taxonomy_version"]) if candidate.get("taxonomy_version") else None
+    return path, version, provenance
+
+
+def _validate_preview_candidate_provenance(payload: Mapping[str, Any]) -> dict[str, Any]:
+    preview = payload.get("taxonomy_preview") or {}
+    candidate = dict(preview.get("candidate") or {})
+    rows = payload.get("candidate_rows") or []
+    provenance = str(candidate.get("provenance") or "")
+    if provenance not in SUPPORTED_PROVENANCE_CLASSES:
+        raise ProductionTaxonomyError(f"PHASE13G431_UNKNOWN_CANDIDATE_PROVENANCE:{provenance}")
+    if provenance == TEST_ONLY_PROVENANCE:
+        raise ProductionTaxonomyError("PHASE13G43_TEST_ONLY_CANDIDATE_REFUSED")
+    if provenance == ACTIVE_BASELINE_PROVENANCE:
+        evidence = candidate.get("source_database_identity") or {}
+        if candidate.get("generating_operation") != "EXPORT_ACTIVE_PRODUCTION_BASELINE_NO_CHANGE":
+            raise ProductionTaxonomyError("PHASE13G431_ACTIVE_BASELINE_PROVENANCE_EVIDENCE_MISSING")
+        if evidence.get("active_version") != BASELINE_VERSION:
+            raise ProductionTaxonomyError("PHASE13G431_ACTIVE_BASELINE_VERSION_MISMATCH")
+        if evidence.get("aaoi_authoritative_role") != "CORE":
+            raise ProductionTaxonomyError("PHASE13G431_AAOI_ACTIVE_ROLE_NOT_CORE")
+    path = Path(str(candidate["path"])) if candidate.get("path") else None
+    content_sha256 = str(candidate.get("content_sha256") or "")
+    if path is not None:
+        if not path.exists():
+            raise ProductionTaxonomyError("PHASE13G431_CANDIDATE_PATH_MISSING")
+        if sha256_file(path) != content_sha256:
+            raise ProductionTaxonomyError("PHASE13G43_CANDIDATE_MUTATION_REJECTED")
+    recomputed = _candidate_fingerprint(
+        provenance=provenance,
+        rows=rows,
+        content_sha256=content_sha256,
+        source_database_identity=candidate.get("source_database_identity"),
+    )
+    if candidate.get("candidate_fingerprint") != recomputed:
+        raise ProductionTaxonomyError("PHASE13G431_CANDIDATE_PROVENANCE_FINGERPRINT_MISMATCH")
+    return {
+        "status": "VALIDATED",
+        "provenance": provenance,
+        "candidate_fingerprint": recomputed,
+        "content_sha256": content_sha256,
+    }
+
+
+def aaoi_source_reconciliation(paths: tax.TaxonomyPaths, *, preview: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    active, rows, _ = _active_dc_rows(paths)
+    active_aaoi = _aaoi_rows(rows)
+    with tax._connect_ro(paths.taxonomy_db) as conn:
+        all_aaoi = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT e.ecosystem_code,
+                       v.taxonomy_version_code,
+                       v.status AS version_status,
+                       v.is_active,
+                       child.entity_id,
+                       child.entity_code,
+                       child.ticker,
+                       layer.entity_name AS layer,
+                       sub.entity_name AS subindustry,
+                       tm.membership_role,
+                       tm.is_primary,
+                       tm.role_weight,
+                       tm.status AS membership_status,
+                       tm.membership_type
+                FROM ec_membership tm
+                JOIN ec_taxonomy_version v ON v.taxonomy_version_id=tm.taxonomy_version_id
+                JOIN ec_ecosystem e ON e.ecosystem_id=v.ecosystem_id
+                JOIN ec_entity child ON child.entity_id=tm.child_entity_id AND child.entity_type='TICKER'
+                JOIN ec_entity sub ON sub.entity_id=tm.parent_entity_id AND sub.entity_type='GROUP_L2'
+                JOIN ec_membership sm ON sm.child_entity_id=sub.entity_id
+                     AND sm.taxonomy_version_id=tm.taxonomy_version_id
+                     AND sm.membership_type='CONTAINS'
+                     AND sm.status='ACTIVE'
+                JOIN ec_entity layer ON layer.entity_id=sm.parent_entity_id AND layer.entity_type='GROUP_L1'
+                WHERE e.ecosystem_code=?
+                  AND child.ticker='AAOI'
+                  AND tm.membership_type='CONTAINS'
+                ORDER BY v.taxonomy_version_code,tm.status,layer.entity_name,sub.entity_name
+                """,
+                (tax.DATACENTER_ECOSYSTEM_CODE,),
+            )
+        ]
+    baseline_export = None
+    if preview:
+        baseline_export = next(
+            (row for row in preview.get("candidate_rows", []) if str(row.get("ticker")).upper() == "AAOI"),
+            None,
+        )
+    diagnosis = {
+        "incorrect_database_or_copy_path": False,
+        "missing_active_version_filtering": False,
+        "rows_mixed_across_versions": False,
+        "incorrect_join_grouping_or_deduplication": False,
+        "test_only_artifact_reuse": False,
+        "role_tier_field_conflation": False,
+        "secondary_membership_substitution": False,
+        "phase13g43_root_cause": "The production baseline export selected AAOI CORE correctly. The Phase 13G.4.3 production guard falsely rejected the export because it used a broad text heuristic: presence of AAOI anywhere plus EXTENDED anywhere in the CSV.",
+    }
+    return {
+        "status": "OK" if len(active_aaoi) == 1 and active_aaoi[0]["report_group_status"] == "CORE" else "BLOCKED",
+        "taxonomy_domain": "dc_ecosystem",
+        "ecosystem_code": tax.DATACENTER_ECOSYSTEM_CODE,
+        "source_database": str(paths.taxonomy_db.resolve(strict=False)),
+        "active_version": str(active["taxonomy_version_code"]),
+        "active_version_filter": {"status": active["status"], "is_active": int(active["is_active"])},
+        "active_aaoi_memberships": active_aaoi,
+        "all_aaoi_memberships": all_aaoi,
+        "baseline_export_aaoi_row": baseline_export,
+        "semantic_fingerprint": stable_hash({"taxonomy_domain": "dc_ecosystem", "rows": tax._semantic_payload(rows)}),
+        "active_aaoi_row_fingerprint": stable_hash(active_aaoi),
+        "diagnosis": diagnosis,
+    }
+
+
+def _write_aaoi_reconciliation_csv(path: Path, reconciliation: Mapping[str, Any]) -> Path:
+    fields = (
+        "ecosystem_code",
+        "taxonomy_version_code",
+        "version_status",
+        "is_active",
+        "entity_id",
+        "entity_code",
+        "ticker",
+        "layer",
+        "subindustry",
+        "membership_role",
+        "is_primary",
+        "role_weight",
+        "membership_status",
+        "membership_type",
+    )
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(reconciliation.get("all_aaoi_memberships") or [])
+    return path
 
 
 def build_production_preview_payload(
@@ -252,6 +483,7 @@ def build_production_preview_payload(
         candidate_provenance=candidate_provenance,
     )
     validation = tax._validate_rows(candidate_rows, identity_index=identity_index)
+    candidate_validation = _validate_preview_candidate_provenance({"taxonomy_preview": {"candidate": candidate}, "candidate_rows": tax._semantic_payload(candidate_rows)})
     changes, counts = tax._diff_rows(active_rows, candidate_rows, identity_index)
     proposed = [row for row in changes if row["change_type"] != "UNCHANGED"]
     blockers = [row for row in changes if row["blocking_status"]]
@@ -270,6 +502,7 @@ def build_production_preview_payload(
         "taxonomy_domain": "dc_ecosystem",
         "production": True,
         "candidate": candidate,
+        "candidate_provenance_validation": candidate_validation,
         "candidate_validation": validation,
         "active_version": str(active["taxonomy_version_code"]),
         "active_taxonomy": {
@@ -345,12 +578,19 @@ def run_production_preview(
             targeted_timeout_seconds=targeted_timeout_seconds,
         )
         preview = payload["taxonomy_preview"]
+        aaoi = aaoi_source_reconciliation(paths, preview=payload)
+        if aaoi["status"] != "OK":
+            raise ProductionTaxonomyError("PHASE13G431_AAOI_SOURCE_RECONCILIATION_BLOCKED")
         progress.completed(ProgressStage.LOAD_CURATED_SOURCE, "Curated taxonomy source loaded.", processed_items=preview["candidate"]["row_count"], total_items=preview["candidate"]["row_count"])
         progress.running(ProgressStage.BUILD_PREVIEW, "Writing immutable production preview.")
         writer.write_json("preview.json", preview)
         payload_path = writer.run_dir / "taxonomy_production_preview_payload.json"
         _write_json(payload_path, payload)
         diff_path = _write_diff_csv(writer.run_dir / "taxonomy_diff.csv", preview["proposed_changes"])
+        aaoi_json = writer.write_json("aaoi_source_reconciliation.json", aaoi)
+        aaoi_csv = _write_aaoi_reconciliation_csv(writer.run_dir / "aaoi_source_reconciliation.csv", aaoi)
+        writer.write_json("source_selection_diagnosis.json", aaoi["diagnosis"])
+        writer.write_json("candidate_provenance_evidence.json", preview["candidate"])
         writer.write_json("database_role_matrix.json", preview["role_matrix"])
         progress.completed(ProgressStage.BUILD_PREVIEW, "Immutable production preview written.")
         progress.running(ProgressStage.VALIDATE_PREVIEW, "Validating no-change preview contract.")
@@ -367,7 +607,13 @@ def run_production_preview(
             request=request.as_dict(),
             summary_counts=preview["change_counts"],
             downstream={"production_preview": preview},
-            artifacts={"preview": str(writer.run_dir / "preview.json"), "payload": str(payload_path), "diff": str(diff_path)},
+            artifacts={
+                "preview": str(writer.run_dir / "preview.json"),
+                "payload": str(payload_path),
+                "diff": str(diff_path),
+                "aaoi_reconciliation_json": str(aaoi_json),
+                "aaoi_reconciliation_csv": str(aaoi_csv),
+            },
             recommended_next_action="Run the single protected production no-change invocation." if outcome == AdminStatus.NO_CHANGE else OUTCOME_B,
         )
         result_dict = result.as_dict() | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "preview_payload_path": str(payload_path), "taxonomy_domain": "dc_ecosystem", "outcome_text": result.recommended_next_action}
@@ -425,18 +671,14 @@ def run_protected_production_apply(
 
         progress.running(ProgressStage.VALIDATE_PREVIEW, "Validating saved immutable preview.")
         _validate_saved_preview(payload, preview_fingerprint)
-        guard_production_candidate(
-            taxonomy_domain=str(preview.get("taxonomy_domain")),
-            candidate_path=Path(preview["candidate"]["path"]) if preview.get("candidate", {}).get("path") else None,
-            candidate_provenance=str(preview.get("candidate", {}).get("provenance") or ""),
-            candidate_version=str(preview.get("candidate", {}).get("taxonomy_version") or ""),
-        )
+        provenance_validation = _validate_preview_candidate_provenance(payload)
+        candidate_path, candidate_version, candidate_provenance = _candidate_source_from_preview(preview)
         fresh_payload = build_production_preview_payload(
             paths=paths,
             run_dir=writer.run_dir,
-            candidate_path=Path(preview["candidate"]["path"]) if preview.get("candidate", {}).get("path") else None,
-            candidate_version=str(preview.get("candidate", {}).get("taxonomy_version") or ""),
-            candidate_provenance=str(preview.get("candidate", {}).get("provenance") or ""),
+            candidate_path=candidate_path,
+            candidate_version=candidate_version,
+            candidate_provenance=candidate_provenance,
             targeted_timeout_seconds=targeted_timeout_seconds,
         )
         fresh = fresh_payload["taxonomy_preview"]
@@ -445,6 +687,12 @@ def run_protected_production_apply(
         if fresh["expected_result"] != "NO_CHANGE":
             raise ProductionTaxonomyError("PHASE13G43_NONZERO_PREVIEW_REFUSED")
         writer.write_json("validated_preview.json", fresh)
+        aaoi = aaoi_source_reconciliation(paths, preview=fresh_payload)
+        if aaoi["status"] != "OK":
+            raise ProductionTaxonomyError("PHASE13G431_AAOI_SOURCE_RECONCILIATION_BLOCKED")
+        writer.write_json("aaoi_source_reconciliation.json", aaoi)
+        _write_aaoi_reconciliation_csv(writer.run_dir / "aaoi_source_reconciliation.csv", aaoi)
+        writer.write_json("candidate_provenance_evidence.json", fresh["candidate"] | {"saved_payload_validation": provenance_validation})
         writer.write_json("database_role_matrix.json", fresh["role_matrix"])
         progress.completed(ProgressStage.VALIDATE_PREVIEW, "Saved preview is fresh and no-change.")
 
@@ -563,7 +811,7 @@ def run_protected_production_apply(
 
 
 def _preflight(paths: tax.TaxonomyPaths, *, require_clean_worktree: bool) -> dict[str, Any]:
-    commits = {short: _commit_is_present(short) for short in ("fe076a4", "6129d72", "be0c91c", "8933d1d")}
+    commits = {short: _commit_is_present(short) for short in ("fe076a4", "6129d72", "be0c91c", "8933d1d", "cacf3ba")}
     path_contract = validate_exact_production_paths(paths)
     retained = reconcile_phase13g42_evidence(DEFAULT_RETAINED_RUN)
     clean = _is_clean_worktree()
@@ -600,6 +848,7 @@ def _validate_saved_preview(payload: Mapping[str, Any], preview_fingerprint: str
         raise ProductionTaxonomyError("PHASE13G43_BLOCKED_PREVIEW_REFUSED")
     if preview.get("expected_writable_database_set"):
         raise ProductionTaxonomyError("PHASE13G43_UNEXPECTED_WRITABLE_SET_EXPANSION")
+    _validate_preview_candidate_provenance(payload)
 
 
 def _fail_preview(

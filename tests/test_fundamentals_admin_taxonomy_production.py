@@ -19,6 +19,8 @@ def _write_csv(path: Path, version: str, role: str = "CORE") -> Path:
                 "taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes",
                 f"{version},AAA,Compute,Servers,{role},1,1.0,",
                 f"{version},BBB,Power,UPS,CORE,1,1.0,",
+                f"{version},AAOI,Networking,Optics / photonics / high-speed connectivity,CORE,1,1.0,authoritative",
+                f"{version},EXTD,Power,UPS,EXTENDED,1,1.0,control extended row",
             ]
         )
         + "\n",
@@ -88,6 +90,20 @@ def test_active_baseline_no_change_preview_has_zero_writes(tmp_path: Path) -> No
     preview = payload["taxonomy_preview"]
 
     assert preview["candidate"]["provenance"] == prod.ACTIVE_BASELINE_PROVENANCE
+    assert preview["candidate"]["source_database_identity"]["aaoi_authoritative_role"] == "CORE"
+    aaoi = [row for row in payload["candidate_rows"] if row["ticker"] == "AAOI"]
+    assert aaoi == [
+        {
+            "is_primary": 1,
+            "layer": "Networking",
+            "notes": "authoritative",
+            "report_group_status": "CORE",
+            "role_weight": 1.0,
+            "subindustry": "Optics / photonics / high-speed connectivity",
+            "taxonomy_version": "DC_TAXONOMY_FULL_V2_1",
+            "ticker": "AAOI",
+        }
+    ]
     assert preview["expected_result"] == "NO_CHANGE"
     assert preview["change_counts"]["semantic_changes"] == 0
     assert preview["change_counts"]["additions"] == 0
@@ -112,23 +128,100 @@ def test_test_only_candidate_is_refused_for_production(tmp_path: Path) -> None:
 
 
 def test_saved_preview_validation_rejects_cross_domain_and_mutation(tmp_path: Path) -> None:
-    payload = {
-        "taxonomy_domain": "dc_ecosystem",
-        "taxonomy_preview": {
-            "taxonomy_domain": "dc_ecosystem",
-            "preview_fingerprint": "good",
-            "expires_at_utc": "2099-01-01T00:00:00Z",
-            "blockers": [],
-            "expected_writable_database_set": [],
-        },
-    }
+    payload = prod.build_production_preview_payload(
+        paths=_paths(_create_db(tmp_path)),
+        run_dir=tmp_path / "run",
+        candidate_path=None,
+        candidate_version=None,
+        candidate_provenance=prod.ACTIVE_BASELINE_PROVENANCE,
+    )
+    payload["taxonomy_preview"]["expires_at_utc"] = "2099-01-01T00:00:00Z"
+    good = payload["taxonomy_preview"]["preview_fingerprint"]
 
-    prod._validate_saved_preview(payload, "good")
+    prod._validate_saved_preview(payload, good)
     with pytest.raises(prod.ProductionTaxonomyError, match="PHASE13G43_PREVIEW_FINGERPRINT_MISMATCH"):
         prod._validate_saved_preview(payload, "bad")
     payload["taxonomy_preview"]["taxonomy_domain"] = "ec_taxonomy"
     with pytest.raises(prod.ProductionTaxonomyError, match="PHASE13G43_CROSS_DOMAIN_PREVIEW_REJECTED"):
-        prod._validate_saved_preview(payload, "good")
+        prod._validate_saved_preview(payload, good)
+
+
+def test_active_version_filtering_excludes_stale_test_only_aaoi_rows(tmp_path: Path) -> None:
+    db_path = _create_db(tmp_path)
+    paths = _paths(db_path)
+    load_datacenter_taxonomy_to_ec_sidecar(
+        db_path,
+        _write_csv(tmp_path / "test_only.csv", prod.TEST_ONLY_VERSION, role="EXTENDED"),
+        prod.TEST_ONLY_VERSION,
+        mark_active=False,
+    )
+
+    payload = prod.build_production_preview_payload(
+        paths=paths,
+        run_dir=tmp_path / "run",
+        candidate_path=None,
+        candidate_version=None,
+        candidate_provenance=prod.ACTIVE_BASELINE_PROVENANCE,
+    )
+
+    aaoi = [row for row in payload["candidate_rows"] if row["ticker"] == "AAOI"]
+    assert {row["taxonomy_version"] for row in aaoi} == {"DC_TAXONOMY_FULL_V2_1"}
+    assert {row["report_group_status"] for row in aaoi} == {"CORE"}
+    reconciliation = prod.aaoi_source_reconciliation(paths, preview=payload)
+    assert reconciliation["status"] == "OK"
+    assert reconciliation["diagnosis"]["missing_active_version_filtering"] is False
+
+
+def test_active_baseline_with_other_extended_rows_is_not_test_only(tmp_path: Path) -> None:
+    payload = prod.build_production_preview_payload(
+        paths=_paths(_create_db(tmp_path)),
+        run_dir=tmp_path / "run",
+        candidate_path=None,
+        candidate_version=None,
+        candidate_provenance=prod.ACTIVE_BASELINE_PROVENANCE,
+    )
+
+    assert any(row["report_group_status"] == "EXTENDED" for row in payload["candidate_rows"])
+    prod._validate_saved_preview(payload, payload["taxonomy_preview"]["preview_fingerprint"])
+
+
+def test_provenance_label_edit_cannot_promote_test_only_candidate(tmp_path: Path) -> None:
+    candidate = _write_csv(tmp_path / "candidate.csv", "DC_TAXONOMY_FULL_V2_1", role="EXTENDED")
+    version, rows, content_sha = prod.tax._rows_from_candidate(candidate, "DC_TAXONOMY_FULL_V2_1")
+    payload = {
+        "taxonomy_domain": "dc_ecosystem",
+        "candidate_rows": prod.tax._semantic_payload(rows),
+        "taxonomy_preview": {
+            "taxonomy_domain": "dc_ecosystem",
+            "preview_fingerprint": "preview",
+            "expires_at_utc": "2099-01-01T00:00:00Z",
+            "blockers": [],
+            "expected_writable_database_set": [],
+            "candidate": {
+                "provenance": prod.ACTIVE_BASELINE_PROVENANCE,
+                "generating_operation": "EXPORT_ACTIVE_PRODUCTION_BASELINE_NO_CHANGE",
+                "path": str(candidate),
+                "taxonomy_version": version,
+                "content_sha256": content_sha,
+                "source_database_identity": {
+                    "active_version": "DC_TAXONOMY_FULL_V2_1",
+                    "aaoi_authoritative_role": "CORE",
+                },
+                "candidate_fingerprint": prod._candidate_fingerprint(
+                    provenance=prod.TEST_ONLY_PROVENANCE,
+                    rows=rows,
+                    content_sha256=content_sha,
+                    source_database_identity={
+                        "active_version": "DC_TAXONOMY_FULL_V2_1",
+                        "aaoi_authoritative_role": "CORE",
+                    },
+                ),
+            },
+        },
+    }
+
+    with pytest.raises(prod.ProductionTaxonomyError, match="PHASE13G431_CANDIDATE_PROVENANCE_FINGERPRINT_MISMATCH"):
+        prod._validate_saved_preview(payload, "preview")
 
 
 def test_dirty_worktree_guard_fails_closed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -89,6 +89,8 @@ Phase 13G.4.3 introduces the protected production-capable taxonomy runner for `C
 
 Future nonzero taxonomy production updates are governed by the Phase 13G.4.3 role-aware contract: production `taxonomy` and `analysis` are writable, while `provider`, `canonical` and `market` remain read-only. Only writable physical databases receive verified backups, restore rehearsal, heavy integrity checks and rollback restoration. `ec_taxonomy` remains update-not-ready until a separate safe write contract exists.
 
+Phase 13G.4.3.1 clarifies the no-change taxonomy source contract: `data/analysis.db` is the authoritative read-only source for active `dc_ecosystem`, while `data/fundamentals_analysis.db` is the read-only downstream consumer verification database for this closure. AAOI is `CORE` in the active production taxonomy; the earlier AAOI `CORE -> EXTENDED` mutation remains test-only copy-lane evidence.
+
 ## Preconditions
 
 - Phase 13F.3.4 report outcome is OUTCOME A.

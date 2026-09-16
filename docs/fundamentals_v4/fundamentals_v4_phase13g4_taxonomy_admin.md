@@ -53,3 +53,9 @@ Phase 13G.4.2.1 supersedes only the over-broad production read-only `quick_check
 Phase 13G.4.3 adds protected production mode for `dc_ecosystem` while authorizing only a true `NO_CHANGE` production verification. The production path requires `--production`, `--apply`, an exact saved preview payload and fingerprint, explicit confirmation, clean worktree, exact production paths, and candidate provenance. The default no-change candidate provenance is `ACTIVE_PRODUCTION_BASELINE_NO_CHANGE`, a deterministic export of the active production taxonomy retained as evidence only.
 
 `ec_taxonomy` remains production update-not-ready and is refused with `EC_TAXONOMY_UPDATE_CONTRACT_NOT_READY`. The Phase 13G.4.1/13G.4.2 AAOI test-only candidate is explicitly blocked from production mode. See [fundamentals_v4_phase13g4_3_protected_taxonomy_production.md](fundamentals_v4_phase13g4_3_protected_taxonomy_production.md).
+
+## Phase 13G.4.3.1 Handoff
+
+Phase 13G.4.3.1 preserves the Phase 13G.4.3 Outcome B run as historical evidence and corrects its pre-write source-provenance defect. The active production baseline export had selected AAOI as `CORE`; the failing guard had incorrectly treated the presence of `AAOI` plus any unrelated `EXTENDED` row in the CSV as test-only evidence.
+
+Production provenance is now explicit and fingerprinted. `ACTIVE_PRODUCTION_BASELINE_NO_CHANGE` is generated directly from active `data/analysis.db`, carries source database identity, and is retained only as no-change evidence. `TEST_ONLY_NOT_FOR_PRODUCTION` candidates remain rejected before any write boundary. See [fundamentals_v4_phase13g4_3_1_source_reconciliation.md](fundamentals_v4_phase13g4_3_1_source_reconciliation.md).
