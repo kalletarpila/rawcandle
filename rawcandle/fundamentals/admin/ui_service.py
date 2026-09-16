@@ -237,7 +237,11 @@ class FundamentalsAdminUIService:
 
     def history_entries(self, *, limit: int = 20) -> list[AdminUIHistoryEntry]:
         entries: list[AdminUIHistoryEntry] = []
-        for item in self.history.list_runs()[:limit]:
+        try:
+            history_items = self.history.list_runs()[:limit]
+        except Exception:
+            return []
+        for item in history_items:
             mode = self._mode_for_entry(item)
             report_available = OPERATION_REPORT_NAME in self._artifact_names(item.run_id)
             entries.append(

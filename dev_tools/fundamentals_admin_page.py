@@ -41,6 +41,8 @@ class FundamentalsAdminPageControls:
     summary_column: Any
     progress_field: Any
     history_column: Any
+    operation_guidance_field: Any
+    history_detail_field: Any
 
 
 def admin_report_download_url(run_id: str) -> str:
@@ -69,6 +71,29 @@ def _result_text(result: AdminUIRunResult) -> str:
     if result.report_sha256:
         parts.append(f"Operation report sha256: {result.report_sha256}")
     return "\n".join(parts)
+
+
+def _material_preview_signature(
+    *,
+    operation_type: str,
+    raw_inputs: str,
+    market: str,
+    taxonomy_domain: str,
+    candidate_path: str,
+    candidate_version: str,
+    production_mode: bool,
+    network_allowed: bool,
+) -> tuple[object, ...]:
+    return (
+        operation_type.strip().upper(),
+        raw_inputs.strip(),
+        market.strip().lower(),
+        taxonomy_domain.strip().lower(),
+        candidate_path.strip(),
+        candidate_version.strip(),
+        bool(production_mode),
+        bool(network_allowed),
+    )
 
 
 def build_fundamentals_admin_page(
@@ -119,6 +144,9 @@ def build_fundamentals_admin_page(
     candidate_version_field = ft.TextField(label="Candidate version", width=260)
     network_allowed_checkbox = ft.Checkbox(label="Allow provider network for preview", value=False)
     production_preview_checkbox = ft.Checkbox(label="Protected production preview", value=False)
+    operation_guidance_field = ft.Text(
+        "Add Tickers preview is provider-network disabled by default. Preview first; Apply requires the same preview payload and fingerprint."
+    )
     preview_payload_field = ft.TextField(label="Preview payload path", width=620)
     preview_fingerprint_field = ft.TextField(label="Preview fingerprint", width=620)
     production_confirmation_field = ft.TextField(
@@ -143,8 +171,57 @@ def build_fundamentals_admin_page(
         min_lines=3,
         max_lines=6,
     )
+    history_detail_field = ft.TextField(
+        label="Selected run",
+        value="Select a run from history to inspect its durable progress and report availability.",
+        read_only=True,
+        multiline=True,
+        min_lines=4,
+        max_lines=7,
+    )
     summary_column = ft.Column(spacing=4)
     history_column = ft.Column(spacing=6)
+    current_preview_signature: tuple[object, ...] | None = None
+
+    def current_signature() -> tuple[object, ...]:
+        return _material_preview_signature(
+            operation_type=operation_dropdown.value or "ADD_TICKERS",
+            raw_inputs=tickers_field.value or "",
+            market=market_field.value or "usa",
+            taxonomy_domain=taxonomy_domain_dropdown.value or "dc_ecosystem",
+            candidate_path=candidate_path_field.value or "",
+            candidate_version=candidate_version_field.value or "",
+            production_mode=bool(production_preview_checkbox.value),
+            network_allowed=bool(network_allowed_checkbox.value),
+        )
+
+    def has_current_preview() -> bool:
+        return (
+            current_preview_signature == current_signature()
+            and bool((preview_payload_field.value or "").strip())
+            and bool((preview_fingerprint_field.value or "").strip())
+        )
+
+    def operation_guidance() -> str:
+        operation = (operation_dropdown.value or "ADD_TICKERS").strip().upper()
+        if operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
+            return (
+                "Sector and Industry scans the operational universe from ticker_meta; "
+                "the ticker box is optional and an empty scope means full universe."
+            )
+        if operation == "CHECK_UPDATE_TAXONOMY":
+            domain = taxonomy_domain_dropdown.value or "dc_ecosystem"
+            if domain == "ec_taxonomy":
+                return (
+                    "ec_taxonomy is visible for read-only readiness checks; updates remain disabled "
+                    "unless the backend authorizes a safe contract."
+                )
+            return (
+                "dc_ecosystem is the current primary taxonomy lane. Domain changes require a fresh preview."
+            )
+        return (
+            "Add Tickers treats the batch as one operation. Provider network is disabled unless explicitly allowed."
+        )
 
     def download_button(run_id: str, *, enabled: bool = True) -> Any:
         if not enabled:
@@ -163,6 +240,7 @@ def build_fundamentals_admin_page(
     def refresh_history() -> None:
         rows = []
         for item in admin_service.history_entries(limit=12):
+            run_id = item.run_id
             rows.append(
                 ft.Row(
                     [
@@ -171,12 +249,46 @@ def build_fundamentals_admin_page(
                         ft.Text(item.mode, width=150),
                         ft.Text(item.outcome, width=140),
                         ft.Text(item.status, width=140),
+                        ft.IconButton(
+                            icon=ft.Icons.INFO,
+                            tooltip="Inspect run summary",
+                            on_click=lambda _event, selected_run_id=run_id: select_history_run(selected_run_id),
+                        ),
                         download_button(item.run_id, enabled=item.report_available),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
             )
         history_column.controls = rows or [ft.Text("No administration runs found.")]
+
+    def select_history_run(run_id: str) -> None:
+        try:
+            progress = admin_service.progress(run_id)
+            report_text = "available" if OPERATION_REPORT_NAME in progress.artifacts else "not yet available"
+            heartbeat = (
+                f"{progress.heartbeat_age_seconds:.0f}s ago"
+                if progress.heartbeat_age_seconds is not None
+                else "not recorded"
+            )
+            history_detail_field.value = (
+                f"Run: {progress.run_id}\n"
+                f"Operation: {progress.operation_type}\n"
+                f"Status: {progress.status}; outcome: {progress.terminal_outcome or 'not terminal'}\n"
+                f"Stage: {progress.current_stage} "
+                f"({progress.current_stage_number or '?'}/{progress.total_declared_stages or '?'})\n"
+                f"Completed stages: {progress.completed_stages}; heartbeat: {heartbeat}\n"
+                f"Operation report: {report_text}"
+            )
+            progress_field.value = (
+                "Still working." if progress.status == "running" else "Selected run progress loaded."
+            ) + (
+                f"\n{progress.current_stage} "
+                f"({progress.current_stage_number or '?'}/{progress.total_declared_stages or '?'})"
+            )
+        except Exception:
+            history_detail_field.value = f"Run: {run_id}\nStatus: unavailable or incomplete."
+        if hasattr(page, "update"):
+            page.update()
 
     def progress_callback(event: Any) -> None:
         progress_field.value = (
@@ -188,19 +300,36 @@ def build_fundamentals_admin_page(
             page.update()
 
     def apply_result(result: AdminUIRunResult) -> None:
+        nonlocal current_preview_signature
         status_field.value = _result_text(result)
         if result.preview_payload_path:
             preview_payload_field.value = result.preview_payload_path
         if result.preview_fingerprint:
             preview_fingerprint_field.value = result.preview_fingerprint
+        if result.preview_payload_path and result.preview_fingerprint:
+            current_preview_signature = current_signature()
         update_summary(result)
         refresh_history()
 
     def apply_capabilities() -> None:
         capability = capability_for_current_operation()
         preview_button.disabled = bool(capability and not capability.preview_enabled)
-        copy_apply_button.disabled = bool(capability and not capability.copy_apply_enabled)
-        production_apply_button.disabled = bool(capability and not capability.production_apply_enabled)
+        preview_ready = has_current_preview()
+        copy_apply_button.disabled = bool((capability and not capability.copy_apply_enabled) or not preview_ready)
+        production_apply_button.disabled = bool((capability and not capability.production_apply_enabled) or not preview_ready)
+        operation_guidance_field.value = operation_guidance()
+
+    def invalidate_preview(_event: Any | None = None) -> None:
+        nonlocal current_preview_signature
+        if current_preview_signature is not None and current_preview_signature != current_signature():
+            current_preview_signature = None
+            status_field.value = (
+                "Status: PREVIEW_STALE\nInputs changed after the last preview. Run Preview again before Apply."
+            )
+            update_summary(AdminUIRunResult(status="PREVIEW_STALE", message="Preview is stale."))
+        apply_capabilities()
+        if hasattr(page, "update"):
+            page.update()
 
     def run_guarded(button: Any, fn: Any) -> None:
         if button.disabled:
@@ -261,7 +390,17 @@ def build_fundamentals_admin_page(
     preview_button = ft.ElevatedButton("Preview", icon=ft.Icons.PREVIEW, on_click=on_preview)
     copy_apply_button = ft.OutlinedButton("Copy apply", icon=ft.Icons.CHECKLIST, on_click=on_copy_apply)
     production_apply_button = ft.OutlinedButton("Production apply", icon=ft.Icons.LOCK, on_click=on_production_apply)
-    operation_dropdown.on_change = lambda _event: (apply_capabilities(), page.update() if hasattr(page, "update") else None)
+    for control in (
+        operation_dropdown,
+        tickers_field,
+        market_field,
+        taxonomy_domain_dropdown,
+        candidate_path_field,
+        candidate_version_field,
+        network_allowed_checkbox,
+        production_preview_checkbox,
+    ):
+        control.on_change = invalidate_preview
     apply_capabilities()
     refresh_history()
 
@@ -269,6 +408,7 @@ def build_fundamentals_admin_page(
         [
             ft.Text("Fundamentals Administration", size=24, weight=ft.FontWeight.BOLD),
             ft.Row([operation_dropdown, market_field, taxonomy_domain_dropdown], wrap=True, spacing=12),
+            operation_guidance_field,
             tickers_field,
             ft.Row([candidate_path_field, candidate_version_field], wrap=True, spacing=12),
             ft.Row([network_allowed_checkbox, production_preview_checkbox], wrap=True, spacing=12),
@@ -290,9 +430,11 @@ def build_fundamentals_admin_page(
                     ft.Text("Outcome", width=140, weight=ft.FontWeight.BOLD),
                     ft.Text("Status", width=140, weight=ft.FontWeight.BOLD),
                     ft.Container(width=48),
+                    ft.Container(width=48),
                 ]
             ),
             history_column,
+            history_detail_field,
         ],
         spacing=12,
         expand=True,
@@ -318,4 +460,6 @@ def build_fundamentals_admin_page(
         summary_column=summary_column,
         progress_field=progress_field,
         history_column=history_column,
+        operation_guidance_field=operation_guidance_field,
+        history_detail_field=history_detail_field,
     )

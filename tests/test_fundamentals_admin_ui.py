@@ -11,7 +11,12 @@ from dev_tools.fundamentals_admin_page import (
     admin_report_download_url,
     build_fundamentals_admin_page,
 )
-from dev_tools.stock_update_scheduler_ui import add_fundamentals_admin_download_route
+from dev_tools.stock_update_scheduler_ui import (
+    add_fundamentals_admin_download_route,
+    add_fundamentals_download_route,
+)
+from rawcandle.fundamentals.admin.artifacts import sha256_file
+from rawcandle.fundamentals.admin.history import AdminRunHistory
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
     resolve_operation_report_download,
@@ -89,7 +94,18 @@ def _write_run(root: Path, run_id: str = "20260916T120000Z_add_tickers_test") ->
                 "completed_at_utc": "2026-09-16T12:01:00Z",
                 "preview_fingerprint": "f" * 64,
                 "summary_counts": {"ELIGIBLE": 1},
-                "downstream": {"package": "NOT_RUN_IN_PREVIEW"},
+                "items": [
+                    {"ticker": "NVDA", "status": "ELIGIBLE", "reason": "new ticker"},
+                    {"ticker": "VRT", "status": "REJECTED", "reason": "already present"},
+                ],
+                "changes": {"before": {"ticker_count": 10}, "after": {"ticker_count": 11}},
+                "source": {"provider": "fixture", "url": "https://example.invalid/report?token=secret-value"},
+                "downstream": {
+                    "invocation_counts": {"package": 0, "relative_position": 0, "relative_valuation": 0},
+                    "snapshot": {"success": 0, "failure": 0},
+                    "write_boundary": {"status": "NOT_CROSSED"},
+                },
+                "warnings": [{"message": "duplicate request ignored"}],
                 "rollback": {"status": "NOT_REQUIRED"},
                 "recommended_next_action": "Review the preview.",
                 "result_fingerprint": "r" * 64,
@@ -111,6 +127,13 @@ def test_operation_report_is_written_atomically_manifested_and_redacted(tmp_path
     assert report.report_path == str(report_path)
     assert report.report_sha256
     assert "Executive Summary" in text
+    assert "Per-Item Results" in text
+    assert "NVDA" in text
+    assert "already present" in text
+    assert "Progress Timeline" in text
+    assert "Work Performed And Downstream" in text
+    assert "Backup And Rollback" in text
+    assert "Next Required Action" in text
     assert "secret-value" not in text
     assert "[REDACTED]" in text
     assert any(item["name"] == OPERATION_REPORT_NAME for item in manifest["artifacts"])
@@ -125,6 +148,8 @@ def test_operation_report_download_resolver_rejects_escape_symlink_and_wrong_art
         resolve_operation_report_download("../bad", root=tmp_path)
     with pytest.raises(ValueError):
         resolve_operation_report_download(run_dir.name, "result.json", root=tmp_path)
+    with pytest.raises(FileNotFoundError):
+        resolve_operation_report_download("missing", root=tmp_path)
 
     target = tmp_path / "outside"
     target.mkdir()
@@ -154,6 +179,88 @@ def test_admin_download_route_serves_exact_operation_report(tmp_path: Path, monk
     assert response.headers["content-disposition"] == 'attachment; filename="operation_report.md"'
     with pytest.raises(HTTPException) as error:
         asyncio.run(route.endpoint(run_dir.name, "result.json"))
+    assert error.value.status_code == 404
+
+
+def test_admin_download_route_matches_artifact_hash_and_rejects_unsafe_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _write_run(tmp_path)
+    write_operation_report(run_dir.name, root=tmp_path)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.resolve_operation_report_download",
+        lambda run_id, filename: resolve_operation_report_download(run_id, filename, root=tmp_path),
+    )
+    app = FastAPI()
+    add_fundamentals_admin_download_route(app)
+    route = next(
+        route for route in app.routes
+        if getattr(route, "path", None) == "/fundamentals/admin/reports/{run_id}/{filename:path}"
+    )
+
+    response = asyncio.run(route.endpoint(run_dir.name, OPERATION_REPORT_NAME))
+
+    report_path = run_dir / OPERATION_REPORT_NAME
+    manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+    report_manifest = next(item for item in manifest["artifacts"] if item["name"] == OPERATION_REPORT_NAME)
+    assert Path(response.path).read_bytes() == report_path.read_bytes()
+    assert response.headers["content-type"].startswith("text/markdown")
+    assert response.headers["content-disposition"] == 'attachment; filename="operation_report.md"'
+    assert sha256_file(report_path) == report_manifest["sha256"]
+    assert sha256_file(report_path) == __import__("hashlib").sha256(Path(response.path).read_bytes()).hexdigest()
+    for run_id, filename in (
+        (run_dir.name, "result.json"),
+        ("../escape", OPERATION_REPORT_NAME),
+        ("%2e%2e%2fescape", OPERATION_REPORT_NAME),
+    ):
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(route.endpoint(run_id, filename))
+        assert error.value.status_code == 404
+
+
+def test_admin_download_route_ignores_malformed_manifest_and_rejects_symlink_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _write_run(tmp_path)
+    write_operation_report(run_dir.name, root=tmp_path)
+    (run_dir / "artifact_manifest.json").write_text("{malformed", encoding="utf-8")
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.resolve_operation_report_download",
+        lambda run_id, filename: resolve_operation_report_download(run_id, filename, root=tmp_path),
+    )
+    app = FastAPI()
+    add_fundamentals_admin_download_route(app)
+    route = next(
+        route for route in app.routes
+        if getattr(route, "path", None) == "/fundamentals/admin/reports/{run_id}/{filename:path}"
+    )
+    assert Path(asyncio.run(route.endpoint(run_dir.name, OPERATION_REPORT_NAME)).path).is_file()
+
+    (run_dir / OPERATION_REPORT_NAME).unlink()
+    (run_dir / OPERATION_REPORT_NAME).symlink_to(tmp_path / "outside.md")
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(route.endpoint(run_dir.name, OPERATION_REPORT_NAME))
+    assert error.value.status_code == 404
+
+
+def test_existing_fundamentals_company_report_download_route_still_serves_exact_bytes(tmp_path: Path) -> None:
+    report = tmp_path / "NVDA_2026-09-06.md"
+    report.write_text("# NVDA\n", encoding="utf-8")
+    app = FastAPI()
+    add_fundamentals_download_route(app, report_dir=tmp_path)
+    route = next(
+        route for route in app.routes
+        if getattr(route, "path", None) == "/fundamentals/reports/{filename:path}"
+    )
+
+    response = asyncio.run(route.endpoint("NVDA_2026-09-06.md"))
+
+    assert Path(response.path).read_bytes() == report.read_bytes()
+    assert response.headers["content-type"].startswith("text/markdown")
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(route.endpoint("../secrets.md"))
     assert error.value.status_code == 404
 
 
@@ -212,6 +319,9 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
                 )
             ]
 
+        def progress(self, run_id):
+            return AdminRunHistory(Path("/tmp/does-not-exist")).progress(run_id)
+
         def preview(self, operation_type, **kwargs):
             self.calls.append({"operation_type": operation_type, **kwargs})
             kwargs["progress_callback"](
@@ -253,6 +363,31 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
     assert controls.preview_payload_field.value == "/tmp/payload.json"
     assert controls.summary_column.controls[0].value == "Operation: ADD_TICKERS"
     assert "PREFLIGHT" in controls.progress_field.value
+    assert controls.copy_apply_button.disabled is False
+    assert controls.production_apply_button.disabled is False
+    controls.tickers_field.value = "MSFT"
+    controls.tickers_field.on_change(None)
+    assert controls.copy_apply_button.disabled is True
+    assert controls.production_apply_button.disabled is True
+    assert "PREVIEW_STALE" in controls.status_field.value
     controls.history_column.controls[0].controls[-1].on_click(None)
     assert page.launched_urls == [admin_report_download_url("run1")]
     assert controls.preview_button.disabled is False
+
+
+def test_history_selection_displays_progress_and_unavailable_report_state(tmp_path: Path) -> None:
+    run_dir = _write_run(tmp_path, "20260916T130000Z_sector_no_change")
+    (run_dir / OPERATION_REPORT_NAME).unlink(missing_ok=True)
+
+    class Service(FundamentalsAdminUIService):
+        def __init__(self) -> None:
+            super().__init__(run_root=tmp_path)
+
+    page = _Page()
+    controls = build_fundamentals_admin_page(page=page, service=Service())
+
+    controls.history_column.controls[0].controls[-2].on_click(None)
+
+    assert "20260916T130000Z_sector_no_change" in controls.history_detail_field.value
+    assert "Operation report: not yet available" in controls.history_detail_field.value
+    assert "Selected run progress loaded" in controls.progress_field.value

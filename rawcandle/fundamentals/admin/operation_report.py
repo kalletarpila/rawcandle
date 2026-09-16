@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import stat
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -31,6 +32,33 @@ def _load_json(path: Path) -> Mapping[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _short(value: Any, *, limit: int = 900) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        rendered = json.dumps(value, sort_keys=True, default=str)
+    else:
+        rendered = str(value)
+    return rendered if len(rendered) <= limit else rendered[: limit - 3] + "..."
+
+
+def _duration_seconds(started: Any, completed: Any) -> float | None:
+    if not started or not completed:
+        return None
+    try:
+        start = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(completed).replace("Z", "+00:00"))
+        return max(0.0, (end - start).total_seconds())
+    except Exception:
+        return None
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _sequence(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, (list, tuple)) else []
 
 
 def _safe_run_dir(run_id: str, root: Path = ADMIN_RUN_ROOT) -> Path:
@@ -70,14 +98,19 @@ def resolve_operation_report_download(
 
 
 def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, Any] | None = None) -> tuple[str, ...]:
-    counts = result.get("summary_counts") if isinstance(result.get("summary_counts"), Mapping) else {}
-    downstream = result.get("downstream") if isinstance(result.get("downstream"), Mapping) else {}
-    rollback = result.get("rollback") if isinstance(result.get("rollback"), Mapping) else {}
+    counts = _mapping(result.get("summary_counts"))
+    downstream = _mapping(result.get("downstream"))
+    rollback = _mapping(result.get("rollback"))
+    warnings = _sequence(result.get("warnings"))
+    blockers = _sequence(result.get("blockers"))
+    duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
     rows = [
         f"Operation: {result.get('operation_type', 'UNKNOWN')}",
         f"Mode: {result.get('mode', 'UNKNOWN')}",
         f"Outcome: {result.get('outcome', 'UNKNOWN')}",
     ]
+    if duration is not None:
+        rows.append(f"Duration: {duration:.0f}s")
     if result.get("preview_fingerprint"):
         rows.append(f"Preview fingerprint: {result['preview_fingerprint']}")
     if counts:
@@ -102,6 +135,10 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
             rows.append("Downstream: recorded")
     if rollback:
         rows.append(f"Rollback: {rollback.get('status', 'RECORDED')}")
+    if warnings:
+        rows.append(f"Warning: {_short(redact(warnings[0]), limit=160)}")
+    if blockers:
+        rows.append(f"Blocker: {_short(redact(blockers[0]), limit=160)}")
     if result.get("recommended_next_action"):
         rows.append(f"Next action: {result['recommended_next_action']}")
     return tuple(rows[:12])
@@ -131,10 +168,39 @@ def _append_mapping(lines: list[str], title: str, value: Mapping[str, Any]) -> N
     for key in sorted(safe_value):
         item = safe_value[key]
         if isinstance(item, (dict, list, tuple)):
-            rendered = json.dumps(item, sort_keys=True, default=str)
+            rendered = _short(item)
         else:
-            rendered = str(item)
+            rendered = _short(item)
         lines.append(f"- {str(key).replace('_', ' ').title()}: `{rendered}`")
+
+
+def _append_items(lines: list[str], title: str, values: list[Any], *, limit: int = 25) -> None:
+    if not values:
+        return
+    lines.extend(["", f"## {title}", ""])
+    for index, item in enumerate(values[:limit], start=1):
+        safe_item = redact(item)
+        if isinstance(safe_item, Mapping):
+            label = (
+                safe_item.get("ticker")
+                or safe_item.get("item_key")
+                or safe_item.get("symbol")
+                or f"item {index}"
+            )
+            status = safe_item.get("status") or safe_item.get("decision") or safe_item.get("outcome") or "recorded"
+            reason = safe_item.get("reason") or safe_item.get("message") or safe_item.get("explanation") or ""
+            lines.append(f"- {label}: {status}" + (f" - {reason}" if reason else ""))
+        else:
+            lines.append(f"- {_short(safe_item, limit=300)}")
+    if len(values) > limit:
+        lines.append(f"- {len(values) - limit} additional items retained in artifacts.")
+
+
+def _append_named_section(lines: list[str], title: str, value: Any) -> None:
+    if isinstance(value, Mapping):
+        _append_mapping(lines, title, value)
+    elif isinstance(value, (list, tuple)):
+        _append_items(lines, title, list(value))
 
 
 def render_operation_report(
@@ -164,12 +230,23 @@ def render_operation_report(
             f"- Completed UTC: `{result.get('completed_at_utc', '')}`",
         ]
     )
+    duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
+    if duration is not None:
+        lines.append(f"- Duration seconds: `{duration:.0f}`")
     _append_mapping(lines, "Request", request or {})
     _append_mapping(lines, "Summary Counts", result.get("summary_counts") if isinstance(result.get("summary_counts"), Mapping) else {})
-    _append_mapping(lines, "Downstream", result.get("downstream") if isinstance(result.get("downstream"), Mapping) else {})
-    _append_mapping(lines, "Rollback", result.get("rollback") if isinstance(result.get("rollback"), Mapping) else {})
+    _append_items(lines, "Per-Item Results", _sequence(result.get("items")) or _sequence(result.get("item_results")) or _sequence(result.get("results")))
+    _append_named_section(lines, "Before And After Changes", result.get("changes") or result.get("change_summary") or result.get("before_after"))
+    _append_named_section(lines, "Source And Provenance", result.get("source") or result.get("provenance") or result.get("active_taxonomy"))
+    _append_mapping(lines, "Work Performed And Downstream", result.get("downstream") if isinstance(result.get("downstream"), Mapping) else {})
+    _append_named_section(lines, "Snapshot Results", result.get("snapshot") or result.get("snapshot_results") or _mapping(result.get("downstream")).get("snapshot"))
+    _append_named_section(lines, "Warnings And Blockers", {"warnings": _sequence(result.get("warnings")), "blockers": _sequence(result.get("blockers"))})
+    _append_named_section(lines, "Write Boundary", result.get("write_boundary") or _mapping(result.get("downstream")).get("write_boundary") or {"status": result.get("write_boundary_status", "NOT_RECORDED")})
+    _append_named_section(lines, "Databases Read And Written", result.get("databases") or result.get("database_roles") or result.get("expected_writable_database_set"))
+    _append_mapping(lines, "Backup And Rollback", result.get("rollback") if isinstance(result.get("rollback"), Mapping) else {})
+    _append_named_section(lines, "Scheduler Handling", result.get("scheduler") or {"status": result.get("scheduler_status", "NOT_RECORDED")})
     if events:
-        lines.extend(["", "## Progress Events", ""])
+        lines.extend(["", "## Progress Timeline", ""])
         for event in events:
             safe_event = redact(event)
             lines.append(
@@ -184,6 +261,14 @@ def render_operation_report(
         for error in errors:
             if isinstance(error, Mapping):
                 lines.append(f"- {error.get('type', 'Error')}: {error.get('message', '')}")
+            else:
+                lines.append(f"- {_short(redact(error), limit=300)}")
+    lines.extend(["", "## Next Required Action", ""])
+    lines.append(f"- {result.get('recommended_next_action') or 'Review the outcome and retained artifacts before any further action.'}")
+    lines.extend(["", "## Cleanup And Retained Artifacts", ""])
+    lines.append("- Durable run artifacts are retained in this run directory.")
+    if result.get("artifact_dir"):
+        lines.append(f"- Artifact directory: `{result.get('artifact_dir')}`")
     lines.extend(
         [
             "",
