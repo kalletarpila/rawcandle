@@ -1273,7 +1273,7 @@ def run_production_apply(
         result = AdminFinalResult(
             run_id=run_id,
             operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
-            outcome=AdminStatus.COMPLETED,
+            outcome=AdminStatus.NO_CHANGE,
             mode="PRODUCTION_NO_CHANGE_APPLY",
             started_at_utc=started,
             completed_at_utc=utc_now(),

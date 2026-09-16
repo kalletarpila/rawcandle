@@ -323,10 +323,11 @@ def test_production_no_change_apply_crosses_no_write_boundary(tmp_path: Path, mo
         confirm_production=True,
     )
 
-    assert result["outcome"] == "COMPLETED"
+    assert result["outcome"] == "NO_CHANGE"
     assert result["mode"] == "PRODUCTION_NO_CHANGE_APPLY"
     assert result["downstream"]["classification_writes"] == 0
     assert result["downstream"]["invocation_counts"] == {"package": 0, "relative_position": 0, "relative_valuation": 0}
+    assert result["downstream"]["repeat"]["outcome"] == "NO_CHANGE"
     assert result["rollback"]["status"] == "NOT_REQUIRED"
     assert result["production_apply"]["backup"]["status"] == "NOT_REQUIRED_NO_WRITE_BOUNDARY"
     assert result["production_apply"]["logical_state_compare"]["identical"] is True

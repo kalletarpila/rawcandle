@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
                 progress_callback=progress_callback,
             )
         print(json.dumps({"ok": True, "run_id": result["run_id"], "outcome": result.get("outcome"), "artifact_dir": result["artifact_dir"]}, sort_keys=True))
-        return 0 if result.get("outcome") == "COMPLETED" else 1
+        return 0 if result.get("outcome") in {"COMPLETED", "NO_CHANGE"} else 1
     except Exception as exc:
         print(json.dumps({"ok": False, "error": type(exc).__name__, "reason": str(exc)}, sort_keys=True))
         return 2
