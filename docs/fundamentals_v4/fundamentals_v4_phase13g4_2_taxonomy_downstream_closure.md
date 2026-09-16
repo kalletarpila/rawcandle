@@ -21,3 +21,7 @@ The downstream chain is the repository's existing authoritative administration p
 The bounded production postflight uses read-only SQLite connections, `query_only`, bounded busy/progress behavior, logical schema and active-identity checks, taxonomy fingerprints, dependency identities, and integrity checks. Physical SQLite metadata such as file size, page count, freelist count, WAL/SHM metadata, and mtime are not used as blocking logical evidence.
 
 Outcome A requires a nonzero taxonomy apply, full downstream invocation once, fixed-point repeat `NO_CHANGE`, independent replay match, rollback after downstream writes, bounded production postflight match, full-suite green status, and production unchanged.
+
+## Phase 13G.4.2.1 Role-Aware Closure
+
+Phase 13G.4.2.1 does not erase the original Phase 13G.4.2 Outcome C audit trail. It reclassifies only the terminal full `quick_check` timeout on production `data/analysis.db` as an over-broad check for a production read-only database. The copy-lane taxonomy apply, downstream, fixed-point, replay and rollback evidence remains authoritative, and future production taxonomy deployment still requires writable-role heavy checks.

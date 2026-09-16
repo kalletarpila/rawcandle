@@ -43,3 +43,7 @@ Phase 13G.4.1 adds the production-shaped `dc_ecosystem` copy-only acceptance lan
 ## Phase 13G.4.2 Handoff
 
 Phase 13G.4.2 adds the downstream closure lane for the same test-only `dc_ecosystem` candidate. It runs the established package, Relative Position, Relative Valuation, dependency and Snapshot chain on production-shaped copies, proves fixed-point repeat and downstream rollback, and replaces raw live hashing with bounded logical production postflight. This remains copy-only; no production taxonomy update is authorized.
+
+## Phase 13G.4.2.1 Handoff
+
+Phase 13G.4.2.1 supersedes only the over-broad production read-only `quick_check` blocker from the Phase 13G.4.2 audit trail. The retained 13G.4.2 copy evidence still records its original Outcome C, but role-aware verification now classifies production `data/analysis.db` as read-only for this copy-only operation and keeps heavy integrity, backup, rollback and full inventory checks on writable copy lanes or future production-writable operations. See [fundamentals_v4_phase13g4_2_1_role_aware_closure.md](fundamentals_v4_phase13g4_2_1_role_aware_closure.md).

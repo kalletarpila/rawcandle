@@ -12,6 +12,19 @@ Persistent administration run history uses the existing ignored Fundamentals rep
 
 `fundamental_reports/admin_runs/`
 
+## Role-Aware Database Verification
+
+Administration operations must derive verification from explicit database roles:
+
+- `production_writable_roles`
+- `production_readonly_roles`
+- `copy_writable_roles`
+- `copy_readonly_roles`
+
+Heavy integrity, backup, rollback and full logical-inventory checks apply only to databases the operation may write. Read-only databases receive only the targeted source and identity checks required by the operation.
+
+If a production writable role crosses a production write boundary, full pre/post integrity, verified backup and rollback protection apply. If a write-capable operation does not cross the production write boundary, redundant post-write scans are skipped in favor of targeted no-write confirmation. Copy-writable lanes carry copy integrity, repeat and rollback checks. Unknown or contradictory roles fail closed.
+
 This keeps compact user-facing evidence outside Git while avoiding the existing taxonomy helper limitation that evidence roots must live under `temp/`. Heavy transient database copies remain reserved for phase/run-specific `temp` roots in later apply phases.
 
 ## Contracts
