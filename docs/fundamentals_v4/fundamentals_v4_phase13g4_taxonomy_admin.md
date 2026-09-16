@@ -39,3 +39,7 @@ This phase does not synchronize `dc_ecosystem` and `ec_taxonomy`, infer membersh
 ## Phase 13G.4.1 Handoff
 
 Phase 13G.4.1 adds the production-shaped `dc_ecosystem` copy-only acceptance lane for a real nonzero versioned taxonomy candidate. The candidate remains explicitly `TEST_ONLY_NOT_FOR_PRODUCTION`, runs only against isolated database copies, and keeps `ec_taxonomy` read-only with `EC_TAXONOMY_UPDATE_CONTRACT_NOT_READY`. A future production-capable taxonomy update still requires a separate protected production phase.
+
+## Phase 13G.4.2 Handoff
+
+Phase 13G.4.2 adds the downstream closure lane for the same test-only `dc_ecosystem` candidate. It runs the established package, Relative Position, Relative Valuation, dependency and Snapshot chain on production-shaped copies, proves fixed-point repeat and downstream rollback, and replaces raw live hashing with bounded logical production postflight. This remains copy-only; no production taxonomy update is authorized.
