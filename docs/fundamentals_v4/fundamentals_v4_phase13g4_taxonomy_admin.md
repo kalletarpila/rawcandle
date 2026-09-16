@@ -35,3 +35,7 @@ This phase does not synchronize `dc_ecosystem` and `ec_taxonomy`, infer membersh
 - Real read-only `ec_taxonomy` audit:
   `fundamental_reports/admin_runs/20260916T073004Z_check_update_taxonomy_031997db1f37_ec_taxonomy_preview`
 - Scheduler was stopped with user `systemd` during the test/audit window after it was observed running as `stock-update-scheduler.service`; no `kill -9` was used.
+
+## Phase 13G.4.1 Handoff
+
+Phase 13G.4.1 adds the production-shaped `dc_ecosystem` copy-only acceptance lane for a real nonzero versioned taxonomy candidate. The candidate remains explicitly `TEST_ONLY_NOT_FOR_PRODUCTION`, runs only against isolated database copies, and keeps `ec_taxonomy` read-only with `EC_TAXONOMY_UPDATE_CONTRACT_NOT_READY`. A future production-capable taxonomy update still requires a separate protected production phase.
