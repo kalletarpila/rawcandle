@@ -25,6 +25,11 @@ from dev_tools.fundamentals_snapshot_page import (
     FUNDAMENTALS_ROUTE,
     build_fundamentals_page,
 )
+from dev_tools.fundamentals_admin_page import (
+    FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE,
+    FUNDAMENTALS_ADMIN_ROUTE,
+    build_fundamentals_admin_page,
+)
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -40,6 +45,10 @@ from rawcandle.scheduler.runner import (
 from rawcandle.fundamentals.snapshot.ui_service import (
     FUNDAMENTAL_REPORTS_DIR,
     resolve_report_download,
+)
+from rawcandle.fundamentals.admin.operation_report import (
+    OPERATION_REPORT_NAME,
+    resolve_operation_report_download,
 )
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
     DATACENTER_ECOSYSTEM_CODE,
@@ -99,7 +108,7 @@ _SWINGMASTER_LOG_FILENAME_RE = re.compile(
 )
 _TIMER_PATH = Path.home() / ".config/systemd/user/stock-update-scheduler.timer"
 _TAXONOMY_EVIDENCE_ROOT = "temp/datacenter_taxonomy_changes"
-TOP_LEVEL_ROUTES = ("/scheduler", "/taxonomy", FUNDAMENTALS_ROUTE)
+TOP_LEVEL_ROUTES = ("/scheduler", "/taxonomy", FUNDAMENTALS_ROUTE, FUNDAMENTALS_ADMIN_ROUTE)
 
 
 def top_level_route_index(route: str | None) -> int:
@@ -110,6 +119,8 @@ def top_level_route_index(route: str | None) -> int:
         return 1
     if normalized == FUNDAMENTALS_ROUTE:
         return 2
+    if normalized == FUNDAMENTALS_ADMIN_ROUTE:
+        return 3
     return 0
 
 
@@ -1778,6 +1789,10 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         timezone_name=config.timezone,
         service=getattr(page, "fundamentals_snapshot_service", None),
     )
+    fundamentals_admin_controls = build_fundamentals_admin_page(
+        page=page,
+        service=getattr(page, "fundamentals_admin_service", None),
+    )
 
     refresh_logs_view(config.log_dir)
     try:
@@ -1838,12 +1853,32 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.fundamentals_status_field = fundamentals_controls.status_field
     page.fundamentals_batch_results_column = fundamentals_controls.batch_results_column
     page.fundamentals_recent_reports_column = fundamentals_controls.recent_reports_column
+    page.fundamentals_admin_content = fundamentals_admin_controls.content
+    page.fundamentals_admin_operation_dropdown = fundamentals_admin_controls.operation_dropdown
+    page.fundamentals_admin_tickers_field = fundamentals_admin_controls.tickers_field
+    page.fundamentals_admin_market_field = fundamentals_admin_controls.market_field
+    page.fundamentals_admin_taxonomy_domain_dropdown = fundamentals_admin_controls.taxonomy_domain_dropdown
+    page.fundamentals_admin_candidate_path_field = fundamentals_admin_controls.candidate_path_field
+    page.fundamentals_admin_candidate_version_field = fundamentals_admin_controls.candidate_version_field
+    page.fundamentals_admin_network_allowed_checkbox = fundamentals_admin_controls.network_allowed_checkbox
+    page.fundamentals_admin_production_preview_checkbox = fundamentals_admin_controls.production_preview_checkbox
+    page.fundamentals_admin_preview_button = fundamentals_admin_controls.preview_button
+    page.fundamentals_admin_copy_apply_button = fundamentals_admin_controls.copy_apply_button
+    page.fundamentals_admin_production_apply_button = fundamentals_admin_controls.production_apply_button
+    page.fundamentals_admin_preview_payload_field = fundamentals_admin_controls.preview_payload_field
+    page.fundamentals_admin_preview_fingerprint_field = fundamentals_admin_controls.preview_fingerprint_field
+    page.fundamentals_admin_production_confirmation_field = fundamentals_admin_controls.production_confirmation_field
+    page.fundamentals_admin_status_field = fundamentals_admin_controls.status_field
+    page.fundamentals_admin_summary_column = fundamentals_admin_controls.summary_column
+    page.fundamentals_admin_progress_field = fundamentals_admin_controls.progress_field
+    page.fundamentals_admin_history_column = fundamentals_admin_controls.history_column
 
     tabs = ft.Tabs(
         tabs=[
             ft.Tab(text="Scheduler", content=scheduler_content),
             ft.Tab(text="Taxonomy", content=taxonomy_content),
             ft.Tab(text="Fundamentals", content=fundamentals_controls.content),
+            ft.Tab(text="Fundamentals Admin", content=fundamentals_admin_controls.content),
         ],
         selected_index=top_level_route_index(getattr(page, "route", "/")),
         expand=True,
@@ -1902,6 +1937,7 @@ def create_scheduler_web_app(
 
     application = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     add_fundamentals_download_route(application, report_dir=report_dir)
+    add_fundamentals_admin_download_route(application)
 
     flet_application = flet_fastapi.app(
         session_handler=_app,
@@ -1923,6 +1959,24 @@ def add_fundamentals_download_route(
             report_path = resolve_report_download(filename, report_dir)
         except (ValueError, FileNotFoundError):
             raise HTTPException(status_code=404, detail="Report not found.")
+        return FileResponse(
+            report_path,
+            media_type="text/markdown",
+            filename=report_path.name,
+            content_disposition_type="attachment",
+        )
+
+
+def add_fundamentals_admin_download_route(application: FastAPI) -> None:
+
+    @application.get(f"{FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE}" + "/{run_id}/{filename:path}")
+    async def download_fundamentals_admin_report(run_id: str, filename: str) -> FileResponse:
+        try:
+            if filename != OPERATION_REPORT_NAME:
+                raise ValueError("unsupported admin report")
+            report_path = resolve_operation_report_download(run_id, filename)
+        except (ValueError, FileNotFoundError):
+            raise HTTPException(status_code=404, detail="Operation report not found.")
         return FileResponse(
             report_path,
             media_type="text/markdown",

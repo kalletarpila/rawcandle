@@ -667,9 +667,10 @@ def test_run_app_exposes_scheduler_taxonomy_and_fundamentals_top_level_tabs(tmp_
     assert page.title == "RawCandle stock update scheduler"
     assert page.technical_relevance_checkbox.value is False
     tabs = page.top_level_tabs
-    assert [tab.text for tab in tabs.tabs] == ["Scheduler", "Taxonomy", "Fundamentals"]
+    assert [tab.text for tab in tabs.tabs] == ["Scheduler", "Taxonomy", "Fundamentals", "Fundamentals Admin"]
     assert tabs.selected_index == 0
     assert page.fundamentals_content is tabs.tabs[2].content
+    assert page.fundamentals_admin_content is tabs.tabs[3].content
     assert page.fundamentals_overwrite_checkbox.value is False
     assert page.taxonomy_prepare_button is not None
     assert not hasattr(page, "datacenter_plan_button")
@@ -679,7 +680,14 @@ def test_run_app_exposes_scheduler_taxonomy_and_fundamentals_top_level_tabs(tmp_
 
 @pytest.mark.parametrize(
     ("route", "index"),
-    (("/", 0), ("/scheduler", 0), ("/taxonomy", 1), ("/fundamentals", 2), ("/unknown", 0)),
+    (
+        ("/", 0),
+        ("/scheduler", 0),
+        ("/taxonomy", 1),
+        ("/fundamentals", 2),
+        ("/fundamentals/admin", 3),
+        ("/unknown", 0),
+    ),
 )
 def test_top_level_routes_have_stable_active_tab(route, index):
     assert top_level_route_index(route) == index

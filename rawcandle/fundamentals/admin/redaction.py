@@ -53,7 +53,7 @@ def redact_text(value: str, *, configured_secrets: tuple[str, ...] = ()) -> str:
         if secret:
             output = output.replace(secret, REDACTED)
     output = re.sub(r"(?i)(authorization:\s*)(bearer|token)?\s*[A-Za-z0-9._~+/=-]{8,}", r"\1" + REDACTED, output)
-    output = re.sub(r"(?i)((api[_-]?key|access[_-]?token|password|secret)=)[^&\s]+", r"\1" + REDACTED, output)
+    output = re.sub(r"(?i)((api[_-]?key|access[_-]?token|token|password|secret)=)[^&\s]+", r"\1" + REDACTED, output)
     return _redact_url(output)
 
 
