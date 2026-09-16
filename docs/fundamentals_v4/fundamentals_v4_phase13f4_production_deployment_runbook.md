@@ -83,6 +83,12 @@ second Phase 13F.4.9 production attempt was made. See
 
 This runbook is intentionally non-executing documentation. It does not authorize production deployment by itself. Production activation requires a separate explicit user request and the exact gates below.
 
+## Taxonomy Production Mode Addendum
+
+Phase 13G.4.3 introduces the protected production-capable taxonomy runner for `CHECK_UPDATE_TAXONOMY --taxonomy dc_ecosystem`. A no-change taxonomy verification uses bounded targeted checks only and must not pause the scheduler, create production backups or cross the write boundary.
+
+Future nonzero taxonomy production updates are governed by the Phase 13G.4.3 role-aware contract: production `taxonomy` and `analysis` are writable, while `provider`, `canonical` and `market` remain read-only. Only writable physical databases receive verified backups, restore rehearsal, heavy integrity checks and rollback restoration. `ec_taxonomy` remains update-not-ready until a separate safe write contract exists.
+
 ## Preconditions
 
 - Phase 13F.3.4 report outcome is OUTCOME A.

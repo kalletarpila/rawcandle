@@ -47,3 +47,9 @@ Phase 13G.4.2 adds the downstream closure lane for the same test-only `dc_ecosys
 ## Phase 13G.4.2.1 Handoff
 
 Phase 13G.4.2.1 supersedes only the over-broad production read-only `quick_check` blocker from the Phase 13G.4.2 audit trail. The retained 13G.4.2 copy evidence still records its original Outcome C, but role-aware verification now classifies production `data/analysis.db` as read-only for this copy-only operation and keeps heavy integrity, backup, rollback and full inventory checks on writable copy lanes or future production-writable operations. See [fundamentals_v4_phase13g4_2_1_role_aware_closure.md](fundamentals_v4_phase13g4_2_1_role_aware_closure.md).
+
+## Phase 13G.4.3 Handoff
+
+Phase 13G.4.3 adds protected production mode for `dc_ecosystem` while authorizing only a true `NO_CHANGE` production verification. The production path requires `--production`, `--apply`, an exact saved preview payload and fingerprint, explicit confirmation, clean worktree, exact production paths, and candidate provenance. The default no-change candidate provenance is `ACTIVE_PRODUCTION_BASELINE_NO_CHANGE`, a deterministic export of the active production taxonomy retained as evidence only.
+
+`ec_taxonomy` remains production update-not-ready and is refused with `EC_TAXONOMY_UPDATE_CONTRACT_NOT_READY`. The Phase 13G.4.1/13G.4.2 AAOI test-only candidate is explicitly blocked from production mode. See [fundamentals_v4_phase13g4_3_protected_taxonomy_production.md](fundamentals_v4_phase13g4_3_protected_taxonomy_production.md).
