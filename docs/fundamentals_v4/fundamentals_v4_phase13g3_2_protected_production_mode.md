@@ -203,3 +203,16 @@ Post-invocation read-only production checks:
 ## Remaining Risk
 
 Production no-change mode is implemented and tested after the logical-state fix, but the protected production invocation was not rerun because the phase allowed exactly one production invocation. A later phase should run a fresh preview and a new protected production no-change invocation using the corrected logical-state comparison.
+
+## Phase 13G.3.2.1 Closure
+
+Phase 13G.3.2.1 performed that later fresh preview and single protected production invocation.
+
+- Fresh preview: `20260916T054622Z_check_update_sector_industry_6cd2344cb214`
+- Production invocation: `20260916T054727Z_check_update_sector_industry_b29afb4f6b77_production`
+- Terminal operation result: `NO_CHANGE`
+- Write boundary crossed: `false`
+- Logical-state compare: identical
+- Classification writes and downstream invocations: `0`
+
+The closure evidence is documented in [fundamentals_v4_phase13g3_2_1_production_no_change_closure.md](fundamentals_v4_phase13g3_2_1_production_no_change_closure.md).

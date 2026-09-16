@@ -121,6 +121,21 @@ The production mode is no-change-only for this phase: it requires a saved full-u
 
 Details and evidence are documented in [fundamentals_v4_phase13g3_2_protected_production_mode.md](fundamentals_v4_phase13g3_2_protected_production_mode.md).
 
+## Phase 13G.3.2.1 Production NO_CHANGE Closure
+
+Phase 13G.3.2.1 ran a fresh protected production verification after the corrected logical-state comparator and the `NO_CHANGE` terminal-result contract were in place.
+
+- Fresh preview: `20260916T054622Z_check_update_sector_industry_6cd2344cb214`
+- Preview fingerprint: `f6b178372c72474df3463f5236f724968ce37020990e27bfa1947afc074bcdc1`
+- Production run: `20260916T054727Z_check_update_sector_industry_b29afb4f6b77_production`
+- Outcome: `NO_CHANGE`
+- Write boundary crossed: `false`
+- Classification writes: `0`
+- Package/RP/RV invocations: `0/0/0`
+- Backup or rollback: `not required`
+
+The stock update scheduler was stopped through its user-systemd timer/service before verification and kept stopped until postflight checks completed. Details and evidence are documented in [fundamentals_v4_phase13g3_2_1_production_no_change_closure.md](fundamentals_v4_phase13g3_2_1_production_no_change_closure.md).
+
 ## Test Evidence
 
 Focused regression suite:
