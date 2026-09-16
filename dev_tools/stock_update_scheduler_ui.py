@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import webbrowser
 from dataclasses import replace
@@ -14,6 +15,10 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 import flet as ft
 import flet.fastapi as flet_fastapi

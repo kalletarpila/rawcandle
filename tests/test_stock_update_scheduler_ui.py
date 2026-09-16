@@ -4,6 +4,8 @@ import csv
 import hashlib
 import json
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -804,6 +806,19 @@ def test_scheduler_ui_startup_passes_fixed_port_to_asgi_server(tmp_path, monkeyp
     uvicorn_mock.assert_called_once_with(application, host="127.0.0.1", port=8555)
     assert timer.daemon is True
     timer.start.assert_called_once_with()
+
+
+def test_scheduler_ui_script_can_be_invoked_directly_for_help():
+    result = subprocess.run(
+        [sys.executable, "dev_tools/stock_update_scheduler_ui.py", "--help"],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "Standalone stock update scheduler control panel." in result.stdout
 
 
 def test_run_app_without_summary_or_logs_shows_clear_messages(tmp_path, monkeypatch):
