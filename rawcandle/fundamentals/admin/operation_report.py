@@ -235,6 +235,15 @@ def render_operation_report(
         lines.append(f"- Duration seconds: `{duration:.0f}`")
     _append_mapping(lines, "Request", request or {})
     _append_mapping(lines, "Summary Counts", result.get("summary_counts") if isinstance(result.get("summary_counts"), Mapping) else {})
+    provider_network = {
+        "network_allowed": result.get("network_allowed", (request or {}).get("network_allowed")),
+        "network_used": result.get("network_used"),
+        "bounded_request_count": result.get("bounded_request_count") or result.get("provider_request_count"),
+        "source_resolution": result.get("source_resolution") or result.get("provider_source_resolution"),
+        "provider_failure": result.get("provider_failure"),
+    }
+    provider_network = {key: value for key, value in provider_network.items() if value is not None}
+    _append_mapping(lines, "Provider Network", provider_network)
     _append_items(lines, "Per-Item Results", _sequence(result.get("items")) or _sequence(result.get("item_results")) or _sequence(result.get("results")))
     _append_named_section(lines, "Before And After Changes", result.get("changes") or result.get("change_summary") or result.get("before_after"))
     _append_named_section(lines, "Source And Provenance", result.get("source") or result.get("provenance") or result.get("active_taxonomy"))

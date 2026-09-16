@@ -23,6 +23,7 @@ from rawcandle.fundamentals.admin.operation_report import (
     write_operation_report,
 )
 from rawcandle.fundamentals.admin.ui_service import (
+    AdminOperationCapability,
     AdminUIHistoryEntry,
     AdminUIRunResult,
     FundamentalsAdminUIService,
@@ -34,6 +35,7 @@ class _Page:
         self.update_count = 0
         self.launched_urls: list[str] = []
         self.tasks = []
+        self.opened_dialogs: list[object] = []
 
     def update(self) -> None:
         self.update_count += 1
@@ -43,6 +45,10 @@ class _Page:
 
     def run_task(self, coro) -> None:
         self.tasks.append(coro)
+
+    def open(self, dialog) -> None:
+        self.opened_dialogs.append(dialog)
+        dialog.open = True
 
 
 def _write_run(root: Path, run_id: str = "20260916T120000Z_add_tickers_test") -> Path:
@@ -93,6 +99,13 @@ def _write_run(root: Path, run_id: str = "20260916T120000Z_add_tickers_test") ->
                 "started_at_utc": "2026-09-16T12:00:00Z",
                 "completed_at_utc": "2026-09-16T12:01:00Z",
                 "preview_fingerprint": "f" * 64,
+                "network_allowed": True,
+                "network_used": False,
+                "source_resolution": {
+                    "NVDA": "existing local provider data",
+                    "VRT": "not found",
+                },
+                "bounded_request_count": 0,
                 "summary_counts": {"ELIGIBLE": 1},
                 "items": [
                     {"ticker": "NVDA", "status": "ELIGIBLE", "reason": "new ticker"},
@@ -127,6 +140,9 @@ def test_operation_report_is_written_atomically_manifested_and_redacted(tmp_path
     assert report.report_path == str(report_path)
     assert report.report_sha256
     assert "Executive Summary" in text
+    assert "Provider Network" in text
+    assert "Network Allowed" in text
+    assert "existing local provider data" in text
     assert "Per-Item Results" in text
     assert "NVDA" in text
     assert "already present" in text
@@ -305,8 +321,9 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
+            self.apply_calls: list[dict[str, object]] = []
 
-        def history_entries(self, *, limit):
+        def history_entries(self, *, limit, include_technical=False):
             return [
                 AdminUIHistoryEntry(
                     run_id="run1",
@@ -346,6 +363,19 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
                 summary_rows=("Operation: ADD_TICKERS", "Outcome: COMPLETED"),
             )
 
+        def copy_apply(self, operation_type, **kwargs):
+            self.apply_calls.append({"operation_type": operation_type, **kwargs})
+            return AdminUIRunResult(
+                status="COMPLETED",
+                message="Apply completed.",
+                run_id="run3",
+                outcome="COMPLETED",
+                mode="COPY_ONLY_APPLY",
+                report_filename=OPERATION_REPORT_NAME,
+                report_sha256="b" * 64,
+                summary_rows=("Operation: ADD_TICKERS", "Outcome: COMPLETED"),
+            )
+
     page = _Page()
     service = Service()
     controls = build_fundamentals_admin_page(page=page, service=service)
@@ -355,24 +385,157 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
         "CHECK_UPDATE_SECTOR_INDUSTRY",
         "CHECK_UPDATE_TAXONOMY",
     ]
+    assert controls.network_allowed_checkbox.visible is False
+    assert controls.preview_payload_field.visible is False
+    assert controls.preview_payload_field.read_only is True
+    assert controls.preview_fingerprint_field.visible is False
+    assert controls.preview_fingerprint_field.read_only is True
+    assert controls.production_confirmation_field.visible is False
+    assert controls.production_confirmation_field.read_only is True
+    assert controls.taxonomy_domain_dropdown.visible is False
+    assert controls.candidate_path_field.visible is False
     controls.tickers_field.value = "NVDA"
+    controls.tickers_field.on_change(None)
     controls.preview_button.on_click(None)
 
     assert service.calls[0]["operation_type"] == "ADD_TICKERS"
-    assert "Status: COMPLETED" in controls.status_field.value
+    assert service.calls[0]["network_allowed"] is True
+    assert "Preview completed." in controls.status_field.value
     assert controls.preview_payload_field.value == "/tmp/payload.json"
     assert controls.summary_column.controls[0].value == "Operation: ADD_TICKERS"
     assert "PREFLIGHT" in controls.progress_field.value
+    assert controls.preview_section.visible is True
+    assert controls.progress_section.visible is True
+    assert controls.final_section.visible is True
+    assert controls.report_button.visible is True
     assert controls.copy_apply_button.disabled is False
     assert controls.production_apply_button.disabled is False
+    assert controls.copy_apply_button.visible is True
+    controls.copy_apply_button.on_click(None)
+    assert service.apply_calls[0]["preview_payload_path"] == "/tmp/payload.json"
+    assert service.apply_calls[0]["preview_fingerprint"] == "f" * 64
     controls.tickers_field.value = "MSFT"
     controls.tickers_field.on_change(None)
     assert controls.copy_apply_button.disabled is True
     assert controls.production_apply_button.disabled is True
-    assert "PREVIEW_STALE" in controls.status_field.value
+    assert "preview is no longer current" in controls.status_field.value
     controls.history_column.controls[0].controls[-1].on_click(None)
     assert page.launched_urls == [admin_report_download_url("run1")]
     assert controls.preview_button.disabled is False
+
+
+def test_admin_page_conditional_fields_switch_by_operation() -> None:
+    page = _Page()
+    controls = build_fundamentals_admin_page(page=page, service=FundamentalsAdminUIService())
+
+    assert controls.tickers_field.visible is True
+    assert controls.taxonomy_domain_dropdown.visible is False
+    assert controls.candidate_path_field.visible is False
+    assert controls.network_allowed_checkbox.visible is False
+
+    controls.operation_dropdown.value = "CHECK_UPDATE_SECTOR_INDUSTRY"
+    controls.operation_dropdown.on_change(None)
+    assert controls.tickers_field.visible is False
+    assert controls.market_field.visible is True
+    assert controls.taxonomy_domain_dropdown.visible is False
+    assert controls.candidate_path_field.visible is False
+    assert "ticker_meta" in controls.operation_guidance_field.value
+
+    controls.operation_dropdown.value = "CHECK_UPDATE_TAXONOMY"
+    controls.operation_dropdown.on_change(None)
+    assert controls.tickers_field.visible is False
+    assert controls.market_field.visible is False
+    assert controls.taxonomy_domain_dropdown.visible is True
+    assert controls.candidate_path_field.visible is False
+    assert "dc_ecosystem" in controls.operation_guidance_field.value
+
+
+def test_production_confirmation_uses_internal_token_and_waits_for_confirm() -> None:
+    class Service:
+        def __init__(self) -> None:
+            self.production_calls: list[dict[str, object]] = []
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def progress(self, run_id):
+            raise FileNotFoundError
+
+        def preview(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED",
+                message="Preview completed.",
+                run_id="run2",
+                outcome="COMPLETED",
+                mode="PREVIEW",
+                preview_fingerprint="f" * 64,
+                preview_payload_path="/tmp/payload.json",
+                report_filename=OPERATION_REPORT_NAME,
+                report_sha256="a" * 64,
+                summary_rows=("Operation: ADD_TICKERS", "Outcome: COMPLETED"),
+            )
+
+        def production_apply(self, operation_type, **kwargs):
+            self.production_calls.append({"operation_type": operation_type, **kwargs})
+            return AdminUIRunResult(
+                status="COMPLETED",
+                message="Production completed.",
+                run_id="run3",
+                outcome="COMPLETED",
+                mode="PRODUCTION",
+                report_filename=OPERATION_REPORT_NAME,
+                report_sha256="b" * 64,
+                summary_rows=("Operation: ADD_TICKERS", "Outcome: COMPLETED"),
+            )
+
+    page = _Page()
+    service = Service()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+    controls.tickers_field.value = "NVDA"
+    controls.tickers_field.on_change(None)
+    controls.preview_button.on_click(None)
+
+    controls.production_apply_button.on_click(None)
+
+    assert service.production_calls == []
+    assert page.opened_dialogs
+    page.opened_dialogs[-1].actions[1].on_click(None)
+    assert service.production_calls[0]["confirmation"] == "CONFIRM_PRODUCTION_BATCH_ADD_TICKERS"
+    assert service.production_calls[0]["preview_payload_path"] == "/tmp/payload.json"
+    assert service.production_calls[0]["preview_fingerprint"] == "f" * 64
+
+
+def test_apply_visibility_follows_backend_capability() -> None:
+    class Service:
+        def capabilities(self):
+            return (
+                AdminOperationCapability("ADD_TICKERS", True, False, False),
+            )
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def preview(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED",
+                message="Preview completed.",
+                run_id="run2",
+                outcome="COMPLETED",
+                mode="PREVIEW",
+                preview_fingerprint="f" * 64,
+                preview_payload_path="/tmp/payload.json",
+                report_filename=OPERATION_REPORT_NAME,
+                report_sha256="a" * 64,
+                summary_rows=("Operation: ADD_TICKERS", "Outcome: COMPLETED"),
+            )
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=Service())
+    controls.tickers_field.value = "NVDA"
+    controls.tickers_field.on_change(None)
+    controls.preview_button.on_click(None)
+
+    assert controls.copy_apply_button.visible is False
+    assert controls.production_apply_button.visible is False
 
 
 def test_history_selection_displays_progress_and_unavailable_report_state(tmp_path: Path) -> None:
@@ -391,3 +554,19 @@ def test_history_selection_displays_progress_and_unavailable_report_state(tmp_pa
     assert "20260916T130000Z_sector_no_change" in controls.history_detail_field.value
     assert "Operation report: not yet available" in controls.history_detail_field.value
     assert "Selected run progress loaded" in controls.progress_field.value
+
+
+def test_history_defaults_to_admin_runs_and_filter_exposes_technical_evidence(tmp_path: Path) -> None:
+    _write_run(tmp_path, "20260916T130000Z_add_tickers_admin")
+    evidence = tmp_path / "phase13h1_1_acceptance"
+    evidence.mkdir()
+    (evidence / "acceptance_summary.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "empty_broken_run").mkdir()
+    service = FundamentalsAdminUIService(run_root=tmp_path)
+
+    default = service.history_entries(limit=10)
+    technical = service.history_entries(limit=10, include_technical=True)
+
+    assert [entry.category for entry in default] == ["Administration run"]
+    assert any(entry.category == "Acceptance/test evidence" for entry in technical)
+    assert any(entry.category == "Invalid or corrupt run" for entry in technical)

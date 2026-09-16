@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -57,6 +58,9 @@ class AdminUIHistoryEntry:
     mode: str
     completed_at_utc: str | None
     report_available: bool
+    category: str = "Administration run"
+    primary_count: int | None = None
+    duration_seconds: float | None = None
 
 
 class FundamentalsAdminUIService:
@@ -235,26 +239,24 @@ class FundamentalsAdminUIService:
     def progress(self, run_id: str) -> RunProgressSummary:
         return self.history.progress(run_id)
 
-    def history_entries(self, *, limit: int = 20) -> list[AdminUIHistoryEntry]:
+    def history_entries(self, *, limit: int = 20, include_technical: bool = False) -> list[AdminUIHistoryEntry]:
         entries: list[AdminUIHistoryEntry] = []
         try:
-            history_items = self.history.list_runs()[:limit]
+            run_dirs = [
+                path for path in sorted(self.run_root.iterdir(), key=lambda item: item.name, reverse=True)
+                if path.is_dir() and not path.is_symlink()
+            ] if self.run_root.exists() else []
         except Exception:
             return []
-        for item in history_items:
-            mode = self._mode_for_entry(item)
-            report_available = OPERATION_REPORT_NAME in self._artifact_names(item.run_id)
-            entries.append(
-                AdminUIHistoryEntry(
-                    run_id=item.run_id,
-                    operation_type=item.operation_type,
-                    outcome=item.outcome,
-                    status=item.status,
-                    mode=mode,
-                    completed_at_utc=item.completed_at_utc,
-                    report_available=report_available,
-                )
-            )
+        for path in run_dirs:
+            entry = self._history_entry_for_run_dir(path)
+            if entry is None:
+                continue
+            if entry.category != "Administration run" and not include_technical:
+                continue
+            entries.append(entry)
+            if len(entries) >= limit:
+                break
         return entries
 
     def resolve_report_download(self, run_id: str) -> Path:
@@ -269,12 +271,129 @@ class FundamentalsAdminUIService:
     def _mode_for_entry(self, entry: RunHistoryEntry) -> str:
         try:
             path = self.history.artifact_path(entry.run_id, "result.json")
-            import json
 
             result = json.loads(path.read_text(encoding="utf-8"))
             return str(result.get("mode", "UNKNOWN"))
         except Exception:
             return "UNKNOWN"
+
+    def _history_entry_for_run_dir(self, run_dir: Path) -> AdminUIHistoryEntry | None:
+        run_id = run_dir.name
+        result = self._load_json_file(run_dir / "result.json")
+        request = self._load_json_file(run_dir / "request.json")
+        status = self._load_json_file(run_dir / "progress_status.json") or self._load_json_file(run_dir / "status.json")
+        category = self._classify_run_dir(run_dir, result=result, request=request, status=status)
+        if category == "Invalid or corrupt run":
+            return AdminUIHistoryEntry(
+                run_id=run_id,
+                operation_type="Invalid run",
+                outcome="CORRUPT_OR_INCOMPLETE",
+                status="corrupt_or_incomplete",
+                mode="INVALID",
+                completed_at_utc=None,
+                report_available=OPERATION_REPORT_NAME in self._artifact_names(run_id),
+                category="Invalid or corrupt run",
+            )
+        if category == "Administration run":
+            try:
+                item = self.history.summarize(run_id)
+            except Exception:
+                return AdminUIHistoryEntry(
+                    run_id=run_id,
+                    operation_type=str((result or request or status or {}).get("operation_type", "Administration")),
+                    outcome="CORRUPT_OR_INCOMPLETE",
+                    status="corrupt_or_incomplete",
+                    mode=str((result or {}).get("mode", "UNKNOWN")),
+                    completed_at_utc=None,
+                    report_available=OPERATION_REPORT_NAME in self._artifact_names(run_id),
+                    category="Invalid or corrupt run",
+                    primary_count=self._primary_count(result or request or {}),
+                )
+            return AdminUIHistoryEntry(
+                run_id=item.run_id,
+                operation_type=item.operation_type,
+                outcome=item.outcome,
+                status=item.status,
+                mode=self._mode_for_entry(item),
+                completed_at_utc=item.completed_at_utc,
+                report_available=OPERATION_REPORT_NAME in self._artifact_names(item.run_id),
+                category=category,
+                primary_count=self._primary_count(result or request or {}),
+                duration_seconds=self._duration_seconds(result or {}),
+            )
+        payload = result or request or status or {}
+        return AdminUIHistoryEntry(
+            run_id=run_id,
+            operation_type=str(payload.get("operation_type", category)),
+            outcome=str(payload.get("outcome", category.upper().replace(" ", "_"))),
+            status=category.lower().replace(" ", "_"),
+            mode=str(payload.get("mode", "TECHNICAL")),
+            completed_at_utc=payload.get("completed_at_utc") or payload.get("timestamp_utc"),
+            report_available=OPERATION_REPORT_NAME in self._artifact_names(run_id),
+            category=category,
+            primary_count=self._primary_count(payload),
+            duration_seconds=self._duration_seconds(payload),
+        )
+
+    def _classify_run_dir(
+        self,
+        run_dir: Path,
+        *,
+        result: Mapping[str, Any] | None,
+        request: Mapping[str, Any] | None,
+        status: Mapping[str, Any] | None,
+    ) -> str:
+        payload = result or request or status or {}
+        operation = str(payload.get("operation_type", ""))
+        if operation in {"ADD_TICKERS", "CHECK_UPDATE_SECTOR_INDUSTRY", "CHECK_UPDATE_TAXONOMY"}:
+            return "Administration run"
+        names = {path.name for path in run_dir.iterdir() if path.is_file() and not path.is_symlink()}
+        if {
+            "acceptance_summary.json",
+            "phase13h1_1_status.json",
+            "phase13h1_1_exit_code.txt",
+        } & names or "acceptance" in run_dir.name.lower():
+            return "Acceptance/test evidence"
+        if "cleanup" in run_dir.name.lower() or "maintenance" in run_dir.name.lower():
+            return "Maintenance/cleanup evidence"
+        if names:
+            return "Legacy evidence"
+        return "Invalid or corrupt run"
+
+    def _load_json_file(self, path: Path) -> Mapping[str, Any] | None:
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+            return parsed if isinstance(parsed, Mapping) else None
+        except Exception:
+            return None
+
+    def _primary_count(self, payload: Mapping[str, Any]) -> int | None:
+        counts = payload.get("summary_counts")
+        if isinstance(counts, Mapping):
+            for key in ("requested", "requested_count", "accepted", "changed", "inspected", "ELIGIBLE"):
+                if key in counts:
+                    try:
+                        return int(counts[key])
+                    except Exception:
+                        return None
+        requested = payload.get("requested_inputs")
+        if isinstance(requested, (list, tuple)):
+            return len(requested)
+        return None
+
+    def _duration_seconds(self, payload: Mapping[str, Any]) -> float | None:
+        started = payload.get("started_at_utc")
+        completed = payload.get("completed_at_utc")
+        if not started or not completed:
+            return None
+        try:
+            from datetime import datetime
+
+            start = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(completed).replace("Z", "+00:00"))
+            return max(0.0, (end - start).total_seconds())
+        except Exception:
+            return None
 
     def _finalize(self, result: Mapping[str, Any], *, default_message: str) -> AdminUIRunResult:
         run_id = str(result.get("run_id") or "")
