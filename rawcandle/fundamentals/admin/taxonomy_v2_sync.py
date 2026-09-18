@@ -203,5 +203,20 @@ def run_apply(
             cleanup_copy_lane(lane)
 
 
-def run_production_apply(**kwargs) -> dict[str, Any]:
-    raise PermissionError("ADMIN_FULL_V2_ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY")
+def run_production_apply(
+    *, preview_payload_path: Path, preview_fingerprint: str, test_run_id: str,
+    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(), run_root: Path = ADMIN_RUN_ROOT,
+    backup_root: Path | None = None, confirm_production: bool = False,
+    progress_callback=None,
+) -> dict[str, Any]:
+    if not confirm_production:
+        raise PermissionError("ADMIN_TAXONOMY_PRODUCTION_CONFIRMATION_REQUIRED")
+    from rawcandle.fundamentals.admin.production_operations import TAXONOMY
+    from rawcandle.fundamentals.admin.production_transaction import run_transaction
+
+    return run_transaction(
+        TAXONOMY, preview_payload_path=preview_payload_path,
+        preview_fingerprint=preview_fingerprint, test_run_id=test_run_id,
+        source_paths=source_paths, run_root=run_root, backup_root=backup_root,
+        production_intent=True,
+    )

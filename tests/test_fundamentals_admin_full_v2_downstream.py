@@ -180,8 +180,10 @@ def test_taxonomy_stale_preview_is_logged_before_copy(tmp_path, monkeypatch):
 
 
 def test_taxonomy_production_update_fails_before_write():
-    with pytest.raises(PermissionError, match="ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY"):
-        taxonomy_v2_sync.run_production_apply()
+    with pytest.raises(PermissionError, match="CONFIRMATION_REQUIRED"):
+        taxonomy_v2_sync.run_production_apply(
+            preview_payload_path=Path("missing.json"), preview_fingerprint="missing", test_run_id="missing",
+        )
 
 
 def test_fundamentals_taxonomy_cli_has_no_csv_candidate_option():

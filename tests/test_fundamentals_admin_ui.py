@@ -374,6 +374,7 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
                 run_id="run3",
                 outcome="COMPLETED",
                 mode="COPY_ONLY_APPLY",
+                preview_fingerprint="f" * 64,
                 report_filename=OPERATION_REPORT_NAME,
                 report_sha256="b" * 64,
                 summary_rows=("Operation: ADD_TICKERS", "Outcome: COMPLETED"),
@@ -412,16 +413,17 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
     assert controls.final_section.visible is False
     assert controls.report_button.visible is True
     assert controls.copy_apply_button.disabled is False
-    assert controls.production_apply_button.disabled is False
+    assert controls.production_apply_button.disabled is True
     assert controls.copy_apply_button.visible is True
     controls.copy_apply_button.on_click(None)
     assert service.apply_calls[0]["preview_payload_path"] == "/tmp/payload.json"
     assert service.apply_calls[0]["preview_fingerprint"] == "f" * 64
+    assert controls.production_apply_button.disabled is False
     controls.tickers_field.value = "MSFT"
     controls.tickers_field.on_change(None)
     assert controls.copy_apply_button.disabled is True
     assert controls.production_apply_button.disabled is True
-    assert "Apply completed." in controls.status_field.value
+    assert "preview is no longer current" in controls.status_field.value
     controls.history_column.controls[0].controls[-1].on_click(None)
     assert page.launched_urls == [admin_report_download_url("run1")]
     assert controls.preview_button.disabled is False
@@ -478,6 +480,12 @@ def test_production_confirmation_uses_internal_token_and_waits_for_confirm() -> 
                 summary_rows=("Operation: ADD_TICKERS", "Outcome: COMPLETED"),
             )
 
+        def copy_apply(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED", message="Test completed.", run_id="copy-run",
+                outcome="COMPLETED", mode="COPY_ONLY_APPLY", preview_fingerprint="f" * 64,
+            )
+
         def production_apply(self, operation_type, **kwargs):
             self.production_calls.append({"operation_type": operation_type, **kwargs})
             return AdminUIRunResult(
@@ -501,11 +509,15 @@ def test_production_confirmation_uses_internal_token_and_waits_for_confirm() -> 
     controls.production_apply_button.on_click(None)
 
     assert service.production_calls == []
+    assert page.opened_dialogs == []
+    controls.copy_apply_button.on_click(None)
+    controls.production_apply_button.on_click(None)
     assert page.opened_dialogs
     page.opened_dialogs[-1].actions[1].on_click(None)
     assert service.production_calls[0]["confirmation"] == "CONFIRM_PRODUCTION_BATCH_ADD_TICKERS"
     assert service.production_calls[0]["preview_payload_path"] == "/tmp/payload.json"
     assert service.production_calls[0]["preview_fingerprint"] == "f" * 64
+    assert service.production_calls[0]["test_run_id"] == "copy-run"
 
 
 def test_apply_visibility_follows_backend_capability() -> None:
@@ -659,6 +671,7 @@ def test_taxonomy_service_action_gates_require_candidate_and_authorized_provenan
         ({**changed, "downstream": {**changed["downstream"], "candidate": None}}, False, False),
         ({**changed, "mode": "PROTECTED_PRODUCTION_PREVIEW", "downstream": {**changed["downstream"], "candidate": {"provenance": "TEST_ONLY_NOT_FOR_PRODUCTION"}}}, False, False),
         ({**changed, "mode": "PROTECTED_PRODUCTION_PREVIEW", "downstream": {**changed["downstream"], "candidate": {"provenance": "CURATED_PRODUCTION_CANDIDATE"}}}, False, False),
+        ({**changed, "mode": "ACTIVE_TAXONOMY_PREVIEW"}, True, True),
     ):
         run_dir = tmp_path / payload["run_id"]
         run_dir.mkdir(exist_ok=True)

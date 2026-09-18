@@ -581,10 +581,10 @@ def test_production_apply_requires_confirmation(tmp_path: Path) -> None:
         )
 
 
-def test_production_apply_rejects_non_authorized_batch(tmp_path: Path) -> None:
+def test_production_apply_rejects_copy_paths(tmp_path: Path) -> None:
     payload, fp = _production_payload(tmp_path / "payload.json", tickers=("ARM",))
 
-    with pytest.raises(PermissionError, match="AUTHORIZED_TICKERS"):
+    with pytest.raises(PermissionError, match="EXPLICIT_PRODUCTION_INTENT_REQUIRED"):
         run_production_apply(
             preview_payload_path=payload,
             preview_fingerprint=fp,
@@ -625,7 +625,7 @@ def test_production_apply_runs_one_batch_and_identical_no_change(tmp_path: Path,
 
     monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._apply_generic_plan", fake_apply)
 
-    with pytest.raises(PermissionError, match="ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY"):
+    with pytest.raises(PermissionError, match="EXPLICIT_PRODUCTION_INTENT_REQUIRED"):
         run_production_apply(
             preview_payload_path=payload,
             preview_fingerprint=fp,
@@ -659,7 +659,7 @@ def test_production_apply_rolls_back_after_write_boundary(tmp_path: Path, monkey
     monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._apply_generic_plan", fail_apply)
     monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._restore_production_from_backups", fake_restore)
 
-    with pytest.raises(PermissionError, match="ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY"):
+    with pytest.raises(PermissionError, match="EXPLICIT_PRODUCTION_INTENT_REQUIRED"):
         run_production_apply(
             preview_payload_path=payload,
             preview_fingerprint=fp,

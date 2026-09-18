@@ -396,13 +396,17 @@ def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT) -> Opera
     result = _load_json(run_dir / "result.json") or {}
     request = _load_json(run_dir / "request.json")
     progress = _load_json(run_dir / "progress_status.json") or _load_json(run_dir / "status.json")
-    report = render_operation_report(
-        run_id=run_id,
-        result=result,
-        request=request,
-        progress=progress,
-        events=_progress_events(run_dir),
-    )
+    if result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"} and "write_set" in result:
+        from rawcandle.fundamentals.admin.production_transaction import render_production_report
+        report = render_production_report(result)
+    else:
+        report = render_operation_report(
+            run_id=run_id,
+            result=result,
+            request=request,
+            progress=progress,
+            events=_progress_events(run_dir),
+        )
     report_path = run_dir / OPERATION_REPORT_NAME
     write_text_atomic(report_path, report)
     manifest = {

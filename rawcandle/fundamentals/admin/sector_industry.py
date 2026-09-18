@@ -46,6 +46,7 @@ from rawcandle.fundamentals.admin.reporting import render_markdown_report
 from rawcandle.fundamentals.admin.rv_identity import active_relative_valuation_identity
 from rawcandle.fundamentals.operating_income_v2 import activation
 from rawcandle.fundamentals.operating_income_v2 import valuation as valuation_engine
+from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_active_dc_memberships
 from rawcandle.fundamentals.phase12d import PRODUCTION, ROOT, database_inventory, sha256, stable_hash, write_json
 from rawcandle.fundamentals.phase12d import production_inventory
 from rawcandle.fundamentals.phase13b_foundation import (
@@ -315,6 +316,9 @@ def source_state(paths: BatchAddTickerPaths) -> dict[str, Any]:
     universe, universe_meta = _active_universe(paths)
     valuation = _valuation_groups(paths)
     structural = _structural_companies(paths)
+    with _readonly(paths.taxonomy_db) as taxonomy_conn:
+        has_taxonomy_schema = all(_table_exists(taxonomy_conn, table) for table in ("ec_ecosystem", "ec_taxonomy_version", "ec_entity", "ec_membership"))
+    active_taxonomy = load_active_dc_memberships(paths.taxonomy_db, paths.canonical_db)[1] if has_taxonomy_schema else None
     return {
         "contract_version": CONTRACT_VERSION,
         "databases": {role: _logical_database_fingerprint(path) for role, path in paths.as_dict().items()},
@@ -323,6 +327,7 @@ def source_state(paths: BatchAddTickerPaths) -> dict[str, Any]:
         "affected_persisted_classification_fingerprint": stable_hash(_stable_keyed_rows(valuation)),
         "structural_fingerprint": stable_hash(_stable_keyed_rows(structural)),
         "active_identities": _active_identities(paths),
+        "active_taxonomy": active_taxonomy,
     }
 
 
@@ -1125,201 +1130,24 @@ def run_production_apply(
     preview_fingerprint: str,
     source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
     run_root: Path = ADMIN_RUN_ROOT,
-    backup_root: Path = PRODUCTION_BACKUP_ROOT,
+    backup_root: Path | None = None,
     temp_root: Path = PRODUCTION_TEMP_ROOT,
     confirm_production: bool = False,
     progress_callback: ProgressCallback | None = None,
+    test_run_id: str | None = None,
 ) -> dict[str, Any]:
-    del temp_root  # Reserved for future production write rehearsals; no production copies are made in no-change mode.
+    del temp_root
     if not confirm_production:
         raise PermissionError("PHASE13G3_PRODUCTION_APPLY_REQUIRES_CONFIRM_PRODUCTION")
-    payload = _load_payload(preview_payload_path)
-    preview = payload.get("sector_industry_preview") if isinstance(payload.get("sector_industry_preview"), Mapping) else {}
-    if preview.get("preview_fingerprint") != preview_fingerprint:
-        raise ValueError("PHASE13G3_PRODUCTION_PREVIEW_FINGERPRINT_MISMATCH")
-    plan = payload.get("sector_industry_plan") if isinstance(payload.get("sector_industry_plan"), Mapping) else {}
-    request_payload = preview.get("request") if isinstance(preview.get("request"), Mapping) else {}
-    request = AdminBatchRequest(
-        operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
-        requested_inputs=tuple(request_payload.get("requested_inputs") or ()),
-        normalized_inputs=tuple(request_payload.get("normalized_inputs") or ()),
-        rejected_inputs=tuple(request_payload.get("rejected_inputs") or ()),
-        market=request_payload.get("market"),
-        options=request_payload.get("options") or {},
+    from rawcandle.fundamentals.admin.production_operations import SECTOR_INDUSTRY
+    from rawcandle.fundamentals.admin.production_transaction import run_transaction
+
+    return run_transaction(
+        SECTOR_INDUSTRY, preview_payload_path=preview_payload_path,
+        preview_fingerprint=preview_fingerprint, test_run_id=test_run_id or "",
+        source_paths=source_paths, run_root=run_root, backup_root=backup_root,
+        production_intent=True,
     )
-    if request.normalized_inputs:
-        raise PermissionError("PHASE13G3_PRODUCTION_REQUIRES_FULL_UNIVERSE_PREVIEW")
-    run_id = stable_run_id(AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY, preview_fingerprint, suffix="production")
-    writer = AdminRunWriter(run_id, AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY, root=run_root)
-    progress = ProgressTracker(
-        run_id=run_id,
-        operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
-        run_dir=writer.run_dir,
-        stages=SECTOR_INDUSTRY_STAGES,
-        callback=progress_callback,
-    )
-    backup_dir = (backup_root / run_id).resolve()
-    started = utc_now()
-    lock_handle = None
-    try:
-        progress.running(ProgressStage.PREFLIGHT, "Recording protected Sector/Industry production request.")
-        writer.checkpoint(RunStage.REQUEST_CREATED, message="Protected Sector/Industry production apply request recorded.", preview_fingerprint=preview_fingerprint)
-        writer.write_json("request.json", request.as_dict())
-        writer.write_json("preview.json", preview)
-        writer.write_json("preview_payload_identity.json", {
-            "path": str(preview_payload_path.resolve()),
-            "sha256": sha256(preview_payload_path),
-            "preview_fingerprint": preview_fingerprint,
-        })
-        writer.checkpoint(RunStage.APPLY_STARTED, message="Running protected production preflight.", preview_fingerprint=preview_fingerprint)
-        with _background_heartbeat(progress, "Sector/Industry production preflight is still running."):
-            preflight = _production_preflight(source_paths, output=writer.run_dir, backup_dir=backup_dir)
-        writer.write_json("production_preflight.json", preflight)
-        progress.completed(ProgressStage.PREFLIGHT, "Production preflight completed.")
-
-        progress.running(ProgressStage.PREVIEW_VALIDATION, "Validating immutable preview, source freshness and maintenance lock.")
-        _assert_preview_fresh(source_paths, payload)
-        PRODUCTION_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-        lock_handle = PRODUCTION_LOCK_PATH.open("w")
-        try:
-            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("PHASE13G3_MAINTENANCE_LOCK_BUSY") from exc
-        progress.completed(ProgressStage.PREVIEW_VALIDATION, "Saved preview is fresh and maintenance lock acquired.")
-
-        progress.running(ProgressStage.CLASSIFICATION_SCAN, "Recomputing fresh full production Sector/Industry scan.")
-        fresh_plan = build_sector_industry_plan(source_paths, request)
-        fresh_plan_dict = fresh_plan.safe_dict()
-        writer.write_json("fresh_production_plan.json", fresh_plan_dict)
-        progress.completed(ProgressStage.CLASSIFICATION_SCAN, "Fresh production scan completed.", processed_items=fresh_plan.inspected_count, total_items=fresh_plan.denominator_count)
-
-        progress.running(ProgressStage.CLASSIFICATION_RECONCILIATION, "Checking accepted Phase 13G.3.1 population contract.")
-        population_gate = _accepted_population_gate(fresh_plan_dict)
-        writer.write_json("production_population_gate.json", population_gate)
-        if population_gate["status"] != "ACCEPTED":
-            raise RuntimeError("PHASE13G3_PRODUCTION_POPULATION_GATE_REJECTED:" + ",".join(population_gate["failures"]))
-        if fingerprint(preview.get("proposed_changes") or []) != fingerprint([]):
-            raise RuntimeError("PHASE13G3_PRODUCTION_SAVED_PREVIEW_CONTAINS_CHANGES")
-        progress.completed(ProgressStage.CLASSIFICATION_RECONCILIATION, "Accepted population contract verified.", processed_items=fresh_plan.inspected_count, total_items=fresh_plan.denominator_count)
-        writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Production no-change gate accepted; no write boundary will be crossed.", preview_fingerprint=preview_fingerprint)
-
-        before_state = _production_logical_state(source_paths)
-        progress.running(ProgressStage.NO_CHANGE_VERIFICATION, "Verifying true production NO_CHANGE with zero writes and zero downstream invocations.")
-        repeat_plan = build_sector_industry_plan(source_paths, request)
-        repeat_gate = _accepted_population_gate(repeat_plan.safe_dict())
-        if repeat_gate["status"] != "ACCEPTED":
-            raise RuntimeError("PHASE13G3_PRODUCTION_REPEAT_GATE_REJECTED:" + ",".join(repeat_gate["failures"]))
-        downstream = {
-            "classification_writes": 0,
-            "invocation_counts": {"package": 0, "relative_position": 0, "relative_valuation": 0},
-            "package": "NOT_RUN_NO_CHANGE",
-            "relative_position": "NOT_RUN_NO_CHANGE",
-            "relative_valuation": "NOT_RUN_NO_CHANGE",
-            "repeat": {"outcome": "NO_CHANGE", "counts": _counts(repeat_plan.items)},
-        }
-        progress.completed(ProgressStage.NO_CHANGE_VERIFICATION, "Production NO_CHANGE verified.", processed_items=repeat_plan.inspected_count, total_items=repeat_plan.denominator_count)
-        after_state = _production_logical_state(source_paths)
-        logical_compare = {
-            "identical": before_state == after_state,
-            "before_fingerprint": stable_hash(before_state),
-            "after_fingerprint": stable_hash(after_state),
-        }
-        if not logical_compare["identical"]:
-            raise RuntimeError("PHASE13G3_PRODUCTION_LOGICAL_STATE_CHANGED_UNEXPECTEDLY")
-
-        final_items = tuple(_decision_from_item(item) for item in fresh_plan.items)
-        counts = _counts(fresh_plan.items)
-        result = AdminFinalResult(
-            run_id=run_id,
-            operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
-            outcome=AdminStatus.NO_CHANGE,
-            mode="PRODUCTION_NO_CHANGE_APPLY",
-            started_at_utc=started,
-            completed_at_utc=utc_now(),
-            preview_fingerprint=preview_fingerprint,
-            request=request.as_dict(),
-            item_results=final_items,
-            summary_counts=counts,
-            rollback={"status": "NOT_REQUIRED", "message": "No production write boundary was crossed; backup was not required."},
-            downstream=downstream | {
-                "production_outcome": PRODUCTION_OUTCOME_A,
-                "logical_state_compare": logical_compare,
-                "population_gate": population_gate,
-                "pre_active_identities": before_state["active_identities"],
-                "post_active_identities": after_state["active_identities"],
-            },
-            artifacts={
-                "fresh_production_plan": str(writer.run_dir / "fresh_production_plan.json"),
-                "population_gate": str(writer.run_dir / "production_population_gate.json"),
-                "preview_payload_identity": str(writer.run_dir / "preview_payload_identity.json"),
-            },
-            recommended_next_action=PRODUCTION_OUTCOME_A,
-        )
-        result_dict = result.as_dict()
-        result_dict["production_apply"] = {
-            "outcome": PRODUCTION_OUTCOME_A,
-            "classification_writes": 0,
-            "downstream_invocation_counts": downstream["invocation_counts"],
-            "backup": {"status": "NOT_REQUIRED_NO_WRITE_BOUNDARY"},
-            "preflight": preflight,
-            "population_gate": population_gate,
-            "logical_state_compare": logical_compare,
-            "before_state": before_state,
-            "after_state": after_state,
-        }
-        writer.write_final_result(result)
-        writer.write_json("production_apply_technical.json", result_dict["production_apply"])
-        writer.write_items_csv([item.as_dict() for item in final_items])
-        writer.write_text("report.md", render_markdown_report(result_dict))
-        progress.running(ProgressStage.FINAL_VALIDATION, "Writing final production no-change artifacts.")
-        progress.completed(ProgressStage.FINAL_VALIDATION, "Final production artifacts written.", processed_items=len(final_items), total_items=len(final_items))
-        writer.checkpoint(RunStage.COMPLETED, message=PRODUCTION_OUTCOME_A, preview_fingerprint=preview_fingerprint, counters=counts)
-        writer.write_exit_code(0)
-        writer.write_manifest()
-        progress.running(ProgressStage.CLEANUP, "Production cleanup completed; no backups or copies were created.")
-        progress.completed(ProgressStage.CLEANUP, "Production cleanup completed; no backups or copies were created.")
-        progress.running(ProgressStage.COMPLETED, PRODUCTION_OUTCOME_A)
-        progress.completed(ProgressStage.COMPLETED, PRODUCTION_OUTCOME_A)
-        return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir)}
-    except Exception as exc:
-        writer.write_error(exc)
-        try:
-            progress.failed(ProgressStage.PREVIEW_VALIDATION, "Protected production apply stopped before write boundary.", errors=(f"{type(exc).__name__}: {exc}",))
-        except Exception:
-            pass
-        error_items = tuple(
-            _decision_from_item(item)
-            for item in plan.get("items", [])
-        ) if isinstance(plan.get("items"), (list, tuple)) else ()
-        result = AdminFinalResult(
-            run_id=run_id,
-            operation_type=AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY,
-            outcome=AdminStatus.FAILED,
-            mode="PRODUCTION_NO_CHANGE_APPLY",
-            started_at_utc=started,
-            completed_at_utc=utc_now(),
-            preview_fingerprint=preview_fingerprint,
-            request=request.as_dict(),
-            item_results=error_items,
-            summary_counts=_counts(plan.get("items", [])) if isinstance(plan.get("items"), (list, tuple)) else {},
-            rollback={"status": "NOT_REQUIRED", "message": "Failure occurred before production write boundary."},
-            downstream={"production_outcome": PRODUCTION_OUTCOME_B},
-            recommended_next_action="Inspect error.json and production_apply_technical.json before any future production attempt.",
-            errors=({"type": type(exc).__name__, "message": str(exc), "traceback": traceback.format_exc()},),
-        )
-        result_dict = result.as_dict()
-        writer.write_final_result(result)
-        writer.write_text("report.md", render_markdown_report(result_dict))
-        writer.checkpoint(RunStage.FAILED_BEFORE_WRITE, message=PRODUCTION_OUTCOME_B, preview_fingerprint=preview_fingerprint, write_boundary_crossed=False)
-        writer.write_exit_code(2)
-        writer.write_manifest()
-        return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "error": type(exc).__name__}
-    finally:
-        if lock_handle is not None:
-            try:
-                fcntl.flock(lock_handle, fcntl.LOCK_UN)
-            finally:
-                lock_handle.close()
 
 
 def preflight_snapshot(paths: BatchAddTickerPaths = BatchAddTickerPaths()) -> dict[str, Any]:

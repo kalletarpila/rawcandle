@@ -69,9 +69,9 @@ class AdminUIHistoryEntry:
 
 _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|check_update_sector_industry|check_update_taxonomy)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
-    "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY"},
-    "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT"},
-    "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW"},
+    "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
+    "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
+    "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
 }
 
 
@@ -107,13 +107,13 @@ class FundamentalsAdminUIService:
 
     def capabilities(self) -> tuple[AdminOperationCapability, ...]:
         return (
-            AdminOperationCapability("ADD_TICKERS", True, True, False),
-            AdminOperationCapability("CHECK_UPDATE_SECTOR_INDUSTRY", True, True, False),
+            AdminOperationCapability("ADD_TICKERS", True, True, True),
+            AdminOperationCapability("CHECK_UPDATE_SECTOR_INDUSTRY", True, True, True),
             AdminOperationCapability(
                 "CHECK_UPDATE_TAXONOMY",
                 True,
                 True,
-                False,
+                True,
             ),
         )
 
@@ -205,6 +205,7 @@ class FundamentalsAdminUIService:
         preview_payload_path: str,
         preview_fingerprint: str,
         confirmation: str,
+        test_run_id: str,
         progress_callback: AdminProgressCallback | None = None,
     ) -> AdminUIRunResult:
         operation = operation_type.strip().upper()
@@ -215,6 +216,7 @@ class FundamentalsAdminUIService:
                 preview_fingerprint=preview_fingerprint,
                 run_root=self.run_root,
                 confirm_production=confirmation == "CONFIRM_PRODUCTION_BATCH_ADD_TICKERS",
+                test_run_id=test_run_id,
                 progress_callback=progress_callback,
             )
         elif operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
@@ -223,6 +225,7 @@ class FundamentalsAdminUIService:
                 preview_fingerprint=preview_fingerprint,
                 run_root=self.run_root,
                 confirm_production=confirmation == "CONFIRM_PRODUCTION_SECTOR_INDUSTRY",
+                test_run_id=test_run_id,
                 progress_callback=progress_callback,
             )
         elif operation == "CHECK_UPDATE_TAXONOMY":
@@ -230,7 +233,8 @@ class FundamentalsAdminUIService:
                 preview_payload_path=payload_path,
                 preview_fingerprint=preview_fingerprint,
                 run_root=self.run_root,
-                confirmation=confirmation,
+                confirm_production=confirmation == "CONFIRM_PRODUCTION_TAXONOMY",
+                test_run_id=test_run_id,
                 progress_callback=progress_callback,
             )
         else:
@@ -445,7 +449,7 @@ class FundamentalsAdminUIService:
             or result.get("payload_path")
         )
         return AdminUIRunResult(
-            status="FAILED" if result.get("outcome") in {"FAILED", "ERROR", "INTERRUPTED"} else "COMPLETED",
+            status="FAILED" if result.get("outcome") in {"FAILED", "ERROR", "INTERRUPTED", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED",
             message=default_message,
             run_id=run_id or None,
             outcome=str(result.get("outcome")) if result.get("outcome") is not None else None,
@@ -459,6 +463,6 @@ class FundamentalsAdminUIService:
             business_outcome=taxonomy["business_outcome"] if taxonomy else None,
             preview_domain=taxonomy["domain"] if taxonomy else None,
             copy_actionable=True if result.get("mode") == "ACTIVE_TAXONOMY_PREVIEW" else (bool(taxonomy["changes"] and taxonomy["eligible"] and not taxonomy["blockers"] and taxonomy["candidate"] and result.get("mode") == "CANDIDATE_PREVIEW" and taxonomy["business_outcome"] == "CHANGES_AVAILABLE") if taxonomy else None),
-            production_actionable=False if taxonomy else None,
+            production_actionable=result.get("mode") == "ACTIVE_TAXONOMY_PREVIEW" if result.get("operation_type") == "CHECK_UPDATE_TAXONOMY" else None,
             duration_seconds=self._duration_seconds(result),
         )

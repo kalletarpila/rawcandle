@@ -310,11 +310,11 @@ def test_production_apply_requires_confirmation(tmp_path: Path) -> None:
         )
 
 
-def test_production_apply_requires_full_universe_preview(tmp_path: Path) -> None:
+def test_production_apply_rejects_copy_paths(tmp_path: Path) -> None:
     paths = _paths(tmp_path / "source")
     preview = run_preview("EXACT", source_paths=paths, run_root=tmp_path / "runs")
 
-    with pytest.raises(PermissionError, match="FULL_UNIVERSE"):
+    with pytest.raises(PermissionError, match="EXPLICIT_PRODUCTION_INTENT_REQUIRED"):
         run_production_apply(
             preview_payload_path=Path(preview["preview_payload_path"]),
             preview_fingerprint=preview["preview_fingerprint"],
@@ -326,7 +326,7 @@ def test_production_apply_requires_full_universe_preview(tmp_path: Path) -> None
         )
 
 
-def test_production_no_change_apply_crosses_no_write_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_no_change_route_requires_real_production_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     paths = _paths(tmp_path / "source")
     _remove_safe_sector_industry_changes(paths)
     preview = run_preview("", source_paths=paths, run_root=tmp_path / "runs")
@@ -334,27 +334,20 @@ def test_production_no_change_apply_crosses_no_write_boundary(tmp_path: Path, mo
     monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry._production_preflight", lambda *args, **kwargs: {"status": "OK"})
     monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry._accepted_population_gate", _accept_test_population)
 
-    result = run_production_apply(
-        preview_payload_path=Path(preview["preview_payload_path"]),
-        preview_fingerprint=preview["preview_fingerprint"],
-        source_paths=paths,
-        run_root=tmp_path / "runs",
-        backup_root=tmp_path / "backups",
-        temp_root=tmp_path / "temp",
-        confirm_production=True,
-    )
-
-    assert result["outcome"] == "NO_CHANGE"
-    assert result["mode"] == "PRODUCTION_NO_CHANGE_APPLY"
-    assert result["downstream"]["classification_writes"] == 0
-    assert result["downstream"]["invocation_counts"] == {"package": 0, "relative_position": 0, "relative_valuation": 0}
-    assert result["downstream"]["repeat"]["outcome"] == "NO_CHANGE"
-    assert result["rollback"]["status"] == "NOT_REQUIRED"
-    assert result["production_apply"]["backup"]["status"] == "NOT_REQUIRED_NO_WRITE_BOUNDARY"
-    assert result["production_apply"]["logical_state_compare"]["identical"] is True
+    with pytest.raises(PermissionError, match="EXPLICIT_PRODUCTION_INTENT_REQUIRED"):
+        run_production_apply(
+            preview_payload_path=Path(preview["preview_payload_path"]),
+            preview_fingerprint=preview["preview_fingerprint"],
+            source_paths=paths,
+            run_root=tmp_path / "runs",
+            backup_root=tmp_path / "backups",
+            temp_root=tmp_path / "temp",
+            confirm_production=True,
+        )
+    assert not (tmp_path / "backups").exists()
 
 
-def test_production_apply_rejects_stale_preview_before_write_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_copy_path_guard_precedes_stale_preview_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     paths = _paths(tmp_path / "source")
     _remove_safe_sector_industry_changes(paths)
     preview = run_preview("", source_paths=paths, run_root=tmp_path / "runs")
@@ -363,19 +356,16 @@ def test_production_apply_rejects_stale_preview_before_write_boundary(tmp_path: 
 
     monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry._production_preflight", lambda *args, **kwargs: {"status": "OK"})
 
-    result = run_production_apply(
-        preview_payload_path=Path(preview["preview_payload_path"]),
-        preview_fingerprint=preview["preview_fingerprint"],
-        source_paths=paths,
-        run_root=tmp_path / "runs",
-        backup_root=tmp_path / "backups",
-        temp_root=tmp_path / "temp",
-        confirm_production=True,
-    )
-
-    assert result["outcome"] == "FAILED"
-    assert result["rollback"]["status"] == "NOT_REQUIRED"
-    assert result["downstream"]["production_outcome"].startswith("OUTCOME B")
+    with pytest.raises(PermissionError, match="EXPLICIT_PRODUCTION_INTENT_REQUIRED"):
+        run_production_apply(
+            preview_payload_path=Path(preview["preview_payload_path"]),
+            preview_fingerprint=preview["preview_fingerprint"],
+            source_paths=paths,
+            run_root=tmp_path / "runs",
+            backup_root=tmp_path / "backups",
+            temp_root=tmp_path / "temp",
+            confirm_production=True,
+        )
 
 
 def test_production_logical_state_ignores_physical_inventory_noise(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

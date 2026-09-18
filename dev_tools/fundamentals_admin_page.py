@@ -236,6 +236,7 @@ def build_fundamentals_admin_page(
     current_preview_result: AdminUIRunResult | None = None
     current_preview_payload_path: str | None = None
     current_preview_fingerprint: str | None = None
+    current_test_run_id: str | None = None
     current_report_run_id: str | None = None
     selected_history_run_id: str | None = None
     operation_running = False
@@ -413,7 +414,7 @@ def build_fundamentals_admin_page(
 
     def apply_result(result: AdminUIRunResult) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
-        nonlocal current_preview_fingerprint, current_report_run_id, selected_history_run_id
+        nonlocal current_preview_fingerprint, current_test_run_id, current_report_run_id, selected_history_run_id
         is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "ACTIVE_TAXONOMY_PREVIEW"}
         status_field.value = _result_text(result)
         final_section.visible = not is_preview
@@ -427,7 +428,11 @@ def build_fundamentals_admin_page(
         if result.preview_payload_path and result.preview_fingerprint:
             current_preview_signature = current_signature()
             current_preview_result = result
+            current_test_run_id = None
+        elif result.mode == "COPY_ONLY_APPLY" and result.status == "COMPLETED" and result.outcome == "COMPLETED" and result.preview_fingerprint == current_preview_fingerprint:
+            current_test_run_id = result.run_id
         elif not is_preview:
+            current_test_run_id = None
             current_preview_signature = None
             current_preview_result = None
             current_preview_payload_path = None
@@ -491,7 +496,7 @@ def build_fundamentals_admin_page(
         taxonomy_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.mode == "ACTIVE_TAXONOMY_PREVIEW" and taxonomy_domain_dropdown.value == "dc_ecosystem")
         generic_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.outcome != "NO_CHANGE")
         copy_ready = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.copy_actionable is True)))
-        production_ready = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.production_actionable is True)))
+        production_ready = bool(current_test_run_id and preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.production_actionable is True)))
         copy_apply_button.visible = bool(copy_authorized and copy_ready)
         copy_apply_button.disabled = bool(operation_running or not copy_authorized or not copy_ready)
         production_apply_button.visible = bool(production_authorized and production_ready)
@@ -499,12 +504,13 @@ def build_fundamentals_admin_page(
 
     def invalidate_preview(_event: Any | None = None) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
-        nonlocal current_preview_fingerprint, current_report_run_id
+        nonlocal current_preview_fingerprint, current_test_run_id, current_report_run_id
         if current_preview_signature is not None and current_preview_signature != current_signature():
             current_preview_signature = None
             current_preview_result = None
             current_preview_payload_path = None
             current_preview_fingerprint = None
+            current_test_run_id = None
             current_report_run_id = None
             preview_payload_field.value = ""
             preview_fingerprint_field.value = ""
@@ -550,11 +556,12 @@ def build_fundamentals_admin_page(
                 page.update()
 
     def on_preview(_event: Any) -> None:
-        nonlocal current_preview_signature, current_preview_result, current_preview_payload_path, current_preview_fingerprint, last_progress_count
+        nonlocal current_preview_signature, current_preview_result, current_preview_payload_path, current_preview_fingerprint, current_test_run_id, last_progress_count
         current_preview_signature = None
         current_preview_result = None
         current_preview_payload_path = None
         current_preview_fingerprint = None
+        current_test_run_id = None
         preview_payload_field.value = ""
         preview_fingerprint_field.value = ""
         last_progress_count = None
@@ -591,6 +598,8 @@ def build_fundamentals_admin_page(
             return "CONFIRM_PRODUCTION_BATCH_ADD_TICKERS"
         if operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
             return "CONFIRM_PRODUCTION_SECTOR_INDUSTRY"
+        if operation == "CHECK_UPDATE_TAXONOMY":
+            return "CONFIRM_PRODUCTION_TAXONOMY"
         capability = capability_for_current_operation()
         return str(getattr(capability, "production_confirmation_hint", "") or "")
 
@@ -639,6 +648,7 @@ def build_fundamentals_admin_page(
                 preview_payload_path=current_preview_payload_path or "",
                 preview_fingerprint=current_preview_fingerprint or "",
                 confirmation=confirmation_token_for_current_operation(),
+                test_run_id=current_test_run_id or "",
                 progress_callback=progress_callback,
             ),
         )

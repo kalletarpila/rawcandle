@@ -64,7 +64,7 @@ def test_fundamentals_taxonomy_production_cli_is_gated(tmp_path: Path, capsys: p
     )
 
     assert code == 2
-    assert "ADMIN_FULL_V2_ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY" in capsys.readouterr().out
+    assert "--test-run-id" in capsys.readouterr().out
 
 
 def test_ec_taxonomy_production_mode_is_refused() -> None:

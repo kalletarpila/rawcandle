@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT
-from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, PRODUCTION_BACKUP_ROOT
+from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.progress import progress_line
-from rawcandle.fundamentals.admin.sector_industry import PRODUCTION_TEMP_ROOT, TEMP_ROOT, run_apply, run_preview, run_production_apply
+from rawcandle.fundamentals.admin.sector_industry import TEMP_ROOT, run_apply, run_preview, run_production_apply
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,8 +18,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--market", default="usa")
     parser.add_argument("--apply", action="store_true", help="Run copy-only apply from a saved preview payload.")
     parser.add_argument("--confirm-apply", action="store_true")
-    parser.add_argument("--production", action="store_true", help="Run the protected production no-change apply mode.")
+    parser.add_argument("--production", action="store_true", help="Run guarded analysis synchronization after a matching copy test.")
     parser.add_argument("--confirm-production", action="store_true")
+    parser.add_argument("--test-run-id", help="Successful Test on copies run bound to this Preview.")
     parser.add_argument("--preview-payload", type=Path, help="sector_industry_preview_payload.json produced by preview.")
     parser.add_argument("--preview-fingerprint")
     parser.add_argument("--backup-root", type=Path)
@@ -58,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     progress_callback = None if args.quiet_progress else lambda event: print(progress_line(event), file=sys.stderr, flush=True)
     try:
         if args.production:
+            if args.temp_root is not None:
+                raise ValueError("--temp-root is not used in production; candidate stays beside analysis DB")
             if not args.apply:
                 raise ValueError("--production requires --apply")
             if not args.preview_payload or not args.preview_fingerprint:
@@ -67,9 +70,9 @@ def main(argv: list[str] | None = None) -> int:
                 preview_fingerprint=args.preview_fingerprint,
                 source_paths=_paths(args),
                 run_root=args.run_root or ADMIN_RUN_ROOT,
-                backup_root=args.backup_root or PRODUCTION_BACKUP_ROOT,
-                temp_root=args.temp_root or PRODUCTION_TEMP_ROOT,
+                backup_root=args.backup_root,
                 confirm_production=args.confirm_production,
+                test_run_id=args.test_run_id,
                 progress_callback=progress_callback,
             )
         elif args.apply:
@@ -93,8 +96,9 @@ def main(argv: list[str] | None = None) -> int:
                 market=args.market,
                 progress_callback=progress_callback,
             )
-        print(json.dumps({"ok": True, "run_id": result["run_id"], "outcome": result.get("outcome"), "artifact_dir": result["artifact_dir"]}, sort_keys=True))
-        return 0 if result.get("outcome") in {"COMPLETED", "NO_CHANGE"} else 1
+        successful = result.get("outcome") in {"COMPLETED", "NO_CHANGE"}
+        print(json.dumps({"ok": successful, "run_id": result["run_id"], "outcome": result.get("outcome"), "artifact_dir": result["artifact_dir"]}, sort_keys=True))
+        return 0 if successful else 1
     except Exception as exc:
         print(json.dumps({"ok": False, "error": type(exc).__name__, "reason": str(exc)}, sort_keys=True))
         return 2
