@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
+from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, sha256_file, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, _background_heartbeat, cleanup_copy_lane, create_copy_lane
 from rawcandle.fundamentals.admin.contracts import (
     AdminBatchRequest, AdminFinalResult, AdminOperationType, AdminStatus, RunStage,
@@ -19,13 +19,16 @@ from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_acti
 from rawcandle.fundamentals.phase13b_foundation import database_fingerprint
 
 
-def _state(paths: BatchAddTickerPaths) -> dict[str, Any]:
+def _state(paths: BatchAddTickerPaths, *, include_content: bool = True) -> dict[str, Any]:
     _, taxonomy = load_active_dc_memberships(paths.taxonomy_db, paths.canonical_db)
-    return {
+    state = {
         "sources": {role: database_fingerprint(paths.as_dict()[role]) for role in ("provider", "canonical", "market", "taxonomy")},
         "analysis": database_fingerprint(paths.analysis_db),
         "active_taxonomy": taxonomy,
     }
+    if include_content:
+        state["content_sha256"] = {role: sha256_file(paths.as_dict()[role]) for role in ("provider", "canonical", "market", "analysis")}
+    return state
 
 
 def run_preview(
@@ -140,7 +143,9 @@ def run_apply(
         progress.running(ProgressStage.CREATE_COPIES, "Copying authoritative source databases.")
         lane = create_copy_lane(source_paths, lane_dir=temp_root / run_id / "apply_lane", writer=writer)
         progress.completed(ProgressStage.CREATE_COPIES, "Source copies are ready.")
-        if _state(lane.paths) != preview["source_state"]:
+        copied_state = _state(lane.paths, include_content=False)
+        preview_logical_state = {key: value for key, value in preview["source_state"].items() if key != "content_sha256"}
+        if copied_state != preview_logical_state:
             raise RuntimeError("FUNDAMENTALS_TAXONOMY_COPY_SOURCE_MISMATCH")
         writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Building disposable V2 analysis.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
         write_boundary_crossed = True

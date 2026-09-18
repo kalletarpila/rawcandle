@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -111,7 +112,7 @@ def test_taxonomy_preview_binds_active_database_identity(tmp_path, monkeypatch):
 def test_taxonomy_copy_apply_uses_full_v2_without_writing_taxonomy(tmp_path, monkeypatch):
     identity = {"domain": "dc_ecosystem", "version": "DC_V2", "semantic_fingerprint": "semantic"}
     paths = _paths(tmp_path)
-    monkeypatch.setattr(taxonomy_v2_sync, "_state", lambda _: {"sources": {}, "analysis": {}, "active_taxonomy": identity})
+    monkeypatch.setattr(taxonomy_v2_sync, "_state", lambda _, **kwargs: {"sources": {}, "analysis": {}, "active_taxonomy": identity})
     preview = taxonomy_v2_sync.run_preview(source_paths=paths, run_root=tmp_path / "runs")
     calls = []
 
@@ -139,7 +140,7 @@ def test_taxonomy_copy_apply_uses_full_v2_without_writing_taxonomy(tmp_path, mon
 def test_taxonomy_rebuild_failure_has_durable_failed_report(tmp_path, monkeypatch):
     identity = {"domain": "dc_ecosystem", "version": "DC_V2", "semantic_fingerprint": "semantic"}
     paths = _paths(tmp_path)
-    monkeypatch.setattr(taxonomy_v2_sync, "_state", lambda _: {"sources": {}, "analysis": {}, "active_taxonomy": identity})
+    monkeypatch.setattr(taxonomy_v2_sync, "_state", lambda _, **kwargs: {"sources": {}, "analysis": {}, "active_taxonomy": identity})
     preview = taxonomy_v2_sync.run_preview(source_paths=paths, run_root=tmp_path / "runs")
 
     def copy_lane(source, *, lane_dir, writer):
@@ -162,7 +163,7 @@ def test_taxonomy_rebuild_failure_has_durable_failed_report(tmp_path, monkeypatc
 
 def test_taxonomy_stale_preview_is_logged_before_copy(tmp_path, monkeypatch):
     state = {"sources": {}, "analysis": {}, "active_taxonomy": {"domain": "dc_ecosystem", "version": "v1", "semantic_fingerprint": "one"}}
-    monkeypatch.setattr(taxonomy_v2_sync, "_state", lambda _: state)
+    monkeypatch.setattr(taxonomy_v2_sync, "_state", lambda _, **kwargs: state)
     preview = taxonomy_v2_sync.run_preview(run_root=tmp_path / "runs")
     state = {"sources": {}, "analysis": {}, "active_taxonomy": {"domain": "dc_ecosystem", "version": "v2", "semantic_fingerprint": "two"}}
     monkeypatch.setattr(taxonomy_v2_sync, "create_copy_lane", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("copy was created")))
@@ -177,6 +178,30 @@ def test_taxonomy_stale_preview_is_logged_before_copy(tmp_path, monkeypatch):
     result = json.loads(failed[0].read_text(encoding="utf-8"))
     assert result["outcome"] == "FAILED"
     assert result["downstream"]["write_boundary_crossed"] is False
+
+
+@pytest.mark.parametrize("changed_role", ("provider", "canonical", "market", "analysis"))
+def test_taxonomy_preview_detects_same_row_count_source_content_change(tmp_path, monkeypatch, changed_role):
+    paths = _paths(tmp_path)
+    for path in paths.as_dict().values():
+        with sqlite3.connect(path) as conn:
+            conn.execute("CREATE TABLE state(value TEXT NOT NULL)")
+            conn.execute("INSERT INTO state VALUES('old')")
+    identity = {"domain": "dc_ecosystem", "version": "DC_V2", "semantic_fingerprint": "semantic"}
+    monkeypatch.setattr(taxonomy_v2_sync, "load_active_dc_memberships", lambda *args: ({}, identity))
+    monkeypatch.setattr(taxonomy_v2_sync, "database_fingerprint", lambda path: {"rows": 1})
+    preview = taxonomy_v2_sync.run_preview(source_paths=paths, run_root=tmp_path / "runs")
+    payload = json.loads(Path(preview["preview_payload_path"]).read_text(encoding="utf-8"))
+    assert set(payload["source_state"]["content_sha256"]) == {"provider", "canonical", "market", "analysis"}
+    with sqlite3.connect(paths.as_dict()[changed_role]) as conn:
+        conn.execute("UPDATE state SET value='new'")
+    monkeypatch.setattr(taxonomy_v2_sync, "create_copy_lane", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("copy was created")))
+    with pytest.raises(RuntimeError, match="STALE_PREVIEW"):
+        taxonomy_v2_sync.run_apply(
+            taxonomy_domain="dc_ecosystem", preview_payload_path=Path(preview["preview_payload_path"]),
+            preview_fingerprint=preview["preview_fingerprint"], source_paths=paths,
+            run_root=tmp_path / "runs", confirm_apply=True,
+        )
 
 
 def test_taxonomy_production_update_fails_before_write():
