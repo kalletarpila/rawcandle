@@ -61,6 +61,111 @@ def _sequence(value: Any) -> list[Any]:
     return list(value) if isinstance(value, (list, tuple)) else []
 
 
+def taxonomy_preview_presentation(result: Mapping[str, Any]) -> dict[str, Any] | None:
+    if result.get("operation_type") != "CHECK_UPDATE_TAXONOMY" or result.get("mode") not in {
+        "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW",
+    }:
+        return None
+    downstream = _mapping(result.get("downstream"))
+    protected = _mapping(downstream.get("production_preview"))
+    counts = _mapping(result.get("summary_counts")) or _mapping(downstream.get("change_counts")) or _mapping(protected.get("change_counts"))
+    active = _mapping(downstream.get("active_taxonomy")) or _mapping(protected.get("active_taxonomy")) or _mapping(result.get("active_taxonomy"))
+    active_counts = _mapping(active.get("counts"))
+    blockers = _sequence(result.get("blockers")) or _sequence(downstream.get("blockers")) or _sequence(protected.get("blockers"))
+    proposed = _sequence(result.get("proposed_changes")) or _sequence(downstream.get("proposed_changes")) or _sequence(protected.get("proposed_changes"))
+    change_keys = ("MEMBERSHIP_ADDED", "MEMBERSHIP_REMOVED", "MEMBERSHIP_CHANGED", "ROLE_TIER_CHANGED", "PRIMARY_DESIGNATION_CHANGED")
+    alias_keys = ("additions", "removals", "role_or_tier_changes", "primary_changes")
+    try:
+        changes = max(sum(int(counts.get(key, 0)) for key in change_keys), sum(int(counts.get(key, 0)) for key in alias_keys), int(counts.get("semantic_changes", 0)), len(proposed))
+        eligible = int(counts.get("automatic_apply_eligible", 0))
+        blocked = max(int(counts.get("blocked", 0)), int(counts.get("blockers", 0)), int(counts.get("unresolved_identities", 0)), len(blockers))
+        unexpected = any(int(value) != 0 for key, value in counts.items() if key not in {*change_keys, *alias_keys, "semantic_changes", "UNCHANGED", "automatic_apply_eligible", "blocked", "blockers", "unresolved_identities"})
+    except (TypeError, ValueError):
+        return None
+    execution_ok = str(result.get("outcome")) not in {"FAILED", "ERROR", "INTERRUPTED", "ROLLED_BACK"} and not result.get("errors")
+    no_change = bool(result.get("outcome") in {"COMPLETED", "NO_CHANGE"} and execution_ok and counts and active_counts and not changes and not eligible and not blocked and not unexpected)
+    if not execution_ok:
+        business = "FAILED"
+    elif blocked:
+        business = "BLOCKED"
+    elif changes and eligible == 0:
+        business = "REVIEW_REQUIRED"
+    elif changes:
+        business = "CHANGES_AVAILABLE"
+    elif no_change:
+        business = "NO_CHANGE"
+    else:
+        business = "REVIEW_REQUIRED"
+    invocations = _mapping(downstream.get("invocation_counts"))
+    if invocations and all(isinstance(value, int) and value == 0 for value in invocations.values()):
+        downstream_text = "No downstream calculations were required or run."
+    elif invocations:
+        downstream_text = "Downstream calculations ran: " + ", ".join(f"{key} {value}" for key, value in sorted(invocations.items())) + "."
+    elif str(result.get("mode", "")).endswith("PREVIEW") or result.get("mode") == "CURRENT_STATE_AUDIT":
+        downstream_text = "Potential downstream work was evaluated. No calculations were run during Preview."
+    else:
+        downstream_text = "Downstream calculation status is unavailable."
+    domain = str(result.get("taxonomy_domain") or active.get("domain") or "unknown")
+    version = _mapping(active.get("version"))
+    return {
+        "business_outcome": business,
+        "domain": domain,
+        "version": version.get("taxonomy_version_code") or result.get("active_version"),
+        "memberships": active_counts.get("rows"),
+        "tickers": active_counts.get("tickers"),
+        "counts": counts,
+        "blockers": blocked,
+        "changes": changes,
+        "eligible": eligible,
+        "candidate": _mapping(downstream.get("candidate")) or _mapping(protected.get("candidate")) or _mapping(result.get("candidate")),
+        "downstream_text": downstream_text,
+    }
+
+
+def _taxonomy_no_change_rows(info: Mapping[str, Any], result: Mapping[str, Any]) -> tuple[str, ...]:
+    rows = ["Taxonomy is up to date", "No changes", f"Taxonomy: {info['domain']}"]
+    if info.get("version"):
+        rows.append(f"Active version: {info['version']}")
+    if info.get("tickers") is not None:
+        rows.append(f"{info['tickers']} tickers checked.")
+    if info.get("memberships") is not None:
+        rows.append(f"{info['memberships']} memberships checked.")
+    rows.extend((
+        "0 additions and 0 removals.",
+        "0 role or tier changes and 0 primary-membership changes.",
+        "0 review blockers.",
+        "No production writes. No update is required.",
+        info["downstream_text"],
+    ))
+    duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
+    if duration is not None:
+        minutes, seconds = divmod(round(duration), 60)
+        rows.append(f"Completed in {minutes} min {seconds} sec")
+    return tuple(rows)
+
+
+def _taxonomy_preview_rows(info: Mapping[str, Any], result: Mapping[str, Any]) -> tuple[str, ...]:
+    if info["business_outcome"] == "NO_CHANGE":
+        return _taxonomy_no_change_rows(info, result)
+    label = {
+        "CHANGES_AVAILABLE": "Changes available",
+        "REVIEW_REQUIRED": "Review required",
+        "BLOCKED": "Update blocked",
+        "FAILED": "Preview failed",
+    }[info["business_outcome"]]
+    rows = [f"Taxonomy: {info['domain']}", label]
+    if info.get("version"):
+        rows.append(f"Active version: {info['version']}")
+    if info.get("memberships") is not None:
+        rows.append(f"{info['memberships']} memberships checked.")
+    rows.extend((f"{info['changes']} proposed changes.", f"{info['blockers']} review blockers.", info["downstream_text"]))
+    duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
+    if duration is not None:
+        minutes, seconds = divmod(round(duration), 60)
+        rows.append(f"Completed in {minutes} min {seconds} sec")
+    return tuple(rows)
+
+
 def _safe_run_dir(run_id: str, root: Path = ADMIN_RUN_ROOT) -> Path:
     if "/" in run_id or "\\" in run_id or run_id in {"", ".", ".."}:
         raise ValueError("invalid run_id")
@@ -98,6 +203,9 @@ def resolve_operation_report_download(
 
 
 def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    taxonomy = taxonomy_preview_presentation(result)
+    if taxonomy:
+        return _taxonomy_preview_rows(taxonomy, result)
     counts = _mapping(result.get("summary_counts"))
     downstream = _mapping(result.get("downstream"))
     rollback = _mapping(result.get("rollback"))
@@ -131,6 +239,8 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
                 "Downstream invocations: "
                 + ", ".join(f"{key}={invocation_counts[key]}" for key in sorted(invocation_counts))
             )
+        elif result.get("mode") in {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW"}:
+            rows.append("Potential downstream work was evaluated. No calculations were run during Preview.")
         else:
             rows.append("Downstream: recorded")
     if rollback:
@@ -283,6 +393,7 @@ def render_operation_report(
             "",
             "## Technical Appendix",
             "",
+            f"- Preview fingerprint: `{result.get('preview_fingerprint', '')}`",
             f"- Result fingerprint: `{result.get('result_fingerprint', '')}`",
             f"- Report content fingerprint: `{fingerprint({'result': result, 'request': request or {}, 'events': events or []})}`",
         ]

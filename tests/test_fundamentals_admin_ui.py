@@ -19,7 +19,10 @@ from rawcandle.fundamentals.admin.artifacts import sha256_file
 from rawcandle.fundamentals.admin.history import AdminRunHistory
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
+    build_operation_summary,
+    render_operation_report,
     resolve_operation_report_download,
+    taxonomy_preview_presentation,
     write_operation_report,
 )
 from rawcandle.fundamentals.admin.ui_service import (
@@ -406,7 +409,7 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
     assert "PREFLIGHT" in controls.progress_field.value
     assert controls.preview_section.visible is True
     assert controls.progress_section.visible is True
-    assert controls.final_section.visible is True
+    assert controls.final_section.visible is False
     assert controls.report_button.visible is True
     assert controls.copy_apply_button.disabled is False
     assert controls.production_apply_button.disabled is False
@@ -418,7 +421,7 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
     controls.tickers_field.on_change(None)
     assert controls.copy_apply_button.disabled is True
     assert controls.production_apply_button.disabled is True
-    assert "preview is no longer current" in controls.status_field.value
+    assert "Apply completed." in controls.status_field.value
     controls.history_column.controls[0].controls[-1].on_click(None)
     assert page.launched_urls == [admin_report_download_url("run1")]
     assert controls.preview_button.disabled is False
@@ -536,6 +539,173 @@ def test_apply_visibility_follows_backend_capability() -> None:
 
     assert controls.copy_apply_button.visible is False
     assert controls.production_apply_button.visible is False
+
+
+def _taxonomy_preview_result(*, outcome="COMPLETED", counts=None, blockers=None, candidate=None, mode="CURRENT_STATE_AUDIT"):
+    return {
+        "run_id": "taxonomy_fixture",
+        "operation_type": "CHECK_UPDATE_TAXONOMY",
+        "mode": mode,
+        "outcome": outcome,
+        "taxonomy_domain": "dc_ecosystem",
+        "started_at_utc": "2026-09-18T08:10:31Z",
+        "completed_at_utc": "2026-09-18T08:14:45Z",
+        "preview_fingerprint": "f" * 64,
+        "summary_counts": counts if counts is not None else {"UNCHANGED": 350, "automatic_apply_eligible": 0, "blocked": 0},
+        "downstream": {
+            "active_taxonomy": {"domain": "dc_ecosystem", "version": {"taxonomy_version_code": "DC_TAXONOMY_FULL_V2_1"}, "counts": {"rows": 350, "tickers": 257}},
+            "candidate": candidate,
+            "dependency_reasoning": {"package_invocations": 0, "relative_position_invocations": 0},
+        },
+        "blockers": blockers or [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("updates", "expected"),
+    [
+        ({}, "NO_CHANGE"),
+        ({"summary_counts": {"MEMBERSHIP_ADDED": 1, "automatic_apply_eligible": 0, "blocked": 0}}, "REVIEW_REQUIRED"),
+        ({"summary_counts": {"MEMBERSHIP_ADDED": 1, "automatic_apply_eligible": 1, "blocked": 0}}, "CHANGES_AVAILABLE"),
+        ({"blockers": [{"status": "UNRESOLVED_IDENTITY"}]}, "BLOCKED"),
+        ({"outcome": "FAILED"}, "FAILED"),
+    ],
+)
+def test_taxonomy_business_outcome_uses_structured_evidence(updates, expected) -> None:
+    result = _taxonomy_preview_result()
+    result.update(updates)
+    assert taxonomy_preview_presentation(result)["business_outcome"] == expected
+
+
+def test_taxonomy_no_change_summary_report_and_retained_run() -> None:
+    retained = Path(__file__).resolve().parents[1] / "fundamental_reports/admin_runs/20260918T081031Z_check_update_taxonomy_dcb015ad6e99_dc_ecosystem_preview/result.json"
+    result = json.loads(retained.read_text(encoding="utf-8")) if retained.exists() else _taxonomy_preview_result()
+    info = taxonomy_preview_presentation(result)
+    assert info["business_outcome"] == "NO_CHANGE"
+    assert info["memberships"] == 350
+    assert info["tickers"] == 257
+    summary = build_operation_summary(result)
+    report = render_operation_report(run_id=result["run_id"], result=result)
+    assert summary[0] == "Taxonomy is up to date"
+    assert "No changes" in summary
+    assert "350 memberships checked." in summary
+    assert "257 tickers checked." in summary
+    assert "No production writes. No update is required." in summary
+    assert "Potential downstream work was evaluated. No calculations were run during Preview." in summary
+    assert "0 additions and 0 removals." in report
+    assert "0 role or tier changes and 0 primary-membership changes." in report
+    assert "0 review blockers." in report
+    assert "Preview fingerprint:" in report
+    assert result["preview_fingerprint"] not in "\n".join(summary)
+
+
+def test_taxonomy_no_change_ui_has_one_summary_and_no_actions() -> None:
+    class Service:
+        def capabilities(self):
+            return (AdminOperationCapability("CHECK_UPDATE_TAXONOMY", True, True, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def preview(self, operation_type, **kwargs):
+            callback = kwargs["progress_callback"]
+            callback({"current_stage_number": 2, "total_declared_stages": 17, "current_stage_id": "LOAD_ACTIVE_TAXONOMY", "stage_state": "RUNNING", "message": "Checking"})
+            assert controls.progress_details.controls[0].expanded is True
+            callback({"current_stage_number": 17, "total_declared_stages": 17, "current_stage_id": "COMPLETED", "stage_state": "COMPLETED", "message": "Done"})
+            result = _taxonomy_preview_result()
+            return AdminUIRunResult(
+                status="COMPLETED", message="Preview completed.", run_id=result["run_id"],
+                outcome="COMPLETED", mode="CURRENT_STATE_AUDIT", preview_domain="dc_ecosystem",
+                business_outcome="NO_CHANGE", copy_actionable=False, production_actionable=False,
+                preview_payload_path="/tmp/taxonomy_preview_payload.json", preview_fingerprint=result["preview_fingerprint"],
+                report_filename=OPERATION_REPORT_NAME, report_sha256="a" * 64,
+                summary_rows=build_operation_summary(result),
+            )
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=Service())
+    controls.operation_dropdown.value = "CHECK_UPDATE_TAXONOMY"
+    controls.operation_dropdown.on_change(None)
+    controls.preview_button.on_click(None)
+    visible_text = "\n".join(control.value for control in controls.summary_column.controls)
+    assert controls.preview_section.controls[0].value == "Taxonomy is up to date"
+    assert "No changes" in visible_text
+    assert "350 memberships checked." in visible_text
+    assert "No update is required." in visible_text
+    assert "f" * 64 not in visible_text
+    assert "a" * 64 not in visible_text
+    assert "CHECK_UPDATE_TAXONOMY" not in visible_text
+    assert controls.final_section.visible is False
+    assert controls.copy_apply_button.visible is False
+    assert controls.copy_apply_button.disabled is True
+    assert controls.production_apply_button.visible is False
+    assert controls.production_apply_button.disabled is True
+    assert controls.progress_summary.value == "17 of 17 stages completed"
+    assert controls.progress_details.controls[0].expanded is False
+    technical = "\n".join(control.value for control in controls.technical_details_column.controls)
+    assert "f" * 64 in technical
+    assert "a" * 64 in technical
+    assert controls.report_button.visible is True
+
+
+def test_taxonomy_service_action_gates_require_candidate_and_authorized_provenance(tmp_path: Path) -> None:
+    service = FundamentalsAdminUIService(run_root=tmp_path)
+    changed = _taxonomy_preview_result(
+        mode="CANDIDATE_PREVIEW",
+        counts={"MEMBERSHIP_ADDED": 1, "automatic_apply_eligible": 1, "blocked": 0},
+        candidate={"taxonomy_version": "NEXT"},
+    )
+    for payload, copy_allowed, production_allowed in (
+        (changed, True, False),
+        ({**changed, "downstream": {**changed["downstream"], "candidate": None}}, False, False),
+        ({**changed, "mode": "PROTECTED_PRODUCTION_PREVIEW", "downstream": {**changed["downstream"], "candidate": {"provenance": "TEST_ONLY_NOT_FOR_PRODUCTION"}}}, False, False),
+        ({**changed, "mode": "PROTECTED_PRODUCTION_PREVIEW", "downstream": {**changed["downstream"], "candidate": {"provenance": "CURATED_PRODUCTION_CANDIDATE"}}}, False, False),
+    ):
+        run_dir = tmp_path / payload["run_id"]
+        run_dir.mkdir(exist_ok=True)
+        (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+        final = service._finalize(payload, default_message="Preview completed.")
+        assert final.copy_actionable is copy_allowed
+        assert final.production_actionable is production_allowed
+
+
+def test_taxonomy_changed_preview_requires_capability_and_fresh_matching_scope() -> None:
+    class Service:
+        def __init__(self):
+            self.copy_enabled = True
+
+        def capabilities(self):
+            return (AdminOperationCapability("CHECK_UPDATE_TAXONOMY", True, self.copy_enabled, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def preview(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED", message="Preview completed.", run_id="changed",
+                outcome="COMPLETED", mode="CANDIDATE_PREVIEW", business_outcome="CHANGES_AVAILABLE",
+                preview_domain="dc_ecosystem", copy_actionable=True, production_actionable=False,
+                preview_payload_path="/tmp/taxonomy_candidate.json", preview_fingerprint="f" * 64,
+                summary_rows=("Changes available",),
+            )
+
+    service = Service()
+    controls = build_fundamentals_admin_page(page=_Page(), service=service)
+    controls.operation_dropdown.value = "CHECK_UPDATE_TAXONOMY"
+    controls.operation_dropdown.on_change(None)
+    controls.preview_button.on_click(None)
+    assert controls.copy_apply_button.visible is True
+    assert controls.production_apply_button.visible is False
+    controls.taxonomy_domain_dropdown.value = "ec_taxonomy"
+    controls.taxonomy_domain_dropdown.on_change(None)
+    assert controls.copy_apply_button.visible is False
+    assert controls.copy_apply_button.disabled is True
+
+    service.copy_enabled = False
+    controls = build_fundamentals_admin_page(page=_Page(), service=service)
+    controls.operation_dropdown.value = "CHECK_UPDATE_TAXONOMY"
+    controls.operation_dropdown.on_change(None)
+    controls.preview_button.on_click(None)
+    assert controls.copy_apply_button.visible is False
 
 
 def test_history_selection_displays_progress_and_unavailable_report_state(tmp_path: Path) -> None:

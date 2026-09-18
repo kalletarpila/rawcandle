@@ -48,6 +48,9 @@ class FundamentalsAdminPageControls:
     progress_section: Any
     final_section: Any
     report_button: Any
+    technical_details_column: Any
+    progress_summary: Any
+    progress_details: Any
 
 
 def admin_report_download_url(run_id: str) -> str:
@@ -66,16 +69,7 @@ def _launch_browser_url(page: Any, url: str) -> None:
 
 
 def _result_text(result: AdminUIRunResult) -> str:
-    parts = [result.message]
-    if result.run_id:
-        parts.append(f"Run: {result.run_id}")
-    if result.outcome:
-        parts.append(f"Outcome: {result.outcome}")
-    if result.preview_fingerprint:
-        parts.append(f"Preview fingerprint: {result.preview_fingerprint}")
-    if result.report_sha256:
-        parts.append(f"Operation report sha256: {result.report_sha256}")
-    return "\n".join(parts)
+    return result.message
 
 
 def _material_preview_signature(
@@ -100,12 +94,6 @@ def _material_preview_signature(
         bool(production_mode) if operation == "CHECK_UPDATE_TAXONOMY" else False,
         True if operation == "ADD_TICKERS" else bool(network_allowed),
     )
-
-
-def _short_fingerprint(value: str | None) -> str:
-    if not value:
-        return "not recorded"
-    return value if len(value) <= 16 else value[:12] + "..."
 
 
 def _plain_status(outcome: str | None) -> str:
@@ -217,14 +205,21 @@ def build_fundamentals_admin_page(
     summary_column = ft.Column(spacing=4)
     history_column = ft.Column(spacing=6)
     show_technical_history_checkbox = ft.Checkbox(label="Show technical and legacy runs", value=False)
-    technical_details_column = ft.Column(spacing=4, visible=False)
+    technical_details_column = ft.Column(spacing=4)
+    preview_title = ft.Text("Preview result", size=18, weight=ft.FontWeight.BOLD)
     preview_section = ft.Column(
-        [ft.Text("Preview summary", size=18, weight=ft.FontWeight.BOLD), summary_column],
+        [preview_title, summary_column],
         spacing=6,
         visible=False,
     )
+    progress_summary = ft.Text("", visible=False)
+    progress_details = ft.ExpansionPanelList(controls=[ft.ExpansionPanel(
+        header=ft.ListTile(title=ft.Text("Progress details")),
+        content=progress_field,
+        expanded=False,
+    )], visible=False)
     progress_section = ft.Column(
-        [ft.Text("Progress", size=18, weight=ft.FontWeight.BOLD), progress_field],
+        [ft.Text("Progress", size=18, weight=ft.FontWeight.BOLD), progress_summary, progress_details],
         spacing=6,
         visible=False,
     )
@@ -244,6 +239,7 @@ def build_fundamentals_admin_page(
     current_preview_fingerprint: str | None = None
     current_report_run_id: str | None = None
     operation_running = False
+    last_progress_count: tuple[object, object] | None = None
 
     def current_signature() -> tuple[object, ...]:
         return _material_preview_signature(
@@ -391,8 +387,13 @@ def build_fundamentals_admin_page(
             page.update()
 
     def progress_callback(event: Any) -> None:
+        nonlocal last_progress_count
         progress_section.visible = True
         progress_field.visible = True
+        progress_details.visible = True
+        progress_details.controls[0].expanded = True
+        progress_summary.visible = False
+        last_progress_count = (event.get("current_stage_number", "?"), event.get("total_declared_stages", "?"))
         progress_field.value = (
             f"[{event.get('current_stage_number', '?')}/{event.get('total_declared_stages', '?')}] "
             f"{event.get('current_stage_id', 'UNKNOWN')} - {event.get('stage_state', 'UNKNOWN')}\n"
@@ -404,9 +405,10 @@ def build_fundamentals_admin_page(
     def apply_result(result: AdminUIRunResult) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
         nonlocal current_preview_fingerprint, current_report_run_id
+        is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW"}
         status_field.value = _result_text(result)
-        final_section.visible = True
-        status_field.visible = True
+        final_section.visible = not is_preview
+        status_field.visible = not is_preview
         if result.preview_payload_path:
             current_preview_payload_path = result.preview_payload_path
             preview_payload_field.value = result.preview_payload_path
@@ -416,6 +418,13 @@ def build_fundamentals_admin_page(
         if result.preview_payload_path and result.preview_fingerprint:
             current_preview_signature = current_signature()
             current_preview_result = result
+        elif not is_preview:
+            current_preview_signature = None
+            current_preview_result = None
+            current_preview_payload_path = None
+            current_preview_fingerprint = None
+            preview_payload_field.value = ""
+            preview_fingerprint_field.value = ""
         if result.run_id:
             current_report_run_id = result.run_id
             report_button.on_click = lambda _event, run_id=result.run_id: _launch_browser_url(
@@ -424,13 +433,41 @@ def build_fundamentals_admin_page(
             )
             report_button.visible = bool(result.report_filename)
         update_summary(result)
-        preview_section.visible = True
+        preview_section.visible = is_preview
+        if result.preview_domain and is_preview:
+            preview_title.value = {
+                "NO_CHANGE": "Taxonomy is up to date",
+                "CHANGES_AVAILABLE": "Taxonomy changes available",
+                "REVIEW_REQUIRED": "Taxonomy needs review",
+                "BLOCKED": "Taxonomy update blocked",
+                "FAILED": "Taxonomy preview failed",
+            }.get(result.business_outcome, "Taxonomy preview result")
+        else:
+            preview_title.value = "Preview result" if is_preview else "Result"
+        if result.business_outcome == "NO_CHANGE" and result.preview_domain:
+            summary_column.controls = [ft.Text("No changes"), *[ft.Text(row) for row in result.summary_rows if row not in {"Taxonomy is up to date", "No changes"}]]
+        elif is_preview and result.outcome == "NO_CHANGE":
+            preview_title.value = "No changes"
+            summary_column.controls = [ft.Text("No update is required.")]
+        if progress_section.visible:
+            if result.status == "FAILED":
+                progress_summary.value = "Operation failed"
+            elif last_progress_count:
+                progress_summary.value = f"{last_progress_count[0]} of {last_progress_count[1]} stages completed"
+            else:
+                progress_summary.value = "Preview completed" if is_preview else "Operation completed"
+            progress_summary.visible = True
+            progress_details.visible = True
+            progress_details.controls[0].expanded = False
         refresh_history()
         technical_details_column.controls = [
             ft.Text(f"Run id: {result.run_id or 'not recorded'}"),
-            ft.Text(f"Preview fingerprint: {_short_fingerprint(result.preview_fingerprint)}"),
+            ft.Text(f"Operation: {(operation_dropdown.value or '').strip()}"),
+            ft.Text(f"Execution status: {result.status}; backend outcome: {result.outcome or 'not recorded'}"),
+            ft.Text(f"Mode: {result.mode or 'not recorded'}"),
+            ft.Text(f"Preview fingerprint: {result.preview_fingerprint or 'not recorded'}"),
             ft.Text(f"Artifact directory: {result.artifact_dir or 'not recorded'}"),
-            ft.Text(f"Report sha256: {_short_fingerprint(result.report_sha256)}"),
+            ft.Text(f"Report sha256: {result.report_sha256 or 'not recorded'}"),
         ]
 
     def apply_capabilities() -> None:
@@ -438,12 +475,17 @@ def build_fundamentals_admin_page(
         update_operation_visibility()
         preview_button.disabled = bool(operation_running or (capability and not capability.preview_enabled) or not can_preview())
         preview_ready = has_current_preview()
-        copy_authorized = bool(getattr(capability, "copy_apply_enabled", True))
-        production_authorized = bool(getattr(capability, "production_apply_enabled", True))
-        copy_apply_button.visible = bool(copy_authorized and preview_ready)
-        copy_apply_button.disabled = bool(operation_running or not preview_ready)
-        production_apply_button.visible = bool(production_authorized and preview_ready)
-        production_apply_button.disabled = bool(operation_running or not preview_ready)
+        taxonomy = (operation_dropdown.value or "") == "CHECK_UPDATE_TAXONOMY"
+        copy_authorized = bool(getattr(capability, "copy_apply_enabled", False if taxonomy else True))
+        production_authorized = bool(getattr(capability, "production_apply_enabled", False if taxonomy else True))
+        taxonomy_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.business_outcome == "CHANGES_AVAILABLE" and current_preview_result.preview_domain == taxonomy_domain_dropdown.value)
+        generic_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.outcome != "NO_CHANGE")
+        copy_ready = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.copy_actionable is True)))
+        production_ready = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.production_actionable is True)))
+        copy_apply_button.visible = bool(copy_authorized and copy_ready)
+        copy_apply_button.disabled = bool(operation_running or not copy_authorized or not copy_ready)
+        production_apply_button.visible = bool(production_authorized and production_ready)
+        production_apply_button.disabled = bool(operation_running or not production_authorized or not production_ready)
 
     def invalidate_preview(_event: Any | None = None) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
@@ -466,9 +508,11 @@ def build_fundamentals_admin_page(
             page.update()
 
     def run_guarded(button: Any, fn: Any) -> None:
-        nonlocal operation_running
+        nonlocal operation_running, last_progress_count
         if button.disabled:
             return
+        if button is not preview_button:
+            last_progress_count = None
         operation_running = True
         button.disabled = True
         preview_button.disabled = True
@@ -477,6 +521,9 @@ def build_fundamentals_admin_page(
         progress_section.visible = True
         progress_field.visible = True
         progress_field.value = "Starting..."
+        progress_summary.visible = False
+        progress_details.visible = True
+        progress_details.controls[0].expanded = True
         if hasattr(page, "update"):
             page.update()
         try:
@@ -493,6 +540,14 @@ def build_fundamentals_admin_page(
                 page.update()
 
     def on_preview(_event: Any) -> None:
+        nonlocal current_preview_signature, current_preview_result, current_preview_payload_path, current_preview_fingerprint, last_progress_count
+        current_preview_signature = None
+        current_preview_result = None
+        current_preview_payload_path = None
+        current_preview_fingerprint = None
+        preview_payload_field.value = ""
+        preview_fingerprint_field.value = ""
+        last_progress_count = None
         run_guarded(
             preview_button,
             lambda: admin_service.preview(
@@ -677,4 +732,7 @@ def build_fundamentals_admin_page(
         progress_section=progress_section,
         final_section=final_section,
         report_button=report_button,
+        technical_details_column=technical_details_column,
+        progress_summary=progress_summary,
+        progress_details=progress_details,
     )

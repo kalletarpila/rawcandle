@@ -13,6 +13,7 @@ from rawcandle.fundamentals.admin.operation_report import (
     OperationReportSummary,
     resolve_operation_report_download,
     write_operation_report,
+    taxonomy_preview_presentation,
 )
 from rawcandle.fundamentals.admin.taxonomy import SUPPORTED_TAXONOMY_DOMAINS
 from rawcandle.fundamentals.admin.taxonomy_production import (
@@ -47,6 +48,11 @@ class AdminUIRunResult:
     report_filename: str | None = None
     report_sha256: str | None = None
     summary_rows: tuple[str, ...] = ()
+    business_outcome: str | None = None
+    preview_domain: str | None = None
+    copy_actionable: bool | None = None
+    production_actionable: bool | None = None
+    duration_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -397,6 +403,7 @@ class FundamentalsAdminUIService:
 
     def _finalize(self, result: Mapping[str, Any], *, default_message: str) -> AdminUIRunResult:
         run_id = str(result.get("run_id") or "")
+        taxonomy = taxonomy_preview_presentation(result)
         report: OperationReportSummary | None = None
         if run_id:
             report = write_operation_report(run_id, root=self.run_root)
@@ -406,7 +413,7 @@ class FundamentalsAdminUIService:
             or result.get("payload_path")
         )
         return AdminUIRunResult(
-            status="COMPLETED",
+            status="FAILED" if result.get("outcome") in {"FAILED", "ERROR", "INTERRUPTED"} else "COMPLETED",
             message=default_message,
             run_id=run_id or None,
             outcome=str(result.get("outcome")) if result.get("outcome") is not None else None,
@@ -417,4 +424,9 @@ class FundamentalsAdminUIService:
             report_filename=OPERATION_REPORT_NAME if report else None,
             report_sha256=report.report_sha256 if report else None,
             summary_rows=report.summary_rows if report else (),
+            business_outcome=taxonomy["business_outcome"] if taxonomy else None,
+            preview_domain=taxonomy["domain"] if taxonomy else None,
+            copy_actionable=bool(taxonomy["changes"] and taxonomy["eligible"] and not taxonomy["blockers"] and taxonomy["candidate"] and result.get("mode") == "CANDIDATE_PREVIEW" and taxonomy["business_outcome"] == "CHANGES_AVAILABLE") if taxonomy else None,
+            production_actionable=False if taxonomy else None,
+            duration_seconds=self._duration_seconds(result),
         )
