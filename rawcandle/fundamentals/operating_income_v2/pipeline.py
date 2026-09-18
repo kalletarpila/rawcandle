@@ -11,7 +11,7 @@ from .persistence import apply_package
 from .rehearsal import calculate
 
 
-def refresh_active_package(paths: Mapping[str, Path]) -> dict[str, Any]:
+def refresh_active_package(paths: Mapping[str, Path], *, as_of_date: str | None = None) -> dict[str, Any]:
     """Rebuild the coherent V2 package without fetching or changing source data."""
     with sqlite3.connect(f"file:{paths['analysis'].resolve()}?mode=ro", uri=True) as reader:
         active = assert_v2_active(reader)
@@ -22,9 +22,10 @@ def refresh_active_package(paths: Mapping[str, Path]) -> dict[str, Any]:
     calculated = (
         phase10b.calculate(
             paths,
-            verify_v1_overlap=active.persistence_fingerprint != TEN_YEAR_OPERATIONAL_PACKAGE_FINGERPRINT,
+            verify_v1_overlap=False,
+            as_of_date=as_of_date,
         )
-        if candidate_active else calculate(paths)
+        if candidate_active else calculate(paths, as_of_date=as_of_date)
     )
     applied_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     with sqlite3.connect(paths["analysis"]) as conn:
@@ -42,6 +43,8 @@ def refresh_active_package(paths: Mapping[str, Path]) -> dict[str, Any]:
         assert_v2_active(conn)
     return {
         "family": "OPERATING_INCOME_MODEL_FAMILY_V2",
+        "as_of_date": calculated["as_of_date"],
+        "taxonomy_dependency": calculated["taxonomy_dependency"],
         "provider_update": False,
         "outcome": report.outcome,
         "logical_changes": report.logical_changes,

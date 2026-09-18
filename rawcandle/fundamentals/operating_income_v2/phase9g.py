@@ -42,7 +42,7 @@ from .readers import (
     PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT,
     ParallelModelRepository,
 )
-from .rehearsal import AS_OF, FRESHNESS_DAYS, calculate
+from .rehearsal import LEGACY_REHEARSAL_AS_OF as AS_OF, FRESHNESS_DAYS, calculate
 
 
 WC_FLAG = "WORKING_CAPITAL_SHIFT_CANDIDATE"
@@ -340,8 +340,8 @@ def run(repo_root: Path, output: Path, destination: Path) -> dict[str, Any]:
     reports_before = _report_inventory(repo_root / "fundamental_reports")
     with sqlite3.connect(f"file:{PRODUCTION['analysis'].resolve()}?mode=ro", uri=True) as conn:
         layer_fingerprints_before = _logical_layer_fingerprints(conn)
-    calculated = calculate(PRODUCTION)
-    replay = calculate(PRODUCTION)
+    calculated = calculate(PRODUCTION, as_of_date=AS_OF)
+    replay = calculate(PRODUCTION, as_of_date=AS_OF)
     if calculated["fingerprints"] != replay["fingerprints"]:
         raise AssertionError("PHASE9G_NONDETERMINISTIC_PURE_REPLAY")
     with sqlite3.connect(f"file:{PRODUCTION['analysis'].resolve()}?mode=ro", uri=True) as conn:

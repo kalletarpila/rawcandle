@@ -79,6 +79,14 @@ CREATE TABLE IF NOT EXISTS {EVIDENCE_FIELD_TABLE}(
  PRIMARY KEY(model_fingerprint,flag_name,slot_number),
  UNIQUE(model_fingerprint,flag_name,field_name)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS relative_position_v2_taxonomy_dependency(
+ snapshot_id TEXT PRIMARY KEY REFERENCES relative_position_snapshot(snapshot_id) ON DELETE CASCADE,
+ taxonomy_domain TEXT NOT NULL,
+ taxonomy_version TEXT NOT NULL,
+ taxonomy_semantic_fingerprint TEXT NOT NULL,
+ calculation_as_of_date TEXT NOT NULL,
+ source_fingerprint TEXT NOT NULL
+);
 """
 
 
@@ -145,10 +153,19 @@ def economic_fingerprint(calculated: Mapping[str, Any]) -> str:
         "delta": [r.to_dict() for r in calculated["delta_results"]],
         "diagnostic": calculated["diagnostics_full"],
         "relative": calculated["relative"].to_dict(),
+        "taxonomy_dependency": {
+            key: calculated["taxonomy_dependency"][key]
+            for key in ("domain", "version", "semantic_fingerprint")
+        },
     })
 
 
 def validate_calculated_package(calculated: Mapping[str, Any]) -> None:
+    dependency = calculated.get("taxonomy_dependency")
+    if not dependency or dependency.get("domain") != "dc_ecosystem" or not dependency.get("version") or not dependency.get("semantic_fingerprint"):
+        raise ValueError("OPERATING_INCOME_V2_TAXONOMY_DEPENDENCY_REQUIRED")
+    if calculated["relative"].snapshot_date != calculated.get("as_of_date", calculated["relative"].snapshot_date):
+        raise ValueError("OPERATING_INCOME_V2_AS_OF_MISMATCH")
     score_keys=set()
     for row in calculated["score_v2"]:
         key=(int(row["company_id"]),int(row["quarter_id"])); score_keys.add(key)
@@ -226,11 +243,11 @@ def _apply_lifecycle(conn: sqlite3.Connection, calculated: Mapping[str, Any], ap
 
 def _apply_valuation(conn: sqlite3.Connection, calculated: Mapping[str, Any], applied_at: str) -> None:
     conn.execute("DELETE FROM valuation_revised_result WHERE model_fingerprint=?", (valuation.MODEL_FINGERPRINT,))
-    source_old={(int(r["company_id"]),int(r["quarter_id"])):r for r in calculated.get("valuation_v1_rows",())}
+    source_current={(int(r["company_id"]),int(r["quarter_id"])):r for r in calculated.get("valuation_source_rows",())}
     columns=("company_id","security_id","ticker","security_active","fiscal_year","fiscal_quarter","fiscal_sequence","quarter_id","period_end","fundamental_available_date","price_date","price_age_calendar_days","selected_price","shares_outstanding","market_cap","cash","total_debt","net_debt","enterprise_value","ttm_operating_income","ttm_free_cashflow","ttm_net_income_common","operating_income_yield","operating_income_points","fcf_yield","fcf_points","earnings_yield","earnings_points","total_valuation_score","valuation_status","reason_code","applicability_classification","sector","industry","model_version","model_fingerprint","source_fingerprint","engine_result_fingerprint","result_fingerprint","history_mode","calculated_at_utc")
     values=[]
     for key in sorted(calculated["valuation_v2"]):
-        result=calculated["valuation_v2"][key]; d=result.to_dict(); base=source_old.get(key,{})
+        result=calculated["valuation_v2"][key]; d=result.to_dict(); base=source_current.get(key,{})
         applicability=valuation.classify_applicability(base.get("sector"),base.get("industry")); classification="SUPPORTED" if applicability.supported is True else "NOT_APPLICABLE" if applicability.supported is False else "NOT_READY"
         row={**d,"security_active":base.get("security_active"),"fiscal_sequence":d["fiscal_year"]*4+int(d["fiscal_quarter"][1]),"applicability_classification":classification,"sector":base.get("sector"),"industry":base.get("industry"),"source_fingerprint":_hash({"quarter":key,"source":base.get("source_fingerprint"),"operating_income":d["ttm_operating_income"]}),"engine_result_fingerprint":d["result_fingerprint"],"history_mode":HISTORY_MODE,"calculated_at_utc":applied_at}
         row["result_fingerprint"]=_hash({c:row.get(c) for c in columns if c not in {"result_fingerprint","calculated_at_utc"}})
@@ -346,6 +363,7 @@ def _apply_diagnostics(
 
 def _apply_relative(conn: sqlite3.Connection, calculated: Mapping[str, Any], applied_at: str) -> None:
     value=calculated["relative"]; content=_hash(value.to_dict()); snapshot_id=_hash((relative_position.MODEL_FINGERPRINT,content))
+    dependency=calculated["taxonomy_dependency"]
     conn.execute("DELETE FROM relative_position_active_snapshot WHERE model_fingerprint=?",(relative_position.MODEL_FINGERPRINT,))
     conn.execute("DELETE FROM relative_position_snapshot WHERE model_fingerprint=?",(relative_position.MODEL_FINGERPRINT,))
     results=[]
@@ -358,6 +376,10 @@ def _apply_relative(conn: sqlite3.Connection, calculated: Mapping[str, Any], app
     conn.executemany("INSERT INTO relative_position_result(snapshot_id,company_id,security_id,ticker,measure,peer_scope,peer_group_id,source_observation_id,source_observation_date,source_score,percentile,rank_low,rank_high,average_rank,peer_count,tie_count,result_status,reason_code,model_version,model_fingerprint) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",results)
     conn.executemany("INSERT INTO relative_position_coverage(snapshot_id,source_observation_id,company_id,measure,peer_scope,peer_group_id,coverage_status,reason_code,peer_count) VALUES(?,?,?,?,?,?,?,?,?)",coverage)
     conn.execute("INSERT INTO relative_position_active_snapshot VALUES(?,?,?)",(relative_position.MODEL_FINGERPRINT,snapshot_id,applied_at))
+    conn.execute("INSERT INTO relative_position_v2_taxonomy_dependency VALUES(?,?,?,?,?,?)",(
+        snapshot_id,dependency["domain"],dependency["version"],dependency["semantic_fingerprint"],
+        value.snapshot_date,value.source_fingerprint,
+    ))
 
 
 def physical_fingerprint(conn: sqlite3.Connection, *, diagnostic_model: Any = diagnostic_flags) -> str:
@@ -383,6 +405,8 @@ def physical_fingerprint(conn: sqlite3.Connection, *, diagnostic_model: Any = di
     consume("relative_snapshot", "SELECT snapshot_id,model_version,model_fingerprint,semantic_mode,snapshot_date,calculation_source_fingerprint,source_content_fingerprint,result_fingerprint,status,result_row_count,coverage_row_count,ready_row_count FROM relative_position_snapshot WHERE model_fingerprint=? ORDER BY snapshot_id", (relative_position.MODEL_FINGERPRINT,))
     consume("relative_result", "SELECT r.* FROM relative_position_result r JOIN relative_position_snapshot s USING(snapshot_id) WHERE s.model_fingerprint=? ORDER BY r.measure,r.peer_scope,r.peer_group_id,r.company_id", (relative_position.MODEL_FINGERPRINT,))
     consume("relative_coverage", "SELECT c.* FROM relative_position_coverage c JOIN relative_position_snapshot s USING(snapshot_id) WHERE s.model_fingerprint=? ORDER BY c.measure,c.peer_scope,c.peer_group_id,c.company_id", (relative_position.MODEL_FINGERPRINT,))
+    if "relative_position_v2_taxonomy_dependency" in {row[0] for row in conn.execute("SELECT name FROM sqlite_schema WHERE type='table'")}:
+        consume("relative_taxonomy_dependency", "SELECT d.* FROM relative_position_v2_taxonomy_dependency d JOIN relative_position_snapshot s USING(snapshot_id) WHERE s.model_fingerprint=? ORDER BY d.snapshot_id", (relative_position.MODEL_FINGERPRINT,))
     consume("relative_active", "SELECT model_fingerprint,snapshot_id FROM relative_position_active_snapshot WHERE model_fingerprint=?", (relative_position.MODEL_FINGERPRINT,))
     return digest.hexdigest()
 

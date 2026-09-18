@@ -203,9 +203,9 @@ def run(repo_root: Path, output: Path) -> dict[str, Any]:
     _json(output / "production_integrity_before.json", before)
 
     started = time.monotonic()
-    calculated = phase10b.calculate(paths)
+    calculated = phase10b.calculate(paths, as_of_date=rehearsal.LEGACY_REHEARSAL_AS_OF.isoformat())
     first_calculation_seconds = time.monotonic() - started
-    replay = phase10b.calculate(paths)
+    replay = phase10b.calculate(paths, as_of_date=rehearsal.LEGACY_REHEARSAL_AS_OF.isoformat())
     replay_fingerprints_equal = calculated["fingerprints"] == replay["fingerprints"]
     if not replay_fingerprints_equal:
         raise RuntimeError("PHASE10B_CALCULATION_NONDETERMINISTIC")
@@ -293,7 +293,7 @@ def run(repo_root: Path, output: Path) -> dict[str, Any]:
     reports_dir.mkdir()
     for ticker in dict.fromkeys(examples):
         snapshot = v2_assembler.assemble_company_snapshot_v2_candidate(
-            report_paths, ticker=ticker, report_date=rehearsal.AS_OF.isoformat(),
+            report_paths, ticker=ticker, report_date=rehearsal.LEGACY_REHEARSAL_AS_OF.isoformat(),
             model_map=phase10b.MODEL_MAP, package_fingerprint=phase10b.PACKAGE_FINGERPRINT,
             diagnostic_model_contract=diagnostic_flags_eight.MODEL_CONTRACT,
         )

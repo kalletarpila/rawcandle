@@ -96,9 +96,10 @@ def _ttm_input_audit(canonical_path: Path) -> dict[int, dict[str, Any]]:
 
 
 def calculate(
-    paths: Mapping[str, Path], *, verify_v1_overlap: bool = True
+    paths: Mapping[str, Path], *, verify_v1_overlap: bool = False,
+    as_of_date: str | None = None,
 ) -> dict[str, Any]:
-    calculated = rehearsal.calculate(paths, verify_v1_overlap=verify_v1_overlap)
+    calculated = rehearsal.calculate(paths, verify_v1_overlap=verify_v1_overlap, as_of_date=as_of_date)
     structural_applied = calculated.get("structural_metadata", {}).get("status") == "STRUCTURAL_CONTRACT_APPLIED"
     input_audit = _ttm_input_audit(paths["canonical"])
     rows = calculated["rows"]
@@ -109,7 +110,7 @@ def calculate(
     valuations = calculated["valuation_v2"]
     valuation_sources = {
         (int(row["company_id"]), int(row["quarter_id"])): row
-        for row in calculated["valuation_v1_rows"]
+        for row in calculated["valuation_source_rows"]
     }
     score_rows = {
         (int(row["company_id"]), int(row["quarter_id"])): row

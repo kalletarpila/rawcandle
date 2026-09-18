@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
-from rawcandle.fundamentals.score import engine as v1
 from rawcandle.fundamentals.score.methodology import ANCHORS
 
+from . import score_calculation
 from .contract import (
     COMPONENTS,
     LEVERAGE_ANCHORS,
@@ -52,8 +52,18 @@ MODEL_CONTRACT = {
     "positive_revenue_required_for_margins": True,
     "operating_income_fallback": None,
     "imputation": None,
-    "statuses": v1.MODEL_CONTRACT["statuses"],
-    "dilution_policy": v1.MODEL_CONTRACT["dilution_policy"],
+    "statuses": {
+        "SCORE_FULL": "all_seven_components_observed",
+        "SCORE_LIMITED": "usable_current_ttm_but_canonical_score_incomplete",
+        "SCORE_NOT_READY": "current_ttm_not_ready_or_availability_date_missing",
+    },
+    "dilution_policy": {
+        "scored_metric": "stored_shares_outstanding_yoy",
+        "qoq_role": "evidence_only",
+        "positive_change_above_50pct": "ASSUMED_GENUINE_DILUTION_BY_POLICY",
+        "split_events": "evidence_only_no_second_adjustment",
+        "data_quality_blocker": False,
+    },
 }
 MODEL_FINGERPRINT = model_fingerprint(MODEL_VERSION, MODEL_CONTRACT)
 
@@ -88,7 +98,7 @@ def trajectory_points(
     rows_by_ordinal: Mapping[int, Mapping[str, Any]],
 ) -> tuple[float | None, dict[str, Any]]:
     mapped = {ordinal: _v1_input(row) for ordinal, row in rows_by_ordinal.items()}
-    points, evidence = v1.trajectory_points(endpoint_ordinal, mapped)
+    points, evidence = score_calculation.trajectory_points(endpoint_ordinal, mapped)
     return points, _replace_semantics(evidence)
 
 
@@ -100,8 +110,9 @@ def compute_score_rows(
     run_id: str,
 ) -> list[dict[str, Any]]:
     mapped = [_v1_input(row) for row in ttm_rows]
-    output = v1.compute_score_rows(
-        mapped, split_events, generated_at=generated_at, run_id=run_id
+    output = score_calculation.compute_score_rows(
+        mapped, split_events, generated_at=generated_at, run_id=run_id,
+        model_version=MODEL_VERSION, model_fingerprint=MODEL_FINGERPRINT,
     )
     for row in output:
         row["model_version"] = MODEL_VERSION

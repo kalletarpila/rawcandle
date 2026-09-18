@@ -84,9 +84,13 @@ def _calculated() -> dict[str, object]:
     }
     return {
         "rows": [source], "score_v2": scores, "lifecycle_v2": {(1, 1): state_result},
-        "valuation_v1_rows": [valuation_source], "valuation_v2": {(1, 1): value},
+        "valuation_source_rows": [valuation_source], "valuation_v2": {(1, 1): value},
         "delta_results": [delta_result], "diagnostics_full": diagnostic_rows,
         "relative": relative,
+        "taxonomy_dependency": {
+            "domain": "dc_ecosystem", "version": "DC_TEST_V1",
+            "semantic_fingerprint": "taxonomy",
+        },
     }
 
 
@@ -122,6 +126,10 @@ def test_complete_parallel_apply_noop_readers_and_v1_coexistence(database: sqlit
     assert first.rows["score_component"] == first.rows["delta_component"] == 7
     assert first.rows["diagnostic_evaluation"] == 7
     assert second.outcome == "NO_CHANGE" and second.logical_changes == 0
+    assert tuple(database.execute(
+        "SELECT taxonomy_domain,taxonomy_version,taxonomy_semantic_fingerprint,calculation_as_of_date "
+        "FROM relative_position_v2_taxonomy_dependency"
+    ).fetchone()) == ("dc_ecosystem", "DC_TEST_V1", "taxonomy", "2026-09-01")
     assert first.physical_content_fingerprint == second.physical_content_fingerprint
     current_manifest = database.execute(f"SELECT persistence_fingerprint FROM {MANIFEST_TABLE}").fetchone()[0]
     assert database.execute(
