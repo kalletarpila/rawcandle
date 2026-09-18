@@ -143,18 +143,18 @@ def test_operation_report_is_written_atomically_manifested_and_redacted(tmp_path
     assert report.report_path == str(report_path)
     assert report.report_sha256
     assert "Executive Summary" in text
-    assert "Provider Network" in text
-    assert "Network Allowed" in text
-    assert "existing local provider data" in text
-    assert "Per-Item Results" in text
+    assert "What Was Checked" in text
+    assert "Provider network data was not used" in text
+    assert "Changes Found" in text
     assert "NVDA" in text
     assert "already present" in text
-    assert "Progress Timeline" in text
-    assert "Work Performed And Downstream" in text
-    assert "Backup And Rollback" in text
-    assert "Next Required Action" in text
+    assert "Actions Performed" in text
+    assert "Downstream Impact" in text
+    assert "Warnings or Blockers" in text
+    assert "Final Result" in text
+    assert "Technical Appendix" in text
     assert "secret-value" not in text
-    assert "[REDACTED]" in text
+    assert "https://example.invalid" not in text
     assert any(item["name"] == OPERATION_REPORT_NAME for item in manifest["artifacts"])
 
 
@@ -709,7 +709,7 @@ def test_taxonomy_changed_preview_requires_capability_and_fresh_matching_scope()
 
 
 def test_history_selection_displays_progress_and_unavailable_report_state(tmp_path: Path) -> None:
-    run_dir = _write_run(tmp_path, "20260916T130000Z_sector_no_change")
+    run_dir = _write_run(tmp_path, "20260916T130000Z_add_tickers_no_change")
     (run_dir / OPERATION_REPORT_NAME).unlink(missing_ok=True)
 
     class Service(FundamentalsAdminUIService):
@@ -721,7 +721,7 @@ def test_history_selection_displays_progress_and_unavailable_report_state(tmp_pa
 
     controls.history_column.controls[0].controls[-2].on_click(None)
 
-    assert "20260916T130000Z_sector_no_change" in controls.history_detail_field.value
+    assert "20260916T130000Z_add_tickers_no_change" in controls.history_detail_field.value
     assert "Operation report: not yet available" in controls.history_detail_field.value
     assert "Selected run progress loaded" in controls.progress_field.value
 
@@ -740,3 +740,115 @@ def test_history_defaults_to_admin_runs_and_filter_exposes_technical_evidence(tm
     assert [entry.category for entry in default] == ["Administration run"]
     assert any(entry.category == "Acceptance/test evidence" for entry in technical)
     assert any(entry.category == "Invalid or corrupt run" for entry in technical)
+
+
+def _retained_taxonomy_result() -> dict:
+    retained = Path(__file__).resolve().parents[1] / "fundamental_reports/admin_runs/20260918T085757Z_check_update_taxonomy_dcb015ad6e99_dc_ecosystem_preview/result.json"
+    result = json.loads(retained.read_text(encoding="utf-8")) if retained.exists() else _taxonomy_preview_result()
+    return result
+
+
+def test_retained_taxonomy_history_is_first_and_technical_evidence_stays_separate(tmp_path: Path) -> None:
+    result = _retained_taxonomy_result()
+    run_dir = tmp_path / result["run_id"]
+    run_dir.mkdir()
+    (run_dir / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    (run_dir / "progress_status.json").write_text(json.dumps({
+        "current_stage_id": "COMPLETED", "current_stage_number": 17,
+        "total_declared_stages": 17, "stage_state": "COMPLETED",
+    }), encoding="utf-8")
+    write_operation_report(run_dir.name, root=tmp_path)
+    phase = tmp_path / "phase13h1_2_ui_simplification"
+    phase.mkdir()
+    phase_result = {
+        "run_id": phase.name, "operation_type": "ADD_TICKERS", "mode": "UI_SIMPLIFICATION_SYNTHETIC_NO_PRODUCTION_WRITE",
+        "outcome": "COMPLETED", "completed_at_utc": "2026-09-19T10:00:00Z",
+    }
+    (phase / "result.json").write_text(json.dumps(phase_result), encoding="utf-8")
+    service = FundamentalsAdminUIService(run_root=tmp_path)
+    visible = service.history_entries(limit=12)
+    all_entries = service.history_entries(limit=12, include_technical=True)
+    assert [entry.run_id for entry in visible] == [result["run_id"]]
+    assert visible[0].category == "Administration run"
+    assert visible[0].outcome == "NO_CHANGE"
+    assert visible[0].completed_at_utc == result["completed_at_utc"]
+    assert visible[0].count_label == "350 memberships"
+    assert visible[0].report_available is True
+    assert all_entries[0].run_id == result["run_id"]
+    assert any(entry.run_id == phase.name and entry.category != "Administration run" for entry in all_entries)
+    assert "350 memberships checked." in service.history_result_summary(result["run_id"])
+
+
+def test_malformed_or_symlinked_history_result_is_not_an_admin_run(tmp_path: Path) -> None:
+    malformed = _write_run(tmp_path, "20260918T120000Z_add_tickers_malformed")
+    (malformed / "result.json").write_text("{invalid", encoding="utf-8")
+    linked = _write_run(tmp_path, "20260918T120100Z_add_tickers_linked")
+    (linked / "result.json").unlink()
+    (linked / "result.json").symlink_to(malformed / "result.json")
+    service = FundamentalsAdminUIService(run_root=tmp_path)
+    assert service.history_entries() == []
+    assert all(item.category == "Invalid or corrupt run" for item in service.history_entries(include_technical=True))
+    with pytest.raises(ValueError):
+        service.history_result_summary(linked.name)
+
+
+def test_retained_taxonomy_report_has_human_sections_and_is_deterministic() -> None:
+    result = _retained_taxonomy_result()
+    report = render_operation_report(run_id=result["run_id"], result=result)
+    assert report == render_operation_report(run_id=result["run_id"], result=result)
+    main, appendix = report.split("## Technical Appendix", 1)
+    for section in (
+        "Executive Summary", "What Was Checked", "Changes Found", "Actions Performed",
+        "Downstream Impact", "Warnings or Blockers", "Final Result",
+    ):
+        assert f"## {section}" in main
+    for fact in (
+        "dc_ecosystem", "DC_TAXONOMY_FULL_V2_1", "257 tickers", "350 memberships",
+        "No additions or removals", "No role or tier changes", "No primary-membership changes",
+        "No warnings or blockers", "No database writes", "No calculations were run during Preview",
+        "No further action is required",
+    ):
+        assert fact in main
+    for clutter in ("/home/kalle/", "None", "[]", "{", "NOT_RECORDED", "COMPLETED RUNNING", result["preview_fingerprint"]):
+        assert clutter not in main
+    assert result["preview_fingerprint"] in appendix
+
+
+def test_history_refresh_after_taxonomy_preview_and_action_label(tmp_path: Path) -> None:
+    result = _taxonomy_preview_result()
+    result["run_id"] = "20260918T120000Z_check_update_taxonomy_fixture_preview"
+    result["completed_at_utc"] = "2026-09-18T12:04:00Z"
+
+    def preview(*, taxonomy_domain, candidate_path, candidate_version, run_root, progress_callback):
+        run_dir = run_root / result["run_id"]
+        run_dir.mkdir()
+        payload = run_dir / "taxonomy_preview_payload.json"
+        payload.write_text("{}", encoding="utf-8")
+        stored = {**result, "preview_payload_path": str(payload), "artifact_dir": str(run_dir)}
+        (run_dir / "result.json").write_text(json.dumps(stored), encoding="utf-8")
+        (run_dir / "progress_status.json").write_text(json.dumps({
+            "operation_type": "CHECK_UPDATE_TAXONOMY", "current_stage_id": "COMPLETED",
+            "current_stage_number": 17, "total_declared_stages": 17, "stage_state": "COMPLETED",
+        }), encoding="utf-8")
+        return stored
+
+    service = FundamentalsAdminUIService(run_root=tmp_path, taxonomy_preview=preview)
+    controls = build_fundamentals_admin_page(page=_Page(), service=service)
+    assert controls.copy_apply_button.text == "Test on copies"
+    assert controls.history_column.controls[0].value == "No administration runs found."
+    controls.operation_dropdown.value = "CHECK_UPDATE_TAXONOMY"
+    controls.operation_dropdown.on_change(None)
+    controls.preview_button.on_click(None)
+    row = controls.history_column.controls[0]
+    assert row.controls[1].value == "Taxonomy"
+    assert row.controls[2].value == "No changes"
+    assert row.controls[3].value == "350 memberships"
+    assert row.controls[4].value == "Administration run"
+    assert controls.copy_apply_button.visible is False
+    assert controls.production_apply_button.visible is False
+    row.controls[-2].on_click(None)
+    assert "Taxonomy is up to date" in controls.history_detail_field.value
+    assert "17/17" in controls.history_detail_field.value
+    assert "Operation report: available" in controls.history_detail_field.value
+    row.controls[-1].on_click(None)
+    assert controls.report_button.visible is True

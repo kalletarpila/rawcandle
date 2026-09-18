@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 from typing import Any, Callable, Mapping
 
 from rawcandle.fundamentals.admin import batch_add_tickers, sector_industry, taxonomy
@@ -12,6 +14,7 @@ from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
     OperationReportSummary,
     resolve_operation_report_download,
+    build_operation_summary,
     write_operation_report,
     taxonomy_preview_presentation,
 )
@@ -67,6 +70,15 @@ class AdminUIHistoryEntry:
     category: str = "Administration run"
     primary_count: int | None = None
     duration_seconds: float | None = None
+    count_label: str | None = None
+
+
+_ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|check_update_sector_industry|check_update_taxonomy)_[A-Za-z0-9_]+$")
+_ADMIN_MODES = {
+    "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY"},
+    "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT"},
+    "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY"},
+}
 
 
 class FundamentalsAdminUIService:
@@ -249,21 +261,39 @@ class FundamentalsAdminUIService:
         entries: list[AdminUIHistoryEntry] = []
         try:
             run_dirs = [
-                path for path in sorted(self.run_root.iterdir(), key=lambda item: item.name, reverse=True)
+                path for path in self.run_root.iterdir()
                 if path.is_dir() and not path.is_symlink()
             ] if self.run_root.exists() else []
         except Exception:
             return []
         for path in run_dirs:
-            entry = self._history_entry_for_run_dir(path)
+            try:
+                entry = self._history_entry_for_run_dir(path)
+            except (OSError, ValueError, TypeError):
+                continue
             if entry is None:
                 continue
-            if entry.category != "Administration run" and not include_technical:
-                continue
             entries.append(entry)
-            if len(entries) >= limit:
-                break
-        return entries
+        def sort_key(entry: AdminUIHistoryEntry) -> tuple[datetime, str]:
+            timestamp = entry.completed_at_utc
+            try:
+                parsed = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+                return (parsed.astimezone(timezone.utc), entry.run_id)
+            except (TypeError, ValueError):
+                return (datetime.min.replace(tzinfo=timezone.utc), entry.run_id)
+
+        administration = sorted((item for item in entries if item.category == "Administration run"), key=sort_key, reverse=True)
+        if not include_technical:
+            return administration[:limit]
+        technical = sorted((item for item in entries if item.category != "Administration run"), key=sort_key, reverse=True)
+        return administration[:limit] + technical[:limit]
+
+    def history_result_summary(self, run_id: str) -> tuple[str, ...]:
+        result_path = self.history.artifact_path(run_id, "result.json")
+        result = self._load_json_file(result_path)
+        if result is None:
+            raise ValueError("invalid admin result")
+        return build_operation_summary(result)
 
     def resolve_report_download(self, run_id: str) -> Path:
         return resolve_operation_report_download(run_id, root=self.run_root)
@@ -288,7 +318,11 @@ class FundamentalsAdminUIService:
         result = self._load_json_file(run_dir / "result.json")
         request = self._load_json_file(run_dir / "request.json")
         status = self._load_json_file(run_dir / "progress_status.json") or self._load_json_file(run_dir / "status.json")
-        category = self._classify_run_dir(run_dir, result=result, request=request, status=status)
+        invalid_artifact = any(
+            (run_dir / name).is_symlink() or ((run_dir / name).exists() and parsed is None)
+            for name, parsed in (("result.json", result), ("request.json", request))
+        )
+        category = "Invalid or corrupt run" if invalid_artifact else self._classify_run_dir(run_dir, result=result, request=request, status=status)
         if category == "Invalid or corrupt run":
             return AdminUIHistoryEntry(
                 run_id=run_id,
@@ -318,7 +352,7 @@ class FundamentalsAdminUIService:
             return AdminUIHistoryEntry(
                 run_id=item.run_id,
                 operation_type=item.operation_type,
-                outcome=item.outcome,
+                outcome=(taxonomy_preview_presentation(result or {}) or {}).get("business_outcome", item.outcome),
                 status=item.status,
                 mode=self._mode_for_entry(item),
                 completed_at_utc=item.completed_at_utc,
@@ -326,6 +360,7 @@ class FundamentalsAdminUIService:
                 category=category,
                 primary_count=self._primary_count(result or request or {}),
                 duration_seconds=self._duration_seconds(result or {}),
+                count_label=self._count_label(result or request or {}),
             )
         payload = result or request or status or {}
         return AdminUIHistoryEntry(
@@ -351,7 +386,9 @@ class FundamentalsAdminUIService:
     ) -> str:
         payload = result or request or status or {}
         operation = str(payload.get("operation_type", ""))
-        if operation in {"ADD_TICKERS", "CHECK_UPDATE_SECTOR_INDUSTRY", "CHECK_UPDATE_TAXONOMY"}:
+        options = (request or {}).get("options")
+        mode = str(payload.get("mode") or (options.get("mode") if isinstance(options, Mapping) else "") or "")
+        if _ADMIN_RUN_ID.fullmatch(run_dir.name) and mode in _ADMIN_MODES.get(operation, ()):
             return "Administration run"
         names = {path.name for path in run_dir.iterdir() if path.is_file() and not path.is_symlink()}
         if {
@@ -367,6 +404,8 @@ class FundamentalsAdminUIService:
         return "Invalid or corrupt run"
 
     def _load_json_file(self, path: Path) -> Mapping[str, Any] | None:
+        if path.is_symlink():
+            return None
         try:
             parsed = json.loads(path.read_text(encoding="utf-8"))
             return parsed if isinstance(parsed, Mapping) else None
@@ -374,6 +413,9 @@ class FundamentalsAdminUIService:
             return None
 
     def _primary_count(self, payload: Mapping[str, Any]) -> int | None:
+        taxonomy = taxonomy_preview_presentation(payload)
+        if taxonomy and taxonomy.get("memberships") is not None:
+            return int(taxonomy["memberships"])
         counts = payload.get("summary_counts")
         if isinstance(counts, Mapping):
             for key in ("requested", "requested_count", "accepted", "changed", "inspected", "ELIGIBLE"):
@@ -386,6 +428,13 @@ class FundamentalsAdminUIService:
         if isinstance(requested, (list, tuple)):
             return len(requested)
         return None
+
+    def _count_label(self, payload: Mapping[str, Any]) -> str | None:
+        taxonomy = taxonomy_preview_presentation(payload)
+        if taxonomy and taxonomy.get("memberships") is not None:
+            return f"{taxonomy['memberships']} memberships"
+        count = self._primary_count(payload)
+        return f"{count} items" if count is not None else None
 
     def _duration_seconds(self, payload: Mapping[str, Any]) -> float | None:
         started = payload.get("started_at_utc")

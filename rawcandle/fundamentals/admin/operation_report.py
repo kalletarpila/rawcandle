@@ -34,14 +34,6 @@ def _load_json(path: Path) -> Mapping[str, Any] | None:
         return None
 
 
-def _short(value: Any, *, limit: int = 900) -> str:
-    if isinstance(value, (dict, list, tuple)):
-        rendered = json.dumps(value, sort_keys=True, default=str)
-    else:
-        rendered = str(value)
-    return rendered if len(rendered) <= limit else rendered[: limit - 3] + "..."
-
-
 def _duration_seconds(started: Any, completed: Any) -> float | None:
     if not started or not completed:
         return None
@@ -212,45 +204,33 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
     warnings = _sequence(result.get("warnings"))
     blockers = _sequence(result.get("blockers"))
     duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
-    rows = [
-        f"Operation: {result.get('operation_type', 'UNKNOWN')}",
-        f"Mode: {result.get('mode', 'UNKNOWN')}",
-        f"Outcome: {result.get('outcome', 'UNKNOWN')}",
-    ]
+    operation = {
+        "ADD_TICKERS": "Add Tickers",
+        "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
+        "CHECK_UPDATE_TAXONOMY": "Taxonomy",
+    }.get(result.get("operation_type"), "Administration")
+    outcome = str(result.get("outcome") or "Recorded").replace("_", " ").title()
+    rows = [f"{operation}: {outcome}"]
     if duration is not None:
-        rows.append(f"Duration: {duration:.0f}s")
-    if result.get("preview_fingerprint"):
-        rows.append(f"Preview fingerprint: {result['preview_fingerprint']}")
+        minutes, seconds = divmod(round(duration), 60)
+        rows.append(f"Completed in {minutes} min {seconds} sec")
     if counts:
-        rows.append(
-            "Counts: "
-            + ", ".join(f"{str(key).replace('_', ' ')}={counts[key]}" for key in sorted(counts))
-        )
-    if progress:
-        rows.append(
-            "Progress: "
-            f"{progress.get('current_stage_id') or progress.get('stage', 'UNKNOWN')} "
-            f"{progress.get('stage_state') or ''}".strip()
-        )
+        for key in ("requested", "accepted", "changed", "already_present", "failed"):
+            if key in counts:
+                rows.append(f"{str(key).replace('_', ' ').title()}: {counts[key]}.")
     if downstream:
         invocation_counts = downstream.get("invocation_counts")
         if isinstance(invocation_counts, Mapping):
-            rows.append(
-                "Downstream invocations: "
-                + ", ".join(f"{key}={invocation_counts[key]}" for key in sorted(invocation_counts))
-            )
+            rows.append("Downstream: " + ", ".join(f"{str(key).replace('_', ' ').title()} {invocation_counts[key]} run(s)" for key in sorted(invocation_counts)) + ".")
         elif result.get("mode") in {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW"}:
             rows.append("Potential downstream work was evaluated. No calculations were run during Preview.")
-        else:
-            rows.append("Downstream: recorded")
     if rollback:
-        rows.append(f"Rollback: {rollback.get('status', 'RECORDED')}")
+        if rollback.get("status") == "ROLLED_BACK":
+            rows.append("The operation was rolled back.")
     if warnings:
-        rows.append(f"Warning: {_short(redact(warnings[0]), limit=160)}")
+        rows.append(f"{len(warnings)} warning(s) recorded.")
     if blockers:
-        rows.append(f"Blocker: {_short(redact(blockers[0]), limit=160)}")
-    if result.get("recommended_next_action"):
-        rows.append(f"Next action: {result['recommended_next_action']}")
+        rows.append(f"{len(blockers)} blocker(s) recorded.")
     return tuple(rows[:12])
 
 
@@ -270,49 +250,6 @@ def _progress_events(run_dir: Path, *, limit: int = 8) -> list[Mapping[str, Any]
     return events[-limit:]
 
 
-def _append_mapping(lines: list[str], title: str, value: Mapping[str, Any]) -> None:
-    if not value:
-        return
-    safe_value = redact(value)
-    lines.extend(["", f"## {title}", ""])
-    for key in sorted(safe_value):
-        item = safe_value[key]
-        if isinstance(item, (dict, list, tuple)):
-            rendered = _short(item)
-        else:
-            rendered = _short(item)
-        lines.append(f"- {str(key).replace('_', ' ').title()}: `{rendered}`")
-
-
-def _append_items(lines: list[str], title: str, values: list[Any], *, limit: int = 25) -> None:
-    if not values:
-        return
-    lines.extend(["", f"## {title}", ""])
-    for index, item in enumerate(values[:limit], start=1):
-        safe_item = redact(item)
-        if isinstance(safe_item, Mapping):
-            label = (
-                safe_item.get("ticker")
-                or safe_item.get("item_key")
-                or safe_item.get("symbol")
-                or f"item {index}"
-            )
-            status = safe_item.get("status") or safe_item.get("decision") or safe_item.get("outcome") or "recorded"
-            reason = safe_item.get("reason") or safe_item.get("message") or safe_item.get("explanation") or ""
-            lines.append(f"- {label}: {status}" + (f" - {reason}" if reason else ""))
-        else:
-            lines.append(f"- {_short(safe_item, limit=300)}")
-    if len(values) > limit:
-        lines.append(f"- {len(values) - limit} additional items retained in artifacts.")
-
-
-def _append_named_section(lines: list[str], title: str, value: Any) -> None:
-    if isinstance(value, Mapping):
-        _append_mapping(lines, title, value)
-    elif isinstance(value, (list, tuple)):
-        _append_items(lines, title, list(value))
-
-
 def render_operation_report(
     *,
     run_id: str,
@@ -321,83 +258,129 @@ def render_operation_report(
     progress: Mapping[str, Any] | None = None,
     events: list[Mapping[str, Any]] | None = None,
 ) -> str:
+    result = redact(result)
+    request = redact(request or {})
     summary_rows = build_operation_summary(result, progress)
-    lines = [
-        f"# Fundamentals Administration Operation Report",
-        "",
-        "## Executive Summary",
-        "",
-    ]
-    for row in summary_rows:
-        lines.append(f"- {row}")
-    lines.extend(
-        [
-            "",
-            "## Run Identity",
-            "",
-            f"- Run ID: `{run_id}`",
-            f"- Started UTC: `{result.get('started_at_utc', '')}`",
-            f"- Completed UTC: `{result.get('completed_at_utc', '')}`",
-        ]
-    )
-    duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
-    if duration is not None:
-        lines.append(f"- Duration seconds: `{duration:.0f}`")
-    _append_mapping(lines, "Request", request or {})
-    _append_mapping(lines, "Summary Counts", result.get("summary_counts") if isinstance(result.get("summary_counts"), Mapping) else {})
-    provider_network = {
-        "network_allowed": result.get("network_allowed", (request or {}).get("network_allowed")),
-        "network_used": result.get("network_used"),
-        "bounded_request_count": result.get("bounded_request_count") or result.get("provider_request_count"),
-        "source_resolution": result.get("source_resolution") or result.get("provider_source_resolution"),
-        "provider_failure": result.get("provider_failure"),
-    }
-    provider_network = {key: value for key, value in provider_network.items() if value is not None}
-    _append_mapping(lines, "Provider Network", provider_network)
-    _append_items(lines, "Per-Item Results", _sequence(result.get("items")) or _sequence(result.get("item_results")) or _sequence(result.get("results")))
-    _append_named_section(lines, "Before And After Changes", result.get("changes") or result.get("change_summary") or result.get("before_after"))
-    _append_named_section(lines, "Source And Provenance", result.get("source") or result.get("provenance") or result.get("active_taxonomy"))
-    _append_mapping(lines, "Work Performed And Downstream", result.get("downstream") if isinstance(result.get("downstream"), Mapping) else {})
-    _append_named_section(lines, "Snapshot Results", result.get("snapshot") or result.get("snapshot_results") or _mapping(result.get("downstream")).get("snapshot"))
-    _append_named_section(lines, "Warnings And Blockers", {"warnings": _sequence(result.get("warnings")), "blockers": _sequence(result.get("blockers"))})
-    _append_named_section(lines, "Write Boundary", result.get("write_boundary") or _mapping(result.get("downstream")).get("write_boundary") or {"status": result.get("write_boundary_status", "NOT_RECORDED")})
-    _append_named_section(lines, "Databases Read And Written", result.get("databases") or result.get("database_roles") or result.get("expected_writable_database_set"))
-    _append_mapping(lines, "Backup And Rollback", result.get("rollback") if isinstance(result.get("rollback"), Mapping) else {})
-    _append_named_section(lines, "Scheduler Handling", result.get("scheduler") or {"status": result.get("scheduler_status", "NOT_RECORDED")})
-    if events:
-        lines.extend(["", "## Progress Timeline", ""])
-        for event in events:
-            safe_event = redact(event)
-            lines.append(
-                "- "
-                f"{safe_event.get('current_stage_number', '?')}/{safe_event.get('total_declared_stages', '?')} "
-                f"{safe_event.get('current_stage_id', 'UNKNOWN')} "
-                f"{safe_event.get('stage_state', 'UNKNOWN')}: {safe_event.get('message', '')}"
-            )
-    errors = result.get("errors") if isinstance(result.get("errors"), list) else []
-    if errors:
-        lines.extend(["", "## Errors", ""])
-        for error in errors:
-            if isinstance(error, Mapping):
-                lines.append(f"- {error.get('type', 'Error')}: {error.get('message', '')}")
-            else:
-                lines.append(f"- {_short(redact(error), limit=300)}")
-    lines.extend(["", "## Next Required Action", ""])
-    lines.append(f"- {result.get('recommended_next_action') or 'Review the outcome and retained artifacts before any further action.'}")
-    lines.extend(["", "## Cleanup And Retained Artifacts", ""])
-    lines.append("- Durable run artifacts are retained in this run directory.")
-    if result.get("artifact_dir"):
-        lines.append(f"- Artifact directory: `{result.get('artifact_dir')}`")
-    lines.extend(
-        [
-            "",
-            "## Technical Appendix",
-            "",
-            f"- Preview fingerprint: `{result.get('preview_fingerprint', '')}`",
-            f"- Result fingerprint: `{result.get('result_fingerprint', '')}`",
-            f"- Report content fingerprint: `{fingerprint({'result': result, 'request': request or {}, 'events': events or []})}`",
-        ]
-    )
+    taxonomy = taxonomy_preview_presentation(result)
+    operation = {
+        "ADD_TICKERS": "Add Tickers",
+        "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
+        "CHECK_UPDATE_TAXONOMY": "Taxonomy",
+    }.get(str(result.get("operation_type")), "Administration")
+    mode = str(result.get("mode") or "")
+    preview_only = mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "READ_ONLY_AUDIT"}
+    counts = _mapping(result.get("summary_counts"))
+    downstream = _mapping(result.get("downstream"))
+    request_data = request or _mapping(result.get("request"))
+    inputs = _sequence(request_data.get("normalized_inputs")) or _sequence(request_data.get("requested_inputs"))
+
+    def section(lines: list[str], title: str, rows: list[str] | tuple[str, ...]) -> None:
+        lines.extend(["", f"## {title}", ""])
+        lines.extend(f"- {row}" for row in rows if row)
+
+    lines = ["# Fundamentals Administration Operation Report"]
+    section(lines, "Executive Summary", summary_rows)
+
+    checked = [f"Operation: {operation}."]
+    if taxonomy:
+        checked.append(f"Taxonomy domain: {taxonomy['domain']}.")
+        if taxonomy.get("version"):
+            checked.append(f"Active version: {taxonomy['version']}.")
+        if taxonomy.get("tickers") is not None:
+            checked.append(f"{taxonomy['tickers']} tickers checked.")
+        if taxonomy.get("memberships") is not None:
+            checked.append(f"{taxonomy['memberships']} memberships checked.")
+    elif inputs:
+        checked.append("Requested tickers: " + ", ".join(str(value) for value in inputs[:25]) + (" and more." if len(inputs) > 25 else "."))
+    elif operation == "Sector and Industry":
+        checked.append("The active operational universe was checked.")
+    if result.get("network_used") is True:
+        checked.append("Provider network data was used.")
+    elif result.get("network_allowed") is not None:
+        checked.append("Provider network data was not used.")
+    section(lines, "What Was Checked", checked)
+
+    if taxonomy and taxonomy["business_outcome"] == "NO_CHANGE":
+        changes = ["No additions or removals.", "No role or tier changes.", "No primary-membership changes."]
+    elif taxonomy:
+        changes = [f"{taxonomy['changes']} proposed changes found."]
+    elif result.get("outcome") == "NO_CHANGE":
+        changes = ["No changes were needed."]
+    else:
+        changes = [f"{key.replace('_', ' ').title()}: {counts[key]}." for key in ("requested", "accepted", "changed", "already_present", "failed") if key in counts]
+        for item in (_sequence(result.get("items")) or _sequence(result.get("item_results")))[:25]:
+            if not isinstance(item, Mapping):
+                continue
+            ticker = item.get("ticker") or item.get("item_key")
+            status = item.get("status") or item.get("decision")
+            reason = item.get("reason")
+            if ticker and status:
+                line = f"{ticker}: {str(status).replace('_', ' ').title()}"
+                if isinstance(reason, str) and reason and "/" not in reason and "\\" not in reason:
+                    line += f" - {reason}"
+                changes.append(line + ".")
+        if not changes:
+            changes = ["See the per-item run evidence for detailed changes."]
+    section(lines, "Changes Found", changes)
+
+    if preview_only:
+        actions = ["Preview checked the current state and recorded its findings.", "No database writes were performed."]
+    elif mode == "COPY_ONLY_APPLY":
+        actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed."]
+    elif result.get("outcome") == "NO_CHANGE":
+        actions = ["No production change was required."]
+    else:
+        actions = ["The protected operation ran. Review the final result for its outcome."]
+    section(lines, "Actions Performed", actions)
+
+    if taxonomy:
+        impact = [taxonomy["downstream_text"]]
+    else:
+        invocations = _mapping(downstream.get("invocation_counts"))
+        if invocations and all(isinstance(value, int) and value == 0 for value in invocations.values()):
+            impact = ["No downstream calculations were required or run."]
+        elif invocations:
+            impact = [f"{str(key).replace('_', ' ').title()}: {value} run(s)." for key, value in sorted(invocations.items())]
+        elif preview_only:
+            impact = ["Potential downstream work was evaluated. No calculations were run during Preview."]
+        else:
+            impact = ["Downstream details are retained in the run evidence."]
+    section(lines, "Downstream Impact", impact)
+
+    warnings = _sequence(result.get("warnings"))
+    blockers = _sequence(result.get("blockers"))
+    if taxonomy and not blockers and taxonomy["blockers"]:
+        blockers = [f"{taxonomy['blockers']} review blockers were recorded."]
+    notices = []
+    for label, values in (("Warning", warnings), ("Blocker", blockers)):
+        for value in values[:10]:
+            detail = str(value.get("reason") or value.get("message") or value.get("status") or label) if isinstance(value, Mapping) else str(value)
+            if "/" in detail or "\\" in detail or "{" in detail:
+                detail = "Details are available in the retained run evidence."
+            notices.append(f"{label}: {detail}.")
+    section(lines, "Warnings or Blockers", notices or ["No warnings or blockers were found."])
+
+    if taxonomy and taxonomy["business_outcome"] == "NO_CHANGE":
+        final = ["No changes. No further action is required."]
+    else:
+        outcome = str(result.get("outcome") or "Recorded").replace("_", " ").title()
+        final = [f"Result: {outcome}."]
+        recommendation = result.get("recommended_next_action")
+        if isinstance(recommendation, str) and recommendation and "/" not in recommendation and "\\" not in recommendation:
+            final.append(recommendation)
+    section(lines, "Final Result", final)
+
+    appendix = [f"Run ID: `{run_id}`"]
+    for label, key in (("Started UTC", "started_at_utc"), ("Completed UTC", "completed_at_utc"), ("Preview fingerprint", "preview_fingerprint"), ("Result fingerprint", "result_fingerprint")):
+        if result.get(key):
+            appendix.append(f"{label}: `{result[key]}`")
+    appendix.append(f"Report content fingerprint: `{fingerprint({'result': result, 'request': request_data, 'events': events or []})}`")
+    if counts:
+        appendix.append("Structured counts: " + ", ".join(f"{key}={counts[key]}" for key in sorted(counts)))
+    artifacts = _mapping(result.get("artifacts"))
+    if artifacts:
+        appendix.append("Artifact files: " + ", ".join(sorted({Path(str(value)).name for value in artifacts.values() if isinstance(value, str)})))
+    section(lines, "Technical Appendix", appendix)
     return redact_text("\n".join(lines).rstrip() + "\n")
 
 

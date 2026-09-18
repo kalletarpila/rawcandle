@@ -238,6 +238,7 @@ def build_fundamentals_admin_page(
     current_preview_payload_path: str | None = None
     current_preview_fingerprint: str | None = None
     current_report_run_id: str | None = None
+    selected_history_run_id: str | None = None
     operation_running = False
     last_progress_count: tuple[object, object] | None = None
 
@@ -265,7 +266,7 @@ def build_fundamentals_admin_page(
         if operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
             return (
                 "Checks the full active universe. data/osakedata.db.ticker_meta is the authoritative "
-                "Sector/Industry source, and this can be run without adding a ticker. Apply is shown "
+                "Sector/Industry source, and this can be run without adding a ticker. Test on copies is shown "
                 "only when the backend reports an authorized correctable candidate."
             )
         if operation == "CHECK_UPDATE_TAXONOMY":
@@ -327,23 +328,34 @@ def build_fundamentals_admin_page(
 
     def refresh_history() -> None:
         rows = []
-        for item in admin_service.history_entries(
-            limit=12,
-            include_technical=bool(show_technical_history_checkbox.value),
-        ):
+        try:
+            entries = admin_service.history_entries(
+                limit=12,
+                include_technical=bool(show_technical_history_checkbox.value),
+            )
+        except Exception:
+            LOGGER.exception("Administration history refresh failed")
+            return
+        for item in entries:
             run_id = item.run_id
             title = _plain_status(item.outcome)
-            when = item.completed_at_utc or "not finished"
+            when = item.completed_at_utc or ("In progress" if item.status == "running" else "Time unavailable")
             category = getattr(item, "category", "Administration run")
             primary = getattr(item, "primary_count", None)
-            count_text = f"{primary} items" if primary is not None else ""
+            count_text = getattr(item, "count_label", None) or (f"{primary} items" if primary is not None else "")
+            operation_label = {
+                "ADD_TICKERS": "Add Tickers",
+                "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
+                "CHECK_UPDATE_TAXONOMY": "Taxonomy",
+            }.get(item.operation_type, item.operation_type.replace("_", " ").title())
+            weight = ft.FontWeight.BOLD if run_id == selected_history_run_id else ft.FontWeight.NORMAL
             rows.append(
                 ft.Row(
                     [
-                        ft.Text(when, width=185),
-                        ft.Text(item.operation_type.replace("_", " ").title(), width=210),
-                        ft.Text(title, width=150),
-                        ft.Text(count_text, width=90),
+                        ft.Text(when, width=185, weight=weight),
+                        ft.Text(operation_label, width=210, weight=weight),
+                        ft.Text(title, width=150, weight=weight),
+                        ft.Text(count_text, width=150, weight=weight),
                         ft.Text(category, width=170, tooltip=f"run_id={item.run_id}; mode={item.mode}"),
                         ft.IconButton(
                             icon=ft.Icons.INFO,
@@ -358,8 +370,11 @@ def build_fundamentals_admin_page(
         history_column.controls = rows or [ft.Text("No administration runs found.")]
 
     def select_history_run(run_id: str) -> None:
+        nonlocal selected_history_run_id
         try:
             progress = admin_service.progress(run_id)
+            summary_reader = getattr(admin_service, "history_result_summary", None)
+            summary = summary_reader(run_id) if callable(summary_reader) else ()
             report_text = "available" if OPERATION_REPORT_NAME in progress.artifacts else "not yet available"
             heartbeat = (
                 f"{progress.heartbeat_age_seconds:.0f}s ago"
@@ -367,6 +382,8 @@ def build_fundamentals_admin_page(
                 else "not recorded"
             )
             history_detail_field.value = (
+                ("\n".join(summary) + "\n" if summary else "")
+                +
                 f"Run: {progress.run_id}\n"
                 f"Operation: {progress.operation_type}\n"
                 f"Status: {progress.status}; outcome: {progress.terminal_outcome or 'not terminal'}\n"
@@ -375,6 +392,7 @@ def build_fundamentals_admin_page(
                 f"Completed stages: {progress.completed_stages}; heartbeat: {heartbeat}\n"
                 f"Operation report: {report_text}"
             )
+            selected_history_run_id = run_id
             progress_field.value = (
                 "Still working." if progress.status == "running" else "Selected run progress loaded."
             ) + (
@@ -383,6 +401,7 @@ def build_fundamentals_admin_page(
             )
         except Exception:
             history_detail_field.value = f"Run: {run_id}\nStatus: unavailable or incomplete."
+        refresh_history()
         if hasattr(page, "update"):
             page.update()
 
@@ -404,7 +423,7 @@ def build_fundamentals_admin_page(
 
     def apply_result(result: AdminUIRunResult) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
-        nonlocal current_preview_fingerprint, current_report_run_id
+        nonlocal current_preview_fingerprint, current_report_run_id, selected_history_run_id
         is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW"}
         status_field.value = _result_text(result)
         final_section.visible = not is_preview
@@ -427,6 +446,7 @@ def build_fundamentals_admin_page(
             preview_fingerprint_field.value = ""
         if result.run_id:
             current_report_run_id = result.run_id
+            selected_history_run_id = result.run_id
             report_button.on_click = lambda _event, run_id=result.run_id: _launch_browser_url(
                 page,
                 admin_report_download_url(run_id),
@@ -639,7 +659,7 @@ def build_fundamentals_admin_page(
         open_production_confirmation(_event)
 
     preview_button = ft.ElevatedButton("Preview", icon=ft.Icons.PREVIEW, on_click=on_preview)
-    copy_apply_button = ft.OutlinedButton("Apply", icon=ft.Icons.CHECKLIST, on_click=on_copy_apply, visible=False)
+    copy_apply_button = ft.OutlinedButton("Test on copies", icon=ft.Icons.CHECKLIST, on_click=on_copy_apply, visible=False)
     production_apply_button = ft.OutlinedButton("Production update", icon=ft.Icons.LOCK, on_click=on_production_apply, visible=False)
     for control in (
         operation_dropdown,
@@ -665,6 +685,7 @@ def build_fundamentals_admin_page(
             ft.Text("Administration operation", size=18, weight=ft.FontWeight.BOLD),
             ft.Row([operation_dropdown, market_field, taxonomy_domain_dropdown], wrap=True, spacing=12),
             operation_guidance_field,
+            ft.Text("Preview checks proposed changes. Test on copies runs them in isolated databases. Production update writes an approved change under the existing safeguards."),
             tickers_field,
             ft.Row([candidate_path_field, candidate_version_field], wrap=True, spacing=12),
             ft.Row([preview_button, copy_apply_button, production_apply_button], spacing=12),
@@ -692,7 +713,7 @@ def build_fundamentals_admin_page(
                     ft.Text("Time", width=185, weight=ft.FontWeight.BOLD),
                     ft.Text("Operation", width=210, weight=ft.FontWeight.BOLD),
                     ft.Text("Result", width=150, weight=ft.FontWeight.BOLD),
-                    ft.Text("Count", width=90, weight=ft.FontWeight.BOLD),
+                    ft.Text("Count", width=150, weight=ft.FontWeight.BOLD),
                     ft.Text("Category", width=170, weight=ft.FontWeight.BOLD),
                     ft.Container(width=48),
                     ft.Container(width=48),

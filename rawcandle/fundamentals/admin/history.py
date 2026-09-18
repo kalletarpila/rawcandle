@@ -52,8 +52,11 @@ class AdminRunHistory:
         return path
 
     def _load_json(self, path: Path) -> Mapping[str, Any] | None:
+        if path.is_symlink():
+            return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, Mapping) else None
         except Exception:
             return None
 
@@ -92,7 +95,7 @@ class AdminRunHistory:
                 outcome=outcome,
                 status=state,
                 started_at_utc=result.get("started_at_utc"),
-                completed_at_utc=result.get("completed_at_utc"),
+                completed_at_utc=result.get("completed_at_utc") or ((status or {}).get("timestamp_utc") if state != "running" else None),
                 run_dir=str(run_dir),
             )
         stage = str((status or {}).get("stage", "UNKNOWN"))
