@@ -21,7 +21,7 @@ from rawcandle.fundamentals.operating_income_v2.persistence import (
     HISTORY_MODE,
 )
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
-from rawcandle.fundamentals.snapshot import assembler as v1
+from rawcandle.fundamentals.snapshot import v2_scaffold as scaffold
 from rawcandle.fundamentals import structural_break
 
 
@@ -158,10 +158,10 @@ def _current_price_valuation(
         )
     ]
     selected = valuation.select_price(bars, report_date)
-    base = {"label": v1.CURRENT_PRICE_LABEL, "price_date": selected.price_date, "price_age_calendar_days": selected.price_age_calendar_days}
+    base = {"label": scaffold.CURRENT_PRICE_LABEL, "price_date": selected.price_date, "price_age_calendar_days": selected.price_age_calendar_days}
     if selected.selected_price is None or selected.price_date is None:
         return {**base, "valuation_status": "VALUATION_NOT_READY", "reason_code": selected.reason_code or "PRICE_MISSING"}
-    if selected.price_age_calendar_days is None or selected.price_age_calendar_days > v1.PRICE_MAX_AGE_DAYS:
+    if selected.price_age_calendar_days is None or selected.price_age_calendar_days > scaffold.PRICE_MAX_AGE_DAYS:
         return {**base, "valuation_status": "VALUATION_NOT_READY", "reason_code": "CURRENT_PRICE_FALLBACK_TOO_OLD", "selected_price": selected.selected_price}
     selected_bar = next(bar for bar in bars if bar.price_date == selected.price_date)
     observation = valuation.ValuationObservation(
@@ -309,7 +309,7 @@ def _three_point_multiples(history: list[dict[str, Any]], current: Mapping[str, 
     def filing(point: str, slot: Mapping[str, Any]) -> dict[str, Any]:
         persisted = slot.get("valuation") or {}
         age = persisted.get("price_age_calendar_days")
-        eligible = persisted.get("selected_price") is not None and age is not None and 0 <= int(age) <= v1.FILING_PRICE_MAX_AGE_DAYS
+        eligible = persisted.get("selected_price") is not None and age is not None and 0 <= int(age) <= scaffold.FILING_PRICE_MAX_AGE_DAYS
         return _multiples_context(
             evaluation_point=point, ttm=slot.get("ttm"), persisted=persisted,
             fiscal_year=slot["fiscal_year"] if slot.get("ttm") else None,
@@ -535,7 +535,7 @@ def _report_source_state(source_state: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _assemble_company_snapshot_v2(
-    paths: v1.SnapshotPaths,
+    paths: scaffold.SnapshotPaths,
     *,
     ticker: str,
     report_date: str,
@@ -543,8 +543,8 @@ def _assemble_company_snapshot_v2(
     candidate_package_fingerprint: str | None = None,
     diagnostic_model_contract: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    base = v1.assemble_company_snapshot(
-        paths, ticker=ticker, report_date=report_date, analysis_scaffold_only=True
+    base = scaffold.assemble_company_snapshot(
+        paths, ticker=ticker, report_date=report_date
     )
     with _readonly(paths.analysis_db) as analysis, _readonly(paths.market_db) as market, _readonly(paths.canonical_db) as canonical:
         is_explicit_candidate = candidate_model_map is not None
@@ -584,7 +584,7 @@ def _assemble_company_snapshot_v2(
         anchor = base["anchor"]
         canonical_anchor = base["history"][-1]["ttm"]
         lifecycle_rows = [row for row in repository.lifecycle_history(company_id, model_fingerprint=model_map["lifecycle"][1]) if not row.get("source_available_date") or row["source_available_date"] <= report_date]
-        base["lifecycle"] = v1.lifecycle_presentation(lifecycle_rows, anchor_year=anchor["fiscal_year"], anchor_quarter=anchor["fiscal_quarter"])
+        base["lifecycle"] = scaffold.lifecycle_presentation(lifecycle_rows, anchor_year=anchor["fiscal_year"], anchor_quarter=anchor["fiscal_quarter"])
         base["delta"] = _delta(analysis, company_id, anchor["fiscal_year"], anchor["fiscal_quarter"], model_map["delta"][1])
         base["current_price_valuation"] = _current_price_valuation(market, ticker=base["identity"]["ticker"], report_date=report_date, anchor=canonical_anchor, classification=base["identity"])
         structural_state = _structural_state(canonical, company_id=company_id, report_date=report_date)
@@ -592,7 +592,7 @@ def _assemble_company_snapshot_v2(
             base["structural_break"] = structural_state
             if not structural_state["eligible"]:
                 base["current_price_valuation"] = {
-                    "label": v1.CURRENT_PRICE_LABEL,
+                    "label": scaffold.CURRENT_PRICE_LABEL,
                     "valuation_status": "VALUATION_NOT_READY",
                     "reason_code": structural_state["reason_code"],
                     "fundamental_anchor_available_date": canonical_anchor.get("ttm_source_available_date"),
@@ -615,12 +615,13 @@ def _assemble_company_snapshot_v2(
         wc = [canonical_anchor.get(key) for key in ("accounts_receivable", "inventory", "accounts_payable", "deferred_revenue")]
         base["absolute_values"]["current"]["operating_net_working_capital"] = None if any(value is None for value in wc) else wc[0] + wc[1] - wc[2] - wc[3]
         filing_values = [slot["valuation"]["total_valuation_score"] if slot.get("valuation") and slot["valuation"]["valuation_status"] == "VALUATION_FULL" else None for slot in base["history"][1:]]
-        base["valuation_four_observation_average"] = v1.four_observation_average(filing_values)
+        base["valuation_four_observation_average"] = scaffold.four_observation_average(filing_values)
         base["valuation_four_observation_count"] = sum(value is not None for value in filing_values)
         base["component_contract"] = {name: score.MODEL_CONTRACT["components"][name]["maximum"] for name in contract.COMPONENTS}
         base["model_fingerprints"] = {name: identity[1] for name, identity in model_map.items()}
         base["model_fingerprints"]["family"] = contract.FAMILY_FINGERPRINT
         base["report_contract"] = CANDIDATE_REPORT_CONTRACT if uses_eight_flags else REPORT_CONTRACT
+        base["report_presentation_contract"] = base["report_contract"]
         base["report_presentation_fingerprint"] = (
             CANDIDATE_REPORT_PRESENTATION_FINGERPRINT
             if uses_eight_flags else REPORT_PRESENTATION_FINGERPRINT
@@ -655,12 +656,12 @@ def _assemble_company_snapshot_v2(
     return base
 
 
-def assemble_company_snapshot_v2(paths: v1.SnapshotPaths, *, ticker: str, report_date: str) -> dict[str, Any]:
+def assemble_company_snapshot_v2(paths: scaffold.SnapshotPaths, *, ticker: str, report_date: str) -> dict[str, Any]:
     return _assemble_company_snapshot_v2(paths, ticker=ticker, report_date=report_date)
 
 
 def assemble_company_snapshot_v2_candidate(
-    paths: v1.SnapshotPaths,
+    paths: scaffold.SnapshotPaths,
     *,
     ticker: str,
     report_date: str,

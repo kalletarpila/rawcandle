@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

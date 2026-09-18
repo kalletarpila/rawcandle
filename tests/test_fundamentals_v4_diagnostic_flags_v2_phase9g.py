@@ -1,9 +1,7 @@
-from dataclasses import fields
 import inspect
 
 import pytest
 
-from rawcandle.fundamentals.diagnostic_flags import engine as v1
 from rawcandle.fundamentals.operating_income_v2 import diagnostic_flags as v2
 from rawcandle.fundamentals.operating_income_v2.rehearsal import _diagnostic_endpoint
 
@@ -107,49 +105,6 @@ def test_working_capital_readiness_boundaries(current, prior, consecutive, statu
         strict=True,
     ))[v2.FLAG_NAMES[6]]
     assert (result.status, result.reason_code) == (status, reason)
-
-
-def _v1_endpoint(value: v2.DiagnosticEndpoint) -> v1.DiagnosticEndpoint:
-    common = {
-        field.name: getattr(value, field.name)
-        for field in fields(v1.DiagnosticEndpoint)
-        if hasattr(value, field.name)
-    }
-    common["ebit"] = value.operating_income
-    common["ebit_yield"] = value.operating_income_yield
-    return v1.DiagnosticEndpoint(**common)
-
-
-def _v1_name(name: str) -> str:
-    return (
-        name.replace("current_operating_margin", "current_ebit_margin")
-        .replace("prior_operating_margin", "prior_ebit_margin")
-        .replace("operating_income_shift", "ebit_shift")
-        .replace("operating_income_yield", "ebit_yield")
-        .replace("current_operating_income", "current_ebit")
-        .replace("prior_operating_income", "prior_ebit")
-        .replace("delta_operating_income", "delta_ebit")
-        .replace("operating_income_trigger", "ebit_trigger")
-    )
-
-
-def test_native_v2_matches_v1_for_all_economically_unchanged_flags() -> None:
-    current = endpoint(
-        current=True, revenue=120_000_000.0, operating_income=4_000_000.0,
-        common_earnings=-3_000_000.0, operating_cashflow=20_000_000.0,
-        capex=-20_000_000.0, cash=2_000_000.0, total_debt=80_000_000.0,
-        operating_income_yield=0.55,
-    )
-    prior = endpoint(current=False)
-    new = v2.evaluate_diagnostic_flags(v2.DiagnosticInput(current, prior, True))
-    old = v1.evaluate_diagnostic_flags(v1.DiagnosticInput(_v1_endpoint(current), _v1_endpoint(prior), True))
-    for index in range(6):
-        assert (new[index].status.value, new[index].reason_code, new[index].triggered) == (
-            old[index].status.value, old[index].reason_code, old[index].triggered,
-        )
-        new_evidence = {_v1_name(item.name): item.value for item in new[index].evidence}
-        old_evidence = {item.name: item.value for item in old[index].evidence}
-        assert new_evidence == old_evidence
 
 
 def test_v2_engine_has_no_v1_adapter_or_ebit_semantics() -> None:

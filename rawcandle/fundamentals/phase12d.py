@@ -747,7 +747,7 @@ def build_candidate(
     timings["ttm_seconds"] = time.perf_counter() - started
 
     started = time.perf_counter()
-    calculated = phase10b.calculate(paths, verify_v1_overlap=False)
+    calculated = phase10b.calculate(paths)
     timings["calculation_seconds"] = time.perf_counter() - started
     package_fingerprint = _candidate_package_fingerprint(
         canonical["source_fingerprint"], canonical["canonical_fingerprint"], ttm["fingerprint"]
@@ -797,7 +797,7 @@ def verify_no_change(paths: Mapping[str, Path], result: Mapping[str, Any], *, ap
     before = {name: _file_state(paths[name]) for name in ("canonical", "analysis")}
     canonical = reconcile_canonical(paths["provider"], paths["canonical"], applied_at=applied_at)
     ttm = rebuild_ttm(paths["canonical"], applied_at=applied_at)
-    calculated = phase10b.calculate(paths, verify_v1_overlap=False)
+    calculated = phase10b.calculate(paths)
     with sqlite3.connect(paths["analysis"]) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")

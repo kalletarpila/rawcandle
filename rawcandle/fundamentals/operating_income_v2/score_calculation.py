@@ -5,7 +5,7 @@ from collections import defaultdict
 from statistics import mean
 from typing import Any, Mapping, Sequence
 
-from rawcandle.fundamentals.score.methodology import (
+from .score_math import (
     ANCHORS, balance_points, clamp, fiscal_ordinal, piecewise_score, safe_div, safe_growth,
 )
 

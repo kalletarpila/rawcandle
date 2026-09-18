@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Sequence
 
-from rawcandle.fundamentals.relative_position import engine as v1
+from . import peer_ranking_core as core
 
 from .contract import RELATIVE_MODEL_VERSION, fingerprint, model_fingerprint
 from .score import MODEL_FINGERPRINT as SCORE_FINGERPRINT
@@ -14,7 +14,7 @@ from .valuation import MODEL_VERSION as VALUATION_VERSION
 
 MODEL_VERSION = RELATIVE_MODEL_VERSION
 MODEL_CONTRACT = {
-    **v1.MODEL_CONTRACT,
+    **core.MODEL_CONTRACT,
     "model_version": MODEL_VERSION,
     "source_models": {
         "FUNDAMENTAL_SCORE": (SCORE_VERSION, SCORE_FINGERPRINT),
@@ -24,11 +24,11 @@ MODEL_CONTRACT = {
 }
 MODEL_FINGERPRINT = model_fingerprint(MODEL_VERSION, MODEL_CONTRACT)
 
-RelativeMeasure = v1.RelativeMeasure
-PeerScope = v1.PeerScope
-RelativeStatus = v1.RelativeStatus
-EcosystemMembership = v1.EcosystemMembership
-RelativeObservation = v1.RelativeObservation
+RelativeMeasure = core.RelativeMeasure
+PeerScope = core.PeerScope
+RelativeStatus = core.RelativeStatus
+EcosystemMembership = core.EcosystemMembership
+RelativeObservation = core.RelativeObservation
 
 
 @dataclass(frozen=True)
@@ -70,7 +70,7 @@ def calculate_snapshot(
         source_model_version="V2_VALIDATED_SOURCE",
         source_model_fingerprint=fingerprint((item.measure.value, "V2_VALIDATED_SOURCE")),
     ) for item in observations]
-    result = v1.calculate_snapshot(
+    result = core.calculate_snapshot(
         mapped, snapshot_date=snapshot_date, freshness_days=freshness_days,
         classification_fingerprint=classification_fingerprint,
         taxonomy_fingerprint=taxonomy_fingerprint,

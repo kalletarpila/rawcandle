@@ -11,12 +11,7 @@ from rawcandle.fundamentals.operating_income_v2.diagnostic_flags import (
     MODEL_CONTRACT as DIAGNOSTIC_MODEL_CONTRACT,
     REVENUE_SCALE_FLOOR,
 )
-from rawcandle.fundamentals.score.engine import COMPONENTS
-from rawcandle.fundamentals.snapshot.assembler import (
-    COMPONENT_LABELS,
-    CURRENT_PRICE_LABEL,
-    REPORT_CONTRACT,
-)
+from rawcandle.fundamentals.snapshot.v2_scaffold import CURRENT_PRICE_LABEL
 from rawcandle.fundamentals.relative_valuation.contract import (
     CANDIDATE_REPORT_CONTRACT as RELATIVE_VALUATION_CANDIDATE_REPORT_CONTRACT,
     PRODUCTION_REPORT_CONTRACT as RELATIVE_VALUATION_PRODUCTION_REPORT_CONTRACT,
@@ -24,7 +19,6 @@ from rawcandle.fundamentals.relative_valuation.contract import (
 
 
 SUPPORTED_REPORT_CONTRACTS = {
-    REPORT_CONTRACT,
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V2",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V3",
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V4",
@@ -33,6 +27,16 @@ SUPPORTED_REPORT_CONTRACTS = {
     "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7",
     RELATIVE_VALUATION_CANDIDATE_REPORT_CONTRACT,
     RELATIVE_VALUATION_PRODUCTION_REPORT_CONTRACT,
+}
+
+COMPONENT_LABELS = {
+    "REVENUE_GROWTH": "Revenue Growth",
+    "OPERATING_PROFITABILITY": "Operating Profitability",
+    "OPERATING_MARGIN_DIRECTION": "Operating Margin Direction",
+    "FCF_MARGIN": "FCF Margin",
+    "BALANCE_SHEET_RESILIENCE": "Balance Sheet",
+    "DILUTION": "Dilution",
+    "FUNDAMENTAL_TRAJECTORY": "Fundamental Trajectory",
 }
 
 

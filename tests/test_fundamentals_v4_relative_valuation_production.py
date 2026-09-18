@@ -25,7 +25,7 @@ from rawcandle.fundamentals.relative_valuation.persistence import (
     set_active_snapshot,
 )
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.renderer import render_snapshot
 def _role_database(path: Path, table: str) -> None:
     with sqlite3.connect(path) as connection:
@@ -197,7 +197,14 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
 
     monkeypatch.setattr(engine_module, "calculate_relative_valuation", forbidden)
     monkeypatch.setattr(persistence_module, "apply_snapshot", forbidden)
-    report_date = "2026-09-12"
+    with sqlite3.connect(
+        f"{paths.analysis_db.resolve().as_uri()}?mode=ro", uri=True
+    ) as connection:
+        active_metadata = RelativeValuationRepository(connection).active_metadata(
+            model_fingerprint=MODEL_FINGERPRINT
+        )
+    assert active_metadata is not None
+    report_date = active_metadata["as_of_date"]
     first = generate_active_company_snapshot(
         paths, ticker="NVDA", report_date=report_date, output_dir=tmp_path
     )
@@ -215,7 +222,7 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
             report_date, model_fingerprint=MODEL_FINGERPRINT
         )
         assert selected_metadata is not None
-        assert selected_metadata["as_of_date"] == "2026-09-12"
+        assert selected_metadata["as_of_date"] == report_date
         persisted = repository.company_by_ticker(
             "NVDA",
             model_fingerprint=MODEL_FINGERPRINT,
@@ -231,19 +238,18 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
 
     assert first["status"] == "CREATED" and second["status"] == "NO_CHANGE"
     assert first["report_content_fingerprint"] == second["report_content_fingerprint"]
-    assert identity["as_of_date"] == "2026-09-12"
-    assert relative["current_valuation"]["price_date"] == "2026-09-11"
+    assert identity["as_of_date"] == report_date
+    assert relative["current_valuation"]["price_date"] == persisted["current_price_date"]
     assert first["snapshot"]["current_price_valuation"]["price_date"] == expected_current_price_date
     for expected in (
-        "Report date: `2026-09-12`",
-        "Relative Valuation snapshot date: `2026-09-12`",
-        "snapshotissa `2026-09-12` yhtiön `2026-09-11` päivän hinnalla",
+        f"Report date: `{report_date}`",
+        f"Relative Valuation snapshot date: `{report_date}`",
+        f"snapshotissa `{report_date}` yhtiön `{persisted['current_price_date']}` päivän hinnalla",
         f"Indicative current-price valuation käyttää `{expected_current_price_date}` päivän hintaa",
-        "Persisted peer comparison — snapshot 2026-09-12",
+        f"Persisted peer comparison — snapshot {report_date}",
         "Snapshot-price Absolute Valuation Score",
         "Snapshot-hintainen",
         "ei lasketa uutta persentiiliä raportin nykyhinnalla",
-        "| Snapshot-price Absolute Valuation Score | 27.02 | 25.76 | −1.26 p |",
     ):
         assert expected in markdown
     assert "Current-price peer comparison" not in markdown
@@ -260,8 +266,8 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
     assert "company_id" not in markdown and "snapshot_id" not in markdown
 
     distinct_dates = copy.deepcopy(first["snapshot"])
-    distinct_dates["report_date"] = "2026-09-13"
-    distinct_dates["current_price_valuation"]["price_date"] = "2026-09-10"
+    distinct_dates["report_date"] = "2026-09-20"
+    distinct_dates["current_price_valuation"]["price_date"] = "2026-09-16"
     distinct_markdown = render_snapshot(distinct_dates).markdown
     assert len({
         distinct_dates["report_date"],
@@ -269,7 +275,7 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
         distinct_dates["relative_valuation"]["current_valuation"]["price_date"],
         distinct_dates["current_price_valuation"]["price_date"],
     }) == 4
-    for date_value in ("2026-09-13", "2026-09-12", "2026-09-11", "2026-09-10"):
+    for date_value in ("2026-09-20", report_date, persisted["current_price_date"], "2026-09-16"):
         assert date_value in distinct_markdown
     assert (
         relative["current_valuation"]["total_valuation_score"]

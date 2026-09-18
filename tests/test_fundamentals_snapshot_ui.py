@@ -16,7 +16,7 @@ from dev_tools.fundamentals_snapshot_page import (
     report_download_url,
 )
 from dev_tools.stock_update_scheduler_ui import add_fundamentals_download_route
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.ui_service import (
     FUNDAMENTAL_REPORTS_DIR,
     MAX_BATCH_TICKERS,
@@ -492,18 +492,16 @@ def test_ui_service_real_snapshot_integration_is_read_only(tmp_path: Path) -> No
         RelativeValuationRepository,
     )
 
-    report_date = "2026-09-12"
     with sqlite3.connect(
         f"{PRODUCTION_SNAPSHOT_PATHS.analysis_db.resolve().as_uri()}?mode=ro",
         uri=True,
     ) as connection:
-        expected_snapshot = RelativeValuationRepository(
-            connection
-        ).report_snapshot_metadata(
-            report_date,
+        repository = RelativeValuationRepository(connection)
+        expected_snapshot = repository.active_metadata(
             model_fingerprint=RELATIVE_VALUATION_MODEL_FINGERPRINT,
         )
     assert expected_snapshot is not None
+    report_date = expected_snapshot["as_of_date"]
     service = FundamentalsSnapshotUIService(output_dir=tmp_path)
 
     result = service.generate(
@@ -512,7 +510,7 @@ def test_ui_service_real_snapshot_integration_is_read_only(tmp_path: Path) -> No
 
     assert result.status == "GENERATED"
     assert result.publication_status == "CREATED"
-    assert result.filename == "CRMD_2026-09-12.md"
+    assert result.filename == f"CRMD_{report_date}.md"
     assert (tmp_path / result.filename).is_file()
     assert (
         f"Relative Valuation snapshot date: `{expected_snapshot['as_of_date']}`"

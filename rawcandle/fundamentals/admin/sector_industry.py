@@ -53,7 +53,7 @@ from rawcandle.fundamentals.phase13b_foundation import (
     database_fingerprint,
     reject_production_path,
 )
-from rawcandle.fundamentals.phase13f3_ticker_transition import REPORT_DATE
+REPORT_DATE = "2026-09-12"
 from rawcandle.fundamentals.relative_valuation.engine import MODEL_FINGERPRINT as RV_MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_valuation.engine import calculate_relative_valuation
 from rawcandle.fundamentals.relative_valuation.persistence import (
@@ -67,7 +67,7 @@ from rawcandle.fundamentals.relative_valuation.source import (
     load_relative_valuation_source,
 )
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 
 
 PHASE = "PHASE13G3_CHECK_UPDATE_SECTOR_INDUSTRY"

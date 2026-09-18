@@ -11,9 +11,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from rawcandle.fundamentals.lifecycle.engine import MODEL_FINGERPRINT as LIFECYCLE_V1_FINGERPRINT
-from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_V1_FINGERPRINT
-from rawcandle.fundamentals.valuation.persistence import load_canonical_source as load_valuation_source
+from .canonical_valuation_source import load_canonical_source as load_valuation_source
 from rawcandle.fundamentals import structural_break
 
 from . import delta, diagnostic_flags, lifecycle, relative_position, score, snapshot, valuation
@@ -244,25 +242,6 @@ def _load_split_events(market: Path) -> dict[str, list[dict[str, Any]]]:
     return output
 
 
-def _load_v1_scores(analysis: Path, model_fingerprint: str) -> dict[tuple[int, int], dict[str, Any]]:
-    with _ro(analysis) as connection:
-        rows = [dict(row) for row in connection.execute("SELECT * FROM score_result WHERE model_fingerprint=? ORDER BY company_id,quarter_id", (model_fingerprint,))]
-        components = defaultdict(list)
-        for row in connection.execute("SELECT r.company_id,r.quarter_id,c.component_name,c.component_score FROM score_component c JOIN score_result r USING(score_result_id) WHERE r.model_fingerprint=? ORDER BY r.company_id,r.quarter_id,c.component_name", (model_fingerprint,)):
-            components[(int(row[0]), int(row[1]))].append({"component_name": row[2], "component_score": row[3]})
-    return {(int(row["company_id"]), int(row["quarter_id"])): {**row, "components": components[(int(row["company_id"]), int(row["quarter_id"]))]} for row in rows}
-
-
-def _load_lifecycle(analysis: Path) -> dict[tuple[int, int], dict[str, Any]]:
-    with _ro(analysis) as connection:
-        return {(int(row["company_id"]), int(row["quarter_id"])): dict(row) for row in connection.execute("SELECT * FROM lifecycle_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", (LIFECYCLE_V1_FINGERPRINT,))}
-
-
-def _load_valuations(analysis: Path) -> list[dict[str, Any]]:
-    with _ro(analysis) as connection:
-        return [dict(row) for row in connection.execute("SELECT * FROM valuation_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", (VALUATION_V1_FINGERPRINT,))]
-
-
 def _diagnostic_endpoint(
     source: Mapping[str, Any],
     *,
@@ -405,7 +384,7 @@ def _score_delta_observation(row: Mapping[str, Any], ttm: Mapping[str, Any]) -> 
 
 
 def calculate(
-    paths: Mapping[str, Path], *, verify_v1_overlap: bool = False,
+    paths: Mapping[str, Path], *,
     as_of_date: str | date | None = None,
 ) -> dict[str, Any]:
     as_of = resolve_as_of(as_of_date)
@@ -416,28 +395,7 @@ def calculate(
     split_events = _load_split_events(paths["market"])
     v2_scores = score.compute_score_rows(rows, split_events, generated_at="REHEARSAL", run_id="PHASE9C")
     score_index = {(int(row["company_id"]), int(row["quarter_id"])): row for row in v2_scores}
-    if verify_v1_overlap:
-        from rawcandle.fundamentals.score import engine as score_v1
-        v1_scores = _load_v1_scores(paths["analysis"], score_v1.MODEL_FINGERPRINT)
-        v1_replay_rows = score_v1.compute_score_rows(rows, split_events, generated_at="REHEARSAL", run_id="PHASE9C_V1")
-    else:
-        v1_scores = {}
-        v1_replay_rows = []
-    v1_replay_index = {(int(row["company_id"]), int(row["quarter_id"])): row for row in v1_replay_rows}
-    unaffected = {"REVENUE_GROWTH", "FCF_MARGIN", "DILUTION"}
-    for key, persisted in v1_scores.items():
-        replayed = v1_replay_index[key]
-        persisted_components = {item["component_name"]: item["component_score"] for item in persisted["components"]}
-        replayed_components = {item["component_name"]: item["component_score"] for item in replayed["components"]}
-        v2_components = {item["component_name"]: item["component_score"] for item in score_index[key]["components"]}
-        if verify_v1_overlap and structural_metadata["status"] == "STRUCTURAL_CONTRACT_ABSENT_LEGACY_ALLOWED":
-            assert persisted["readiness_status"] == replayed["readiness_status"]
-            assert persisted["total_score"] == replayed["total_score"]
-            assert persisted_components == replayed_components
-            assert all(v2_components[name] == persisted_components[name] for name in unaffected)
-    life_v2 = _lifecycle(rows, _load_quarter_revenues(paths["canonical"], rows)); life_v1 = _load_lifecycle(paths["analysis"]) if verify_v1_overlap else {}
-    valuation_v1 = _load_valuations(paths["analysis"]) if verify_v1_overlap else []
-    valuation_v1_index = {(int(row["company_id"]), int(row["quarter_id"])): row for row in valuation_v1}
+    life_v2 = _lifecycle(rows, _load_quarter_revenues(paths["canonical"], rows))
     canonical_valuation = load_valuation_source(paths["canonical"], paths["market"])
     canonical_valuation_index = {
         (int(row["observation"].company_id), int(row["observation"].quarter_id)): row
@@ -446,7 +404,6 @@ def calculate(
     valuation_v2 = {}
     valuation_source_rows = []
     for key in sorted(ttm_index):
-        old = valuation_v1_index.get(key)
         source = canonical_valuation_index[key]
         valuation_v2[key] = _valuation_from_canonical_source(source, ttm_index[key])
         base = source["observation"]
@@ -464,17 +421,6 @@ def calculate(
         (int(row["company_id"]), int(row["quarter_id"])): row
         for row in valuation_source_rows
     }
-
-    score_current=[]; lifecycle_current=[]; valuation_current=[]
-    for key in sorted(fresh_keys):
-        before=v1_scores.get(key); after=score_index[key]
-        if before is not None:
-            score_current.append({"company_id":key[0],"quarter_id":key[1],"ticker":after["ticker"],"v1_status":before["readiness_status"],"v2_status":after["readiness_status"],"v1_score":before["total_score"],"v2_score":after["total_score"],"delta":None if before["total_score"] is None or after["total_score"] is None else after["total_score"]-before["total_score"]})
-        b=life_v1.get(key); a=life_v2[key]
-        if b is not None:
-            lifecycle_current.append({"company_id":key[0],"quarter_id":key[1],"ticker":after["ticker"],"v1_raw":b["raw_state"],"v2_raw":a.raw_result.raw_state.value,"v1_final":b["final_state"],"v2_final":a.final_state.value if a.final_state else None,"v1_status":b["lifecycle_status"],"v2_status":a.lifecycle_status.value})
-        old=valuation_v1_index.get(key); new=valuation_v2.get(key)
-        if old and new: valuation_current.append({"company_id":key[0],"quarter_id":key[1],"ticker":after["ticker"],"v1_status":old["valuation_status"],"v2_status":new.valuation_status,"v1_score":old["total_valuation_score"],"v2_score":new.total_valuation_score,"delta":None if old["total_valuation_score"] is None or new.total_valuation_score is None else new.total_valuation_score-old["total_valuation_score"]})
 
     histories=defaultdict(list); delta_observations={}
     for key,row in score_index.items():
@@ -570,52 +516,6 @@ def calculate(
     diagnostics=[row for row in diagnostics_full if (row["company_id"],row["quarter_id"]) in fresh_keys]
 
     snapshot.validate_model_bundle({layer:snapshot.ModelIdentity(*identity) for layer,identity in snapshot.MODEL_CONTRACT["required_models"].items()})
-    outputs={"as_of_date":as_of.isoformat(),"taxonomy_dependency":taxonomy_dependency,"rows":rows,"fresh":fresh,"structural_metadata":structural_metadata,"score_v2":v2_scores,"score_current":score_current,"v1_replay_rows":v1_replay_rows,"lifecycle_v2":life_v2,"lifecycle_current":lifecycle_current,"valuation_source_rows":valuation_source_rows,"valuation_v2":valuation_v2,"valuation_current":valuation_current,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostic_source_fingerprint":fingerprint({"structural":structural_metadata,"rows":diagnostic_source_rows}),"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
+    outputs={"as_of_date":as_of.isoformat(),"taxonomy_dependency":taxonomy_dependency,"rows":rows,"fresh":fresh,"structural_metadata":structural_metadata,"score_v2":v2_scores,"lifecycle_v2":life_v2,"valuation_source_rows":valuation_source_rows,"valuation_v2":valuation_v2,"delta_results":delta_results,"delta_full":delta_full,"delta_current":delta_current,"relative":relative,"diagnostic_source_fingerprint":fingerprint({"structural":structural_metadata,"rows":diagnostic_source_rows}),"diagnostics_full":diagnostics_full,"diagnostics":diagnostics}
     outputs["fingerprints"]={"structural":fingerprint(structural_metadata),"score":fingerprint(v2_scores),"lifecycle":fingerprint([asdict(life_v2[key]) for key in sorted(life_v2)]),"valuation":fingerprint([valuation_v2[key].to_dict() for key in sorted(valuation_v2)]),"delta":fingerprint(delta_full),"relative":relative.result_fingerprint,"diagnostic":fingerprint(diagnostics_full)}
     return outputs
-
-
-def run(repo_root: Path, output: Path) -> dict[str, Any]:
-    output.mkdir(parents=True,exist_ok=True)
-    paths={"canonical":repo_root/"data/fundamentals_v4.db","analysis":repo_root/"data/fundamentals_analysis.db","market":repo_root/"data/osakedata.db","provider":repo_root/"data/fundamentals_provider.db","taxonomy":repo_root/"data/analysis.db"}
-    before=database_integrity(paths); first=calculate(paths, verify_v1_overlap=True, as_of_date=LEGACY_REHEARSAL_AS_OF); second=calculate(paths, verify_v1_overlap=True, as_of_date=LEGACY_REHEARSAL_AS_OF); assert first["fingerprints"]==second["fingerprints"]
-    _write_csv(output/"current_score_comparison.csv",first["score_current"]); _write_csv(output/"current_lifecycle_comparison.csv",first["lifecycle_current"]); _write_csv(output/"current_valuation_comparison.csv",first["valuation_current"]); _write_csv(output/"current_delta_comparison.csv",first["delta_current"])
-    _write_csv(output/"current_relative_position_comparison.csv",[{"company_id":row["company_id"],"ticker":row["ticker"],"measure":row["measure"].value,"scope":row["peer_scope"].value,"percentile":row["percentile"],"rank":row["average_rank"],"status":row["status"].value} for row in first["relative"].results])
-    _write_csv(output/"current_diagnostic_comparison.csv",first["diagnostics"])
-    reconciliation=[]
-    for name,rows in (("SCORE",first["score_current"]),("LIFECYCLE",first["lifecycle_current"]),("VALUATION",first["valuation_current"])):
-        reconciliation.append({"layer":name,"rows":len(rows),"changed":sum((row.get("v1_score")!=row.get("v2_score")) if name!="LIFECYCLE" else row["v1_final"]!=row["v2_final"] for row in rows)})
-    _write_csv(output/"v1_v2_reconciliation.csv",reconciliation)
-    cases=[]
-    targets=("AMZN","GOOG","NVDA","CRMD","APD","BA","LITE")
-    for row in first["score_current"]:
-        if row["ticker"] in targets:
-            valuation_row=next((item for item in first["valuation_current"] if item["company_id"]==row["company_id"]),{})
-            cases.append({**row,"v1_valuation":valuation_row.get("v1_score"),"v2_valuation":valuation_row.get("v2_score")})
-    expected={"AMZN":56.08,"GOOG":77.53,"NVDA":96.94,"CRMD":91.08,"APD":26.96}
-    indexed_cases={row["ticker"]:row for row in cases}
-    for ticker,expected_score in expected.items():
-        assert abs(indexed_cases[ticker]["v2_score"]-expected_score)<=0.02
-    _write_csv(output/"company_case_checks.csv",cases)
-    versions={"family":FAMILY_FINGERPRINT,"score":(score.MODEL_VERSION,score.MODEL_FINGERPRINT),"lifecycle":(lifecycle.MODEL_VERSION,lifecycle.MODEL_FINGERPRINT),"valuation":(valuation.MODEL_VERSION,valuation.MODEL_FINGERPRINT),"delta":(delta.MODEL_VERSION,delta.MODEL_FINGERPRINT),"relative":(relative_position.MODEL_VERSION,relative_position.MODEL_FINGERPRINT),"diagnostic":(diagnostic_flags.MODEL_VERSION,diagnostic_flags.MODEL_FINGERPRINT),"snapshot":(snapshot.MODEL_VERSION,snapshot.MODEL_FINGERPRINT)}
-    _write_json(output/"model_version_map.json",versions); _write_json(output/"v2_fingerprints.json",versions); _write_json(output/"result_fingerprints.json",{"first":first["fingerprints"],"second":second["fingerprints"],"identical":True})
-    _write_json(output/"readiness_summary.json",{"ttm_rows":len(first["rows"]),"v1_score_replay_rows":len(first["v1_replay_rows"]),"v1_score_replay_identical":True,"unaffected_score_components_identical":True,"current_fresh":len(first["fresh"]),"score_full":sum(row["readiness_status"]=="SCORE_FULL" for row in first["score_v2"]),"current_score_full":sum(row["v2_status"]=="SCORE_FULL" for row in first["score_current"]),"valuation_calculated":len(first["valuation_v2"]),"lifecycle_rows":len(first["lifecycle_v2"]),"delta_history_rows":len(first["delta_full"]),"current_delta_rows":len(first["delta_current"]),"relative_rows":len(first["relative"].results),"diagnostic_history_rows":len(first["diagnostics_full"]),"diagnostic_rows":len(first["diagnostics"])})
-    (output/"recommended_phase9d_scope.md").write_text("# Recommended Phase 9D scope\n\nDesign and rehearse parallel V2 persistence schemas, repositories, backfill packages and reader-bundle activation. Preserve V1 rows and rollback. Production migration, backfill and activation require separate authorization.\n",encoding="utf-8")
-    after=database_integrity(paths); assert before==after; _write_json(output/"database_integrity_before.json",before); _write_json(output/"database_integrity_after.json",after)
-    report=f"# Phase 9C implementation report\n\nParallel Operating-Income V2 pure engines are implemented. Full history: {len(first['rows'])} TTM, {len(first['score_v2'])} Score and {len(first['lifecycle_v2'])} Lifecycle rows. Current fresh: {len(first['fresh'])}. Two rehearsals produced identical fingerprints. No production writes or activation occurred.\n"
-    (output/"PHASE9C_IMPLEMENTATION_REPORT.md").write_text(report,encoding="utf-8"); (output/"commands_run.txt").write_text("python -m rawcandle.fundamentals.operating_income_v2.rehearsal --output <temp>\n",encoding="utf-8")
-    for path in output.glob("*.json"): json.loads(path.read_text())
-    for path in output.glob("*.csv"):
-        with path.open(newline="",encoding="utf-8") as handle: list(csv.reader(handle))
-    required={"PHASE9C_IMPLEMENTATION_REPORT.md","model_version_map.json","v2_fingerprints.json","v1_v2_reconciliation.csv","current_score_comparison.csv","current_lifecycle_comparison.csv","current_valuation_comparison.csv","current_delta_comparison.csv","current_relative_position_comparison.csv","current_diagnostic_comparison.csv","company_case_checks.csv","readiness_summary.json","result_fingerprints.json","recommended_phase9d_scope.md","commands_run.txt"}
-    assert not (required-{path.name for path in output.iterdir()})
-    return {"output":str(output),"fingerprints":first["fingerprints"],"integrity_identical":True}
-
-
-def main() -> None:
-    parser=argparse.ArgumentParser(); parser.add_argument("--repo-root",type=Path,default=Path.cwd()); parser.add_argument("--output",type=Path)
-    args=parser.parse_args(); stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"); output=args.output or args.repo_root/"temp/fundamentals_v4_operating_income_v2_phase9c"/stamp
-    print(json.dumps(run(args.repo_root.resolve(),output.resolve()),sort_keys=True))
-
-
-if __name__=="__main__": main()

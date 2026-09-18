@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 from rawcandle.fundamentals.operating_income_v2 import snapshot_eight
 from rawcandle.fundamentals.snapshot import v2_assembler
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 
 from .contract import CANDIDATE_REPORT_CONTRACT, PRODUCTION_REPORT_CONTRACT
 from .engine import MODEL_FINGERPRINT, MODEL_VERSION, RelativeValuationSnapshot

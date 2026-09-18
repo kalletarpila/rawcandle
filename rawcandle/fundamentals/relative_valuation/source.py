@@ -13,9 +13,9 @@ from rawcandle.fundamentals.operating_income_v2 import valuation
 from rawcandle.fundamentals.operating_income_v2 import relative_position as active_relative_position
 from rawcandle.fundamentals.operating_income_v2.activation import assert_v2_active
 from rawcandle.fundamentals import structural_break
-from rawcandle.fundamentals.relative_position import source as peer_source
-from rawcandle.fundamentals.relative_position.engine import CURRENT_FRESHNESS_DAYS
-from rawcandle.fundamentals.score.engine import TTM_MODEL_VERSION
+from rawcandle.fundamentals.operating_income_v2 import peer_source_context as peer_source
+from rawcandle.fundamentals.operating_income_v2.peer_ranking_core import CURRENT_FRESHNESS_DAYS
+from rawcandle.fundamentals.ttm.engine import MODEL_VERSION as TTM_MODEL_VERSION
 
 from .engine import HistoricalEndpoint, RelativeValuationInput, canonical_json
 

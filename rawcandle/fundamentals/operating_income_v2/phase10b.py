@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from rawcandle.fundamentals.diagnostic_flags import persistence as diagnostic_v1
+from rawcandle.fundamentals.schema.analysis_runtime_layout import DiagnosticLayout as diagnostic_tables
 
 from . import (
     activation,
@@ -96,10 +96,10 @@ def _ttm_input_audit(canonical_path: Path) -> dict[int, dict[str, Any]]:
 
 
 def calculate(
-    paths: Mapping[str, Path], *, verify_v1_overlap: bool = False,
+    paths: Mapping[str, Path], *,
     as_of_date: str | None = None,
 ) -> dict[str, Any]:
-    calculated = rehearsal.calculate(paths, verify_v1_overlap=verify_v1_overlap, as_of_date=as_of_date)
+    calculated = rehearsal.calculate(paths, as_of_date=as_of_date)
     structural_applied = calculated.get("structural_metadata", {}).get("status") == "STRUCTURAL_CONTRACT_APPLIED"
     input_audit = _ttm_input_audit(paths["canonical"])
     rows = calculated["rows"]
@@ -284,7 +284,7 @@ def apply_candidate_package(
             raise RuntimeError("PHASE10B_PHYSICAL_CONTENT_CHANGED")
         package = conn.execute(
             f"SELECT source_fingerprint,economic_result_fingerprint,physical_content_fingerprint "
-            f"FROM {diagnostic_v1.PACKAGE_TABLE} WHERE model_fingerprint=?",
+            f"FROM {diagnostic_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",
             (diagnostic_flags_eight.MODEL_FINGERPRINT,),
         ).fetchone()
         return CandidateApplyReport(
@@ -357,7 +357,7 @@ def apply_candidate_package(
 
     package = conn.execute(
         f"SELECT source_fingerprint,economic_result_fingerprint,physical_content_fingerprint "
-        f"FROM {diagnostic_v1.PACKAGE_TABLE} WHERE model_fingerprint=?",
+        f"FROM {diagnostic_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",
         (diagnostic_flags_eight.MODEL_FINGERPRINT,),
     ).fetchone()
     rows = persistence.row_counts(conn, diagnostic_model=diagnostic_flags_eight)
@@ -391,13 +391,13 @@ def validate_candidate_package(conn: sqlite3.Connection) -> dict[str, Any]:
         raise RuntimeError("PHASE10B_PERSISTED_ROW_COUNT_MISMATCH:" + json.dumps(mismatches, sort_keys=True))
     duplicates = conn.execute(
         f"SELECT COUNT(*) FROM (SELECT e.package_id,e.company_id,e.fiscal_sequence,v.flag_id,COUNT(*) n "
-        f"FROM {diagnostic_v1.ENDPOINT_TABLE} e JOIN {diagnostic_v1.EVALUATION_TABLE} v USING(endpoint_id) "
-        f"WHERE e.package_id=(SELECT package_id FROM {diagnostic_v1.PACKAGE_TABLE} WHERE model_fingerprint=?) "
+        f"FROM {diagnostic_tables.ENDPOINT_TABLE} e JOIN {diagnostic_tables.EVALUATION_TABLE} v USING(endpoint_id) "
+        f"WHERE e.package_id=(SELECT package_id FROM {diagnostic_tables.PACKAGE_TABLE} WHERE model_fingerprint=?) "
         "GROUP BY e.package_id,e.company_id,e.fiscal_sequence,v.flag_id HAVING n<>1)",
         (diagnostic_flags_eight.MODEL_FINGERPRINT,),
     ).fetchone()[0]
     orphans = conn.execute(
-        f"SELECT COUNT(*) FROM {diagnostic_v1.EVALUATION_TABLE} v LEFT JOIN {diagnostic_v1.ENDPOINT_TABLE} e USING(endpoint_id) WHERE e.endpoint_id IS NULL"
+        f"SELECT COUNT(*) FROM {diagnostic_tables.EVALUATION_TABLE} v LEFT JOIN {diagnostic_tables.ENDPOINT_TABLE} e USING(endpoint_id) WHERE e.endpoint_id IS NULL"
     ).fetchone()[0]
     if duplicates or orphans:
         raise RuntimeError("PHASE10B_PERSISTENCE_RELATIONSHIP_INVALID")

@@ -1,11 +1,64 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from rawcandle.fundamentals.operating_income_v2 import full_rebuild
+
+
+def test_active_imports_do_not_load_legacy_v1_engines() -> None:
+    script = '''
+import importlib.abc
+import sys
+
+blocked = {
+    "rawcandle.fundamentals.score.engine",
+    "rawcandle.fundamentals.lifecycle.engine",
+    "rawcandle.fundamentals.valuation.engine",
+    "rawcandle.fundamentals.delta.engine",
+    "rawcandle.fundamentals.diagnostic_flags.engine",
+    "rawcandle.fundamentals.relative_position.engine",
+}
+
+class BlockLegacy(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in blocked:
+            raise ImportError("retired V1 engine: " + fullname)
+        return None
+
+sys.meta_path.insert(0, BlockLegacy())
+import rawcandle.fundamentals.operating_income_v2.full_rebuild
+import rawcandle.fundamentals.admin.batch_add_tickers
+import rawcandle.fundamentals.admin.sector_industry
+import rawcandle.fundamentals.admin.taxonomy
+import rawcandle.fundamentals.snapshot.active
+assert not blocked.intersection(sys.modules)
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_retired_v1_entrypoints_are_absent() -> None:
+    root = Path(__file__).resolve().parents[1]
+    for module in (
+        "score/engine.py", "lifecycle/engine.py", "valuation/engine.py",
+        "delta/engine.py", "diagnostic_flags/engine.py", "relative_position/engine.py",
+    ):
+        assert not (root / "rawcandle/fundamentals" / module).exists()
+    for name in (
+        "score", "valuation_production", "delta_production",
+        "diagnostic_flags_production", "relative_position_production",
+    ):
+        assert not (root / "rawcandle/cli" / f"run_fundamentals_v4_{name}.py").exists()
+    scheduler = (root / "rawcandle/scheduler/runner.py").read_text(encoding="utf-8")
+    assert "run_fundamentals_v4_score" not in scheduler
+    assert "run_fundamentals_v4_relative_position" not in scheduler
 
 
 def test_fresh_bootstrap_has_v2_schema_but_no_results(tmp_path: Path) -> None:

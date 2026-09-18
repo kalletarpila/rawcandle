@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals.operating_income_v2 import valuation
-from rawcandle.fundamentals.relative_position.engine import (
+from rawcandle.fundamentals.operating_income_v2.peer_ranking_core import (
     CURRENT_FRESHNESS_DAYS,
     MINIMUM_PEERS,
     EcosystemMembership,

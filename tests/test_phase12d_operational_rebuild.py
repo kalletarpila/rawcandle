@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 from rawcandle.fundamentals import phase12d
-from rawcandle.fundamentals.diagnostic_flags import persistence as diagnostic_persistence
-from rawcandle.fundamentals.lifecycle import revised_history
+from rawcandle.fundamentals.schema.analysis_compat_schema import DIAGNOSTIC_SCHEMA_SQL, LIFECYCLE_SCHEMA_SQL
 from rawcandle.fundamentals.operating_income_v2 import (
     diagnostic_flags_eight,
     phase10b,
@@ -182,8 +181,8 @@ def test_eight_flag_candidate_apply_refreshes_complete_package_and_noops() -> No
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys=ON")
     connection.executescript(ANALYSIS_SCHEMA_SQL)
-    connection.executescript(revised_history.SCHEMA_SQL)
-    diagnostic_persistence.ensure_schema(connection)
+    connection.executescript(LIFECYCLE_SCHEMA_SQL)
+    connection.executescript(DIAGNOSTIC_SCHEMA_SQL)
     persistence.ensure_schema(connection)
     candidate = "phase12d-candidate"
     first = phase10b.apply_candidate_package(

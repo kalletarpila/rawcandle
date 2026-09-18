@@ -29,7 +29,7 @@ from rawcandle.fundamentals.relative_valuation.persistence import (
 )
 from rawcandle.fundamentals.relative_valuation.source import ReadOnlySourcePaths, load_relative_valuation_source
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.ui_service import FundamentalsSnapshotUIService, resolve_report_download
 
 from .phase12d import (
@@ -451,7 +451,7 @@ def run(output: Path, *, apply: bool, confirm_production: bool) -> dict[str, Any
         with SidecarMonitor() as monitor:
             canonical = reconcile_canonical(PRODUCTION["provider"], PRODUCTION["canonical"], applied_at=applied_at)
             ttm = rebuild_ttm(PRODUCTION["canonical"], applied_at=applied_at)
-            calculated = phase10b.calculate(PRODUCTION, verify_v1_overlap=False)
+            calculated = phase10b.calculate(PRODUCTION)
             package_fingerprint = stable_hash({
                 "rebuild_fingerprint": EXPECTED["rebuild"],
                 "parent_persistence_fingerprint": phase10b.PACKAGE_FINGERPRINT,
@@ -483,7 +483,7 @@ def run(output: Path, *, apply: bool, confirm_production: bool) -> dict[str, Any
             before_no_change = {name: _file_state(PRODUCTION[name]) for name in ("canonical", "analysis")}
             canonical_no_change = reconcile_canonical(PRODUCTION["provider"], PRODUCTION["canonical"], applied_at=applied_at)
             ttm_no_change = rebuild_ttm(PRODUCTION["canonical"], applied_at=applied_at)
-            calculated_again = phase10b.calculate(PRODUCTION, verify_v1_overlap=False)
+            calculated_again = phase10b.calculate(PRODUCTION)
             with sqlite3.connect(PRODUCTION["analysis"]) as connection:
                 connection.row_factory = sqlite3.Row
                 connection.execute("PRAGMA foreign_keys=ON")

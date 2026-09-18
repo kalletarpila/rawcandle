@@ -13,8 +13,8 @@ from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals.operating_income_v2 import relative_position as active_relative_position
 from rawcandle.fundamentals.operating_income_v2 import valuation
-from rawcandle.fundamentals.relative_position.engine import RelativeMeasure
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.operating_income_v2.peer_ranking_core import RelativeMeasure
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.renderer import render_snapshot
 from rawcandle.fundamentals.snapshot.v2_assembler import _current_price_valuation
 

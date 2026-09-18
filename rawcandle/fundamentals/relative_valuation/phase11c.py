@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from rawcandle.fundamentals.schema.migrations import ANALYSIS_SCHEMA_SQL
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.renderer import render_snapshot
 
 from .candidate_snapshot import (

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from rawcandle.fundamentals.snapshot import renderer, v2_assembler
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 
 from . import activation, diagnostic_flags, diagnostic_flags_eight, phase10b, persistence, rehearsal
 from .readers import ParallelModelRepository

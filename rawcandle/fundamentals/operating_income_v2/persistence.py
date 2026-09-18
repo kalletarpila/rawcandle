@@ -7,8 +7,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from rawcandle.fundamentals.delta import persistence as delta_v1
-from rawcandle.fundamentals.diagnostic_flags import persistence as diagnostic_v1
+from rawcandle.fundamentals.schema.analysis_runtime_layout import DeltaLayout as delta_tables
+from rawcandle.fundamentals.schema.analysis_runtime_layout import DiagnosticLayout as diagnostic_tables
 
 from . import contract, delta, diagnostic_flags, lifecycle, relative_position, score, snapshot, valuation
 
@@ -263,17 +263,17 @@ def _code_id(conn: sqlite3.Connection, table: str, id_column: str, text_column: 
 
 
 def _apply_delta(conn: sqlite3.Connection, calculated: Mapping[str, Any], applied_at: str) -> None:
-    package_id=_id((delta.MODEL_FINGERPRINT,HISTORY_MODE)); existing=conn.execute(f"SELECT package_id FROM {delta_v1.PACKAGE_TABLE} WHERE model_fingerprint=?",(delta.MODEL_FINGERPRINT,)).fetchone()
+    package_id=_id((delta.MODEL_FINGERPRINT,HISTORY_MODE)); existing=conn.execute(f"SELECT package_id FROM {delta_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",(delta.MODEL_FINGERPRINT,)).fetchone()
     if existing:
-        conn.execute(f"DELETE FROM {delta_v1.COMPONENT_TABLE} WHERE endpoint_id IN (SELECT endpoint_id FROM {delta_v1.TOTAL_TABLE} WHERE package_id=?)",(existing[0],))
-        conn.execute(f"DELETE FROM {delta_v1.TOTAL_TABLE} WHERE package_id=?",(existing[0],))
-        conn.execute(f"DELETE FROM {delta_v1.PACKAGE_TABLE} WHERE package_id=?",(existing[0],))
+        conn.execute(f"DELETE FROM {delta_tables.COMPONENT_TABLE} WHERE endpoint_id IN (SELECT endpoint_id FROM {delta_tables.TOTAL_TABLE} WHERE package_id=?)",(existing[0],))
+        conn.execute(f"DELETE FROM {delta_tables.TOTAL_TABLE} WHERE package_id=?",(existing[0],))
+        conn.execute(f"DELETE FROM {delta_tables.PACKAGE_TABLE} WHERE package_id=?",(existing[0],))
     score_ids={(int(r[0]),int(r[1])):int(r[2]) for r in conn.execute("SELECT company_id,quarter_id,score_result_id FROM score_result WHERE model_fingerprint=?",(score.MODEL_FINGERPRINT,))}
     component_ids={}
     for name,maximum in zip(contract.COMPONENTS,(20.,15.,15.,15.,15.,10.,10.)):
-        row=conn.execute(f"SELECT component_id,maximum_points FROM {delta_v1.COMPONENT_TYPE_TABLE} WHERE component_name=?",(name,)).fetchone()
+        row=conn.execute(f"SELECT component_id,maximum_points FROM {delta_tables.COMPONENT_TYPE_TABLE} WHERE component_name=?",(name,)).fetchone()
         if row is None:
-            cid=int(conn.execute(f"SELECT COALESCE(MAX(component_id),0)+1 FROM {delta_v1.COMPONENT_TYPE_TABLE}").fetchone()[0]); conn.execute(f"INSERT INTO {delta_v1.COMPONENT_TYPE_TABLE} VALUES(?,?,?)",(cid,name,maximum))
+            cid=int(conn.execute(f"SELECT COALESCE(MAX(component_id),0)+1 FROM {delta_tables.COMPONENT_TYPE_TABLE}").fetchone()[0]); conn.execute(f"INSERT INTO {delta_tables.COMPONENT_TYPE_TABLE} VALUES(?,?,?)",(cid,name,maximum))
         else: cid=int(row[0]); assert float(row[1])==maximum
         component_ids[name]=cid
     statuses={}; reasons={}
@@ -281,8 +281,8 @@ def _apply_delta(conn: sqlite3.Connection, calculated: Mapping[str, Any], applie
         for h in result.horizons:
             statuses[_enum(h["status"])]=None; reasons[h["reason_code"]]=None
             for c in h["components"]: statuses[_enum(c["status"])]=None; reasons[c["reason_code"]]=None
-    for value in statuses: statuses[value]=_code_id(conn,delta_v1.STATUS_TABLE,"status_id","status_text",value)
-    for value in reasons: reasons[value]=_code_id(conn,delta_v1.REASON_TABLE,"reason_id","reason_text",value)
+    for value in statuses: statuses[value]=_code_id(conn,delta_tables.STATUS_TABLE,"status_id","status_text",value)
+    for value in reasons: reasons[value]=_code_id(conn,delta_tables.REASON_TABLE,"reason_id","reason_text",value)
     total_rows=[]; component_rows=[]
     for result in calculated["delta_results"]:
         key=(result.company_id,int(result.current_observation_id)); endpoint_id=_id((delta.MODEL_FINGERPRINT,result.company_id,result.current_fiscal_sequence)); horizons={_enum(h["horizon"]):h for h in result.horizons}
@@ -300,10 +300,10 @@ def _apply_delta(conn: sqlite3.Connection, calculated: Mapping[str, Any], applie
                 c=next(x for x in horizons[hname]["components"] if x["component_name"]==cname); row.extend((c["prior_points"],c["delta_points"],statuses[_enum(c["status"])],reasons[c["reason_code"]]))
             row.append(_hash(row)); component_rows.append(row)
     economic=_hash([r.result_fingerprint for r in calculated["delta_results"]]); physical=_hash((total_rows,component_rows))
-    values=(package_id,delta_v1.PERSISTENCE_VERSION,delta_v1.LAYOUT_FINGERPRINT,delta.MODEL_VERSION,delta.MODEL_FINGERPRINT,delta_v1.SEMANTIC_MODE,HISTORY_MODE,score.MODEL_FINGERPRINT,_hash(calculated["score_v2"]),_hash([r.result_fingerprint for r in calculated["delta_results"]]),lifecycle.MODEL_FINGERPRINT,_hash("lifecycle-source"),_hash([asdict(x) for x in calculated["lifecycle_v2"].values()]),valuation.MODEL_FINGERPRINT,_hash("valuation-source"),_hash([x.result_fingerprint for x in calculated["valuation_v2"].values()]),economic,physical,len(total_rows),len(component_rows),applied_at)
-    conn.execute(f"INSERT INTO {delta_v1.PACKAGE_TABLE} VALUES({','.join('?' for _ in values)})",values)
-    conn.executemany(f"INSERT INTO {delta_v1.TOTAL_TABLE} VALUES({','.join('?' for _ in range(24))})",total_rows)
-    conn.executemany(f"INSERT INTO {delta_v1.COMPONENT_TABLE} VALUES({','.join('?' for _ in range(16))})",component_rows)
+    values=(package_id,delta_tables.PERSISTENCE_VERSION,delta_tables.LAYOUT_FINGERPRINT,delta.MODEL_VERSION,delta.MODEL_FINGERPRINT,delta_tables.SEMANTIC_MODE,HISTORY_MODE,score.MODEL_FINGERPRINT,_hash(calculated["score_v2"]),_hash([r.result_fingerprint for r in calculated["delta_results"]]),lifecycle.MODEL_FINGERPRINT,_hash("lifecycle-source"),_hash([asdict(x) for x in calculated["lifecycle_v2"].values()]),valuation.MODEL_FINGERPRINT,_hash("valuation-source"),_hash([x.result_fingerprint for x in calculated["valuation_v2"].values()]),economic,physical,len(total_rows),len(component_rows),applied_at)
+    conn.execute(f"INSERT INTO {delta_tables.PACKAGE_TABLE} VALUES({','.join('?' for _ in values)})",values)
+    conn.executemany(f"INSERT INTO {delta_tables.TOTAL_TABLE} VALUES({','.join('?' for _ in range(24))})",total_rows)
+    conn.executemany(f"INSERT INTO {delta_tables.COMPONENT_TABLE} VALUES({','.join('?' for _ in range(16))})",component_rows)
 
 
 def _apply_diagnostics(
@@ -314,24 +314,24 @@ def _apply_diagnostics(
     diagnostic_model: Any = diagnostic_flags,
     persistence_version: str = PERSISTENCE_VERSION,
 ) -> None:
-    pid=_id((diagnostic_model.MODEL_FINGERPRINT,DIAGNOSTIC_HISTORY_MODE)); old=conn.execute(f"SELECT package_id FROM {diagnostic_v1.PACKAGE_TABLE} WHERE model_fingerprint=?",(diagnostic_model.MODEL_FINGERPRINT,)).fetchone()
+    pid=_id((diagnostic_model.MODEL_FINGERPRINT,DIAGNOSTIC_HISTORY_MODE)); old=conn.execute(f"SELECT package_id FROM {diagnostic_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",(diagnostic_model.MODEL_FINGERPRINT,)).fetchone()
     if old:
-        conn.execute(f"DELETE FROM {diagnostic_v1.EVALUATION_TABLE} WHERE endpoint_id IN (SELECT endpoint_id FROM {diagnostic_v1.ENDPOINT_TABLE} WHERE package_id=?)",(old[0],))
-        conn.execute(f"DELETE FROM {diagnostic_v1.ENDPOINT_TABLE} WHERE package_id=?",(old[0],))
-        conn.execute(f"DELETE FROM {diagnostic_v1.PACKAGE_TABLE} WHERE package_id=?",(old[0],))
+        conn.execute(f"DELETE FROM {diagnostic_tables.EVALUATION_TABLE} WHERE endpoint_id IN (SELECT endpoint_id FROM {diagnostic_tables.ENDPOINT_TABLE} WHERE package_id=?)",(old[0],))
+        conn.execute(f"DELETE FROM {diagnostic_tables.ENDPOINT_TABLE} WHERE package_id=?",(old[0],))
+        conn.execute(f"DELETE FROM {diagnostic_tables.PACKAGE_TABLE} WHERE package_id=?",(old[0],))
     grouped={}
     for row in calculated["diagnostics_full"]: grouped.setdefault((row["company_id"],row["quarter_id"]),[]).append(row)
     ttm={(int(r["company_id"]),int(r["endpoint_quarter_id"])):r for r in calculated["rows"]}
     flag_ids={}; status_ids={}; reason_ids={}; source_ids={}; applicability_ids={}
     for row in calculated["diagnostics_full"]:
-        flag_ids[row["flag_name"]]=_code_id(conn,diagnostic_v1.FLAG_TABLE,"flag_id","flag_name",row["flag_name"])
-        status_ids[row["status"]]=_code_id(conn,diagnostic_v1.STATUS_TABLE,"status_id","status_text",row["status"])
-        reason_ids[row["reason_code"]]=_code_id(conn,diagnostic_v1.REASON_TABLE,"reason_id","reason_text",row["reason_code"])
+        flag_ids[row["flag_name"]]=_code_id(conn,diagnostic_tables.FLAG_TABLE,"flag_id","flag_name",row["flag_name"])
+        status_ids[row["status"]]=_code_id(conn,diagnostic_tables.STATUS_TABLE,"status_id","status_text",row["status"])
+        reason_ids[row["reason_code"]]=_code_id(conn,diagnostic_tables.REASON_TABLE,"reason_id","reason_text",row["reason_code"])
     endpoint_rows=[]; evaluation_rows=[]
     evidence_layout={flag:diagnostic_model.EVIDENCE_FIELDS[flag] for flag in sorted(flag_ids)}
     boolean_layout={flag:diagnostic_model.BOOLEAN_FIELDS.get(flag,()) for flag in sorted(flag_ids)}
     for key in sorted(grouped):
-        source=ttm[key]; sequence=int(source["endpoint_fiscal_year"])*4+int(str(source["endpoint_fiscal_quarter"])[1]); eid=_id((diagnostic_model.MODEL_FINGERPRINT,key[0],sequence)); source_status="TTM_READY" if source.get("core_ttm_ready") else "TTM_NOT_READY"; source_ids[source_status]=_code_id(conn,diagnostic_v1.SOURCE_STATUS_TABLE,"source_status_id","source_status_text",source_status)
+        source=ttm[key]; sequence=int(source["endpoint_fiscal_year"])*4+int(str(source["endpoint_fiscal_quarter"])[1]); eid=_id((diagnostic_model.MODEL_FINGERPRINT,key[0],sequence)); source_status="TTM_READY" if source.get("core_ttm_ready") else "TTM_NOT_READY"; source_ids[source_status]=_code_id(conn,diagnostic_tables.SOURCE_STATUS_TABLE,"source_status_id","source_status_text",source_status)
         endpoint_rows.append((eid,pid,key[0],key[1],source["endpoint_fiscal_year"],int(str(source["endpoint_fiscal_quarter"])[1]),sequence,source["period_end"],source.get("ttm_source_available_date"),source.get("ttm_source_available_date"),source_ids[source_status],_hash((key,source_status))))
         assert len(grouped[key])==len(diagnostic_model.FLAG_NAMES)
         for row in sorted(grouped[key],key=lambda x:x["flag_name"]):
@@ -345,7 +345,7 @@ def _apply_diagnostics(
             application=None
             if classification is not None:
                 applicability_ids[classification]=_code_id(
-                    conn,diagnostic_v1.APPLICABILITY_TABLE,
+                    conn,diagnostic_tables.APPLICABILITY_TABLE,
                     "applicability_id","applicability_text",classification,
                 )
                 application=applicability_ids[classification]
@@ -354,9 +354,9 @@ def _apply_diagnostics(
     economic=_hash(calculated["diagnostics_full"]); physical=_hash((endpoint_rows,evaluation_rows))
     source_fingerprint=calculated.get("diagnostic_source_fingerprint",_hash(calculated["rows"]))
     values=(pid,persistence_version,_hash(evidence_layout),diagnostic_model.MODEL_VERSION,diagnostic_model.MODEL_FINGERPRINT,diagnostic_model.SEMANTIC_MODE,DIAGNOSTIC_HISTORY_MODE,diagnostic_model.EVIDENCE_SCHEMA_VERSION,source_fingerprint,economic,physical,len(endpoint_rows),len(evaluation_rows),applied_at)
-    conn.execute(f"INSERT INTO {diagnostic_v1.PACKAGE_TABLE} VALUES({','.join('?' for _ in values)})",values)
-    conn.executemany(f"INSERT INTO {diagnostic_v1.ENDPOINT_TABLE} VALUES({','.join('?' for _ in range(12))})",endpoint_rows)
-    conn.executemany(f"INSERT INTO {diagnostic_v1.EVALUATION_TABLE} VALUES({','.join('?' for _ in range(26))})",evaluation_rows)
+    conn.execute(f"INSERT INTO {diagnostic_tables.PACKAGE_TABLE} VALUES({','.join('?' for _ in values)})",values)
+    conn.executemany(f"INSERT INTO {diagnostic_tables.ENDPOINT_TABLE} VALUES({','.join('?' for _ in range(12))})",endpoint_rows)
+    conn.executemany(f"INSERT INTO {diagnostic_tables.EVALUATION_TABLE} VALUES({','.join('?' for _ in range(26))})",evaluation_rows)
     conn.execute(f"DELETE FROM {EVIDENCE_FIELD_TABLE} WHERE model_fingerprint=?",(diagnostic_model.MODEL_FINGERPRINT,))
     conn.executemany(f"INSERT INTO {EVIDENCE_FIELD_TABLE} VALUES(?,?,?,?)",[(diagnostic_model.MODEL_FINGERPRINT,flag,index+1,name) for flag,names in sorted(evidence_layout.items()) for index,name in enumerate(names)])
 
@@ -395,12 +395,12 @@ def physical_fingerprint(conn: sqlite3.Connection, *, diagnostic_model: Any = di
     consume("score_component", "SELECT r.company_id,r.quarter_id,c.component_name,c.component_score,c.evidence_json FROM score_component c JOIN score_result r USING(score_result_id) WHERE r.model_fingerprint=? ORDER BY r.company_id,r.quarter_id,c.component_name", (score.MODEL_FINGERPRINT,))
     consume("lifecycle", "SELECT company_id,quarter_id,raw_state,final_state,lifecycle_status,reason_code,last_confirmed_state,candidate_state,candidate_count,operating_margin_ttm,operating_margin_direction,evidence_json FROM lifecycle_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", (lifecycle.MODEL_FINGERPRINT,))
     consume("valuation", "SELECT company_id,quarter_id,total_valuation_score,valuation_status,reason_code,ttm_operating_income,operating_income_yield,operating_income_points,fcf_yield,fcf_points,earnings_yield,earnings_points,result_fingerprint FROM valuation_revised_result WHERE model_fingerprint=? ORDER BY company_id,fiscal_sequence", (valuation.MODEL_FINGERPRINT,))
-    consume("delta_package", f"SELECT package_id,persistence_version,layout_fingerprint,model_version,model_fingerprint,semantic_mode,history_mode,score_model_fingerprint,fundamental_source_fingerprint,fundamental_result_fingerprint,lifecycle_model_fingerprint,lifecycle_source_fingerprint,lifecycle_result_fingerprint,valuation_model_fingerprint,valuation_source_fingerprint,valuation_result_fingerprint,economic_package_fingerprint,physical_content_fingerprint,total_row_count,component_row_count FROM {delta_v1.PACKAGE_TABLE} WHERE model_fingerprint=?", (delta.MODEL_FINGERPRINT,))
-    consume("delta_result", f"SELECT r.* FROM {delta_v1.TOTAL_TABLE} r JOIN {delta_v1.PACKAGE_TABLE} p USING(package_id) WHERE p.model_fingerprint=? ORDER BY r.company_id,r.fiscal_sequence", (delta.MODEL_FINGERPRINT,))
-    consume("delta_component", f"SELECT c.* FROM {delta_v1.COMPONENT_TABLE} c JOIN {delta_v1.TOTAL_TABLE} r USING(endpoint_id) JOIN {delta_v1.PACKAGE_TABLE} p USING(package_id) WHERE p.model_fingerprint=? ORDER BY r.company_id,r.fiscal_sequence,c.component_id", (delta.MODEL_FINGERPRINT,))
-    consume("diagnostic_package", f"SELECT package_id,persistence_version,layout_fingerprint,model_version,model_fingerprint,semantic_mode,history_mode,evidence_schema_version,source_fingerprint,economic_result_fingerprint,physical_content_fingerprint,endpoint_count,evaluation_count FROM {diagnostic_v1.PACKAGE_TABLE} WHERE model_fingerprint=?", (diagnostic_model.MODEL_FINGERPRINT,))
-    consume("diagnostic_endpoint", f"SELECT e.* FROM {diagnostic_v1.ENDPOINT_TABLE} e JOIN {diagnostic_v1.PACKAGE_TABLE} p USING(package_id) WHERE p.model_fingerprint=? ORDER BY e.company_id,e.fiscal_sequence", (diagnostic_model.MODEL_FINGERPRINT,))
-    consume("diagnostic_evaluation", f"SELECT v.* FROM {diagnostic_v1.EVALUATION_TABLE} v JOIN {diagnostic_v1.ENDPOINT_TABLE} e USING(endpoint_id) JOIN {diagnostic_v1.PACKAGE_TABLE} p USING(package_id) WHERE p.model_fingerprint=? ORDER BY e.company_id,e.fiscal_sequence,v.flag_id", (diagnostic_model.MODEL_FINGERPRINT,))
+    consume("delta_package", f"SELECT package_id,persistence_version,layout_fingerprint,model_version,model_fingerprint,semantic_mode,history_mode,score_model_fingerprint,fundamental_source_fingerprint,fundamental_result_fingerprint,lifecycle_model_fingerprint,lifecycle_source_fingerprint,lifecycle_result_fingerprint,valuation_model_fingerprint,valuation_source_fingerprint,valuation_result_fingerprint,economic_package_fingerprint,physical_content_fingerprint,total_row_count,component_row_count FROM {delta_tables.PACKAGE_TABLE} WHERE model_fingerprint=?", (delta.MODEL_FINGERPRINT,))
+    consume("delta_result", f"SELECT r.* FROM {delta_tables.TOTAL_TABLE} r JOIN {delta_tables.PACKAGE_TABLE} p USING(package_id) WHERE p.model_fingerprint=? ORDER BY r.company_id,r.fiscal_sequence", (delta.MODEL_FINGERPRINT,))
+    consume("delta_component", f"SELECT c.* FROM {delta_tables.COMPONENT_TABLE} c JOIN {delta_tables.TOTAL_TABLE} r USING(endpoint_id) JOIN {delta_tables.PACKAGE_TABLE} p USING(package_id) WHERE p.model_fingerprint=? ORDER BY r.company_id,r.fiscal_sequence,c.component_id", (delta.MODEL_FINGERPRINT,))
+    consume("diagnostic_package", f"SELECT package_id,persistence_version,layout_fingerprint,model_version,model_fingerprint,semantic_mode,history_mode,evidence_schema_version,source_fingerprint,economic_result_fingerprint,physical_content_fingerprint,endpoint_count,evaluation_count FROM {diagnostic_tables.PACKAGE_TABLE} WHERE model_fingerprint=?", (diagnostic_model.MODEL_FINGERPRINT,))
+    consume("diagnostic_endpoint", f"SELECT e.* FROM {diagnostic_tables.ENDPOINT_TABLE} e JOIN {diagnostic_tables.PACKAGE_TABLE} p USING(package_id) WHERE p.model_fingerprint=? ORDER BY e.company_id,e.fiscal_sequence", (diagnostic_model.MODEL_FINGERPRINT,))
+    consume("diagnostic_evaluation", f"SELECT v.* FROM {diagnostic_tables.EVALUATION_TABLE} v JOIN {diagnostic_tables.ENDPOINT_TABLE} e USING(endpoint_id) JOIN {diagnostic_tables.PACKAGE_TABLE} p USING(package_id) WHERE p.model_fingerprint=? ORDER BY e.company_id,e.fiscal_sequence,v.flag_id", (diagnostic_model.MODEL_FINGERPRINT,))
     consume("diagnostic_evidence_layout", f"SELECT * FROM {EVIDENCE_FIELD_TABLE} WHERE model_fingerprint=? ORDER BY flag_name,slot_number", (diagnostic_model.MODEL_FINGERPRINT,))
     consume("relative_snapshot", "SELECT snapshot_id,model_version,model_fingerprint,semantic_mode,snapshot_date,calculation_source_fingerprint,source_content_fingerprint,result_fingerprint,status,result_row_count,coverage_row_count,ready_row_count FROM relative_position_snapshot WHERE model_fingerprint=? ORDER BY snapshot_id", (relative_position.MODEL_FINGERPRINT,))
     consume("relative_result", "SELECT r.* FROM relative_position_result r JOIN relative_position_snapshot s USING(snapshot_id) WHERE s.model_fingerprint=? ORDER BY r.measure,r.peer_scope,r.peer_group_id,r.company_id", (relative_position.MODEL_FINGERPRINT,))
@@ -412,8 +412,8 @@ def physical_fingerprint(conn: sqlite3.Connection, *, diagnostic_model: Any = di
 
 
 def row_counts(conn: sqlite3.Connection, *, diagnostic_model: Any = diagnostic_flags) -> dict[str,int]:
-    delta_pid=conn.execute(f"SELECT package_id FROM {delta_v1.PACKAGE_TABLE} WHERE model_fingerprint=?",(delta.MODEL_FINGERPRINT,)).fetchone(); diag_pid=conn.execute(f"SELECT package_id FROM {diagnostic_v1.PACKAGE_TABLE} WHERE model_fingerprint=?",(diagnostic_model.MODEL_FINGERPRINT,)).fetchone(); snap=conn.execute("SELECT snapshot_id FROM relative_position_active_snapshot WHERE model_fingerprint=?",(relative_position.MODEL_FINGERPRINT,)).fetchone()
-    return {"score":_score_rows(conn),"score_component":int(conn.execute("SELECT COUNT(*) FROM score_component c JOIN score_result r USING(score_result_id) WHERE r.model_fingerprint=?",(score.MODEL_FINGERPRINT,)).fetchone()[0]),"lifecycle":int(conn.execute("SELECT COUNT(*) FROM lifecycle_revised_result WHERE model_fingerprint=?",(lifecycle.MODEL_FINGERPRINT,)).fetchone()[0]),"valuation":int(conn.execute("SELECT COUNT(*) FROM valuation_revised_result WHERE model_fingerprint=?",(valuation.MODEL_FINGERPRINT,)).fetchone()[0]),"delta":0 if not delta_pid else int(conn.execute(f"SELECT COUNT(*) FROM {delta_v1.TOTAL_TABLE} WHERE package_id=?",(delta_pid[0],)).fetchone()[0]),"delta_component":0 if not delta_pid else int(conn.execute(f"SELECT COUNT(*) FROM {delta_v1.COMPONENT_TABLE} c JOIN {delta_v1.TOTAL_TABLE} r USING(endpoint_id) WHERE r.package_id=?",(delta_pid[0],)).fetchone()[0]),"diagnostic_endpoint":0 if not diag_pid else int(conn.execute(f"SELECT COUNT(*) FROM {diagnostic_v1.ENDPOINT_TABLE} WHERE package_id=?",(diag_pid[0],)).fetchone()[0]),"diagnostic_evaluation":0 if not diag_pid else int(conn.execute(f"SELECT COUNT(*) FROM {diagnostic_v1.EVALUATION_TABLE} v JOIN {diagnostic_v1.ENDPOINT_TABLE} e USING(endpoint_id) WHERE e.package_id=?",(diag_pid[0],)).fetchone()[0]),"relative_result":0 if not snap else int(conn.execute("SELECT COUNT(*) FROM relative_position_result WHERE snapshot_id=?",(snap[0],)).fetchone()[0]),"relative_coverage":0 if not snap else int(conn.execute("SELECT COUNT(*) FROM relative_position_coverage WHERE snapshot_id=?",(snap[0],)).fetchone()[0])}
+    delta_pid=conn.execute(f"SELECT package_id FROM {delta_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",(delta.MODEL_FINGERPRINT,)).fetchone(); diag_pid=conn.execute(f"SELECT package_id FROM {diagnostic_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",(diagnostic_model.MODEL_FINGERPRINT,)).fetchone(); snap=conn.execute("SELECT snapshot_id FROM relative_position_active_snapshot WHERE model_fingerprint=?",(relative_position.MODEL_FINGERPRINT,)).fetchone()
+    return {"score":_score_rows(conn),"score_component":int(conn.execute("SELECT COUNT(*) FROM score_component c JOIN score_result r USING(score_result_id) WHERE r.model_fingerprint=?",(score.MODEL_FINGERPRINT,)).fetchone()[0]),"lifecycle":int(conn.execute("SELECT COUNT(*) FROM lifecycle_revised_result WHERE model_fingerprint=?",(lifecycle.MODEL_FINGERPRINT,)).fetchone()[0]),"valuation":int(conn.execute("SELECT COUNT(*) FROM valuation_revised_result WHERE model_fingerprint=?",(valuation.MODEL_FINGERPRINT,)).fetchone()[0]),"delta":0 if not delta_pid else int(conn.execute(f"SELECT COUNT(*) FROM {delta_tables.TOTAL_TABLE} WHERE package_id=?",(delta_pid[0],)).fetchone()[0]),"delta_component":0 if not delta_pid else int(conn.execute(f"SELECT COUNT(*) FROM {delta_tables.COMPONENT_TABLE} c JOIN {delta_tables.TOTAL_TABLE} r USING(endpoint_id) WHERE r.package_id=?",(delta_pid[0],)).fetchone()[0]),"diagnostic_endpoint":0 if not diag_pid else int(conn.execute(f"SELECT COUNT(*) FROM {diagnostic_tables.ENDPOINT_TABLE} WHERE package_id=?",(diag_pid[0],)).fetchone()[0]),"diagnostic_evaluation":0 if not diag_pid else int(conn.execute(f"SELECT COUNT(*) FROM {diagnostic_tables.EVALUATION_TABLE} v JOIN {diagnostic_tables.ENDPOINT_TABLE} e USING(endpoint_id) WHERE e.package_id=?",(diag_pid[0],)).fetchone()[0]),"relative_result":0 if not snap else int(conn.execute("SELECT COUNT(*) FROM relative_position_result WHERE snapshot_id=?",(snap[0],)).fetchone()[0]),"relative_coverage":0 if not snap else int(conn.execute("SELECT COUNT(*) FROM relative_position_coverage WHERE snapshot_id=?",(snap[0],)).fetchone()[0])}
 
 
 def apply_package(conn: sqlite3.Connection, calculated: Mapping[str, Any], *, applied_at: str, inject_failure_at: str | None=None, stage_callback: Callable[[str,sqlite3.Connection],None] | None=None) -> ApplyReport:

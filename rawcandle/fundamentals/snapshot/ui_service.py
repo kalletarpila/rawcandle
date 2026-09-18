@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.writer import report_filename
 
 

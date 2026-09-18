@@ -1,44 +1,152 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from enum import Enum
 from typing import Sequence
-
-from rawcandle.fundamentals.lifecycle import engine as v1
 
 from .contract import LIFECYCLE_MODEL_VERSION, TTM_MODEL_VERSION, model_fingerprint
 
 
-LifecycleState = v1.LifecycleState
-LifecycleStatus = v1.LifecycleStatus
-StartupProfile = v1.StartupProfile
-LifecycleReason = Enum(
-    "LifecycleReason",
-    {item.name: item.value.replace("EBIT", "OPERATING_INCOME") for item in v1.LifecycleReason},
-    type=str,
-)
-StateMachineReason = v1.StateMachineReason
-LifecycleMachineState = v1.LifecycleMachineState
-
 MODEL_VERSION = LIFECYCLE_MODEL_VERSION
-def _operating_semantics(value):
-    if isinstance(value, dict):
-        return {_operating_semantics(key): _operating_semantics(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_operating_semantics(item) for item in value]
-    if isinstance(value, str):
-        return value.replace("ttm_ebit", "ttm_operating_income").replace("ebit_margin", "operating_margin").replace("EBIT", "OPERATING_INCOME")
-    return value
+
+
+class LifecycleState(str, Enum):
+    STARTUP = "STARTUP"
+    DISTRESSED = "DISTRESSED"
+    SCALING = "SCALING"
+    GROWTH = "GROWTH"
+    MATURE = "MATURE"
+    DECLINING = "DECLINING"
+    STRUGGLING = "STRUGGLING"
+    TRANSITION = "TRANSITION"
+    UNCLASSIFIED = "UNCLASSIFIED"
+
+
+class LifecycleStatus(str, Enum):
+    READY = "LIFECYCLE_READY"
+    NOT_READY = "LIFECYCLE_NOT_READY"
+
+
+class StartupProfile(str, Enum):
+    PRE_REVENUE = "PRE_REVENUE"
+    REVENUE_GENERATING = "REVENUE_GENERATING"
+
+
+class LifecycleReason(str, Enum):
+    CLASSIFIED_PRE_REVENUE_STARTUP = "CLASSIFIED_PRE_REVENUE_STARTUP"
+    CLASSIFIED_DISTRESSED = "CLASSIFIED_DISTRESSED"
+    CLASSIFIED_REVENUE_GENERATING_STARTUP = "CLASSIFIED_REVENUE_GENERATING_STARTUP"
+    CLASSIFIED_SCALING = "CLASSIFIED_SCALING"
+    CLASSIFIED_GROWTH = "CLASSIFIED_GROWTH"
+    CLASSIFIED_MATURE = "CLASSIFIED_MATURE"
+    CLASSIFIED_DECLINING = "CLASSIFIED_DECLINING"
+    CLASSIFIED_STRUGGLING = "CLASSIFIED_STRUGGLING"
+    CLASSIFIED_TRANSITION = "CLASSIFIED_TRANSITION"
+    TTM_NOT_READY = "TTM_NOT_READY"
+    TTM_MODEL_VERSION_UNSUPPORTED = "TTM_MODEL_VERSION_UNSUPPORTED"
+    SOURCE_AVAILABILITY_DATE_MISSING = "SOURCE_AVAILABILITY_DATE_MISSING"
+    SOURCE_AVAILABILITY_DATE_INVALID = "SOURCE_AVAILABILITY_DATE_INVALID"
+    CURRENT_REVENUE_MISSING = "CURRENT_REVENUE_MISSING"
+    CURRENT_REVENUE_INVALID = "CURRENT_REVENUE_INVALID"
+    CURRENT_REVENUE_NEGATIVE = "CURRENT_REVENUE_NEGATIVE"
+    CURRENT_OPERATING_INCOME_MISSING = "CURRENT_OPERATING_INCOME_MISSING"
+    CURRENT_OPERATING_INCOME_INVALID = "CURRENT_OPERATING_INCOME_INVALID"
+    CURRENT_FCF_MISSING = "CURRENT_FCF_MISSING"
+    CURRENT_FCF_INVALID = "CURRENT_FCF_INVALID"
+    PRE_REVENUE_QUARTER_COUNT_INVALID = "PRE_REVENUE_QUARTER_COUNT_INVALID"
+    PRE_REVENUE_QUARTER_REVENUE_MISSING = "PRE_REVENUE_QUARTER_REVENUE_MISSING"
+    PRE_REVENUE_QUARTER_REVENUE_INVALID = "PRE_REVENUE_QUARTER_REVENUE_INVALID"
+    ZERO_REVENUE_PRE_REVENUE_CONDITIONS_NOT_MET = "ZERO_REVENUE_PRE_REVENUE_CONDITIONS_NOT_MET"
+    FISCAL_CHAIN_INVALID = "FISCAL_CHAIN_INVALID"
+    LAG4_REVENUE_MISSING = "LAG4_REVENUE_MISSING"
+    LAG4_REVENUE_INVALID = "LAG4_REVENUE_INVALID"
+    LAG4_REVENUE_NONPOSITIVE = "LAG4_REVENUE_NONPOSITIVE"
+    LAG4_OPERATING_INCOME_MISSING = "LAG4_OPERATING_INCOME_MISSING"
+    LAG4_OPERATING_INCOME_INVALID = "LAG4_OPERATING_INCOME_INVALID"
+    REQUIRED_METRICS_MISSING = "REQUIRED_METRICS_MISSING"
+
+
+class StateMachineReason(str, Enum):
+    LEADING_UNCLASSIFIED = "LEADING_UNCLASSIFIED"
+    UNCLASSIFIED_CLEARED_CANDIDATE = "UNCLASSIFIED_CLEARED_CANDIDATE"
+    INITIAL_STATE_CONFIRMED = "INITIAL_STATE_CONFIRMED"
+    CONFIRMED_STATE_REPEATED = "CONFIRMED_STATE_REPEATED"
+    CANDIDATE_STARTED = "CANDIDATE_STARTED"
+    CANDIDATE_REPLACED = "CANDIDATE_REPLACED"
+    CANDIDATE_CONFIRMED = "CANDIDATE_CONFIRMED"
+    DISTRESSED_IMMEDIATE_ENTRY = "DISTRESSED_IMMEDIATE_ENTRY"
 
 
 MODEL_CONTRACT = {
-    **_operating_semantics(v1.MODEL_CONTRACT),
     "model_version": MODEL_VERSION,
     "ttm_model_version": TTM_MODEL_VERSION,
+    "economic_states": [state.value for state in LifecycleState if state is not LifecycleState.UNCLASSIFIED],
+    "technical_state": LifecycleState.UNCLASSIFIED.value,
+    "startup_profiles": [profile.value for profile in StartupProfile],
+    "status": {"ready": LifecycleStatus.READY.value, "not_ready": LifecycleStatus.NOT_READY.value},
+    "reason_codes": [reason.value for reason in LifecycleReason],
+    "state_machine_reason_codes": [reason.value for reason in StateMachineReason],
+    "priority": [
+        "PRE_REVENUE_STARTUP",
+        "DISTRESSED",
+        "REVENUE_GENERATING_STARTUP",
+        "SCALING",
+        "GROWTH",
+        "MATURE",
+        "DECLINING",
+        "STRUGGLING",
+        "TRANSITION",
+    ],
+    "thresholds": {
+        "distressed": {"operating_margin_lt": -0.20, "fcf_margin_lt": -0.20},
+        "startup": {"growth_gt": 0.30, "operating_margin_lt": -0.05, "fcf_margin_lt": 0.0},
+        "scaling": {"growth_gt": 0.10, "operating_margin_gte": 0.0, "margin_direction_gt": 0.0},
+        "growth": {"growth_gt": 0.20, "operating_margin_lt": 0.10, "margin_direction_gte": -0.05},
+        "mature": {"operating_margin_gte": 0.15, "fcf_margin_gte": 0.05, "growth_gte": -0.05, "margin_direction_gte": -0.05},
+        "declining": {"growth_lt": -0.05, "margin_direction_lt": -0.05},
+        "struggling": {"operating_margin_lt_or_fcf_margin_lt": 0.0, "growth_gte": -0.05, "margin_direction_gte": -0.05},
+    },
+    "pre_revenue": {
+        "quarter_count": 4,
+        "all_quarter_revenues_exactly_zero": True,
+        "ttm_operating_income_lt": 0.0,
+        "ttm_fcf_lt": 0.0,
+    },
+    "required_metrics": {
+        "PRE_REVENUE_STARTUP": ["four_observed_zero_revenue_quarters", "current_ttm_operating_income", "current_ttm_fcf"],
+        "DISTRESSED": ["positive_current_ttm_revenue", "current_ttm_operating_income", "current_ttm_fcf"],
+        "REVENUE_GENERATING_STARTUP": ["G", "M", "F"],
+        "SCALING": ["G", "M", "DeltaM"],
+        "GROWTH": ["G", "M", "DeltaM"],
+        "MATURE": ["G", "M", "DeltaM", "F"],
+        "DECLINING": ["G", "M", "DeltaM"],
+        "STRUGGLING": ["G", "M", "DeltaM", "F"],
+        "TRANSITION": ["G", "M", "DeltaM", "F"],
+    },
+    "numeric_semantics": {
+        "comparison_arithmetic": "DECIMAL_FROM_SOURCE_NUMBER_STRING",
+        "classification_rounding": None,
+        "public_metric_type": "FLOAT_UNROUNDED",
+    },
+    "state_machine": {
+        "ordinary_confirmation_count": 2,
+        "distressed_entry": "IMMEDIATE",
+        "distressed_exit": "TWO_IDENTICAL_NON_DISTRESSED",
+        "unclassified": "NOT_READY_CLEAR_CANDIDATE_PRESERVE_LAST_CONFIRMED_ONLY_AS_HISTORY",
+        "forced_path": False,
+    },
+    "excluded_inputs": ["score", "price", "returns", "valuation", "leverage", "debt", "dilution", "sector_rank", "percentiles", "future_outcomes"],
+}
+MODEL_CONTRACT.update({
     "operating_metric": "ttm_operating_income/ttm_revenue",
     "operating_direction": "operating_margin_t-operating_margin_t_minus_4",
     "ebit_fallback": None,
-}
+})
 MODEL_FINGERPRINT = model_fingerprint(MODEL_VERSION, MODEL_CONTRACT)
 
 
@@ -85,6 +193,15 @@ class RawLifecycleResult:
 
 
 @dataclass(frozen=True)
+class LifecycleMachineState:
+    last_confirmed_state: LifecycleState | None = None
+    last_confirmed_startup_profile: StartupProfile | None = None
+    candidate_state: LifecycleState | None = None
+    candidate_startup_profile: StartupProfile | None = None
+    candidate_count: int = 0
+
+
+@dataclass(frozen=True)
 class StateMachineResult:
     raw_result: RawLifecycleResult
     final_state: LifecycleState | None
@@ -98,82 +215,361 @@ class StateMachineResult:
     model_fingerprint: str = MODEL_FINGERPRINT
 
 
-def _v1_observation(value: LifecycleObservation) -> v1.LifecycleObservation:
-    if value.ttm_model_version != TTM_MODEL_VERSION:
-        raise ValueError("OPERATING_INCOME_V2_TTM_MODEL_MISMATCH")
-    return v1.LifecycleObservation(
-        company_id=value.company_id,
-        security_id=value.security_id,
-        endpoint_quarter_id=value.endpoint_quarter_id,
-        endpoint_fiscal_year=value.endpoint_fiscal_year,
-        endpoint_fiscal_quarter=value.endpoint_fiscal_quarter,
-        period_end=value.period_end,
-        source_available_date=value.source_available_date,
-        core_ttm_ready=value.core_ttm_ready,
-        ttm_revenue=value.ttm_revenue,
-        ttm_ebit=value.ttm_operating_income,
-        ttm_free_cashflow=value.ttm_free_cashflow,
-        lag4_ttm_revenue=value.lag4_ttm_revenue,
-        lag4_ttm_ebit=value.lag4_ttm_operating_income,
-        lag4_chain_valid=value.lag4_chain_valid,
-        input_quarter_revenues=value.input_quarter_revenues,
-        source_data_version=value.source_data_version,
-        ttm_model_version=v1.TTM_MODEL_VERSION,
-    )
+def _finite(value: float | None) -> bool:
+    return value is not None and math.isfinite(float(value))
 
 
-def _from_v1(raw: v1.RawLifecycleResult, observation: LifecycleObservation) -> RawLifecycleResult:
-    metrics = LifecycleMetrics(
-        raw.metrics.revenue_growth_yoy_ttm,
-        raw.metrics.ebit_margin_ttm,
-        raw.metrics.ebit_margin_direction,
-        raw.metrics.fcf_margin_ttm,
-    )
-    missing = tuple(name.replace("lag4_ttm_ebit", "lag4_ttm_operating_income").replace("ttm_ebit", "ttm_operating_income") for name in raw.missing_inputs)
+def _decimal(value: float) -> Decimal:
+    return Decimal(str(value))
+
+
+def _empty_metrics() -> LifecycleMetrics:
+    return LifecycleMetrics(None, None, None, None)
+
+
+def _unclassified(
+    observation: LifecycleObservation,
+    reason: LifecycleReason,
+    metrics: LifecycleMetrics,
+    *missing_inputs: str,
+) -> RawLifecycleResult:
     return RawLifecycleResult(
-        observation, raw.raw_state, raw.lifecycle_status, LifecycleReason[raw.reason_code.name],
-        metrics, raw.startup_profile, missing,
+        observation=observation,
+        raw_state=LifecycleState.UNCLASSIFIED,
+        lifecycle_status=LifecycleStatus.NOT_READY,
+        reason_code=reason,
+        metrics=metrics,
+        missing_inputs=tuple(sorted(set(missing_inputs))),
     )
 
 
-def _to_v1(raw: RawLifecycleResult) -> v1.RawLifecycleResult:
-    if raw.model_version != MODEL_VERSION or raw.model_fingerprint != MODEL_FINGERPRINT:
-        raise ValueError("OPERATING_INCOME_V2_LIFECYCLE_MODEL_MISMATCH")
-    return v1.RawLifecycleResult(
-        _v1_observation(raw.observation), raw.raw_state, raw.lifecycle_status,
-        v1.LifecycleReason[raw.reason_code.name],
-        v1.LifecycleMetrics(
-            raw.metrics.revenue_growth_yoy_ttm,
-            raw.metrics.operating_margin_ttm,
-            raw.metrics.operating_margin_direction,
-            raw.metrics.fcf_margin_ttm,
-        ),
-        raw.startup_profile,
-        tuple(name.replace("lag4_ttm_operating_income", "lag4_ttm_ebit").replace("ttm_operating_income", "ttm_ebit") for name in raw.missing_inputs),
+def _classified(
+    observation: LifecycleObservation,
+    state: LifecycleState,
+    reason: LifecycleReason,
+    metrics: LifecycleMetrics,
+    startup_profile: StartupProfile | None = None,
+) -> RawLifecycleResult:
+    return RawLifecycleResult(
+        observation=observation,
+        raw_state=state,
+        lifecycle_status=LifecycleStatus.READY,
+        reason_code=reason,
+        metrics=metrics,
+        startup_profile=startup_profile,
+    )
+
+
+def _availability_reason(value: str | None) -> LifecycleReason | None:
+    if value is None or not value.strip():
+        return LifecycleReason.SOURCE_AVAILABILITY_DATE_MISSING
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return LifecycleReason.SOURCE_AVAILABILITY_DATE_INVALID
+    return None
+
+
+def _classify_zero_revenue(observation: LifecycleObservation) -> RawLifecycleResult:
+    metrics = _empty_metrics()
+    revenues = observation.input_quarter_revenues
+    if len(revenues) != 4:
+        return _unclassified(
+            observation,
+            LifecycleReason.PRE_REVENUE_QUARTER_COUNT_INVALID,
+            metrics,
+            "input_quarter_revenues",
+        )
+    if any(value is None for value in revenues):
+        return _unclassified(
+            observation,
+            LifecycleReason.PRE_REVENUE_QUARTER_REVENUE_MISSING,
+            metrics,
+            "input_quarter_revenues",
+        )
+    if any(not _finite(value) for value in revenues):
+        return _unclassified(
+            observation,
+            LifecycleReason.PRE_REVENUE_QUARTER_REVENUE_INVALID,
+            metrics,
+            "input_quarter_revenues",
+        )
+    if observation.ttm_operating_income is None:
+        return _unclassified(observation, LifecycleReason.CURRENT_OPERATING_INCOME_MISSING, metrics, "ttm_operating_income")
+    if not _finite(observation.ttm_operating_income):
+        return _unclassified(observation, LifecycleReason.CURRENT_OPERATING_INCOME_INVALID, metrics, "ttm_operating_income")
+    if observation.ttm_free_cashflow is None:
+        return _unclassified(observation, LifecycleReason.CURRENT_FCF_MISSING, metrics, "ttm_free_cashflow")
+    if not _finite(observation.ttm_free_cashflow):
+        return _unclassified(observation, LifecycleReason.CURRENT_FCF_INVALID, metrics, "ttm_free_cashflow")
+    if (
+        all(float(value) == 0.0 for value in revenues)
+        and float(observation.ttm_operating_income) < 0.0
+        and float(observation.ttm_free_cashflow) < 0.0
+    ):
+        return _classified(
+            observation,
+            LifecycleState.STARTUP,
+            LifecycleReason.CLASSIFIED_PRE_REVENUE_STARTUP,
+            metrics,
+            StartupProfile.PRE_REVENUE,
+        )
+    return _unclassified(
+        observation,
+        LifecycleReason.ZERO_REVENUE_PRE_REVENUE_CONDITIONS_NOT_MET,
+        metrics,
+        "pre_revenue_conditions",
     )
 
 
 def classify_raw_state(observation: LifecycleObservation) -> RawLifecycleResult:
-    return _from_v1(v1.classify_raw_state(_v1_observation(observation)), observation)
+    """Classify one source-provenanced TTM observation without mutable state."""
+    if observation.ttm_model_version != TTM_MODEL_VERSION:
+        return _unclassified(
+            observation,
+            LifecycleReason.TTM_MODEL_VERSION_UNSUPPORTED,
+            _empty_metrics(),
+            "ttm_model_version",
+        )
+    availability_reason = _availability_reason(observation.source_available_date)
+    if availability_reason is not None:
+        return _unclassified(observation, availability_reason, _empty_metrics(), "source_available_date")
+    if not observation.core_ttm_ready:
+        return _unclassified(observation, LifecycleReason.TTM_NOT_READY, _empty_metrics(), "core_ttm_ready")
+    if observation.ttm_revenue is None:
+        return _unclassified(observation, LifecycleReason.CURRENT_REVENUE_MISSING, _empty_metrics(), "ttm_revenue")
+    if not _finite(observation.ttm_revenue):
+        return _unclassified(observation, LifecycleReason.CURRENT_REVENUE_INVALID, _empty_metrics(), "ttm_revenue")
+
+    revenue = float(observation.ttm_revenue)
+    revenue_decimal = _decimal(revenue)
+    if revenue_decimal < 0:
+        return _unclassified(observation, LifecycleReason.CURRENT_REVENUE_NEGATIVE, _empty_metrics(), "ttm_revenue")
+    if revenue_decimal == 0:
+        return _classify_zero_revenue(observation)
+    if observation.ttm_operating_income is None:
+        return _unclassified(observation, LifecycleReason.CURRENT_OPERATING_INCOME_MISSING, _empty_metrics(), "ttm_operating_income")
+    if not _finite(observation.ttm_operating_income):
+        return _unclassified(observation, LifecycleReason.CURRENT_OPERATING_INCOME_INVALID, _empty_metrics(), "ttm_operating_income")
+
+    ebit_decimal = _decimal(float(observation.ttm_operating_income))
+    operating_margin_decimal = ebit_decimal / revenue_decimal
+    operating_margin = float(operating_margin_decimal)
+    fcf_margin = None
+    fcf_problem: tuple[LifecycleReason, str] | None = None
+    if observation.ttm_free_cashflow is None:
+        fcf_problem = (LifecycleReason.CURRENT_FCF_MISSING, "ttm_free_cashflow")
+    elif not _finite(observation.ttm_free_cashflow):
+        fcf_problem = (LifecycleReason.CURRENT_FCF_INVALID, "ttm_free_cashflow")
+    else:
+        fcf_margin_decimal = _decimal(float(observation.ttm_free_cashflow)) / revenue_decimal
+        fcf_margin = float(fcf_margin_decimal)
+
+    level_metrics = LifecycleMetrics(None, operating_margin, None, fcf_margin)
+    if fcf_margin is not None and operating_margin_decimal < Decimal("-0.20") and fcf_margin_decimal < Decimal("-0.20"):
+        return _classified(
+            observation,
+            LifecycleState.DISTRESSED,
+            LifecycleReason.CLASSIFIED_DISTRESSED,
+            level_metrics,
+        )
+
+    history_problem: tuple[LifecycleReason, str] | None = None
+    if not observation.lag4_chain_valid:
+        history_problem = (LifecycleReason.FISCAL_CHAIN_INVALID, "lag4_chain")
+    elif observation.lag4_ttm_revenue is None:
+        history_problem = (LifecycleReason.LAG4_REVENUE_MISSING, "lag4_ttm_revenue")
+    elif not _finite(observation.lag4_ttm_revenue):
+        history_problem = (LifecycleReason.LAG4_REVENUE_INVALID, "lag4_ttm_revenue")
+    elif float(observation.lag4_ttm_revenue) <= 0.0:
+        history_problem = (LifecycleReason.LAG4_REVENUE_NONPOSITIVE, "lag4_ttm_revenue")
+
+    if history_problem is not None:
+        reason, field = history_problem
+        return _unclassified(observation, reason, level_metrics, field)
+
+    previous_revenue = float(observation.lag4_ttm_revenue)
+    previous_revenue_decimal = _decimal(previous_revenue)
+    growth_decimal = revenue_decimal / previous_revenue_decimal - 1
+    growth = float(growth_decimal)
+    margin_direction = None
+    margin_direction_decimal = None
+    margin_problem: tuple[LifecycleReason, str] | None = None
+    if observation.lag4_ttm_operating_income is None:
+        margin_problem = (LifecycleReason.LAG4_OPERATING_INCOME_MISSING, "lag4_ttm_operating_income")
+    elif not _finite(observation.lag4_ttm_operating_income):
+        margin_problem = (LifecycleReason.LAG4_OPERATING_INCOME_INVALID, "lag4_ttm_operating_income")
+    else:
+        previous_margin_decimal = _decimal(float(observation.lag4_ttm_operating_income)) / previous_revenue_decimal
+        margin_direction_decimal = operating_margin_decimal - previous_margin_decimal
+        margin_direction = float(margin_direction_decimal)
+
+    metrics = LifecycleMetrics(growth, operating_margin, margin_direction, fcf_margin)
+    if (
+        fcf_margin is not None
+        and growth_decimal > Decimal("0.30")
+        and operating_margin_decimal < Decimal("-0.05")
+        and fcf_margin_decimal < 0
+    ):
+        return _classified(
+            observation,
+            LifecycleState.STARTUP,
+            LifecycleReason.CLASSIFIED_REVENUE_GENERATING_STARTUP,
+            metrics,
+            StartupProfile.REVENUE_GENERATING,
+        )
+    if (
+        margin_direction_decimal is not None
+        and growth_decimal > Decimal("0.10")
+        and operating_margin_decimal >= 0
+        and margin_direction_decimal > 0
+    ):
+        return _classified(observation, LifecycleState.SCALING, LifecycleReason.CLASSIFIED_SCALING, metrics)
+    if (
+        margin_direction_decimal is not None
+        and growth_decimal > Decimal("0.20")
+        and operating_margin_decimal < Decimal("0.10")
+        and margin_direction_decimal >= Decimal("-0.05")
+    ):
+        return _classified(observation, LifecycleState.GROWTH, LifecycleReason.CLASSIFIED_GROWTH, metrics)
+    if (
+        margin_direction_decimal is not None
+        and fcf_margin is not None
+        and operating_margin_decimal >= Decimal("0.15")
+        and fcf_margin_decimal >= Decimal("0.05")
+        and growth_decimal >= Decimal("-0.05")
+        and margin_direction_decimal >= Decimal("-0.05")
+    ):
+        return _classified(observation, LifecycleState.MATURE, LifecycleReason.CLASSIFIED_MATURE, metrics)
+    if margin_direction_decimal is not None and (
+        growth_decimal < Decimal("-0.05") or margin_direction_decimal < Decimal("-0.05")
+    ):
+        return _classified(observation, LifecycleState.DECLINING, LifecycleReason.CLASSIFIED_DECLINING, metrics)
+    if (
+        margin_direction_decimal is not None
+        and fcf_margin is not None
+        and (operating_margin_decimal < 0 or fcf_margin_decimal < 0)
+        and growth_decimal >= Decimal("-0.05")
+        and margin_direction_decimal >= Decimal("-0.05")
+    ):
+        return _classified(observation, LifecycleState.STRUGGLING, LifecycleReason.CLASSIFIED_STRUGGLING, metrics)
+    if margin_direction_decimal is not None and fcf_margin is not None:
+        return _classified(observation, LifecycleState.TRANSITION, LifecycleReason.CLASSIFIED_TRANSITION, metrics)
+
+    missing: list[str] = []
+    problems: list[tuple[LifecycleReason, str]] = []
+    if margin_problem is not None:
+        problems.append(margin_problem)
+        missing.append(margin_problem[1])
+    if fcf_problem is not None:
+        problems.append(fcf_problem)
+        missing.append(fcf_problem[1])
+    if problems:
+        return _unclassified(observation, problems[0][0], metrics, *missing)
+    return _unclassified(observation, LifecycleReason.REQUIRED_METRICS_MISSING, metrics, "lifecycle_metrics")
 
 
 def advance_state_machine(
     state: LifecycleMachineState,
     raw_result: RawLifecycleResult,
 ) -> tuple[LifecycleMachineState, StateMachineResult]:
-    next_state, result = v1.advance_state_machine(state, _to_v1(raw_result))
+    """Advance one immutable state-machine step."""
+    if raw_result.model_version != MODEL_VERSION or raw_result.model_fingerprint != MODEL_FINGERPRINT:
+        raise ValueError("LIFECYCLE_MODEL_IDENTITY_MISMATCH")
+    if (
+        raw_result.raw_state is LifecycleState.UNCLASSIFIED
+        and raw_result.lifecycle_status is not LifecycleStatus.NOT_READY
+    ) or (
+        raw_result.raw_state is not LifecycleState.UNCLASSIFIED
+        and raw_result.lifecycle_status is not LifecycleStatus.READY
+    ):
+        raise ValueError("LIFECYCLE_RAW_RESULT_STATUS_MISMATCH")
+
+    if raw_result.raw_state is LifecycleState.UNCLASSIFIED:
+        next_state = LifecycleMachineState(
+            last_confirmed_state=state.last_confirmed_state,
+            last_confirmed_startup_profile=state.last_confirmed_startup_profile,
+        )
+        reason = (
+            StateMachineReason.LEADING_UNCLASSIFIED
+            if state.last_confirmed_state is None
+            else StateMachineReason.UNCLASSIFIED_CLEARED_CANDIDATE
+        )
+        return next_state, StateMachineResult(
+            raw_result=raw_result,
+            final_state=None,
+            final_startup_profile=None,
+            last_confirmed_state=next_state.last_confirmed_state,
+            candidate_state=None,
+            candidate_count=0,
+            lifecycle_status=LifecycleStatus.NOT_READY,
+            transition_reason=reason,
+        )
+
+    raw_state = raw_result.raw_state
+    raw_profile = raw_result.startup_profile if raw_state is LifecycleState.STARTUP else None
+    if state.last_confirmed_state is None:
+        next_state = LifecycleMachineState(raw_state, raw_profile)
+        reason = StateMachineReason.INITIAL_STATE_CONFIRMED
+    elif raw_state is LifecycleState.DISTRESSED:
+        next_state = LifecycleMachineState(LifecycleState.DISTRESSED)
+        reason = StateMachineReason.DISTRESSED_IMMEDIATE_ENTRY
+    elif raw_state is state.last_confirmed_state:
+        confirmed_profile = raw_profile if raw_state is LifecycleState.STARTUP else state.last_confirmed_startup_profile
+        next_state = LifecycleMachineState(raw_state, confirmed_profile)
+        reason = StateMachineReason.CONFIRMED_STATE_REPEATED
+    elif raw_state is state.candidate_state:
+        count = state.candidate_count + 1
+        if count >= 2:
+            next_state = LifecycleMachineState(raw_state, raw_profile)
+            reason = StateMachineReason.CANDIDATE_CONFIRMED
+        else:
+            next_state = LifecycleMachineState(
+                state.last_confirmed_state,
+                state.last_confirmed_startup_profile,
+                raw_state,
+                raw_profile,
+                count,
+            )
+            reason = StateMachineReason.CANDIDATE_STARTED
+    else:
+        next_state = LifecycleMachineState(
+            state.last_confirmed_state,
+            state.last_confirmed_startup_profile,
+            raw_state,
+            raw_profile,
+            1,
+        )
+        reason = StateMachineReason.CANDIDATE_REPLACED if state.candidate_state is not None else StateMachineReason.CANDIDATE_STARTED
+
     return next_state, StateMachineResult(
-        raw_result, result.final_state, result.final_startup_profile,
-        result.last_confirmed_state, result.candidate_state,
-        result.candidate_count, result.lifecycle_status,
-        result.transition_reason,
+        raw_result=raw_result,
+        final_state=next_state.last_confirmed_state,
+        final_startup_profile=next_state.last_confirmed_startup_profile,
+        last_confirmed_state=next_state.last_confirmed_state,
+        candidate_state=next_state.candidate_state,
+        candidate_count=next_state.candidate_count,
+        lifecycle_status=LifecycleStatus.READY,
+        transition_reason=reason,
     )
 
 
 def replay_state_machine(raw_results: Sequence[RawLifecycleResult]) -> tuple[StateMachineResult, ...]:
+    """Replay a caller-provided chronological source sequence deterministically."""
     state = LifecycleMachineState()
-    output = []
-    for raw in raw_results:
-        state, result = advance_state_machine(state, raw)
+    output: list[StateMachineResult] = []
+    previous_date: date | None = None
+    for raw_result in raw_results:
+        available = raw_result.observation.source_available_date
+        if available is None:
+            raise ValueError("LIFECYCLE_REPLAY_AVAILABILITY_DATE_REQUIRED")
+        try:
+            current_date = date.fromisoformat(available)
+        except ValueError as exc:
+            raise ValueError("LIFECYCLE_REPLAY_AVAILABILITY_DATE_INVALID") from exc
+        if previous_date is not None and current_date < previous_date:
+            raise ValueError("LIFECYCLE_REPLAY_SEQUENCE_NOT_CHRONOLOGICAL")
+        state, result = advance_state_machine(state, raw_result)
         output.append(result)
+        previous_date = current_date
     return tuple(output)

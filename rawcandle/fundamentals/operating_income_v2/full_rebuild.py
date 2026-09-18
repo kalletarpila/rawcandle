@@ -12,17 +12,17 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from rawcandle.fundamentals.delta import persistence as delta_storage
-from rawcandle.fundamentals.diagnostic_flags import persistence as diagnostic_storage
-from rawcandle.fundamentals.lifecycle import revised_history
-from rawcandle.fundamentals.relative_position import persistence as rp_storage
 from rawcandle.fundamentals.relative_valuation import persistence as rv_storage
 from rawcandle.fundamentals.relative_valuation.engine import calculate_relative_valuation
 from rawcandle.fundamentals.relative_valuation.source import ReadOnlySourcePaths, load_relative_valuation_source
+from rawcandle.fundamentals.schema.analysis_compat_schema import (
+    DELTA_SCHEMA_SQL, DIAGNOSTIC_SCHEMA_SQL, LIFECYCLE_SCHEMA_SQL,
+    RELATIVE_POSITION_SCHEMA_SQL, RELATIVE_POSITION_SCHEMA_VERSION,
+    VALUATION_SCHEMA_SQL,
+)
 from rawcandle.fundamentals.schema.migrations import ANALYSIS_SCHEMA_SQL, bootstrap_database
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.v2_assembler import assemble_company_snapshot_v2
-from rawcandle.fundamentals.valuation import persistence as valuation_storage
 
 from . import activation, phase10b, persistence, relative_position, score
 from .readers import ActiveModelRepository, ParallelModelRepository
@@ -61,11 +61,16 @@ def _heartbeat(output: Path, stage: str):
 
 def _schema(conn: sqlite3.Connection, target: Path, applied_at: str) -> None:
     bootstrap_database(target, "fundamentals_analysis", ANALYSIS_SCHEMA_SQL, applied_at)
-    conn.executescript(revised_history.SCHEMA_SQL)
-    valuation_storage.ensure_schema(conn)
-    conn.executescript(delta_storage.SCHEMA_SQL)
-    diagnostic_storage.ensure_schema(conn)
-    rp_storage.ensure_schema(conn, applied_at_utc=applied_at)
+    for sql in (
+        LIFECYCLE_SCHEMA_SQL, VALUATION_SCHEMA_SQL, DELTA_SCHEMA_SQL,
+        DIAGNOSTIC_SCHEMA_SQL, RELATIVE_POSITION_SCHEMA_SQL,
+    ):
+        conn.executescript(sql)
+    conn.execute(
+        "INSERT INTO relative_position_schema_meta(singleton,schema_version,applied_at_utc) "
+        "VALUES (1,?,?)",
+        (RELATIVE_POSITION_SCHEMA_VERSION, applied_at),
+    )
     persistence.ensure_schema(conn)
     rv_storage.ensure_schema(conn, applied_at_utc=applied_at)
     conn.commit()
@@ -212,7 +217,7 @@ def rebuild_v2_analysis(
         stage = "v2_calculation"
         _event(output, stage, "STARTED")
         with _heartbeat(output, stage):
-            calculated = phase10b.calculate(paths, verify_v1_overlap=False, as_of_date=as_of_date)
+            calculated = phase10b.calculate(paths, as_of_date=as_of_date)
         _event(output, stage, "COMPLETED", fingerprints=calculated["fingerprints"])
         if inject_failure_at == stage:
             raise RuntimeError("INJECTED_V2_REBUILD_CALCULATION_FAILURE")

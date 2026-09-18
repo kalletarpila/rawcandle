@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 
 from rawcandle.fundamentals.operating_income_v2 import valuation
-from rawcandle.fundamentals.relative_position.engine import EcosystemMembership
+from rawcandle.fundamentals.operating_income_v2.peer_ranking_core import EcosystemMembership
 from rawcandle.fundamentals.relative_valuation.engine import (
     MODEL_FINGERPRINT,
     ComponentHistoryStatus,

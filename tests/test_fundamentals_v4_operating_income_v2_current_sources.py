@@ -9,7 +9,6 @@ import pytest
 from rawcandle.fundamentals.admin import taxonomy as admin_taxonomy
 from rawcandle.fundamentals.phase12d import stable_hash
 from rawcandle.fundamentals.operating_income_v2 import rehearsal, score, taxonomy_source
-from rawcandle.fundamentals.score import engine as legacy_score
 
 
 def _canonical_security_fixture(path: Path, tickers: list[tuple[int, str]]) -> Path:
@@ -19,12 +18,7 @@ def _canonical_security_fixture(path: Path, tickers: list[tuple[int, str]]) -> P
     return path
 
 
-def test_score_v2_does_not_call_legacy_engine(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden(*args: object, **kwargs: object) -> None:
-        raise AssertionError("legacy score engine called")
-
-    monkeypatch.setattr(legacy_score, "compute_score_rows", forbidden)
-    monkeypatch.setattr(legacy_score, "trajectory_points", forbidden)
+def test_score_v2_uses_current_engine() -> None:
     row = {
         "ttm_id": 1, "company_id": 1, "security_id": 1, "ticker": "AAA",
         "endpoint_quarter_id": 1, "endpoint_fiscal_year": 2026,

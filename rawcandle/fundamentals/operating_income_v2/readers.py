@@ -4,25 +4,18 @@ import json
 import sqlite3
 from typing import Any
 
-from rawcandle.fundamentals.delta.engine import MODEL_FINGERPRINT as DELTA_V1
-from rawcandle.fundamentals.diagnostic_flags.engine import MODEL_FINGERPRINT as DIAGNOSTIC_V1
-from rawcandle.fundamentals.lifecycle.engine import MODEL_FINGERPRINT as LIFECYCLE_V1
-from rawcandle.fundamentals.relative_position.engine import MODEL_FINGERPRINT as RELATIVE_V1
-from rawcandle.fundamentals.score.engine import MODEL_FINGERPRINT as SCORE_V1
-from rawcandle.fundamentals.valuation.engine import MODEL_FINGERPRINT as VALUATION_V1
-
 from . import contract, delta, diagnostic_flags, diagnostic_flags_eight, lifecycle, relative_position, score, valuation
 from .persistence import DIAGNOSTIC_HISTORY_MODE, EVIDENCE_FIELD_TABLE, HISTORY_MODE, MANIFEST_HISTORY_TABLE, MANIFEST_TABLE, MODEL_MAP, PACKAGE_FINGERPRINT
 
 
 PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT = "d5434e139b68ee8af44dffce34cb9225538f0badb61d5d1074fb976a4de3185d"
 KNOWN = {
-    "score": {SCORE_V1, score.MODEL_FINGERPRINT},
-    "lifecycle": {LIFECYCLE_V1, lifecycle.MODEL_FINGERPRINT},
-    "valuation": {VALUATION_V1, valuation.MODEL_FINGERPRINT},
-    "delta": {DELTA_V1, delta.MODEL_FINGERPRINT},
-    "diagnostic": {DIAGNOSTIC_V1, PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT, diagnostic_flags.MODEL_FINGERPRINT, diagnostic_flags_eight.MODEL_FINGERPRINT},
-    "relative": {RELATIVE_V1, relative_position.MODEL_FINGERPRINT},
+    "score": {score.MODEL_FINGERPRINT},
+    "lifecycle": {lifecycle.MODEL_FINGERPRINT},
+    "valuation": {valuation.MODEL_FINGERPRINT},
+    "delta": {delta.MODEL_FINGERPRINT},
+    "diagnostic": {PRE_PHASE9G_DIAGNOSTIC_FINGERPRINT, diagnostic_flags.MODEL_FINGERPRINT, diagnostic_flags_eight.MODEL_FINGERPRINT},
+    "relative": {relative_position.MODEL_FINGERPRINT},
 }
 
 
@@ -122,8 +115,6 @@ class ParallelModelRepository:
         return endpoints
 
     def _diagnostic_field_maps(self, model_fingerprint: str) -> dict[str, list[dict[str, Any]]]:
-        if model_fingerprint == DIAGNOSTIC_V1:
-            return {}
         output: dict[str, list[dict[str, Any]]] = {}
         for row in _rows(
             self.conn,
@@ -140,8 +131,6 @@ class ParallelModelRepository:
         model_fingerprint: str,
         field_maps: dict[str, list[dict[str, Any]]],
     ) -> None:
-        if model_fingerprint == DIAGNOSTIC_V1:
-            return
         for item in evaluations:
             flag = str(item["flag_name"])
             evidence = {

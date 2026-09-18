@@ -6,15 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from rawcandle.fundamentals.diagnostic_flags import persistence as diagnostic_persistence
-from rawcandle.fundamentals.lifecycle import revised_history
 from rawcandle.fundamentals.operating_income_v2 import delta, diagnostic_flags, lifecycle
 from rawcandle.fundamentals.operating_income_v2 import relative_position, score, valuation
 from rawcandle.fundamentals.operating_income_v2.persistence import (
     MANIFEST_HISTORY_TABLE, MANIFEST_TABLE, MODEL_MAP, apply_package, ensure_schema,
     migrate_copy, physical_fingerprint,
 )
-from rawcandle.fundamentals.operating_income_v2.phase9d import deep_reconcile
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
 from rawcandle.fundamentals.operating_income_v2.activation import (
     activate_package,
@@ -27,7 +24,7 @@ from rawcandle.fundamentals.operating_income_v2.readers import ActiveModelReposi
 from rawcandle.fundamentals.operating_income_v2.reporting import render_company_report
 from rawcandle.fundamentals.operating_income_v2.rehearsal import _ro, _score_delta_observation
 from rawcandle.fundamentals.schema.migrations import ANALYSIS_SCHEMA_SQL
-from rawcandle.fundamentals.score.engine import MODEL_FINGERPRINT as SCORE_V1
+from rawcandle.fundamentals.schema.analysis_compat_schema import DIAGNOSTIC_SCHEMA_SQL, LIFECYCLE_SCHEMA_SQL
 from tests.test_fundamentals_v4_operating_income_v2 import (
     diagnostic_endpoint, relative_observation, ttm, valuation_observation,
 )
@@ -100,24 +97,15 @@ def database() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(ANALYSIS_SCHEMA_SQL)
-    conn.executescript(revised_history.SCHEMA_SQL)
-    diagnostic_persistence.ensure_schema(conn)
+    conn.executescript(LIFECYCLE_SCHEMA_SQL)
+    conn.executescript(DIAGNOSTIC_SCHEMA_SQL)
     ensure_schema(conn)
-    conn.execute(
-        "INSERT INTO analysis_model_run VALUES(?,?,?,?,?,'COMPLETE','{}')",
-        ("v1", "SCORE", "V1", SCORE_V1, "test"),
-    )
-    result_id = conn.execute(
-        "INSERT INTO score_result(company_id,quarter_id,model_version,model_fingerprint,total_score,readiness_status,generated_at_utc,run_id) VALUES(1,1,'V1',?,1,'SCORE_FULL','test','v1')",
-        (SCORE_V1,),
-    ).lastrowid
-    conn.execute("INSERT INTO score_component(score_result_id,component_name,component_score) VALUES(?,?,?)", (result_id, "V1_COMPONENT", 1.0))
     conn.commit()
     yield conn
     conn.close()
 
 
-def test_complete_parallel_apply_noop_readers_and_v1_coexistence(database: sqlite3.Connection, tmp_path: Path) -> None:
+def test_complete_parallel_apply_noop_and_v2_readers(database: sqlite3.Connection, tmp_path: Path) -> None:
     calculated = _calculated()
     first = apply_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
     second = apply_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
@@ -139,14 +127,11 @@ def test_complete_parallel_apply_noop_readers_and_v1_coexistence(database: sqlit
     assert ParallelModelRepository(database).package_manifest(current_manifest)[
         "persistence_fingerprint"
     ] == current_manifest
-    reconciliation = deep_reconcile(database, calculated)
-    assert reconciliation["ok"], reconciliation
-    assert database.execute("SELECT COUNT(*) FROM score_result WHERE model_fingerprint=?", (SCORE_V1,)).fetchone()[0] == 1
-
     repository = ParallelModelRepository(database)
     repository.assert_v2_bundle()
     assert repository.score_current(1, model_fingerprint=score.MODEL_FINGERPRINT)["model_fingerprint"] == score.MODEL_FINGERPRINT
-    assert repository.score_current(1, model_fingerprint=SCORE_V1)["model_fingerprint"] == SCORE_V1
+    with pytest.raises(ValueError, match="UNKNOWN_SCORE_MODEL_FINGERPRINT"):
+        repository.score_current(1, model_fingerprint="retired-v1")
     assert repository.score_quarter(1, 1, model_fingerprint=score.MODEL_FINGERPRINT)["quarter_id"] == 1
     assert repository.lifecycle_quarter(1, 2023, "Q1", model_fingerprint=lifecycle.MODEL_FINGERPRINT)["raw_state"]
     assert repository.valuation_quarter(1, 2023, "Q1", model_fingerprint=valuation.MODEL_FINGERPRINT)["valuation_status"]
@@ -209,16 +194,6 @@ def test_migration_guards_and_wal_aware_reader(tmp_path: Path) -> None:
     writer.close()
 
 
-def test_integrity_comparison_allows_only_byte_identical_shm_mtime() -> None:
-    from rawcandle.fundamentals.operating_income_v2.phase9d import compare_production_integrity
-
-    before = {"taxonomy": {"sha256": "db", "shm": {"path": "x", "size": 1, "sha256": "same", "mtime_ns": 1}}}
-    after = {"taxonomy": {"sha256": "db", "shm": {"path": "x", "size": 1, "sha256": "same", "mtime_ns": 2}}}
-    assert compare_production_integrity(before, after)["content_identical"]
-    after["taxonomy"]["shm"]["sha256"] = "changed"
-    assert not compare_production_integrity(before, after)["content_identical"]
-
-
 def test_activation_is_atomic_coherent_and_reversible(
     database: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -242,7 +217,8 @@ def test_activation_is_atomic_coherent_and_reversible(
     ).fetchone()[0] == delta.MODEL_FINGERPRINT
     assert active.diagnostic_current(1)["evaluations"]
     assert isinstance(active.relative_current(1), list)
-    assert ParallelModelRepository(database).score_current(1, model_fingerprint=SCORE_V1)
+    with pytest.raises(ValueError, match="UNKNOWN_SCORE_MODEL_FINGERPRINT"):
+        ParallelModelRepository(database).score_current(1, model_fingerprint="retired-v1")
 
     archived = "archived-package"
     database.execute(

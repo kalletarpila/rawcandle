@@ -14,14 +14,14 @@ from rawcandle.fundamentals.schema.provenance import (
     write_provenance_many,
 )
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
-from rawcandle.fundamentals.relative_position.persistence import (
-    SCHEMA_SQL as RELATIVE_POSITION_SCHEMA_SQL,
+from rawcandle.fundamentals.schema.analysis_compat_schema import (
+    DELTA_SCHEMA_SQL,
+    RELATIVE_POSITION_SCHEMA_SQL,
+    VALUATION_SCHEMA_SQL,
 )
 from rawcandle.fundamentals.relative_valuation.persistence import (
     SCHEMA_SQL as RELATIVE_VALUATION_SCHEMA_SQL,
 )
-from rawcandle.fundamentals.delta.persistence import SCHEMA_SQL as DELTA_SCHEMA_SQL
-from rawcandle.fundamentals.valuation.persistence import SCHEMA_SQL as VALUATION_SCHEMA_SQL
 
 
 PROVIDER_SCHEMA_SQL = """

@@ -39,6 +39,7 @@ from rawcandle.fundamentals.admin.progress import (
     ProgressTracker,
 )
 from rawcandle.fundamentals.admin.reporting import render_markdown_report
+from rawcandle.fundamentals.admin.structural_context import _events, _structural_evidence, _structural_package_fingerprint
 from rawcandle.fundamentals.admin.rv_identity import active_relative_valuation_identity
 from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_active_dc_memberships
 from rawcandle.fundamentals import structural_break
@@ -63,8 +64,6 @@ from rawcandle.fundamentals.phase13d_backend import (
     build_ticker_preview,
     reject_production_or_alias,
 )
-from rawcandle.fundamentals.phase13f3_3_structural_break_contract import _events, _structural_evidence, _structural_package_fingerprint
-from rawcandle.fundamentals.phase13f3_ticker_transition import REPORT_DATE
 from rawcandle.fundamentals.providers.sharadar import FUNDAMENTALS_REQUIRED_FIELDS, SharadarClient, redact_url
 from rawcandle.fundamentals.relative_valuation.engine import MODEL_FINGERPRINT as RV_MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_valuation.engine import calculate_relative_valuation
@@ -81,7 +80,9 @@ from rawcandle.fundamentals.relative_valuation.source import (
 from rawcandle.fundamentals.schema.migrations import PROVIDER_SCHEMA_SQL
 from rawcandle.fundamentals.schema.production_bootstrap import insert_production_sharadar_observation
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
+
+REPORT_DATE = "2026-09-12"
 
 
 PHASE = "PHASE13G2_BATCH_ADD_TICKERS"

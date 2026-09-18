@@ -5,15 +5,10 @@ from dataclasses import replace
 
 import pytest
 
-from rawcandle.fundamentals.delta import engine as delta_v1
-from rawcandle.fundamentals.diagnostic_flags import engine as diagnostic_v1
-from rawcandle.fundamentals.lifecycle import engine as lifecycle_v1
 from rawcandle.fundamentals.operating_income_v2 import contract
 from rawcandle.fundamentals.operating_income_v2 import delta, diagnostic_flags, lifecycle
 from rawcandle.fundamentals.operating_income_v2 import relative_position, score, snapshot, valuation
-from rawcandle.fundamentals.relative_position import engine as relative_v1
-from rawcandle.fundamentals.score import engine as score_v1
-from rawcandle.fundamentals.valuation import engine as valuation_v1
+from rawcandle.fundamentals.operating_income_v2.score_math import fiscal_ordinal
 
 
 V1_FINGERPRINTS = {
@@ -46,35 +41,32 @@ def component(row: dict[str, object], name: str) -> dict[str, object]:
     return next(item for item in row["components"] if item["component_name"] == name)  # type: ignore[index,union-attr]
 
 
-def test_v1_fingerprints_are_unchanged_and_v2_are_distinct() -> None:
-    assert score_v1.MODEL_FINGERPRINT == V1_FINGERPRINTS["score"]
-    assert lifecycle_v1.MODEL_FINGERPRINT == V1_FINGERPRINTS["lifecycle"]
-    assert valuation_v1.MODEL_FINGERPRINT == V1_FINGERPRINTS["valuation"]
-    assert delta_v1.MODEL_FINGERPRINT == V1_FINGERPRINTS["delta"]
-    assert relative_v1.MODEL_FINGERPRINT == V1_FINGERPRINTS["relative"]
-    assert diagnostic_v1.MODEL_FINGERPRINT == V1_FINGERPRINTS["diagnostic"]
+def test_v2_fingerprints_are_distinct_from_retired_models() -> None:
     assert len({score.MODEL_FINGERPRINT, lifecycle.MODEL_FINGERPRINT, valuation.MODEL_FINGERPRINT,
                 delta.MODEL_FINGERPRINT, relative_position.MODEL_FINGERPRINT,
                 diagnostic_flags.MODEL_FINGERPRINT, snapshot.MODEL_FINGERPRINT}) == 7
+    assert not set(V1_FINGERPRINTS.values()) & {
+        score.MODEL_FINGERPRINT, lifecycle.MODEL_FINGERPRINT, valuation.MODEL_FINGERPRINT,
+        delta.MODEL_FINGERPRINT, relative_position.MODEL_FINGERPRINT,
+        diagnostic_flags.MODEL_FINGERPRINT,
+    }
     assert contract.FAMILY_FINGERPRINT
 
 
-def test_score_v2_uses_operating_income_and_preserves_unaffected_components() -> None:
+def test_score_v2_uses_operating_income_and_scores_other_components() -> None:
     rows = [ttm(index) for index in range(1, 9)]
     v2 = score.compute_score_rows(rows, {}, generated_at="x", run_id="x")[-1]
-    v1 = score_v1.compute_score_rows(rows, {}, generated_at="x", run_id="x")[-1]
     assert v2["model_version"] == score.MODEL_VERSION
     assert component(v2, "OPERATING_PROFITABILITY")["component_score"] == 7.5
-    assert component(v1, "EBIT_PROFITABILITY")["component_score"] == 15.0
     for name in ("REVENUE_GROWTH", "FCF_MARGIN", "DILUTION"):
-        assert component(v2, name)["component_score"] == component(v1, name)["component_score"]
+        assert component(v2, name)["component_score"] is not None
     assert v2["total_score"] == pytest.approx(sum(float(item["component_score"]) for item in v2["components"]))  # type: ignore[arg-type,union-attr]
     assert "ttm_operating_income" in component(v2, "OPERATING_PROFITABILITY")["evidence_json"]
 
 
 def test_score_v2_has_no_ebit_fallback_and_neutral_trajectory_is_five() -> None:
     rows = [ttm(index) for index in range(1, 6)]
-    ordinals = {score_v1.fiscal_ordinal(row["endpoint_fiscal_year"], row["endpoint_fiscal_quarter"]): row for row in rows}
+    ordinals = {fiscal_ordinal(row["endpoint_fiscal_year"], row["endpoint_fiscal_quarter"]): row for row in rows}
     points, evidence = score.trajectory_points(max(ordinals), ordinals)
     assert points == 5.0
     assert "operating_margin" in json.dumps(evidence)
@@ -210,7 +202,7 @@ def test_delta_v2_reconciles_and_rejects_v1_mixing() -> None:
     qoq = next(item for item in result.horizons if item["horizon"] == delta.Horizon.QOQ)
     assert qoq["delta_points"] == 7.0
     assert qoq["component_delta_sum"] == pytest.approx(7.0)
-    mixed = replace(history[-1], model_version=score_v1.MODEL_VERSION, model_fingerprint=score_v1.MODEL_FINGERPRINT)
+    mixed = replace(history[-1], model_version="RETIRED_SCORE_V1", model_fingerprint=V1_FINGERPRINTS["score"])
     with pytest.raises(ValueError, match="SCORE_MODEL_MISMATCH"):
         delta.calculate_fundamental_delta(mixed, history, source_fingerprint="source")
 
@@ -229,7 +221,7 @@ def test_relative_v2_ties_and_source_identity() -> None:
     result = relative_position.calculate_snapshot(observations, snapshot_date="2026-01-02", freshness_days=180, classification_fingerprint="c", taxonomy_fingerprint="t")
     tied = [item for item in result.results if item["peer_scope"] == relative_position.PeerScope.UNIVERSE and item["company_id"] in {1, 2}]
     assert len(tied) == 2 and tied[0]["average_rank"] == tied[1]["average_rank"]
-    mixed = replace(observations[0], source_model_version=score_v1.MODEL_VERSION, source_model_fingerprint=score_v1.MODEL_FINGERPRINT)
+    mixed = replace(observations[0], source_model_version="RETIRED_SCORE_V1", source_model_fingerprint=V1_FINGERPRINTS["score"])
     with pytest.raises(ValueError, match="SOURCE_MODEL_MISMATCH"):
         relative_position.calculate_snapshot([mixed, *observations[1:]], snapshot_date="2026-01-02", freshness_days=180, classification_fingerprint="c", taxonomy_fingerprint="t")
 
@@ -256,6 +248,6 @@ def test_snapshot_v2_terminology_and_bundle_rejection() -> None:
     }
     snapshot.validate_model_bundle(bundle)
     with pytest.raises(ValueError, match="MODEL_MISMATCH"):
-        snapshot.validate_model_bundle({**bundle, "score": snapshot.ModelIdentity(score_v1.MODEL_VERSION, score_v1.MODEL_FINGERPRINT)})
+        snapshot.validate_model_bundle({**bundle, "score": snapshot.ModelIdentity("RETIRED_SCORE_V1", V1_FINGERPRINTS["score"])})
     assert "Operating Income" in snapshot.TERMINOLOGY.values()
     assert "EBIT" not in json.dumps(snapshot.TERMINOLOGY)

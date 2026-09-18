@@ -13,12 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from rawcandle.fundamentals.relative_position.source import (
-    ReadOnlySourcePaths,
-    build_identity_index,
-    load_current_relative_source,
-    resolve_taxonomy_ticker,
+from rawcandle.fundamentals.operating_income_v2.peer_source_context import (
+    build_identity_index, resolve_taxonomy_ticker,
 )
+from rawcandle.fundamentals.operating_income_v2.relative_position import MODEL_FINGERPRINT as RP_V2_FINGERPRINT
 from rawcandle.testing.database_isolation import (
     PROTECTED_DATABASE_ROLES,
     capture_file_state,
@@ -280,15 +278,15 @@ def taxonomy_checks(repo_root: Path, *, as_of_date: str) -> dict[str, Any]:
         ticker: resolve_taxonomy_ticker(ticker, identity)
         for ticker in ("NVDA", "AMZN", "VRT")
     }
-    relative = load_current_relative_source(
-        ReadOnlySourcePaths(
-            analysis_db=analysis,
-            canonical_db=canonical,
-            market_db=market,
-            taxonomy_db=taxonomy,
-        ),
-        as_of_date=as_of_date,
-    )
+    with _readonly(analysis) as connection:
+        relative = connection.execute(
+            "SELECT s.result_row_count,s.calculation_source_fingerprint,"
+            "d.taxonomy_semantic_fingerprint,d.taxonomy_version "
+            "FROM relative_position_active_snapshot a "
+            "JOIN relative_position_snapshot s USING(snapshot_id) "
+            "JOIN relative_position_v2_taxonomy_dependency d USING(snapshot_id) "
+            "WHERE a.model_fingerprint=?", (RP_V2_FINGERPRINT,),
+        ).fetchone()
     return {
         "duplicate_checks": duplicate_checks,
         "orphan_checks": orphan_checks,
@@ -296,13 +294,7 @@ def taxonomy_checks(repo_root: Path, *, as_of_date: str) -> dict[str, Any]:
         "classifications": classifications,
         "ecosystem_examples": ecosystem_examples,
         "identity_examples": identity_examples,
-        "relative_position_source": {
-            "observation_count": len(relative.observations),
-            "classification_fingerprint": relative.classification_fingerprint,
-            "taxonomy_fingerprint": relative.taxonomy_fingerprint,
-            "taxonomy_audit_count": len(relative.taxonomy_audit),
-            "metadata": relative.metadata,
-        },
+        "relative_position_source": dict(relative) if relative else None,
         "repository_root": str(repo_root),
     }
 

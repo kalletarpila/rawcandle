@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from rawcandle.fundamentals.operating_income_v2.activation import assert_v2_active, known_packages
-from rawcandle.fundamentals.operating_income_v2.phase10c import LOCKED_PACKAGE
+from rawcandle.fundamentals.operating_income_v2.phase10b import PACKAGE_FINGERPRINT as LOCKED_PACKAGE
 
 from .engine import MODEL_FINGERPRINT, MODEL_VERSION, calculate_relative_valuation
 from .persistence import (

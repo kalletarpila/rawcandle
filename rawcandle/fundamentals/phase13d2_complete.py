@@ -44,7 +44,7 @@ from rawcandle.fundamentals.relative_valuation.persistence import (
 )
 from rawcandle.fundamentals.relative_valuation.source import ReadOnlySourcePaths, load_relative_valuation_source
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 
 
 PHASE = "PHASE13D2_COMPLETE_REAL_SOURCE_ONBOARDING_REHEARSAL"

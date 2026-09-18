@@ -1,5 +1,10 @@
 # Fundamentals V4 Phase 13 Architecture Contract
 
+Current production authority is the full V2 + RP V2 + RV rebuild described in
+[Phase 13G.2.5D](fundamentals_v4_phase13g2_5d_v1_runtime_retirement.md).
+The design history below predates V1 retirement and is not an executable
+production runbook.
+
 Phase 13 separates three manual Fundamentals UI operations:
 
 1. Snapshot Generation

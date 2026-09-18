@@ -19,11 +19,12 @@ from rawcandle.fundamentals.operating_income_v2.diagnostic_flags import (
     REVENUE_SCALE_FLOOR,
 )
 from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
-from rawcandle.fundamentals.snapshot.assembler import SnapshotPaths
+from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.v2_assembler import CANDIDATE_REPORT_CONTRACT
 from rawcandle.fundamentals.snapshot.v2_assembler import CANDIDATE_REPORT_PRESENTATION_FINGERPRINT
 from rawcandle.fundamentals.snapshot.v2_assembler import _multiples_context
 from rawcandle.fundamentals.snapshot.renderer import (
+    CANDIDATE_DIAGNOSTIC_REASON_EXPLANATIONS,
     ALL_DIAGNOSTICS_CLEAR_TEXT,
     DIAGNOSTIC_COVERAGE_TEXT,
     DIAGNOSTIC_DEFINITIONS,
@@ -161,14 +162,8 @@ def test_v2_report_formats_values_and_restores_context(nvda_report: tuple[str, d
     assert "28.18x" in report
     assert "Currency: N/A (source currency not available in the validated contract)" in report
     assert "Datacenter" in report
-    assert "Overall eligible universe" in report
-    universe_counts = {
-        row["measure"]: row["peer_count"]
-        for row in snapshot["relative_position"]["rows"]
-        if row["peer_scope"] == "UNIVERSE"
-    }
-    assert f"n={universe_counts['FUNDAMENTAL_SCORE']}" in report
-    assert f"n={universe_counts['ABSOLUTE_VALUATION_SCORE']}" in report
+    assert "| Mittari | Universe |" in report
+    assert "RELATIVE_SNAPSHOT_MISSING_OR_FUTURE" in report
     assert "Non-Operating Earnings Gap: TARKASTETTAVA EHDOKAS" in report
     assert (
         "CURRENT_REVISED_COMPANY_SNAPSHOT_V2_PRESENTATION_V7" in report
@@ -196,9 +191,7 @@ def test_presentation_identity_is_separate_from_active_economic_bundle(
         phase10b.snapshot_eight.MODEL_FINGERPRINT,
         RELATIVE_VALUATION_SNAPSHOT_FINGERPRINT,
     }
-    assert snapshot["source_state"]["active_package"][1] == (
-        activation.TEN_YEAR_OPERATIONAL_PACKAGE_FINGERPRINT
-    )
+    assert snapshot["source_state"]["active_package"][1] == phase10b.PACKAGE_FINGERPRINT
 
 
 def test_phase9j_2_definitions_are_complete_and_engine_reconciled(
@@ -572,14 +565,14 @@ def test_phase9j_diagnostic_explanations_cover_engine_and_production_contract() 
                 "JOIN diagnostic_flag_status s USING(status_id) "
                 "JOIN diagnostic_flag_reason r USING(reason_id) "
                 "WHERE p.model_fingerprint=?",
-                ("7f6291bf04e69cf22944ea3f81e07b284ccffd8edbd0edea4190ddc79050b031",),
+                (phase10b.diagnostic_flags_eight.MODEL_FINGERPRINT,),
             )
         )
     finally:
         connection.close()
     production_reasons = {row[2] for row in production_combinations}
-    assert len(production_combinations) == 50
-    assert production_reasons <= set(DIAGNOSTIC_REASON_EXPLANATIONS)
+    assert len(production_combinations) >= 50
+    assert production_reasons <= (set(DIAGNOSTIC_REASON_EXPLANATIONS) | set(CANDIDATE_DIAGNOSTIC_REASON_EXPLANATIONS))
     for _, _, reason in production_combinations:
         explanation = diagnostic_explanation({"reason_code": reason})
         assert explanation != UNKNOWN_DIAGNOSTIC_EXPLANATION

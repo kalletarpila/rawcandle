@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
-from rawcandle.fundamentals.score.methodology import ANCHORS
+from .score_math import ANCHORS
 
 from . import score_calculation
 from .contract import (
@@ -86,7 +86,7 @@ def _replace_semantics(value: Any) -> Any:
     return value
 
 
-def _v1_input(row: Mapping[str, Any]) -> dict[str, Any]:
+def _score_input(row: Mapping[str, Any]) -> dict[str, Any]:
     operating_income = row.get("ttm_operating_income")
     mapped = dict(row)
     mapped["ttm_ebit"] = operating_income
@@ -97,7 +97,7 @@ def trajectory_points(
     endpoint_ordinal: int,
     rows_by_ordinal: Mapping[int, Mapping[str, Any]],
 ) -> tuple[float | None, dict[str, Any]]:
-    mapped = {ordinal: _v1_input(row) for ordinal, row in rows_by_ordinal.items()}
+    mapped = {ordinal: _score_input(row) for ordinal, row in rows_by_ordinal.items()}
     points, evidence = score_calculation.trajectory_points(endpoint_ordinal, mapped)
     return points, _replace_semantics(evidence)
 
@@ -109,7 +109,7 @@ def compute_score_rows(
     generated_at: str,
     run_id: str,
 ) -> list[dict[str, Any]]:
-    mapped = [_v1_input(row) for row in ttm_rows]
+    mapped = [_score_input(row) for row in ttm_rows]
     output = score_calculation.compute_score_rows(
         mapped, split_events, generated_at=generated_at, run_id=run_id,
         model_version=MODEL_VERSION, model_fingerprint=MODEL_FINGERPRINT,
