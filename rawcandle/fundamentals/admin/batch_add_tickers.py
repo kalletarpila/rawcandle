@@ -13,12 +13,13 @@ import threading
 import traceback
 from contextlib import contextmanager
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from zipfile import ZipFile
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
+from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
 from rawcandle.fundamentals.admin.contracts import (
     AdminBatchRequest,
     AdminFinalResult,
@@ -54,26 +55,16 @@ from rawcandle.fundamentals.phase12d import (
 )
 from rawcandle.fundamentals.phase13b_foundation import database_fingerprint, online_backup
 from rawcandle.fundamentals.phase13b_foundation import (
-    CandidatePaths,
-    attach_dependencies,
-    backfill_universe,
-    candidate_relative_valuation_dependency_state,
-    ensure_candidate_schema,
     reject_production_path,
-    taxonomy_identity,
 )
 from rawcandle.fundamentals.phase13d_backend import (
     Phase13DPaths,
-    apply_ticker_preview,
     build_ticker_preview,
     reject_production_or_alias,
 )
-from rawcandle.fundamentals.phase13f3_1_package_recovery import instrumented_package_refresh
 from rawcandle.fundamentals.phase13f3_3_structural_break_contract import _events, _structural_evidence, _structural_package_fingerprint
 from rawcandle.fundamentals.phase13f3_ticker_transition import REPORT_DATE
 from rawcandle.fundamentals.providers.sharadar import FUNDAMENTALS_REQUIRED_FIELDS, SharadarClient, redact_url
-from rawcandle.fundamentals.relative_position.engine import MODEL_FINGERPRINT as RP_MODEL_FINGERPRINT
-from rawcandle.fundamentals.relative_position.production import refresh_relative_position
 from rawcandle.fundamentals.relative_valuation.engine import MODEL_FINGERPRINT as RV_MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_valuation.engine import calculate_relative_valuation
 from rawcandle.fundamentals.relative_valuation.persistence import (
@@ -1283,7 +1274,7 @@ def _manual_rv_refresh_generic(paths: BatchAddTickerPaths, *, output: Path, appl
     return result
 
 
-def _snapshot_smoke_generic(paths: BatchAddTickerPaths, output: Path, *, tickers: Sequence[str]) -> dict[str, Any]:
+def _snapshot_smoke_generic(paths: BatchAddTickerPaths, output: Path, *, tickers: Sequence[str], report_date: str = REPORT_DATE) -> dict[str, Any]:
     report_dir = output / "snapshot_reports"
     report_dir.mkdir(parents=True, exist_ok=True)
     snapshot_paths = SnapshotPaths(paths.canonical_db, paths.analysis_db, paths.market_db, paths.taxonomy_db, paths.provider_db)
@@ -1293,7 +1284,7 @@ def _snapshot_smoke_generic(paths: BatchAddTickerPaths, output: Path, *, tickers
             generated = generate_active_company_snapshot(
                 snapshot_paths,
                 ticker=ticker,
-                report_date=REPORT_DATE,
+                report_date=report_date,
                 output_dir=report_dir,
                 overwrite=True,
             )
@@ -1324,11 +1315,13 @@ def _run_authoritative_downstream(
     *,
     accepted_tickers: Sequence[str],
     applied_at: str,
+    as_of_date: str | None = None,
     progress: ProgressTracker | None = None,
     allow_production: bool = False,
     snapshot_control_tickers: Sequence[str] = (),
 ) -> dict[str, Any]:
-    candidate = CandidatePaths(paths.canonical_db, paths.analysis_db, paths.taxonomy_db, provider_db=paths.provider_db, market_db=paths.market_db)
+    if allow_production:
+        raise PermissionError("ADMIN_FULL_V2_ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY")
     result: dict[str, Any] = {"applied_at_utc": applied_at, "accepted_tickers": list(accepted_tickers)}
     if progress:
         progress.running(ProgressStage.CANONICAL_REBUILD, "Rebuilding canonical quarters from staged provider rows.")
@@ -1350,99 +1343,32 @@ def _run_authoritative_downstream(
     result["structural_evidence"] = _structural_evidence(paths.canonical_db)
     structural_package_fingerprint = _structural_package_fingerprint(result["structural_contract"])
     result["structural_package_fingerprint"] = structural_package_fingerprint
-    result["valuation_classification"] = _valuation_classification_update_generic(
-        paths,
-        tickers=accepted_tickers,
-        applied_at=applied_at,
-        allow_production=allow_production,
-    )
     if progress:
         progress.completed(
             ProgressStage.STRUCTURAL_DEPENDENCIES,
             "Structural dependencies applied.",
             processed_rows=int(result["structural_contract"].get("quarter_regime_count") or 0),
         )
-    result["schema"] = ensure_candidate_schema(candidate, applied_at_utc=applied_at, apply=True, allow_production=allow_production)
-    universe = backfill_universe(candidate, applied_at_utc=applied_at, apply=True, allow_production=allow_production)
-    result["universe"] = universe
     if progress:
-        progress.running(ProgressStage.PACKAGE_CALCULATION, "Running Operating-Income V2 package calculation.")
-    with _background_heartbeat(progress, "Operating-Income V2 package refresh is still running."):
-        result["package"] = instrumented_package_refresh(paths.as_dict(), output, allow_production=allow_production)
+        progress.running(ProgressStage.PACKAGE_CALCULATION, "Building fresh full V2 analysis and Relative Valuation.")
+    with _background_heartbeat(progress, "Full V2 analysis rebuild is still running."):
+        rebuilt = run_full_v2_downstream(paths.as_dict(), output=output, as_of_date=as_of_date or applied_at[:10])
+    result.update(rebuilt)
     if progress:
-        package_rows = result["package"].get("first_apply", {}).get("rows", {})
         progress.completed(
             ProgressStage.PACKAGE_CALCULATION,
-            "Operating-Income V2 package calculation completed.",
-            processed_rows=int(package_rows.get("score") or 0) if isinstance(package_rows, Mapping) else None,
+            "Full V2 and Relative Valuation rebuild validated.",
         )
-        progress.running(ProgressStage.PACKAGE_APPLY, "Operating-Income V2 package apply verified.")
-        progress.completed(ProgressStage.PACKAGE_APPLY, "Operating-Income V2 package apply completed.")
-        progress.running(ProgressStage.RELATIVE_POSITION, "Refreshing full-universe Relative Position.")
-    with _background_heartbeat(progress, "Relative Position refresh is still running."):
-        result["relative_position"] = asdict(refresh_relative_position(
-            canonical_db=paths.canonical_db,
-            analysis_db=paths.analysis_db,
-            market_db=paths.market_db,
-            taxonomy_db=paths.taxonomy_db,
-            snapshot_date=REPORT_DATE,
-            model_fingerprint=RP_MODEL_FINGERPRINT,
-            applied_at_utc=applied_at,
-        ))
-    if progress:
-        progress.completed(
-            ProgressStage.RELATIVE_POSITION,
-            "Relative Position refresh completed.",
-            processed_rows=int(result["relative_position"].get("result_rows") or 0),
-        )
-        progress.running(ProgressStage.RELATIVE_VALUATION, "Refreshing full-universe Relative Valuation.")
-    taxonomy = taxonomy_identity(paths.taxonomy_db)
-    result["pre_refresh_compatibility"] = candidate_relative_valuation_dependency_state(
-        paths.analysis_db,
-        report_date=REPORT_DATE,
-        expected_universe_fingerprint=universe["identity"]["economic_result_fingerprint"],
-        expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
-    )
-    with _background_heartbeat(progress, "Relative Valuation refresh is still running."):
-        result["relative_valuation"] = _manual_rv_refresh_generic(paths, output=output, applied_at=applied_at)
-    if progress:
-        progress.completed(
-            ProgressStage.RELATIVE_VALUATION,
-            "Relative Valuation refresh completed.",
-            processed_rows=int(result["relative_valuation"].get("snapshot", {}).get("company_count") or 0),
-        )
-        progress.running(ProgressStage.DEPENDENCY_ATTACHMENT, "Attaching refreshed dependency identities.")
-    structural_metadata = {
-        "structural_contract_version": structural_break.CONTRACT_VERSION,
-        "structural_package_fingerprint": structural_package_fingerprint,
-        "structural_event_fingerprint": result["structural_contract"]["economic_event_fingerprint"],
-        "structural_regime_fingerprint": result["structural_contract"]["regime_fingerprint"],
-        "structural_event_count": result["structural_contract"]["event_count"],
-        "structural_quarter_regime_count": result["structural_contract"]["quarter_regime_count"],
-        "structural_ttm_regime_count": result["structural_contract"]["ttm_regime_count"],
-    }
-    result["dependencies"] = attach_dependencies(
-        candidate,
-        universe=universe["identity"],
-        applied_at_utc=applied_at,
-        apply=True,
-        allow_production=allow_production,
-        structural_metadata=structural_metadata,
-    )
-    result["post_refresh_compatibility"] = candidate_relative_valuation_dependency_state(
-        paths.analysis_db,
-        report_date=REPORT_DATE,
-        expected_universe_fingerprint=universe["identity"]["economic_result_fingerprint"],
-        expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
-    )
-    if progress:
-        progress.completed(ProgressStage.DEPENDENCY_ATTACHMENT, "Dependency attachment completed.")
+        for stage in (ProgressStage.PACKAGE_APPLY, ProgressStage.RELATIVE_POSITION, ProgressStage.RELATIVE_VALUATION):
+            progress.running(stage, "Validated by the full V2 rebuild.")
+            progress.completed(stage, "Validated by the full V2 rebuild.")
+        progress.skipped(ProgressStage.DEPENDENCY_ATTACHMENT, "Fresh V2 analysis has its own validated dependencies.")
         progress.running(ProgressStage.SNAPSHOT_SMOKE, "Generating eligible Snapshot smoke reports.")
     snapshot_tickers = tuple(dict.fromkeys([*accepted_tickers, *snapshot_control_tickers]))
-    result["snapshots"] = _snapshot_smoke_generic(paths, output, tickers=snapshot_tickers)
+    candidate_paths = replace(paths, analysis_db=Path(rebuilt["candidate_analysis_db"]))
+    result["snapshots"] = _snapshot_smoke_generic(candidate_paths, output, tickers=snapshot_tickers, report_date=as_of_date or applied_at[:10])
     if progress:
         progress.completed(ProgressStage.SNAPSHOT_SMOKE, "Snapshot smoke completed.", processed_items=len(result["snapshots"]), total_items=len(snapshot_tickers))
-    result["invocation_counts"] = {"package": 1, "relative_position": 1, "relative_valuation": 1}
     return result
 
 
@@ -1470,6 +1396,7 @@ def _apply_generic_plan(
     progress: ProgressTracker | None = None,
     allow_production: bool = False,
     snapshot_control_tickers: Sequence[str] = (),
+    as_of_date: str | None = None,
 ) -> dict[str, Any]:
     plan_fingerprint = str(plan.get("plan_fingerprint") or stable_hash(plan))
     items = [item for item in plan.get("items", []) if item.get("status") == "ELIGIBLE"]
@@ -1510,6 +1437,7 @@ def _apply_generic_plan(
             output,
             accepted_tickers=accepted,
             applied_at=applied_at,
+            as_of_date=as_of_date,
             progress=progress,
             allow_production=allow_production,
             snapshot_control_tickers=snapshot_control_tickers,
@@ -1679,56 +1607,41 @@ def run_apply(
         progress.running(ProgressStage.SOURCE_RESOLUTION, "Validating saved preview freshness and source plan.", processed_items=0, total_items=len(request.normalized_inputs))
         _assert_preview_not_stale(lane.paths, payload)
         writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Preview is fresh on apply copy.", preview_fingerprint=preview_fingerprint)
-        copy_preview, raw_preview = build_preview_from_copy(lane.paths, request, now=payload.get("created_at_utc"))
-        saved_plan = payload.get("generic_batch_plan") if isinstance(payload.get("generic_batch_plan"), Mapping) else raw_preview["generic_batch_plan"]
+        saved_plan = payload.get("generic_batch_plan")
+        if not isinstance(saved_plan, Mapping):
+            raise ValueError("ADMIN_ADD_TICKERS_SAVED_GENERIC_PLAN_REQUIRED")
+        copy_preview, raw_preview = build_preview_from_copy(
+            lane.paths, request, now=payload.get("created_at_utc"),
+            network_allowed=bool(saved_plan.get("network_allowed")),
+        )
+        if raw_preview["generic_batch_plan"]["plan_fingerprint"] != saved_plan.get("plan_fingerprint"):
+            raise ValueError("ADMIN_ADD_TICKERS_STALE_PLAN_CONTENT_CHANGED")
         progress.completed(ProgressStage.SOURCE_RESOLUTION, "Saved preview and source plan validated.", processed_items=len(request.normalized_inputs), total_items=len(request.normalized_inputs))
         copy_preview_path = lane.lane_dir / "accepted_preview.json"
         write_json(copy_preview_path, raw_preview)
         writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Applying accepted tickers to database copies.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
         write_boundary_crossed = True
         before = source_state(lane.paths)["databases"]
-        if _provider_schema_ready(lane.paths.provider_db):
-            applied = _apply_generic_plan(
-                lane.paths,
-                saved_plan,
-                output=lane.lane_dir / "generic_authoritative_apply",
-                failure_boundary=failure_boundary,
-                progress=progress,
-            )
-            applied["mode"] = "GENERIC_AUTHORITATIVE_BATCH"
-        else:
-            applied = apply_ticker_preview(
-                lane.paths.as_phase13d(),
-                preview_path=copy_preview_path,
-                preview_fingerprint=raw_preview["preview_fingerprint"],
-                apply=True,
-                confirm_apply=True,
-                output=lane.lane_dir / "phase13d_apply",
-                failure_boundary=failure_boundary,
-            )
-            applied["mode"] = "PHASE13D_COMPATIBILITY_FALLBACK"
+        if not _provider_schema_ready(lane.paths.provider_db):
+            raise RuntimeError("ADMIN_ADD_TICKERS_PROVIDER_SCHEMA_REQUIRED_FOR_V2_REBUILD")
+        applied = _apply_generic_plan(
+            lane.paths,
+            saved_plan,
+            output=lane.lane_dir / "generic_authoritative_apply",
+            failure_boundary=failure_boundary,
+            progress=progress,
+            as_of_date=str(payload["created_at_utc"])[:10],
+        )
+        applied["mode"] = "GENERIC_AUTHORITATIVE_BATCH"
         after = source_state(lane.paths)["databases"]
-        if applied.get("mode") == "GENERIC_AUTHORITATIVE_BATCH":
-            repeated = _apply_generic_plan(
-                lane.paths,
-                saved_plan,
-                output=lane.lane_dir / "generic_authoritative_repeat",
-                progress=progress,
-            )
-        else:
-            repeated = apply_ticker_preview(
-                lane.paths.as_phase13d(),
-                preview_path=copy_preview_path,
-                preview_fingerprint=raw_preview["preview_fingerprint"],
-                apply=True,
-                confirm_apply=True,
-                output=lane.lane_dir / "phase13d_repeat",
-            )
-        if applied.get("mode") == "GENERIC_AUTHORITATIVE_BATCH":
-            saved_plan_items = saved_plan.get("items") if isinstance(saved_plan.get("items"), list) else []
-            base_decisions = tuple(_decision_from_plan_mapping(item) for item in saved_plan_items) or copy_preview.decisions
-        else:
-            base_decisions = copy_preview.decisions
+        repeated = _apply_generic_plan(
+            lane.paths,
+            saved_plan,
+            output=lane.lane_dir / "generic_authoritative_repeat",
+            progress=progress,
+        )
+        saved_plan_items = saved_plan.get("items") if isinstance(saved_plan.get("items"), list) else []
+        base_decisions = tuple(_decision_from_plan_mapping(item) for item in saved_plan_items) or copy_preview.decisions
         decisions = _apply_decisions(base_decisions, applied)
         counts = _counts(decisions)
         downstream = applied.get("downstream") if isinstance(applied.get("downstream"), Mapping) else {}
@@ -1751,6 +1664,7 @@ def run_apply(
                 "package": downstream.get("package", "NOT_RUN") if isinstance(downstream, Mapping) else "NOT_RUN",
                 "relative_position": downstream.get("relative_position", "NOT_RUN") if isinstance(downstream, Mapping) else "NOT_RUN",
                 "relative_valuation": downstream.get("relative_valuation", applied.get("relative_valuation_state")) if isinstance(downstream, Mapping) else applied.get("relative_valuation_state"),
+                "active_taxonomy": downstream.get("active_taxonomy") if isinstance(downstream, Mapping) else None,
                 "invocation_counts": invocation_counts or {"package": 0, "relative_position": 0, "relative_valuation": 0},
                 "repeat_apply_outcome": repeated.get("outcome"),
                 "authoritative_downstream": {
@@ -1864,6 +1778,7 @@ def run_production_apply(
         options=request_payload.get("options") or {},
     )
     _assert_authorized_production_batch(request)
+    raise PermissionError("ADMIN_FULL_V2_ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY")
     run_id = stable_run_id(AdminOperationType.ADD_TICKERS, preview_fingerprint, suffix="production")
     writer = AdminRunWriter(run_id, AdminOperationType.ADD_TICKERS, root=run_root)
     progress = ProgressTracker(

@@ -146,7 +146,7 @@ def test_run_preview_writes_durable_artifacts_and_history(tmp_path: Path) -> Non
     assert history.progress(result["run_id"]).terminal_outcome == "COMPLETED"
 
 
-def test_copy_only_apply_is_idempotent_and_does_not_mutate_source(tmp_path: Path) -> None:
+def test_copy_only_apply_refuses_legacy_provider_schema_without_mutating_source(tmp_path: Path) -> None:
     source = _paths(tmp_path / "source")
     source_mtime = source.canonical_db.stat().st_mtime_ns
     preview = run_preview("NEWC", source_paths=source, run_root=tmp_path / "runs", temp_root=tmp_path / "temp")
@@ -162,11 +162,8 @@ def test_copy_only_apply_is_idempotent_and_does_not_mutate_source(tmp_path: Path
         confirm_apply=True,
     )
 
-    assert result["outcome"] == "COMPLETED"
-    assert result["copy_apply"]["phase13d_result"]["outcome"] == "APPLIED"
-    assert result["copy_apply"]["repeat_result"]["outcome"] == "NO_CHANGE"
-    assert result["downstream"]["phase13d_candidate_apply"] == "RUN_ONCE_FOR_BATCH"
-    assert result["downstream"]["authoritative_downstream"]["status"] == "NOT_AVAILABLE_FOR_GENERIC_BATCH_ADD_TICKERS"
+    assert result["outcome"] == "ROLLED_BACK"
+    assert result["error"] == "RuntimeError"
     assert source.canonical_db.stat().st_mtime_ns == source_mtime
     with sqlite3.connect(source.canonical_db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM security WHERE current_ticker='NEWC'").fetchone()[0] == 0
@@ -436,6 +433,7 @@ def test_generic_apply_stages_all_items_before_one_downstream_batch(tmp_path: Pa
             "package": {"first_apply": {"outcome": "APPLIED"}},
             "relative_position": {"apply": {"outcome": "APPLIED"}},
             "relative_valuation": {"first_apply": {"outcome": "ACTIVATED"}},
+            "active_taxonomy": {"domain": "dc_ecosystem", "version": "active", "semantic_fingerprint": "taxonomy-hash"},
             "invocation_counts": {"package": 1, "relative_position": 1, "relative_valuation": 1},
         }
 
@@ -453,6 +451,7 @@ def test_generic_apply_stages_all_items_before_one_downstream_batch(tmp_path: Pa
     assert result["outcome"] == "COMPLETED"
     assert result["downstream"]["mode"] == "GENERIC_AUTHORITATIVE_BATCH"
     assert result["downstream"]["invocation_counts"] == {"package": 1, "relative_position": 1, "relative_valuation": 1}
+    assert result["downstream"]["active_taxonomy"]["semantic_fingerprint"] == "taxonomy-hash"
     assert calls == [{"accepted": ("NEWC", "ADR"), "staged": {"NEWC", "ADR"}, "securities": {"NEWC", "ADR"}}]
     progress_summary = AdminRunHistory(tmp_path / "runs").progress(result["run_id"])
     assert progress_summary.current_stage == "COMPLETED"
@@ -461,6 +460,25 @@ def test_generic_apply_stages_all_items_before_one_downstream_batch(tmp_path: Pa
         for line in Path(result["artifact_dir"], "progress_events.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [event["current_stage_id"] for event in progress_events if event["stage_state"] == "COMPLETED"].count("NO_CHANGE_VERIFICATION") == 1
+
+
+def test_generic_apply_rejects_same_row_count_classification_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers.DEFAULT_ARCHIVE", _archive(tmp_path / "source.zip"))
+    preview = run_preview("NEWC", source_paths=paths, run_root=tmp_path / "runs", temp_root=tmp_path / "temp")
+    with sqlite3.connect(paths.market_db) as conn:
+        conn.execute("UPDATE ticker_meta SET sector='Industrials' WHERE ticker='NEWC'")
+
+    result = run_apply(
+        preview_payload_path=Path(preview["phase13d_preview_payload_path"]),
+        preview_fingerprint=preview["preview_fingerprint"],
+        source_paths=paths, run_root=tmp_path / "runs", temp_root=tmp_path / "temp",
+        confirm_apply=True,
+    )
+    assert result["outcome"] == "FAILED"
+    assert result["error"] == "ValueError"
+    with sqlite3.connect(paths.canonical_db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM security WHERE current_ticker='NEWC'").fetchone()[0] == 0
 
 
 def test_generic_apply_rolls_back_after_identity_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -607,21 +625,17 @@ def test_production_apply_runs_one_batch_and_identical_no_change(tmp_path: Path,
 
     monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._apply_generic_plan", fake_apply)
 
-    result = run_production_apply(
-        preview_payload_path=payload,
-        preview_fingerprint=fp,
-        source_paths=paths,
-        run_root=tmp_path / "runs",
-        backup_root=tmp_path / "backups",
-        temp_root=tmp_path / "temp",
-        confirm_production=True,
-    )
-
-    assert result["outcome"] == "COMPLETED"
-    assert calls[0]["tickers"] == ("AG", "ALOY", "ARM", "ASML", "ASX", "BABA", "BHP", "BIDU", "BTDR", "CAMT")
-    assert calls[0]["allow_production"] is True
-    assert calls[0]["snapshot_control_tickers"] == ("NVDA",)
-    assert result["downstream"]["repeat_apply_outcome"] == "NO_CHANGE"
+    with pytest.raises(PermissionError, match="ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY"):
+        run_production_apply(
+            preview_payload_path=payload,
+            preview_fingerprint=fp,
+            source_paths=paths,
+            run_root=tmp_path / "runs",
+            backup_root=tmp_path / "backups",
+            temp_root=tmp_path / "temp",
+            confirm_production=True,
+        )
+    assert calls == []
 
 
 def test_production_apply_rolls_back_after_write_boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -645,16 +659,14 @@ def test_production_apply_rolls_back_after_write_boundary(tmp_path: Path, monkey
     monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._apply_generic_plan", fail_apply)
     monkeypatch.setattr("rawcandle.fundamentals.admin.batch_add_tickers._restore_production_from_backups", fake_restore)
 
-    result = run_production_apply(
-        preview_payload_path=payload,
-        preview_fingerprint=fp,
-        source_paths=paths,
-        run_root=tmp_path / "runs",
-        backup_root=tmp_path / "backups",
-        temp_root=tmp_path / "temp",
-        confirm_production=True,
-    )
-
-    assert result["outcome"] == "ROLLED_BACK"
-    assert restored == [True]
-    assert result["downstream"]["production_outcome"] == "OUTCOME C — PRODUCTION DEPLOYMENT FAILED AND COMPLETE BACKUP SET RESTORED"
+    with pytest.raises(PermissionError, match="ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY"):
+        run_production_apply(
+            preview_payload_path=payload,
+            preview_fingerprint=fp,
+            source_paths=paths,
+            run_root=tmp_path / "runs",
+            backup_root=tmp_path / "backups",
+            temp_root=tmp_path / "temp",
+            confirm_production=True,
+        )
+    assert restored == []

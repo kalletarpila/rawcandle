@@ -219,6 +219,13 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
             if key in counts:
                 rows.append(f"{str(key).replace('_', ' ').title()}: {counts[key]}.")
     if downstream:
+        active_taxonomy = _mapping(downstream.get("active_taxonomy"))
+        if active_taxonomy:
+            rows.append(
+                "Active taxonomy: " + str(active_taxonomy.get("domain", "")) + " "
+                + str(active_taxonomy.get("version", "")) + "; semantic fingerprint "
+                + str(active_taxonomy.get("semantic_fingerprint", "")) + "."
+            )
         invocation_counts = downstream.get("invocation_counts")
         if isinstance(invocation_counts, Mapping):
             rows.append("Downstream: " + ", ".join(f"{str(key).replace('_', ' ').title()} {invocation_counts[key]} run(s)" for key in sorted(invocation_counts)) + ".")

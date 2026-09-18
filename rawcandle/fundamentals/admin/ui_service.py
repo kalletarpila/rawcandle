@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from typing import Any, Callable, Mapping
 
-from rawcandle.fundamentals.admin import batch_add_tickers, sector_industry, taxonomy
+from rawcandle.fundamentals.admin import batch_add_tickers, sector_industry, taxonomy_v2_sync
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT
 from rawcandle.fundamentals.admin.history import AdminRunHistory, RunHistoryEntry, RunProgressSummary
 from rawcandle.fundamentals.admin.operation_report import (
@@ -17,12 +17,6 @@ from rawcandle.fundamentals.admin.operation_report import (
     build_operation_summary,
     write_operation_report,
     taxonomy_preview_presentation,
-)
-from rawcandle.fundamentals.admin.taxonomy import SUPPORTED_TAXONOMY_DOMAINS
-from rawcandle.fundamentals.admin.taxonomy_production import (
-    CONFIRMATION_TOKEN as TAXONOMY_PRODUCTION_CONFIRMATION_TOKEN,
-    run_production_preview as run_taxonomy_production_preview,
-    run_protected_production_apply as run_taxonomy_production_apply,
 )
 
 
@@ -77,7 +71,7 @@ _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|check_update_sector_indu
 _ADMIN_MODES = {
     "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT"},
-    "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY"},
+    "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW"},
 }
 
 
@@ -93,10 +87,10 @@ class FundamentalsAdminUIService:
         sector_preview: Callable[..., dict[str, Any]] = sector_industry.run_preview,
         sector_apply: Callable[..., dict[str, Any]] = sector_industry.run_apply,
         sector_production_apply: Callable[..., dict[str, Any]] = sector_industry.run_production_apply,
-        taxonomy_preview: Callable[..., dict[str, Any]] = taxonomy.run_preview,
-        taxonomy_apply: Callable[..., dict[str, Any]] = taxonomy.run_apply,
-        taxonomy_production_preview: Callable[..., dict[str, Any]] = run_taxonomy_production_preview,
-        taxonomy_production_apply: Callable[..., dict[str, Any]] = run_taxonomy_production_apply,
+        taxonomy_preview: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_preview,
+        taxonomy_apply: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_apply,
+        taxonomy_production_preview: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_preview,
+        taxonomy_production_apply: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_production_apply,
     ) -> None:
         self.run_root = run_root.resolve()
         self.history = history or AdminRunHistory(self.run_root)
@@ -113,14 +107,13 @@ class FundamentalsAdminUIService:
 
     def capabilities(self) -> tuple[AdminOperationCapability, ...]:
         return (
-            AdminOperationCapability("ADD_TICKERS", True, True, True),
-            AdminOperationCapability("CHECK_UPDATE_SECTOR_INDUSTRY", True, True, True),
+            AdminOperationCapability("ADD_TICKERS", True, True, False),
+            AdminOperationCapability("CHECK_UPDATE_SECTOR_INDUSTRY", True, True, False),
             AdminOperationCapability(
                 "CHECK_UPDATE_TAXONOMY",
                 True,
                 True,
-                True,
-                production_confirmation_hint=TAXONOMY_PRODUCTION_CONFIRMATION_TOKEN,
+                False,
             ),
         )
 
@@ -154,23 +147,13 @@ class FundamentalsAdminUIService:
                 progress_callback=progress_callback,
             )
         elif operation == "CHECK_UPDATE_TAXONOMY":
-            if taxonomy_domain not in SUPPORTED_TAXONOMY_DOMAINS:
-                raise ValueError("UNSUPPORTED_TAXONOMY_DOMAIN")
-            if production_mode:
-                result = self._taxonomy_production_preview(
-                    candidate_path=Path(candidate_path) if candidate_path else None,
-                    candidate_version=candidate_version,
-                    run_root=self.run_root,
-                    progress_callback=progress_callback,
-                )
-            else:
-                result = self._taxonomy_preview(
-                    taxonomy_domain=taxonomy_domain,
-                    candidate_path=Path(candidate_path) if candidate_path else None,
-                    candidate_version=candidate_version,
-                    run_root=self.run_root,
-                    progress_callback=progress_callback,
-                )
+            result = self._taxonomy_preview(
+                taxonomy_domain=taxonomy_domain,
+                candidate_path=Path(candidate_path) if candidate_path else None,
+                candidate_version=candidate_version,
+                run_root=self.run_root,
+                progress_callback=progress_callback,
+            )
         else:
             raise ValueError("UNSUPPORTED_ADMIN_OPERATION")
         return self._finalize(result, default_message="Preview completed.")
@@ -475,7 +458,7 @@ class FundamentalsAdminUIService:
             summary_rows=report.summary_rows if report else (),
             business_outcome=taxonomy["business_outcome"] if taxonomy else None,
             preview_domain=taxonomy["domain"] if taxonomy else None,
-            copy_actionable=bool(taxonomy["changes"] and taxonomy["eligible"] and not taxonomy["blockers"] and taxonomy["candidate"] and result.get("mode") == "CANDIDATE_PREVIEW" and taxonomy["business_outcome"] == "CHANGES_AVAILABLE") if taxonomy else None,
+            copy_actionable=True if result.get("mode") == "ACTIVE_TAXONOMY_PREVIEW" else (bool(taxonomy["changes"] and taxonomy["eligible"] and not taxonomy["blockers"] and taxonomy["candidate"] and result.get("mode") == "CANDIDATE_PREVIEW" and taxonomy["business_outcome"] == "CHANGES_AVAILABLE") if taxonomy else None),
             production_actionable=False if taxonomy else None,
             duration_seconds=self._duration_seconds(result),
         )

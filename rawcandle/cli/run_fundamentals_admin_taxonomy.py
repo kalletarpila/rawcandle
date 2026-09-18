@@ -7,25 +7,17 @@ from pathlib import Path
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT
 from rawcandle.fundamentals.admin.progress import progress_line
-from rawcandle.fundamentals.admin.taxonomy import SUPPORTED_TAXONOMY_DOMAINS, TEMP_ROOT, TaxonomyPaths, run_apply, run_preview
-from rawcandle.fundamentals.admin.taxonomy_production import (
-    ACTIVE_BASELINE_PROVENANCE,
-    CONFIRMATION_TOKEN,
-    run_production_preview,
-    run_protected_production_apply,
-)
+from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
+from rawcandle.fundamentals.admin.taxonomy_v2_sync import run_apply, run_preview, run_production_apply
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Phase 13G.4 copy-only dual-domain taxonomy administration CLI.")
-    parser.add_argument("--taxonomy", required=True, choices=SUPPORTED_TAXONOMY_DOMAINS, help="Taxonomy domain to inspect or copy-apply.")
-    parser.add_argument("--candidate", type=Path, help="Curated Datacenter taxonomy CSV candidate.")
-    parser.add_argument("--candidate-version", help="Expected taxonomy_version in the candidate CSV.")
+    parser = argparse.ArgumentParser(description="Rebuild Fundamentals from the active dc_ecosystem taxonomy.")
+    parser.add_argument("--taxonomy", default="dc_ecosystem", choices=("dc_ecosystem",))
     parser.add_argument("--apply", action="store_true", help="Run copy-only apply from a saved preview payload.")
-    parser.add_argument("--production", action="store_true", help="Use the protected production-capable dc_ecosystem workflow.")
+    parser.add_argument("--production", action="store_true", help="Reserved until atomic V2 production publication is available.")
     parser.add_argument("--confirm-apply", action="store_true")
-    parser.add_argument("--confirm-production", help=f"Required token for production no-change apply: {CONFIRMATION_TOKEN}")
-    parser.add_argument("--candidate-provenance", default=ACTIVE_BASELINE_PROVENANCE)
+    parser.add_argument("--confirm-production")
     parser.add_argument("--preview-payload", type=Path, help="taxonomy_preview_payload.json produced by preview.")
     parser.add_argument("--preview-fingerprint")
     parser.add_argument("--provider-db", type=Path)
@@ -39,9 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _paths(args: argparse.Namespace) -> TaxonomyPaths:
-    defaults = TaxonomyPaths()
-    return TaxonomyPaths(
+def _paths(args: argparse.Namespace) -> BatchAddTickerPaths:
+    defaults = BatchAddTickerPaths()
+    return BatchAddTickerPaths(
         provider_db=args.provider_db or defaults.provider_db,
         canonical_db=args.canonical_db or defaults.canonical_db,
         analysis_db=args.analysis_db or defaults.analysis_db,
@@ -54,28 +46,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     progress_callback = None if args.quiet_progress else lambda event: print(progress_line(event), file=sys.stderr, flush=True)
     try:
-        if args.production and args.taxonomy != "dc_ecosystem":
-            raise RuntimeError("EC_TAXONOMY_UPDATE_CONTRACT_NOT_READY")
         if args.production and args.apply:
-            if not args.preview_payload or not args.preview_fingerprint:
-                raise ValueError("--apply requires --preview-payload and --preview-fingerprint")
-            result = run_protected_production_apply(
-                preview_payload_path=args.preview_payload,
-                preview_fingerprint=args.preview_fingerprint,
-                confirmation=args.confirm_production or "",
-                source_paths=_paths(args),
-                run_root=args.run_root or ADMIN_RUN_ROOT,
-                progress_callback=progress_callback,
-            )
+            result = run_production_apply()
         elif args.production:
-            result = run_production_preview(
-                source_paths=_paths(args),
-                candidate_path=args.candidate,
-                candidate_version=args.candidate_version,
-                candidate_provenance=args.candidate_provenance,
-                run_root=args.run_root or ADMIN_RUN_ROOT,
-                progress_callback=progress_callback,
-            )
+            result = run_preview(taxonomy_domain=args.taxonomy, source_paths=_paths(args), run_root=args.run_root or ADMIN_RUN_ROOT)
         elif args.apply:
             if not args.preview_payload or not args.preview_fingerprint:
                 raise ValueError("--apply requires --preview-payload and --preview-fingerprint")
@@ -85,15 +59,13 @@ def main(argv: list[str] | None = None) -> int:
                 preview_fingerprint=args.preview_fingerprint,
                 source_paths=_paths(args),
                 run_root=args.run_root or ADMIN_RUN_ROOT,
-                temp_root=args.temp_root or TEMP_ROOT,
+                temp_root=args.temp_root or Path("temp/fundamentals_admin_taxonomy"),
                 confirm_apply=args.confirm_apply,
                 progress_callback=progress_callback,
             )
         else:
             result = run_preview(
                 taxonomy_domain=args.taxonomy,
-                candidate_path=args.candidate,
-                candidate_version=args.candidate_version,
                 source_paths=_paths(args),
                 run_root=args.run_root or ADMIN_RUN_ROOT,
                 progress_callback=progress_callback,

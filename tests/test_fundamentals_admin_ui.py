@@ -448,7 +448,7 @@ def test_admin_page_conditional_fields_switch_by_operation() -> None:
     controls.operation_dropdown.on_change(None)
     assert controls.tickers_field.visible is False
     assert controls.market_field.visible is False
-    assert controls.taxonomy_domain_dropdown.visible is True
+    assert controls.taxonomy_domain_dropdown.visible is False
     assert controls.candidate_path_field.visible is False
     assert "dc_ecosystem" in controls.operation_guidance_field.value
 
@@ -682,7 +682,7 @@ def test_taxonomy_changed_preview_requires_capability_and_fresh_matching_scope()
         def preview(self, operation_type, **kwargs):
             return AdminUIRunResult(
                 status="COMPLETED", message="Preview completed.", run_id="changed",
-                outcome="COMPLETED", mode="CANDIDATE_PREVIEW", business_outcome="CHANGES_AVAILABLE",
+                outcome="COMPLETED", mode="ACTIVE_TAXONOMY_PREVIEW", business_outcome="CHANGES_AVAILABLE",
                 preview_domain="dc_ecosystem", copy_actionable=True, production_actionable=False,
                 preview_payload_path="/tmp/taxonomy_candidate.json", preview_fingerprint="f" * 64,
                 summary_rows=("Changes available",),

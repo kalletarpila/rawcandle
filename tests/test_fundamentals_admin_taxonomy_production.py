@@ -48,11 +48,7 @@ def _paths(db_path: Path) -> TaxonomyPaths:
     return TaxonomyPaths(provider_db=db_path, canonical_db=db_path, analysis_db=db_path, market_db=db_path, taxonomy_db=db_path)
 
 
-def test_protected_production_cli_requires_confirmation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    def fail_apply(**kwargs):
-        raise PermissionError("PHASE13G43_PRODUCTION_CONFIRMATION_REQUIRED")
-
-    monkeypatch.setattr(taxonomy_cli, "run_protected_production_apply", fail_apply)
+def test_fundamentals_taxonomy_production_cli_is_gated(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code = taxonomy_cli.main(
         [
             "--taxonomy",
@@ -68,14 +64,12 @@ def test_protected_production_cli_requires_confirmation(monkeypatch: pytest.Monk
     )
 
     assert code == 2
-    assert "PHASE13G43_PRODUCTION_CONFIRMATION_REQUIRED" in capsys.readouterr().out
+    assert "ADMIN_FULL_V2_ATOMIC_PRODUCTION_REPLACEMENT_NOT_READY" in capsys.readouterr().out
 
 
-def test_ec_taxonomy_production_mode_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
-    code = taxonomy_cli.main(["--taxonomy", "ec_taxonomy", "--production", "--quiet-progress"])
-
-    assert code == 2
-    assert "EC_TAXONOMY_UPDATE_CONTRACT_NOT_READY" in capsys.readouterr().out
+def test_ec_taxonomy_production_mode_is_refused() -> None:
+    with pytest.raises(SystemExit, match="2"):
+        taxonomy_cli.main(["--taxonomy", "ec_taxonomy", "--production", "--quiet-progress"])
 
 
 def test_active_baseline_no_change_preview_has_zero_writes(tmp_path: Path) -> None:

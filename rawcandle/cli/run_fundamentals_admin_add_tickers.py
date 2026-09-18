@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-network", action="store_true", help="Permit bounded Sharadar lookup for tickers missing local/archive fundamentals.")
     parser.add_argument("--apply", action="store_true", help="Run copy-only apply from a saved preview payload.")
     parser.add_argument("--confirm-apply", action="store_true")
-    parser.add_argument("--production", action="store_true", help="Run the protected exact production apply mode.")
+    parser.add_argument("--production", action="store_true", help="Reserved until atomic full-V2 production publication is available.")
     parser.add_argument("--confirm-production", action="store_true")
     parser.add_argument("--preview-payload", type=Path, help="phase13d_preview_payload.json produced by preview.")
     parser.add_argument("--preview-fingerprint")

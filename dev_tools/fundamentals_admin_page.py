@@ -89,8 +89,8 @@ def _material_preview_signature(
         raw_inputs.strip() if operation == "ADD_TICKERS" else "",
         market.strip().lower(),
         taxonomy_domain.strip().lower() if operation == "CHECK_UPDATE_TAXONOMY" else "",
-        candidate_path.strip() if operation == "CHECK_UPDATE_TAXONOMY" else "",
-        candidate_version.strip() if operation == "CHECK_UPDATE_TAXONOMY" else "",
+        "",
+        "",
         bool(production_mode) if operation == "CHECK_UPDATE_TAXONOMY" else False,
         True if operation == "ADD_TICKERS" else bool(network_allowed),
     )
@@ -155,12 +155,11 @@ def build_fundamentals_admin_page(
         width=220,
         options=[
             ft.dropdown.Option("dc_ecosystem", "dc_ecosystem"),
-            ft.dropdown.Option("ec_taxonomy", "ec_taxonomy"),
         ],
         value="dc_ecosystem",
     )
-    candidate_path_field = ft.TextField(label="Candidate CSV", width=520)
-    candidate_version_field = ft.TextField(label="Candidate version", width=260)
+    candidate_path_field = ft.TextField(label="Candidate CSV", width=520, visible=False)
+    candidate_version_field = ft.TextField(label="Candidate version", width=260, visible=False)
     network_allowed_checkbox = ft.Checkbox(label="Allow provider network for preview", value=True, visible=False)
     production_preview_checkbox = ft.Checkbox(label="Protected production preview", value=False, visible=False)
     operation_guidance_field = ft.Text(
@@ -270,16 +269,7 @@ def build_fundamentals_admin_page(
                 "only when the backend reports an authorized correctable candidate."
             )
         if operation == "CHECK_UPDATE_TAXONOMY":
-            domain = taxonomy_domain_dropdown.value or "dc_ecosystem"
-            if domain == "ec_taxonomy":
-                return (
-                    "ec_taxonomy is a separate future domain and remains read-only/not-ready unless "
-                    "the backend authorizes a safe workflow."
-                )
-            return (
-                "dc_ecosystem is the current primary Datacenter taxonomy. Fundamentals consumption "
-                "does not automatically edit taxonomy source classifications."
-            )
+            return "Rebuilds Fundamentals from the active dc_ecosystem version in data/analysis.db."
         return (
             "Enter one or more tickers. Commas, spaces, newlines and duplicates are accepted. "
             "Provider network access is enabled automatically when local data is insufficient."
@@ -292,9 +282,9 @@ def build_fundamentals_admin_page(
         is_taxonomy = operation == "CHECK_UPDATE_TAXONOMY"
         tickers_field.visible = is_add
         market_field.visible = is_add or is_sector
-        taxonomy_domain_dropdown.visible = is_taxonomy
-        candidate_path_field.visible = is_taxonomy and bool(candidate_path_field.value)
-        candidate_version_field.visible = is_taxonomy and bool(candidate_version_field.value)
+        taxonomy_domain_dropdown.visible = False
+        candidate_path_field.visible = False
+        candidate_version_field.visible = False
         network_allowed_checkbox.visible = False
         production_preview_checkbox.visible = False
         preview_payload_field.visible = False
@@ -424,7 +414,7 @@ def build_fundamentals_admin_page(
     def apply_result(result: AdminUIRunResult) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
         nonlocal current_preview_fingerprint, current_report_run_id, selected_history_run_id
-        is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW"}
+        is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "ACTIVE_TAXONOMY_PREVIEW"}
         status_field.value = _result_text(result)
         final_section.visible = not is_preview
         status_field.visible = not is_preview
@@ -498,7 +488,7 @@ def build_fundamentals_admin_page(
         taxonomy = (operation_dropdown.value or "") == "CHECK_UPDATE_TAXONOMY"
         copy_authorized = bool(getattr(capability, "copy_apply_enabled", False if taxonomy else True))
         production_authorized = bool(getattr(capability, "production_apply_enabled", False if taxonomy else True))
-        taxonomy_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.business_outcome == "CHANGES_AVAILABLE" and current_preview_result.preview_domain == taxonomy_domain_dropdown.value)
+        taxonomy_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.mode == "ACTIVE_TAXONOMY_PREVIEW" and taxonomy_domain_dropdown.value == "dc_ecosystem")
         generic_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.outcome != "NO_CHANGE")
         copy_ready = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.copy_actionable is True)))
         production_ready = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.production_actionable is True)))
@@ -575,8 +565,8 @@ def build_fundamentals_admin_page(
                 raw_inputs=tickers_field.value or "",
                 market=market_field.value or "usa",
                 taxonomy_domain=taxonomy_domain_dropdown.value or "dc_ecosystem",
-                candidate_path=candidate_path_field.value or None,
-                candidate_version=candidate_version_field.value or None,
+                candidate_path=None,
+                candidate_version=None,
                 production_mode=False,
                 network_allowed=True if (operation_dropdown.value or "ADD_TICKERS") == "ADD_TICKERS" else False,
                 progress_callback=progress_callback,

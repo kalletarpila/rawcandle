@@ -9,11 +9,12 @@ import shutil
 import subprocess
 import traceback
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
+from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
 from rawcandle.fundamentals.admin.batch_add_tickers import (
     BatchAddTickerPaths,
     PRODUCTION_BACKUP_ROOT,
@@ -48,17 +49,10 @@ from rawcandle.fundamentals.operating_income_v2 import valuation as valuation_en
 from rawcandle.fundamentals.phase12d import PRODUCTION, ROOT, database_inventory, sha256, stable_hash, write_json
 from rawcandle.fundamentals.phase12d import production_inventory
 from rawcandle.fundamentals.phase13b_foundation import (
-    CandidatePaths,
-    attach_dependencies,
-    candidate_relative_valuation_dependency_state,
     database_fingerprint,
     reject_production_path,
-    taxonomy_identity,
 )
-from rawcandle.fundamentals.phase13f3_1_package_recovery import instrumented_package_refresh
 from rawcandle.fundamentals.phase13f3_ticker_transition import REPORT_DATE
-from rawcandle.fundamentals.relative_position.engine import MODEL_FINGERPRINT as RP_MODEL_FINGERPRINT
-from rawcandle.fundamentals.relative_position.production import refresh_relative_position
 from rawcandle.fundamentals.relative_valuation.engine import MODEL_FINGERPRINT as RV_MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_valuation.engine import calculate_relative_valuation
 from rawcandle.fundamentals.relative_valuation.persistence import (
@@ -804,7 +798,7 @@ def _manual_rv_refresh(paths: BatchAddTickerPaths, *, output: Path, applied_at: 
     return result
 
 
-def _snapshot_smoke(paths: BatchAddTickerPaths, output: Path, *, tickers: Sequence[str]) -> dict[str, Any]:
+def _snapshot_smoke(paths: BatchAddTickerPaths, output: Path, *, tickers: Sequence[str], report_date: str = REPORT_DATE) -> dict[str, Any]:
     report_dir = output / "snapshot_reports"
     report_dir.mkdir(parents=True, exist_ok=True)
     snapshot_paths = SnapshotPaths(paths.canonical_db, paths.analysis_db, paths.market_db, paths.taxonomy_db, paths.provider_db)
@@ -814,7 +808,7 @@ def _snapshot_smoke(paths: BatchAddTickerPaths, output: Path, *, tickers: Sequen
             generated = generate_active_company_snapshot(
                 snapshot_paths,
                 ticker=ticker,
-                report_date=REPORT_DATE,
+                report_date=report_date,
                 output_dir=report_dir,
                 overwrite=True,
             )
@@ -840,67 +834,26 @@ def _run_downstream(
     changed_tickers: Sequence[str],
     applied_at: str,
     progress: ProgressTracker | None,
+    as_of_date: str | None = None,
 ) -> dict[str, Any]:
-    candidate = CandidatePaths(paths.canonical_db, paths.analysis_db, paths.taxonomy_db, provider_db=paths.provider_db, market_db=paths.market_db)
     result: dict[str, Any] = {"changed_tickers": list(changed_tickers), "applied_at_utc": applied_at}
     if progress:
-        progress.running(ProgressStage.PACKAGE_CALCULATION, "Running one batch-wide Operating-Income package refresh.")
-    with _background_heartbeat(progress, "Sector/Industry package refresh is still running."):
-        result["package"] = instrumented_package_refresh(paths.as_dict(), output, allow_production=False)
+        progress.running(ProgressStage.PACKAGE_CALCULATION, "Building fresh full V2 analysis and Relative Valuation.")
+    with _background_heartbeat(progress, "Full V2 analysis rebuild is still running."):
+        rebuilt = run_full_v2_downstream(paths.as_dict(), output=output, as_of_date=as_of_date or applied_at[:10])
+    result.update(rebuilt)
     if progress:
-        package_rows = result["package"].get("first_apply", {}).get("rows", {})
-        progress.completed(ProgressStage.PACKAGE_CALCULATION, "Package calculation completed.", processed_rows=int(package_rows.get("valuation") or 0) if isinstance(package_rows, Mapping) else None)
-        progress.running(ProgressStage.PACKAGE_APPLY, "Package apply verified.")
-        progress.completed(ProgressStage.PACKAGE_APPLY, "Package apply completed.")
-        progress.running(ProgressStage.RELATIVE_POSITION, "Refreshing Relative Position once for the full universe.")
-    with _background_heartbeat(progress, "Sector/Industry Relative Position refresh is still running."):
-        result["relative_position"] = refresh_relative_position(
-            canonical_db=paths.canonical_db,
-            analysis_db=paths.analysis_db,
-            market_db=paths.market_db,
-            taxonomy_db=paths.taxonomy_db,
-            snapshot_date=REPORT_DATE,
-            model_fingerprint=RP_MODEL_FINGERPRINT,
-            applied_at_utc=applied_at,
-        ).__dict__
-    if progress:
-        progress.completed(ProgressStage.RELATIVE_POSITION, "Relative Position refresh completed.", processed_rows=int(result["relative_position"].get("result_rows") or 0))
-        progress.running(ProgressStage.RELATIVE_VALUATION, "Refreshing Relative Valuation once for the full universe.")
-    taxonomy = taxonomy_identity(paths.taxonomy_db)
-    universe = _read_active_universe_identity(paths)
-    result["pre_refresh_compatibility"] = candidate_relative_valuation_dependency_state(
-        paths.analysis_db,
-        report_date=REPORT_DATE,
-        expected_universe_fingerprint=universe.get("economic_result_fingerprint"),
-        expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
-    )
-    with _background_heartbeat(progress, "Sector/Industry Relative Valuation refresh is still running."):
-        result["relative_valuation"] = _manual_rv_refresh(paths, output=output, applied_at=applied_at)
-    if progress:
-        progress.completed(ProgressStage.RELATIVE_VALUATION, "Relative Valuation refresh completed.", processed_rows=int(result["relative_valuation"]["snapshot"].get("company_count") or 0))
-        progress.running(ProgressStage.DEPENDENCY_ATTACHMENT, "Attaching dependency identities.")
-    with _background_heartbeat(progress, "Sector/Industry dependency attachment is still running."):
-        result["dependencies"] = attach_dependencies(
-            candidate,
-            universe=universe,
-            applied_at_utc=applied_at,
-            apply=True,
-            allow_production=False,
-        )
-    result["post_refresh_compatibility"] = candidate_relative_valuation_dependency_state(
-        paths.analysis_db,
-        report_date=REPORT_DATE,
-        expected_universe_fingerprint=universe.get("economic_result_fingerprint"),
-        expected_taxonomy_economic_fingerprint=taxonomy["taxonomy_economic_fingerprint"],
-    )
-    if progress:
-        progress.completed(ProgressStage.DEPENDENCY_ATTACHMENT, "Dependency attachment completed.")
+        progress.completed(ProgressStage.PACKAGE_CALCULATION, "Full V2 and Relative Valuation rebuild validated.")
+        for stage in (ProgressStage.PACKAGE_APPLY, ProgressStage.RELATIVE_POSITION, ProgressStage.RELATIVE_VALUATION):
+            progress.running(stage, "Validated by the full V2 rebuild.")
+            progress.completed(stage, "Validated by the full V2 rebuild.")
+        progress.skipped(ProgressStage.DEPENDENCY_ATTACHMENT, "Fresh V2 analysis has its own validated dependencies.")
         progress.running(ProgressStage.SNAPSHOT_SMOKE, "Generating representative Snapshot smoke reports.")
     smoke_tickers = tuple(dict.fromkeys([*changed_tickers[:10], "NVDA"]))
-    result["snapshots"] = _snapshot_smoke(paths, output, tickers=smoke_tickers)
+    candidate_paths = replace(paths, analysis_db=Path(rebuilt["candidate_analysis_db"]))
+    result["snapshots"] = _snapshot_smoke(candidate_paths, output, tickers=smoke_tickers, report_date=as_of_date or applied_at[:10])
     if progress:
         progress.completed(ProgressStage.SNAPSHOT_SMOKE, "Snapshot smoke completed.", processed_items=len(result["snapshots"]), total_items=len(smoke_tickers))
-    result["invocation_counts"] = {"package": 1, "relative_position": 1, "relative_valuation": 1}
     return result
 
 
@@ -931,6 +884,7 @@ def run_preview(
     counts = _counts(plan.items)
     preview = {
         "operation_type": AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY.value,
+        "as_of_date": started[:10],
         "request": request.as_dict(),
         "source_state": plan.source_state,
         "proposed_changes": [dict(item) for item in plan.correctable_items],
@@ -1026,6 +980,9 @@ def run_apply(
         failed_stage = ProgressStage.CLASSIFICATION_SCAN
         progress.running(ProgressStage.CLASSIFICATION_SCAN, "Validating saved preview freshness on copy lane.")
         _assert_preview_fresh(lane.paths, payload)
+        fresh_plan = build_sector_industry_plan(lane.paths, request, now=plan.get("created_at_utc"))
+        if fresh_plan.safe_dict()["plan_fingerprint"] != plan.get("plan_fingerprint"):
+            raise ValueError("ADMIN_SECTOR_INDUSTRY_STALE_PLAN_CONTENT_CHANGED")
         progress.completed(ProgressStage.CLASSIFICATION_SCAN, "Saved preview is fresh on copy lane.")
         failed_stage = ProgressStage.CLASSIFICATION_RECONCILIATION
         progress.running(ProgressStage.CLASSIFICATION_RECONCILIATION, "Reconciling saved Sector/Industry change set.")
@@ -1055,6 +1012,7 @@ def run_apply(
                 changed_tickers=[str(item["ticker"]) for item in safe_items],
                 applied_at=applied_at,
                 progress=progress,
+                as_of_date=str(preview["as_of_date"]),
             )
             failed_stage = ProgressStage.NO_CHANGE_VERIFICATION
             progress.running(ProgressStage.NO_CHANGE_VERIFICATION, "Repeating Sector/Industry operation on corrected copy lane.")
@@ -1087,6 +1045,7 @@ def run_apply(
                 "package": downstream.get("package", "NOT_RUN"),
                 "relative_position": downstream.get("relative_position", "NOT_RUN"),
                 "relative_valuation": downstream.get("relative_valuation", "NOT_RUN"),
+                "active_taxonomy": downstream.get("active_taxonomy"),
                 "repeat": repeat_result,
             },
             artifacts={"copy_lane": str(lane.lane_dir), "downstream": str(lane.lane_dir / "sector_industry_downstream")},

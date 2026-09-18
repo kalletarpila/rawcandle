@@ -189,13 +189,15 @@ def test_apply_corrects_copy_lane_once_and_repeat_no_change(tmp_path: Path, monk
     preview = run_preview("CHG NULLC", source_paths=paths, run_root=tmp_path / "runs")
     calls = []
 
-    def fake_downstream(paths_arg, output, *, changed_tickers, applied_at, progress):
+    def fake_downstream(paths_arg, output, *, changed_tickers, applied_at, progress, as_of_date):
         calls.append(tuple(changed_tickers))
+        assert as_of_date == preview["started_at_utc"][:10]
         return {
             "invocation_counts": {"package": 1, "relative_position": 1, "relative_valuation": 1},
             "package": {"first_apply": {"economic_result_fingerprint": "pkg"}},
             "relative_position": {"result_fingerprint": "rp"},
             "relative_valuation": {"snapshot": {"result_fingerprint": "rv"}},
+            "active_taxonomy": {"domain": "dc_ecosystem", "version": "active", "semantic_fingerprint": "taxonomy-hash"},
         }
 
     monkeypatch.setattr("rawcandle.fundamentals.admin.sector_industry._run_downstream", fake_downstream)
@@ -213,8 +215,27 @@ def test_apply_corrects_copy_lane_once_and_repeat_no_change(tmp_path: Path, monk
     assert calls == [("CHG", "NULLC")]
     assert result["downstream"]["repeat"]["outcome"] == "NO_CHANGE"
     assert result["downstream"]["invocation_counts"] == {"package": 1, "relative_position": 1, "relative_valuation": 1}
+    assert result["downstream"]["active_taxonomy"]["semantic_fingerprint"] == "taxonomy-hash"
     with sqlite3.connect(Path(result["cleanup"]["retained"]) / "analysis.db") as conn:
         assert conn.execute("SELECT DISTINCT sector,industry FROM valuation_revised_result WHERE ticker='CHG'").fetchall() == [("Industrials", "Machinery")]
+
+
+def test_apply_rejects_same_row_count_ticker_meta_content_drift(tmp_path: Path) -> None:
+    paths = _paths(tmp_path / "source")
+    preview = run_preview("CHG", source_paths=paths, run_root=tmp_path / "runs")
+    with sqlite3.connect(paths.market_db) as conn:
+        conn.execute("UPDATE ticker_meta SET sector='Technology' WHERE ticker='CHG'")
+
+    result = run_apply(
+        preview_payload_path=Path(preview["preview_payload_path"]),
+        preview_fingerprint=preview["preview_fingerprint"],
+        source_paths=paths, run_root=tmp_path / "runs", temp_root=tmp_path / "temp",
+        confirm_apply=True,
+    )
+    assert result["outcome"] == "FAILED"
+    assert result["error"] == "ValueError"
+    with sqlite3.connect(paths.analysis_db) as conn:
+        assert conn.execute("SELECT sector FROM valuation_revised_result WHERE ticker='CHG' LIMIT 1").fetchone()[0] == "Technology"
 
 
 def test_no_change_apply_skips_downstream(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
