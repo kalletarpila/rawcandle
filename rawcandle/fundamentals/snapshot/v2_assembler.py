@@ -543,7 +543,9 @@ def _assemble_company_snapshot_v2(
     candidate_package_fingerprint: str | None = None,
     diagnostic_model_contract: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    base = v1.assemble_company_snapshot(paths, ticker=ticker, report_date=report_date)
+    base = v1.assemble_company_snapshot(
+        paths, ticker=ticker, report_date=report_date, analysis_scaffold_only=True
+    )
     with _readonly(paths.analysis_db) as analysis, _readonly(paths.market_db) as market, _readonly(paths.canonical_db) as canonical:
         is_explicit_candidate = candidate_model_map is not None
         if is_explicit_candidate:

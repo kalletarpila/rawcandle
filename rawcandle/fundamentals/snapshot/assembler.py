@@ -907,6 +907,7 @@ def assemble_company_snapshot(
     ticker: str,
     report_date: str,
     before_final_verify: Callable[[], None] | None = None,
+    analysis_scaffold_only: bool = False,
 ) -> dict[str, Any]:
     _validate_paths(paths)
     report_day = date.fromisoformat(report_date)
@@ -940,9 +941,12 @@ def assemble_company_snapshot(
             for row in normalized_canonical
         }
         slots = strict_fiscal_slots(normalized_canonical, anchor_year=anchor_year, anchor_quarter=anchor_quarter, count=5)
-        score_by_quarter = _score_history(analysis, identity["company_id"])
-        valuation_repo = ValuationRepository(analysis)
-        valuation_by_quarter = {int(row["quarter_id"]): row for row in valuation_repo.history(identity["company_id"], model_fingerprint=VALUATION_FINGERPRINT)}
+        score_by_quarter = {} if analysis_scaffold_only else _score_history(analysis, identity["company_id"])
+        valuation_by_quarter = {} if analysis_scaffold_only else {
+            int(row["quarter_id"]): row for row in ValuationRepository(analysis).history(
+                identity["company_id"], model_fingerprint=VALUATION_FINGERPRINT
+            )
+        }
         labels = ("YoY base", "t−3", "t−2", "t−1", "Nykyinen")
         history = []
         for label, slot in zip(labels, slots):
@@ -960,13 +964,13 @@ def assemble_company_snapshot(
                 "valuation": valuation,
             })
 
-        delta = FundamentalDeltaRepository(analysis).with_components(
+        delta = None if analysis_scaffold_only else FundamentalDeltaRepository(analysis).with_components(
             identity["company_id"], anchor_year, anchor_quarter,
             model_fingerprint=DELTA_FINGERPRINT,
         )
         if delta and int(delta["total"]["current_score_result_id"]) != int(anchor["endpoint_quarter_id"]):
             delta = None
-        lifecycle_rows = RevisedLifecycleRepository(analysis).history(
+        lifecycle_rows = [] if analysis_scaffold_only else RevisedLifecycleRepository(analysis).history(
             identity["company_id"], model_fingerprint=LIFECYCLE_FINGERPRINT
         )
         eligible_lifecycle_rows = [
@@ -994,11 +998,11 @@ def assemble_company_snapshot(
             history=history,
             current_price_valuation=current_valuation,
         )
-        relative = _relative_position(
+        relative = None if analysis_scaffold_only else _relative_position(
             RelativePositionRepository(analysis), identity["company_id"], report_date,
             int(anchor["endpoint_quarter_id"]),
         )
-        diagnostic = DiagnosticFlagRepository(analysis).endpoint(
+        diagnostic = None if analysis_scaffold_only else DiagnosticFlagRepository(analysis).endpoint(
             identity["company_id"], anchor_year, anchor_quarter,
             model_fingerprint=DIAGNOSTIC_FINGERPRINT,
         )
@@ -1068,7 +1072,7 @@ def assemble_company_snapshot(
             "source_state_audit": source_state_audit,
             "source_state_audit_fingerprint": _fingerprint(source_state_audit),
         }
-        snapshot["reconciliation"] = _reconcile(snapshot)
+        snapshot["reconciliation"] = [] if analysis_scaffold_only else _reconcile(snapshot)
         failures = [row for row in snapshot["reconciliation"] if not row["ok"]]
         if failures:
             raise RuntimeError(f"SNAPSHOT_RECONCILIATION_FAILED:{_canonical_json(failures)}")

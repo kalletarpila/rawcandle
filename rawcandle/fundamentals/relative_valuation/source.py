@@ -161,12 +161,14 @@ def _bars(connection: sqlite3.Connection, ticker: str, as_of_date: str) -> tuple
 def _strip_upstream_snapshot_identity(row: dict[str, Any]) -> dict[str, Any]:
     cleaned = dict(row)
     cleaned.pop("snapshot_id", None)
+    cleaned.pop("relative_position_result_id", None)
     return cleaned
 
 
 def _strip_filing_valuation_run_metadata(row: dict[str, Any]) -> dict[str, Any]:
     cleaned = dict(row)
     cleaned.pop("calculated_at_utc", None)
+    cleaned.pop("valuation_revised_result_id", None)
     return cleaned
 
 

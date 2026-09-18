@@ -139,9 +139,10 @@ def test_market_bar_adapter_prefers_exact_ticker_and_never_reads_future(tmp_path
     assert [(bar.price_date, bar.close) for bar in bars] == [("2026-09-08", 2.0)]
 
 
-def test_relative_position_snapshot_id_is_not_relative_valuation_source_input() -> None:
+def test_relative_position_storage_ids_are_not_relative_valuation_source_input() -> None:
     row = {
         "snapshot_id": "lane-specific-relative-position-snapshot",
+        "relative_position_result_id": 17,
         "company_id": 1,
         "peer_scope": "UNIVERSE",
         "percentile": 50.0,
@@ -150,11 +151,12 @@ def test_relative_position_snapshot_id_is_not_relative_valuation_source_input() 
     cleaned = _strip_upstream_snapshot_identity(row)
 
     assert "snapshot_id" not in cleaned
+    assert "relative_position_result_id" not in cleaned
     assert cleaned["company_id"] == 1
     assert row["snapshot_id"] == "lane-specific-relative-position-snapshot"
 
 
-def test_filing_valuation_calculation_timestamp_is_not_source_input() -> None:
+def test_filing_valuation_storage_identity_is_not_source_input() -> None:
     row = {
         "valuation_revised_result_id": 7,
         "company_id": 1,
@@ -165,5 +167,5 @@ def test_filing_valuation_calculation_timestamp_is_not_source_input() -> None:
     cleaned = _strip_filing_valuation_run_metadata(row)
 
     assert "calculated_at_utc" not in cleaned
-    assert cleaned["valuation_revised_result_id"] == 7
+    assert "valuation_revised_result_id" not in cleaned
     assert cleaned["total_valuation_score"] == 4.5
