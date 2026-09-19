@@ -213,52 +213,94 @@ class ProductionOperation:
     written_roles: tuple[str, ...]
     validate_preview: Callable[[BatchAddTickerPaths, Mapping[str, Any], str], dict[str, Any]]
     mutate_sources: Callable[[BatchAddTickerPaths, Mapping[str, Any]], dict[str, Any]]
+    production_validate_preview: Callable[[BatchAddTickerPaths, Mapping[str, Any], str], dict[str, Any]] | None = None
 
 
 def render_production_report(result: Mapping[str, Any]) -> str:
+    from rawcandle.fundamentals.admin.operation_report import final_status_message, operation_result
+
+    operation = {
+        "ADD_TICKERS": "Add Tickers",
+        "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
+        "CHECK_UPDATE_TAXONOMY": "Taxonomy",
+    }.get(str(result.get("operation_type")), "Administration")
+    duration = "Not reached"
+    if result.get("started_at_utc") and result.get("completed_at_utc"):
+        from datetime import datetime
+        started = datetime.fromisoformat(str(result["started_at_utc"]).replace("Z", "+00:00"))
+        completed = datetime.fromisoformat(str(result["completed_at_utc"]).replace("Z", "+00:00"))
+        minutes, seconds = divmod(round(max(0.0, (completed - started).total_seconds())), 60)
+        duration = f"{minutes} min {seconds} sec"
+    outcome = str(result.get("outcome") or "FAILED")
+    failed = outcome not in {"COMPLETED", "NO_CHANGE"}
+    preflight_failure = failed and not bool(result.get("write_boundary_crossed"))
     lines = [
-        "# Fundamentals Administration production transaction", "",
-        f"Operation: {result['operation_type']}",
-        f"Final status: {result['outcome']}",
-        f"Requested change: {json.dumps(result.get('requested_change'), sort_keys=True, default=str)}",
-        f"Preview: {result.get('preview', {}).get('payload', 'not validated')}",
-        f"Preview fingerprint: {result.get('preview_fingerprint')}",
-        f"Test on copies: {result.get('test_run_id') or 'not required for no-change'}",
-        f"As-of date: {result.get('as_of_date') or 'not established'}", "",
-        "## Guard and sources", "",
-        f"Lock owner: {json.dumps(result.get('lock_owner'), sort_keys=True, default=str)}",
-        f"Source state verified before publication: {result.get('source_state_verified') is True}",
-        f"Source writes: {(result.get('source_writes') or {}).get('outcome', 'not run')}; tickers: {', '.join((result.get('source_writes') or {}).get('tickers') or []) or 'none'}", "",
-        "## Verified backups", "",
+        "# Fundamentals Administration Operation Report", "",
+        "## Executive Summary", "",
+        f"- Operation: {operation}",
+        "- Stage: Production update",
+        f"- Result: {operation_result(result)}",
+        f"- Duration: {duration}",
+        f"- {final_status_message(result)}",
     ]
+    if preflight_failure:
+        lines.extend([
+            "- The safety preflight rejected the operation.",
+            "- No production database writes were performed.",
+            "- No backup was required.",
+            "- No rollback was required.",
+        ])
+    elif outcome == "COMPLETED":
+        tickers = (result.get("source_writes") or {}).get("tickers") or []
+        if tickers:
+            lines.append(f"- {len(tickers)} tickers were added successfully.")
+        lines.extend([
+            "- Full V2 analysis, RP V2 and RV were rebuilt and validated.",
+            "- Production postflight checks passed.",
+        ])
+    lines.extend(["", "## Guard and Sources", ""])
+    lines.extend([
+        f"- Preview: {'Validated' if result.get('preview') else 'Not reached'}",
+        f"- Test on copies: {'Validated' if result.get('test_on_copies') else 'Not reached'}",
+        f"- Production lock: {'Acquired' if result.get('lock_owner') else 'Not reached'}",
+        f"- Source state verification: {'Passed' if result.get('source_state_verified') else 'Not reached'}",
+    ])
+    lines.extend(["", "## Verified backups", ""])
     backups = result.get("backups") or {}
     if backups:
         for role, entry in backups.items():
             verified = entry["verification"]
             lines.append(f"- {role}: {entry['backup']} ({verified['size']} bytes; quick_check={verified['quick_check']}; foreign_key_check={verified['foreign_key_check']}; sha256={verified['sha256']})")
     else:
-        lines.append("No backup was required before the write boundary.")
+        lines.append("- Not applicable: the operation stopped before backups were required.")
     rebuild = result.get("full_v2_rebuild") or {}
     package = rebuild.get("package") or {}
     validation = rebuild.get("validation") or {}
     rv = rebuild.get("rv") or {}
     taxonomy = rebuild.get("taxonomy_dependency") or {}
     lines.extend([
-        "", "## Full V2 candidate", "",
-        f"B1 gate: {rebuild.get('status', 'not run')}",
-        f"Score/Valuation/RP counts: {json.dumps(package.get('rows'), sort_keys=True, default=str)}",
-        f"RV company/peer/component rows: {rv.get('company_rows_inserted', 'not run')} / {rv.get('peer_rows_inserted', 'not run')} / {rv.get('component_rows_inserted', 'not run')}",
-        f"RV input count: {validation.get('rv_input_count', 'not run')}",
-        f"Taxonomy: {taxonomy.get('domain', 'not run')} / {taxonomy.get('version', 'not run')}",
-        f"Taxonomy semantic fingerprint: {taxonomy.get('semantic_fingerprint', 'not run')}",
-        f"Candidate validation: {json.dumps(validation, sort_keys=True, default=str)}",
-        "", "## Publication and postflight", "",
-        f"Atomic replacement: {json.dumps(result.get('atomic_replacement'), sort_keys=True, default=str)}",
-        f"Production-path postflight: {json.dumps(result.get('postflight'), sort_keys=True, default=str)}",
-        f"Rollback: {json.dumps(result.get('rollback'), sort_keys=True, default=str)}",
+        "", "## Full V2 Candidate", "",
+        f"- B1 gate: {rebuild.get('status', 'Not reached')}",
+        f"- Active taxonomy: {taxonomy.get('version', 'Not reached')}",
+        f"- Candidate validation: {'Passed' if validation else 'Not reached'}",
+        "", "## Publication and Postflight", "",
+        f"- Atomic replacement: {(result.get('atomic_replacement') or {}).get('status', 'Not reached')}",
+        f"- Production postflight: {'Passed' if result.get('postflight') else 'Not reached'}",
+        f"- Rollback: {(result.get('rollback') or {}).get('status', 'Not applicable')}",
+        "", "## Technical Appendix", "",
+        f"- Run ID: `{result.get('run_id', 'Not recorded')}`",
+        f"- Backend outcome: `{outcome}`",
+        f"- Failure phase: `{result.get('failed_stage', 'Not applicable')}`",
+        f"- Preview fingerprint: `{result.get('preview_fingerprint', 'Not recorded')}`",
+        f"- Requested change: `{json.dumps(result.get('requested_change'), sort_keys=True, default=str) if result.get('requested_change') is not None else 'Not reached'}`",
+        f"- Score/Valuation/RP counts: `{json.dumps(package.get('rows'), sort_keys=True, default=str) if package.get('rows') is not None else 'Not reached'}`",
+        f"- RV company/peer/component rows: `{rv.get('company_rows_inserted', 'Not reached')} / {rv.get('peer_rows_inserted', 'Not reached')} / {rv.get('component_rows_inserted', 'Not reached')}`",
+        f"- RV input count: `{validation.get('rv_input_count', 'Not reached')}`",
+        f"- Taxonomy semantic fingerprint: `{taxonomy.get('semantic_fingerprint', 'Not reached')}`",
+        f"- Candidate validation details: `{json.dumps(validation, sort_keys=True, default=str) if validation else 'Not reached'}`",
     ])
     if result.get("error"):
-        lines.append(f"Failure at {result.get('failed_stage')}: {result['error']}")
+        lines.append(f"- Technical exception: `{result['error']}`")
     return "\n".join(lines) + "\n"
 
 
@@ -269,6 +311,7 @@ def run_transaction(
     scheduler_log_dir: str | None = None, lock_path: Path = ADMIN_LOCK,
     production_intent: bool = False, rehearsal: bool = False,
     inject_failure_at: str | None = None,
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     production_analysis = PRODUCTION["analysis"].resolve()
     actual_production = source_paths.analysis_db.resolve() == production_analysis
@@ -296,7 +339,25 @@ def run_transaction(
     if candidate.exists() or candidate.is_symlink():
         raise FileExistsError("ADMIN_CANDIDATE_STAGING_PATH_EXISTS")
     backup_dir = (backup_root or BACKUP_ROOT) / run_id
-    result: dict[str, Any] = {"run_id": run_id, "artifact_dir": str(writer.run_dir), "operation_type": operation.operation_type.value, "mode": "PRODUCTION_APPLY" if actual_production else "TRANSACTION_REHEARSAL", "preview_fingerprint": preview_fingerprint, "test_run_id": test_run_id, "as_of_date": None, "started_at_utc": started, "outcome": "FAILED", "write_set": list(operation.written_roles)}
+    result: dict[str, Any] = {"run_id": run_id, "artifact_dir": str(writer.run_dir), "operation_type": operation.operation_type.value, "mode": "PRODUCTION_APPLY" if actual_production else "TRANSACTION_REHEARSAL", "preview_fingerprint": preview_fingerprint, "test_run_id": test_run_id, "as_of_date": None, "started_at_utc": started, "outcome": "FAILED", "write_set": list(operation.written_roles), "write_boundary_crossed": False}
+
+    def progress(number: int, stage_id: str, state: str, message: str) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback({
+                "run_id": run_id,
+                "operation_type": operation.operation_type.value,
+                "current_stage_id": stage_id,
+                "current_stage_number": number,
+                "total_declared_stages": 9,
+                "stage_state": state,
+                "message": message,
+            })
+        except Exception:
+            pass
+
+    progress(1, "PREFLIGHT", "RUNNING", "Validating the production request and exact database paths.")
     writer.checkpoint(RunStage.REQUEST_CREATED, message="Guarded production transaction requested.", preview_fingerprint=preview_fingerprint)
     writer.checkpoint(RunStage.APPLY_STARTED, message="Validating Preview and Test on copies.", preview_fingerprint=preview_fingerprint)
     locks = ExitStack()
@@ -304,13 +365,20 @@ def run_transaction(
         if actual_production:
             from rawcandle.fundamentals.admin.batch_add_tickers import _assert_clean_worktree
             _assert_clean_worktree()
-        preview = operation.validate_preview(source_paths, payload, preview_fingerprint)
+        validate_preview = (
+            operation.production_validate_preview
+            if actual_production and operation.production_validate_preview is not None
+            else operation.validate_preview
+        )
+        preview = validate_preview(source_paths, payload, preview_fingerprint)
         result["as_of_date"] = preview["as_of_date"]
         result["requested_change"] = preview.get("request") or preview.get("requested") or preview.get("taxonomy_dependency", {}).get("domain")
         result["preview"] = {"payload": str(payload_path), "fingerprint": preview_fingerprint}
+        progress(2, "PREVIEW_AND_TEST", "RUNNING", "Preview is current; validating the matching Test on copies run.")
         if preview.get("no_change"):
             writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="No source or analysis change required.", preview_fingerprint=preview_fingerprint)
             result.update(outcome="NO_CHANGE", completed_at_utc=utc_now(), backups={})
+            progress(9, "COMPLETED", "COMPLETED", "Production update completed; no changes were required.")
             return result
         test = _verify_test(run_root, test_run_id, operation.operation_type, preview_fingerprint)
         tested_taxonomy = test.get("downstream", {}).get("active_taxonomy") or {}
@@ -321,13 +389,15 @@ def run_transaction(
         writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Preview and Test are bound; no production write yet.", preview_fingerprint=preview_fingerprint)
         owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
         if owner:
+            progress(3, "LOCKS", "COMPLETED", "Production and scheduler locks acquired.")
             result["lock_owner"] = owner
-            operation.validate_preview(source_paths, payload, preview_fingerprint)
+            validate_preview(source_paths, payload, preview_fingerprint)
             locked_source_state = _source_fingerprints(source_paths)
             stage = "BACKUP"
             result["storage_preflight"] = _storage_preflight(source_paths, operation.written_roles, backup_dir.parent)
             backups = _backup_write_set(source_paths, operation.written_roles, backup_dir)
             result["backups"] = backups
+            progress(4, "BACKUPS", "COMPLETED", "Verified production backups created.")
             if locked_source_state != _source_fingerprints(source_paths):
                 raise RuntimeError("ADMIN_SOURCE_CHANGED_DURING_BACKUP")
             stage = "SOURCE_MUTATION"
@@ -335,10 +405,13 @@ def run_transaction(
             if source_mutation_started:
                 writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Authoritative source mutation starting.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
                 write_boundary_crossed = True
+                result["write_boundary_crossed"] = True
             mutation = operation.mutate_sources(source_paths, preview)
             result["source_writes"] = mutation
+            progress(5, "SOURCE_UPDATE", "COMPLETED", "Authorized source updates completed.")
             if mutation.get("outcome") == "NO_CHANGE":
                 result.update(outcome="NO_CHANGE", completed_at_utc=utc_now())
+                progress(9, "COMPLETED", "COMPLETED", "Production update completed; no changes were required.")
                 return result
             stage = "SOURCE_STABILITY"
             before_rebuild = _source_fingerprints(source_paths)
@@ -347,10 +420,12 @@ def run_transaction(
             if candidate.exists() or candidate.is_symlink():
                 raise FileExistsError("ADMIN_CANDIDATE_STAGING_PATH_EXISTS")
             candidate_owned = True
+            progress(6, "FULL_V2_REBUILD", "RUNNING", "Building and validating the full V2 analysis candidate, RP V2 and RV.")
             rebuild = rebuild_v2_analysis(candidate, sources, as_of_date=preview["as_of_date"], output=writer.run_dir / "full_v2_rebuild", inject_failure_at=inject_failure_at if inject_failure_at in {"v2_calculation", "validation"} else None)
             if rebuild["status"] != "READY":
                 raise RuntimeError("ADMIN_FULL_V2_CANDIDATE_NOT_READY")
             result["full_v2_rebuild"] = {"status": rebuild["status"], "package": rebuild["package"], "validation": rebuild["validation"], "taxonomy_dependency": rebuild["taxonomy_dependency"], "rv": rebuild["rv"]}
+            progress(6, "FULL_V2_REBUILD", "COMPLETED", "Full V2 analysis candidate, RP V2 and RV are ready.")
             stage = "SOURCE_RECHECK"
             if before_rebuild != _source_fingerprints(source_paths):
                 raise RuntimeError("ADMIN_SOURCE_CHANGED_DURING_REBUILD")
@@ -363,9 +438,11 @@ def run_transaction(
             if not write_boundary_crossed:
                 writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Atomic analysis replacement starting.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
                 write_boundary_crossed = True
+                result["write_boundary_crossed"] = True
             publication_started = True
             result["atomic_replacement"] = _publish_candidate(candidate=candidate, target=source_paths.analysis_db, rebuild=rebuild, backup=backups["analysis"], lock_owner=owner, bound_test=test, source_stable=True, production_intent=production_intent, rehearsal=rehearsal)
             replaced = True
+            progress(7, "ATOMIC_REPLACEMENT", "COMPLETED", "Analysis database replacement completed atomically.")
             if inject_failure_at == "post_replacement":
                 raise RuntimeError("ADMIN_INJECTED_POST_REPLACEMENT_FAILURE")
             stage = "POSTFLIGHT"
@@ -373,7 +450,9 @@ def run_transaction(
             if _sha256(source_paths.analysis_db) != result["atomic_replacement"]["candidate_sha256"]:
                 raise RuntimeError("ADMIN_PRODUCTION_PATH_FINGERPRINT_MISMATCH")
             result["postflight"] = postflight
+            progress(8, "POSTFLIGHT", "COMPLETED", "Production postflight checks passed.")
             result.update(outcome="COMPLETED", completed_at_utc=utc_now(), rollback={"status": "NOT_REQUIRED"})
+            progress(9, "COMPLETED", "COMPLETED", "Production update completed successfully.")
             return result
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
@@ -388,6 +467,7 @@ def run_transaction(
                 result["rollback"] = {"status": "CRITICAL_ROLLBACK_FAILED", "error": f"{type(rollback_exc).__name__}: {rollback_exc}"}
                 result["outcome"] = "CRITICAL_ROLLBACK_FAILED"
         result["completed_at_utc"] = utc_now()
+        progress(9, "COMPLETED", "FAILED", "Production update failed; see the final summary.")
         return result
     finally:
         locks.close()

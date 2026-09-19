@@ -15,6 +15,8 @@ from rawcandle.fundamentals.admin.operation_report import (
     OperationReportSummary,
     resolve_operation_report_download,
     build_operation_summary,
+    final_status_message,
+    operation_stage,
     write_operation_report,
     taxonomy_preview_presentation,
 )
@@ -65,6 +67,10 @@ class AdminUIHistoryEntry:
     primary_count: int | None = None
     duration_seconds: float | None = None
     count_label: str | None = None
+
+    @property
+    def stage(self) -> str:
+        return operation_stage(self.mode)
 
 
 _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|check_update_sector_industry|check_update_taxonomy)_[A-Za-z0-9_]+$")
@@ -405,13 +411,20 @@ class FundamentalsAdminUIService:
             return int(taxonomy["memberships"])
         counts = payload.get("summary_counts")
         if isinstance(counts, Mapping):
-            for key in ("requested", "requested_count", "accepted", "changed", "inspected", "ELIGIBLE"):
+            mode = str(payload.get("mode") or "")
+            preferred = {
+                "PREVIEW": ("eligible", "requested", "requested_count", "ELIGIBLE"),
+                "COPY_ONLY_APPLY": ("applied", "accepted", "requested", "APPLIED"),
+                "PRODUCTION_APPLY": ("applied", "accepted", "requested", "APPLIED"),
+            }.get(mode, ())
+            for key in (*preferred, "requested", "requested_count", "accepted", "changed", "inspected", "eligible", "applied", "ELIGIBLE", "APPLIED"):
                 if key in counts:
                     try:
                         return int(counts[key])
                     except Exception:
                         return None
-        requested = payload.get("requested_inputs")
+        request = payload.get("request") or payload.get("requested_change")
+        requested = request.get("requested_inputs") if isinstance(request, Mapping) else payload.get("requested_inputs")
         if isinstance(requested, (list, tuple)):
             return len(requested)
         return None
@@ -449,8 +462,8 @@ class FundamentalsAdminUIService:
             or result.get("payload_path")
         )
         return AdminUIRunResult(
-            status="FAILED" if result.get("outcome") in {"FAILED", "ERROR", "INTERRUPTED", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED",
-            message=default_message,
+            status="FAILED" if result.get("outcome") in {"FAILED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED",
+            message=final_status_message(result) if result.get("mode") else default_message,
             run_id=run_id or None,
             outcome=str(result.get("outcome")) if result.get("outcome") is not None else None,
             mode=str(result.get("mode")) if result.get("mode") is not None else None,

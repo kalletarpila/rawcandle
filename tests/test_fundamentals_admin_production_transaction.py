@@ -86,6 +86,80 @@ def test_atomic_rehearsal_reopens_replaced_analysis_and_only_backs_up_write_set(
     assert "Verified backups" in report and "Atomic replacement" in report
 
 
+def test_exact_production_mode_selects_explicit_production_validator(tmp_path, monkeypatch):
+    paths = _fixture(tmp_path, monkeypatch)[1]
+    run_root = tmp_path / "production-runs"
+    lock_path = tmp_path / "production.lock"
+    payload = tmp_path / "production-preview.json"
+    payload.write_text("{}", encoding="utf-8")
+    for role, path in paths.as_dict().items():
+        monkeypatch.setitem(tx.PRODUCTION, role, path)
+    monkeypatch.setattr(tx, "ADMIN_RUN_ROOT", run_root)
+    monkeypatch.setattr(tx, "ADMIN_LOCK", lock_path)
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.batch_add_tickers._assert_clean_worktree",
+        lambda: {"status": "CLEAN"},
+    )
+    calls = []
+
+    def copy_validator(*args):
+        raise AssertionError("copy validator must not validate an actual production transaction")
+
+    def production_validator(*args):
+        calls.append("production")
+        return {"as_of_date": "2026-09-19", "taxonomy_dependency": IDENTITY, "no_change": True}
+
+    operation = tx.ProductionOperation(
+        AdminOperationType.ADD_TICKERS,
+        ("provider", "canonical", "analysis"),
+        copy_validator,
+        lambda *args: {"outcome": "NOT_REQUIRED"},
+        production_validate_preview=production_validator,
+    )
+
+    result = tx.run_transaction(
+        operation,
+        preview_payload_path=payload,
+        preview_fingerprint="preview-fp",
+        test_run_id="fresh-test",
+        source_paths=paths,
+        run_root=run_root,
+        lock_path=lock_path,
+        production_intent=True,
+    )
+
+    assert result["outcome"] == "NO_CHANGE"
+    assert calls == ["production"]
+
+
+def test_production_mode_rejects_arbitrary_path_before_validator(tmp_path, monkeypatch):
+    paths = _fixture(tmp_path, monkeypatch)[1]
+    for role, path in paths.as_dict().items():
+        monkeypatch.setitem(tx.PRODUCTION, role, path)
+    arbitrary = tmp_path / "arbitrary-provider.db"
+    sqlite3.connect(arbitrary).close()
+    unsafe = BatchAddTickerPaths(
+        arbitrary, paths.canonical_db, paths.analysis_db, paths.market_db, paths.taxonomy_db,
+    )
+    operation = tx.ProductionOperation(
+        AdminOperationType.ADD_TICKERS,
+        ("provider", "canonical", "analysis"),
+        lambda *args: {},
+        lambda *args: {},
+        production_validate_preview=lambda *args: (_ for _ in ()).throw(AssertionError("must not run")),
+    )
+
+    with pytest.raises(PermissionError, match="EXACT_PRODUCTION_PATHS_REQUIRED"):
+        tx.run_transaction(
+            operation,
+            preview_payload_path=tmp_path / "missing.json",
+            preview_fingerprint="preview-fp",
+            test_run_id="fresh-test",
+            source_paths=unsafe,
+            production_intent=True,
+        )
+
+
 def test_post_replacement_failure_restores_analysis_and_add_sources(tmp_path, monkeypatch):
     op, paths, kwargs = _fixture(tmp_path, monkeypatch, operation=AdminOperationType.ADD_TICKERS,
                                  roles=("provider", "canonical", "analysis"), source_mutation=True)

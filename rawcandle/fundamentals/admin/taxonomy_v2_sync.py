@@ -223,5 +223,5 @@ def run_production_apply(
         TAXONOMY, preview_payload_path=preview_payload_path,
         preview_fingerprint=preview_fingerprint, test_run_id=test_run_id,
         source_paths=source_paths, run_root=run_root, backup_root=backup_root,
-        production_intent=True,
+        production_intent=True, progress_callback=progress_callback,
     )

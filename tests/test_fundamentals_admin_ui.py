@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -20,11 +21,13 @@ from rawcandle.fundamentals.admin.history import AdminRunHistory
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
     build_operation_summary,
+    final_status_message,
     render_operation_report,
     resolve_operation_report_download,
     taxonomy_preview_presentation,
     write_operation_report,
 )
+from rawcandle.fundamentals.admin.production_transaction import render_production_report
 from rawcandle.fundamentals.admin.ui_service import (
     AdminOperationCapability,
     AdminUIHistoryEntry,
@@ -652,7 +655,7 @@ def test_taxonomy_no_change_ui_has_one_summary_and_no_actions() -> None:
     assert controls.production_apply_button.visible is False
     assert controls.production_apply_button.disabled is True
     assert controls.progress_summary.value == "17 of 17 stages completed"
-    assert controls.progress_details.controls[0].expanded is False
+    assert controls.progress_details.controls[0].expanded is True
     technical = "\n".join(control.value for control in controls.technical_details_column.controls)
     assert "f" * 64 in technical
     assert "a" * 64 in technical
@@ -854,9 +857,10 @@ def test_history_refresh_after_taxonomy_preview_and_action_label(tmp_path: Path)
     controls.preview_button.on_click(None)
     row = controls.history_column.controls[0]
     assert row.controls[1].value == "Taxonomy"
-    assert row.controls[2].value == "No changes"
-    assert row.controls[3].value == "350 memberships"
-    assert row.controls[4].value == "Administration run"
+    assert row.controls[2].value == "Preview"
+    assert row.controls[3].value == "No changes"
+    assert row.controls[4].value == "350 memberships"
+    assert row.controls[5].value == "Administration run"
     assert controls.copy_apply_button.visible is False
     assert controls.production_apply_button.visible is False
     row.controls[-2].on_click(None)
@@ -865,3 +869,103 @@ def test_history_refresh_after_taxonomy_preview_and_action_label(tmp_path: Path)
     assert "Operation report: available" in controls.history_detail_field.value
     row.controls[-1].on_click(None)
     assert controls.report_button.visible is True
+
+
+@pytest.mark.parametrize(
+    ("outcome", "failed_stage", "expected"),
+    [
+        ("COMPLETED", None, "Production update completed successfully."),
+        ("FAILED", "PREFLIGHT", "Production update failed before any production database changes were made."),
+        ("FAILED_ROLLED_BACK", "POSTFLIGHT", "All production database changes were rolled back successfully."),
+        ("CRITICAL_ROLLBACK_FAILED", "POSTFLIGHT", "Immediate operator review is required."),
+    ],
+)
+def test_production_final_status_is_derived_from_backend_outcome(outcome, failed_stage, expected) -> None:
+    result = {"mode": "PRODUCTION_APPLY", "outcome": outcome, "failed_stage": failed_stage}
+    message = final_status_message(result)
+    assert expected in message
+    if outcome != "COMPLETED":
+        assert message != "Production update completed successfully."
+
+
+def test_progress_details_retain_lines_and_respect_manual_scroll() -> None:
+    class Service:
+        def capabilities(self):
+            return (AdminOperationCapability("ADD_TICKERS", True, True, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def preview(self, operation_type, **kwargs):
+            callback = kwargs["progress_callback"]
+            for number in range(1, 6):
+                callback({"current_stage_number": number, "total_declared_stages": 12, "current_stage_id": f"STAGE_{number}", "stage_state": "COMPLETED", "message": f"Line {number}"})
+            controls.progress_field.on_scroll(SimpleNamespace(pixels=0, max_scroll_extent=500))
+            for number in range(6, 13):
+                callback({"current_stage_number": number, "total_declared_stages": 12, "current_stage_id": f"STAGE_{number}", "stage_state": "COMPLETED", "message": f"Line {number}"})
+            return AdminUIRunResult(
+                status="COMPLETED", message="Preview completed.", run_id="progress-run",
+                outcome="COMPLETED", mode="PREVIEW", preview_fingerprint="f" * 64,
+                preview_payload_path="/tmp/progress.json", summary_rows=("Preview completed",),
+            )
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=Service())
+    controls.tickers_field.value = "NVDA"
+    controls.tickers_field.on_change(None)
+    controls.preview_button.on_click(None)
+
+    assert controls.progress_field.height == 230
+    assert len(controls.progress_field.controls) == 13
+    assert "STAGE_1" in controls.progress_field.value
+    assert "STAGE_12" in controls.progress_field.value
+    assert controls.progress_field.auto_scroll is False
+    assert controls.progress_summary.value == "12 of 12 stages completed"
+    assert controls.progress_details.controls[0].expanded is True
+
+
+def test_add_tickers_reports_use_stage_and_user_facing_language() -> None:
+    preview = {
+        "run_id": "preview-run", "operation_type": "ADD_TICKERS", "mode": "PREVIEW",
+        "outcome": "COMPLETED", "started_at_utc": "2026-09-19T10:00:00Z",
+        "completed_at_utc": "2026-09-19T10:00:05Z", "summary_counts": {"eligible": 1},
+        "items": [{"ticker": "TSEM", "status": "ELIGIBLE", "reason": "Eligible from provider identity, price, classification and fundamentals evidence."}],
+    }
+    copy = {
+        **preview, "run_id": "copy-run", "mode": "COPY_ONLY_APPLY",
+        "summary_counts": {"applied": 1},
+        "items": [{"ticker": "TSEM", "status": "APPLIED", "reason": "Applied on copy-lane."}],
+    }
+    preview_report = render_operation_report(run_id="preview-run", result=preview)
+    copy_report = render_operation_report(run_id="copy-run", result=copy)
+
+    assert "Stage: Preview" in preview_report
+    assert "TSEM: Eligible - from provider identity" in preview_report
+    assert "Eligible - Eligible" not in preview_report
+    assert ".." not in preview_report
+    assert "Next step: run Test on copies." in preview_report
+    assert "Stage: Test on copies" in copy_report
+    assert "TSEM: Successfully tested on copies." in copy_report
+    assert "copy-lane" not in copy_report
+    assert "Next step: Production update is available" in copy_report
+
+
+def test_production_preflight_failure_report_is_plain_and_technical_details_are_secondary() -> None:
+    result = {
+        "run_id": "production-failure", "operation_type": "ADD_TICKERS", "mode": "PRODUCTION_APPLY",
+        "outcome": "FAILED", "failed_stage": "PREFLIGHT",
+        "started_at_utc": "2026-09-19T10:00:00Z", "completed_at_utc": "2026-09-19T10:00:03Z",
+        "preview_fingerprint": "f" * 64, "error": "PermissionError: INTERNAL_PATH_FAILURE",
+    }
+    report = render_production_report(result)
+    main, appendix = report.split("## Technical Appendix", 1)
+
+    assert "Operation: Add Tickers" in main
+    assert "Stage: Production update" in main
+    assert "Result: Failed" in main
+    assert "Failure phase" not in main
+    assert "No production database writes were performed." in main
+    assert "No backup was required." in main
+    assert "No rollback was required." in main
+    assert "Requested change: null" not in report
+    assert "Failure phase: `PREFLIGHT`" in appendix
+    assert "PermissionError: INTERNAL_PATH_FAILURE" in appendix

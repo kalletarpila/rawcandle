@@ -184,15 +184,14 @@ def build_fundamentals_admin_page(
         max_lines=5,
         visible=False,
     )
-    progress_field = ft.TextField(
-        label="Progress",
-        value="",
-        read_only=True,
-        multiline=True,
-        min_lines=2,
-        max_lines=5,
+    progress_field = ft.ListView(
+        height=230,
+        spacing=4,
+        padding=8,
+        auto_scroll=True,
         visible=False,
     )
+    progress_field.value = ""
     history_detail_field = ft.TextField(
         label="Selected run",
         value="Select a run from history to inspect its durable progress and report availability.",
@@ -241,6 +240,28 @@ def build_fundamentals_admin_page(
     selected_history_run_id: str | None = None
     operation_running = False
     last_progress_count: tuple[object, object] | None = None
+    progress_lines: list[str] = []
+    progress_follow_latest = True
+
+    def render_progress(*, replace: list[str] | None = None, append: str | None = None) -> None:
+        nonlocal progress_lines
+        if replace is not None:
+            progress_lines = list(replace)
+        if append:
+            progress_lines.append(append)
+        progress_lines = progress_lines[-200:]
+        progress_field.value = "\n".join(progress_lines)
+        progress_field.controls = [ft.Text(line, selectable=True) for line in progress_lines]
+        progress_field.auto_scroll = progress_follow_latest
+
+    def on_progress_scroll(event: Any) -> None:
+        nonlocal progress_follow_latest
+        pixels = float(getattr(event, "pixels", 0) or 0)
+        maximum = float(getattr(event, "max_scroll_extent", 0) or 0)
+        progress_follow_latest = maximum - pixels <= 24
+        progress_field.auto_scroll = progress_follow_latest
+
+    progress_field.on_scroll = on_progress_scroll
 
     def current_signature() -> tuple[object, ...]:
         return _material_preview_signature(
@@ -344,9 +365,10 @@ def build_fundamentals_admin_page(
                 ft.Row(
                     [
                         ft.Text(when, width=185, weight=weight),
-                        ft.Text(operation_label, width=210, weight=weight),
-                        ft.Text(title, width=150, weight=weight),
-                        ft.Text(count_text, width=150, weight=weight),
+                        ft.Text(operation_label, width=190, weight=weight),
+                        ft.Text(item.stage, width=155, weight=weight),
+                        ft.Text(title, width=135, weight=weight),
+                        ft.Text(count_text, width=125, weight=weight),
                         ft.Text(category, width=170, tooltip=f"run_id={item.run_id}; mode={item.mode}"),
                         ft.IconButton(
                             icon=ft.Icons.INFO,
@@ -384,12 +406,10 @@ def build_fundamentals_admin_page(
                 f"Operation report: {report_text}"
             )
             selected_history_run_id = run_id
-            progress_field.value = (
-                "Still working." if progress.status == "running" else "Selected run progress loaded."
-            ) + (
-                f"\n{progress.current_stage} "
-                f"({progress.current_stage_number or '?'}/{progress.total_declared_stages or '?'})"
-            )
+            render_progress(replace=[
+                "Still working." if progress.status == "running" else "Selected run progress loaded.",
+                f"{progress.current_stage} ({progress.current_stage_number or '?'}/{progress.total_declared_stages or '?'})",
+            ])
         except Exception:
             history_detail_field.value = f"Run: {run_id}\nStatus: unavailable or incomplete."
         refresh_history()
@@ -404,11 +424,12 @@ def build_fundamentals_admin_page(
         progress_details.controls[0].expanded = True
         progress_summary.visible = False
         last_progress_count = (event.get("current_stage_number", "?"), event.get("total_declared_stages", "?"))
-        progress_field.value = (
+        progress_line = (
             f"[{event.get('current_stage_number', '?')}/{event.get('total_declared_stages', '?')}] "
-            f"{event.get('current_stage_id', 'UNKNOWN')} - {event.get('stage_state', 'UNKNOWN')}\n"
+            f"{event.get('current_stage_id', 'UNKNOWN')} - {event.get('stage_state', 'UNKNOWN')}: "
             f"{event.get('message', '')}"
         )
+        render_progress(append=progress_line)
         if hasattr(page, "update"):
             page.update()
 
@@ -473,7 +494,7 @@ def build_fundamentals_admin_page(
                 progress_summary.value = "Preview completed" if is_preview else "Operation completed"
             progress_summary.visible = True
             progress_details.visible = True
-            progress_details.controls[0].expanded = False
+            progress_details.controls[0].expanded = True
         refresh_history()
         technical_details_column.controls = [
             ft.Text(f"Run id: {result.run_id or 'not recorded'}"),
@@ -524,7 +545,7 @@ def build_fundamentals_admin_page(
             page.update()
 
     def run_guarded(button: Any, fn: Any) -> None:
-        nonlocal operation_running, last_progress_count
+        nonlocal operation_running, last_progress_count, progress_follow_latest
         if button.disabled:
             return
         if button is not preview_button:
@@ -536,7 +557,8 @@ def build_fundamentals_admin_page(
         production_apply_button.disabled = True
         progress_section.visible = True
         progress_field.visible = True
-        progress_field.value = "Starting..."
+        progress_follow_latest = True
+        render_progress(replace=["Starting..."])
         progress_summary.visible = False
         progress_details.visible = True
         progress_details.controls[0].expanded = True
@@ -711,9 +733,10 @@ def build_fundamentals_admin_page(
             ft.Row(
                 [
                     ft.Text("Time", width=185, weight=ft.FontWeight.BOLD),
-                    ft.Text("Operation", width=210, weight=ft.FontWeight.BOLD),
-                    ft.Text("Result", width=150, weight=ft.FontWeight.BOLD),
-                    ft.Text("Count", width=150, weight=ft.FontWeight.BOLD),
+                    ft.Text("Operation", width=190, weight=ft.FontWeight.BOLD),
+                    ft.Text("Stage", width=155, weight=ft.FontWeight.BOLD),
+                    ft.Text("Result", width=135, weight=ft.FontWeight.BOLD),
+                    ft.Text("Count", width=125, weight=ft.FontWeight.BOLD),
                     ft.Text("Category", width=170, weight=ft.FontWeight.BOLD),
                     ft.Container(width=48),
                     ft.Container(width=48),

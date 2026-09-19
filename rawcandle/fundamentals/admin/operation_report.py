@@ -15,6 +15,20 @@ from rawcandle.io_atomic import write_text_atomic
 
 OPERATION_REPORT_NAME = "operation_report.md"
 
+STAGE_LABELS = {
+    "PREVIEW": "Preview",
+    "CURRENT_STATE_AUDIT": "Preview",
+    "CANDIDATE_PREVIEW": "Preview",
+    "PROTECTED_PRODUCTION_PREVIEW": "Preview",
+    "ACTIVE_TAXONOMY_PREVIEW": "Preview",
+    "READ_ONLY_AUDIT": "Preview",
+    "COPY_ONLY_APPLY": "Test on copies",
+    "PRODUCTION_APPLY": "Production update",
+    "PRODUCTION_NO_CHANGE_APPLY": "Production update",
+    "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY": "Production update",
+    "TRANSACTION_REHEARSAL": "Production update",
+}
+
 
 @dataclass(frozen=True)
 class OperationReportSummary:
@@ -51,6 +65,43 @@ def _mapping(value: Any) -> Mapping[str, Any]:
 
 def _sequence(value: Any) -> list[Any]:
     return list(value) if isinstance(value, (list, tuple)) else []
+
+
+def operation_stage(mode: Any) -> str:
+    return STAGE_LABELS.get(str(mode or ""), "Recorded run")
+
+
+def operation_result(result: Mapping[str, Any]) -> str:
+    outcome = str(result.get("outcome") or "RECORDED").upper()
+    if outcome in {"COMPLETED", "APPLIED", "READY_TO_APPLY"}:
+        return "Completed"
+    if outcome == "NO_CHANGE":
+        return "No changes"
+    if outcome in {"FAILED_ROLLED_BACK", "ROLLED_BACK"}:
+        return "Rolled back"
+    if outcome == "CRITICAL_ROLLBACK_FAILED":
+        return "Critical rollback failure"
+    if outcome in {"FAILED", "ERROR", "INTERRUPTED"}:
+        return "Failed"
+    return outcome.replace("_", " ").title()
+
+
+def final_status_message(result: Mapping[str, Any]) -> str:
+    stage = operation_stage(result.get("mode"))
+    outcome = str(result.get("outcome") or "").upper()
+    if stage == "Production update":
+        if outcome in {"COMPLETED", "NO_CHANGE"}:
+            return "Production update completed successfully."
+        if outcome in {"FAILED_ROLLED_BACK", "ROLLED_BACK"}:
+            return "Production update failed. All production database changes were rolled back successfully."
+        if outcome == "CRITICAL_ROLLBACK_FAILED":
+            return "CRITICAL: Production update failed and rollback did not complete. Immediate operator review is required."
+        return "Production update failed before any production database changes were made."
+    if stage == "Test on copies":
+        return "Test on copies completed successfully." if outcome == "COMPLETED" else "Test on copies failed."
+    if stage == "Preview":
+        return "Preview completed." if outcome in {"COMPLETED", "NO_CHANGE"} else "Preview failed."
+    return f"{stage}: {operation_result(result)}."
 
 
 def taxonomy_preview_presentation(result: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -204,31 +255,26 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
     warnings = _sequence(result.get("warnings"))
     blockers = _sequence(result.get("blockers"))
     duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
-    operation = {
-        "ADD_TICKERS": "Add Tickers",
-        "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
-        "CHECK_UPDATE_TAXONOMY": "Taxonomy",
-    }.get(result.get("operation_type"), "Administration")
-    outcome = str(result.get("outcome") or "Recorded").replace("_", " ").title()
-    rows = [f"{operation}: {outcome}"]
+    stage = operation_stage(result.get("mode"))
+    rows = [final_status_message(result)]
     if duration is not None:
         minutes, seconds = divmod(round(duration), 60)
         rows.append(f"Completed in {minutes} min {seconds} sec")
     if counts:
-        for key in ("requested", "accepted", "changed", "already_present", "failed"):
+        for key in ("requested", "eligible", "applied", "accepted", "changed", "already_present", "failed"):
             if key in counts:
                 rows.append(f"{str(key).replace('_', ' ').title()}: {counts[key]}.")
     if downstream:
         active_taxonomy = _mapping(downstream.get("active_taxonomy"))
         if active_taxonomy:
-            rows.append(
-                "Active taxonomy: " + str(active_taxonomy.get("domain", "")) + " "
-                + str(active_taxonomy.get("version", "")) + "; semantic fingerprint "
-                + str(active_taxonomy.get("semantic_fingerprint", "")) + "."
-            )
+            version = active_taxonomy.get("version")
+            if isinstance(version, Mapping):
+                version = version.get("taxonomy_version_code") or version.get("version")
+            rows.append("Active taxonomy: " + str(version or active_taxonomy.get("domain", "unknown")) + ".")
         invocation_counts = downstream.get("invocation_counts")
         if isinstance(invocation_counts, Mapping):
-            rows.append("Downstream: " + ", ".join(f"{str(key).replace('_', ' ').title()} {invocation_counts[key]} run(s)" for key in sorted(invocation_counts)) + ".")
+            if stage != "Preview" and any(invocation_counts.values()):
+                rows.append("Full V2 analysis, RP V2 and RV completed successfully.")
         elif result.get("mode") in {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW"}:
             rows.append("Potential downstream work was evaluated. No calculations were run during Preview.")
     if rollback:
@@ -285,8 +331,20 @@ def render_operation_report(
         lines.extend(["", f"## {title}", ""])
         lines.extend(f"- {row}" for row in rows if row)
 
+    duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
+    duration_text = "Not reached"
+    if duration is not None:
+        minutes, seconds = divmod(round(duration), 60)
+        duration_text = f"{minutes} min {seconds} sec"
+    executive = [
+        f"Operation: {operation}",
+        f"Stage: {operation_stage(mode)}",
+        f"Result: {operation_result(result)}",
+        f"Duration: {duration_text}",
+        *summary_rows,
+    ]
     lines = ["# Fundamentals Administration Operation Report"]
-    section(lines, "Executive Summary", summary_rows)
+    section(lines, "Executive Summary", executive)
 
     checked = [f"Operation: {operation}."]
     if taxonomy:
@@ -322,18 +380,25 @@ def render_operation_report(
             status = item.get("status") or item.get("decision")
             reason = item.get("reason")
             if ticker and status:
-                line = f"{ticker}: {str(status).replace('_', ' ').title()}"
-                if isinstance(reason, str) and reason and "/" not in reason and "\\" not in reason:
-                    line += f" - {reason}"
-                changes.append(line + ".")
+                status_label = str(status).replace("_", " ").title()
+                clean_reason = str(reason or "").strip().rstrip(".")
+                if mode == "COPY_ONLY_APPLY" and str(status).upper() == "APPLIED":
+                    line = f"{ticker}: Successfully tested on copies"
+                else:
+                    if clean_reason.lower().startswith(status_label.lower() + " from"):
+                        clean_reason = clean_reason[len(status_label):].strip()
+                    line = f"{ticker}: {status_label}"
+                    if clean_reason and "/" not in clean_reason and "\\" not in clean_reason:
+                        line += f" - {clean_reason}"
+                changes.append(line.rstrip(".") + ".")
         if not changes:
             changes = ["See the per-item run evidence for detailed changes."]
     section(lines, "Changes Found", changes)
 
     if preview_only:
-        actions = ["Preview checked the current state and recorded its findings.", "No database writes were performed."]
+        actions = ["Preview checked the current state and recorded its findings.", "No database writes were performed.", "Next step: run Test on copies."]
     elif mode == "COPY_ONLY_APPLY":
-        actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed."]
+        actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed.", "Next step: Production update is available after this successful test."]
     elif result.get("outcome") == "NO_CHANGE":
         actions = ["No production change was required."]
     else:
@@ -372,7 +437,7 @@ def render_operation_report(
     else:
         outcome = str(result.get("outcome") or "Recorded").replace("_", " ").title()
         final = [f"Result: {outcome}."]
-        recommendation = result.get("recommended_next_action")
+        recommendation = None if mode in {"PREVIEW", "COPY_ONLY_APPLY"} else result.get("recommended_next_action")
         if isinstance(recommendation, str) and recommendation and "/" not in recommendation and "\\" not in recommendation:
             final.append(recommendation)
     section(lines, "Final Result", final)
@@ -384,6 +449,9 @@ def render_operation_report(
     appendix.append(f"Report content fingerprint: `{fingerprint({'result': result, 'request': request_data, 'events': events or []})}`")
     if counts:
         appendix.append("Structured counts: " + ", ".join(f"{key}={counts[key]}" for key in sorted(counts)))
+    active_taxonomy = _mapping(downstream.get("active_taxonomy"))
+    if active_taxonomy.get("semantic_fingerprint"):
+        appendix.append(f"Active taxonomy semantic fingerprint: `{active_taxonomy['semantic_fingerprint']}`")
     artifacts = _mapping(result.get("artifacts"))
     if artifacts:
         appendix.append("Artifact files: " + ", ".join(sorted({Path(str(value)).name for value in artifacts.values() if isinstance(value, str)})))

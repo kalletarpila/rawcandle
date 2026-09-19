@@ -274,6 +274,141 @@ def test_exact_production_path_validation_rejects_alias_symlink_and_uri(tmp_path
         ))
 
 
+def test_exact_production_validator_rebuilds_plan_without_phase13d_copy_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import rawcandle.fundamentals.admin.batch_add_tickers as batch
+    import rawcandle.fundamentals.admin.production_operations as operations
+
+    paths = _generic_paths(tmp_path / "source")
+    monkeypatch.setattr(batch, "DEFAULT_ARCHIVE", _archive(tmp_path / "source.zip"))
+    preview = run_preview(
+        "NEWC",
+        source_paths=paths,
+        run_root=tmp_path / "runs",
+        temp_root=tmp_path / "temp",
+    )
+    payload = json.loads(Path(preview["phase13d_preview_payload_path"]).read_text(encoding="utf-8"))
+    active_taxonomy = payload["phase13g2_preview"]["source_state"]["active_taxonomy"]
+    monkeypatch.setattr(operations, "_taxonomy", lambda _paths: active_taxonomy)
+    for role, path in paths.as_dict().items():
+        monkeypatch.setitem(batch.PRODUCTION, role, path)
+
+    validated = operations._add_validate_production(paths, payload, preview["preview_fingerprint"])
+
+    assert validated["no_change"] is False
+    assert validated["plan"]["accepted_tickers"] == ["NEWC"]
+
+
+def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import rawcandle.fundamentals.admin.production_operations as operations
+    import rawcandle.fundamentals.admin.production_transaction as transaction
+
+    paths = _generic_paths(tmp_path / "source")
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.batch_add_tickers.DEFAULT_ARCHIVE",
+        _archive(tmp_path / "source.zip"),
+    )
+    active_taxonomy = {
+        "domain": "dc_ecosystem",
+        "version": "fixture-v2",
+        "semantic_fingerprint": "fixture-taxonomy",
+    }
+
+    def downstream(*args, **kwargs):
+        return {
+            "package": {"first_apply": {"outcome": "APPLIED"}},
+            "relative_position": {"apply": {"outcome": "APPLIED"}},
+            "relative_valuation": {"first_apply": {"outcome": "ACTIVATED"}},
+            "active_taxonomy": active_taxonomy,
+            "invocation_counts": {
+                "full_v2_rebuild": 1,
+                "package": 1,
+                "relative_position": 1,
+                "relative_valuation": 1,
+            },
+        }
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.batch_add_tickers._run_authoritative_downstream",
+        downstream,
+    )
+    run_root = tmp_path / "runs"
+    preview = run_preview("NEWC", source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp")
+    tested = run_apply(
+        preview_payload_path=Path(preview["phase13d_preview_payload_path"]),
+        preview_fingerprint=preview["preview_fingerprint"],
+        source_paths=paths,
+        run_root=run_root,
+        temp_root=tmp_path / "temp",
+        confirm_apply=True,
+    )
+    tested_result_path = Path(tested["artifact_dir"]) / "result.json"
+    tested_result = json.loads(tested_result_path.read_text(encoding="utf-8"))
+    tested_result["downstream"]["active_taxonomy"] = active_taxonomy
+    tested_result_path.write_text(json.dumps(tested_result), encoding="utf-8")
+    monkeypatch.setattr(operations, "_taxonomy", lambda _paths: None)
+    monkeypatch.setattr(
+        transaction,
+        "_source_fingerprints",
+        lambda current: {
+            role: transaction._sha256(path)
+            for role, path in current.as_dict().items()
+        },
+    )
+    monkeypatch.setattr(transaction, "database_inventory", lambda path: {"quick_check": "ok"})
+
+    def rebuild(target, sources, **kwargs):
+        with sqlite3.connect(target) as conn:
+            conn.execute("CREATE TABLE rebuilt(status TEXT NOT NULL)")
+            conn.execute("INSERT INTO rebuilt VALUES('READY')")
+        return {
+            "status": "READY",
+            "target": str(target),
+            "package": {"rows": {"companies": 1}},
+            "validation": {"rv_input_count": 1},
+            "taxonomy_dependency": active_taxonomy,
+            "rv": {"company_rows_inserted": 1, "peer_rows_inserted": 1, "component_rows_inserted": 1},
+        }
+
+    monkeypatch.setattr(transaction, "rebuild_v2_analysis", rebuild)
+    monkeypatch.setattr(transaction, "validate_rebuild", lambda *args, **kwargs: {"status": "READY"})
+    monkeypatch.setattr(operations.add, "reconcile_canonical", lambda *args, **kwargs: {"outcome": "APPLIED"})
+    monkeypatch.setattr(operations.add, "rebuild_ttm", lambda *args, **kwargs: {"outcome": "APPLIED"})
+    monkeypatch.setattr(operations.add.structural_break, "apply_contract", lambda *args, **kwargs: {"outcome": "APPLIED"})
+
+    def validate(paths_arg, payload_arg, expected):
+        validated = operations._add_validate(paths_arg, payload_arg, expected)
+        validated["taxonomy_dependency"] = active_taxonomy
+        return validated
+
+    rehearsal_operation = transaction.ProductionOperation(
+        operations.ADD_TICKERS.operation_type,
+        operations.ADD_TICKERS.written_roles,
+        validate,
+        operations.ADD_TICKERS.mutate_sources,
+    )
+
+    rehearsed = transaction.run_transaction(
+        rehearsal_operation,
+        preview_payload_path=Path(preview["phase13d_preview_payload_path"]),
+        preview_fingerprint=preview["preview_fingerprint"],
+        test_run_id=tested["run_id"],
+        source_paths=paths,
+        run_root=run_root,
+        backup_root=tmp_path / "backups",
+        scheduler_log_dir=str(tmp_path / "scheduler"),
+        lock_path=tmp_path / "admin.lock",
+        rehearsal=True,
+    )
+
+    assert preview["outcome"] == "COMPLETED"
+    assert tested["outcome"] == "COMPLETED"
+    assert rehearsed["outcome"] == "COMPLETED", rehearsed
+    assert rehearsed["source_writes"]["tickers"] == ["NEWC"]
+    assert rehearsed["full_v2_rebuild"]["status"] == "READY"
+    assert rehearsed["atomic_replacement"]["status"] == "REPLACED"
+    assert rehearsed["postflight"]["status"] == "READY"
+
+
 def test_cli_preview_smoke(tmp_path: Path, capsys) -> None:
     from rawcandle.cli.run_fundamentals_admin_add_tickers import main
 

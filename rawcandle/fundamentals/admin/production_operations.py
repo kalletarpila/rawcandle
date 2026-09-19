@@ -26,7 +26,13 @@ def _assert_preview_hash(preview: Mapping[str, Any], expected: str) -> None:
         raise ValueError("ADMIN_PRODUCTION_PREVIEW_FINGERPRINT_MISMATCH")
 
 
-def _add_validate(paths: BatchAddTickerPaths, payload: Mapping[str, Any], expected: str) -> dict[str, Any]:
+def _add_validate(
+    paths: BatchAddTickerPaths,
+    payload: Mapping[str, Any],
+    expected: str,
+    *,
+    exact_production_paths: bool = False,
+) -> dict[str, Any]:
     preview = payload.get("phase13g2_preview") or {}
     _assert_preview_hash(preview, expected)
     add._assert_preview_not_stale(paths, payload)
@@ -46,14 +52,29 @@ def _add_validate(paths: BatchAddTickerPaths, payload: Mapping[str, Any], expect
     )
     if not request.normalized_inputs or request.rejected_inputs:
         raise ValueError("ADMIN_ADD_TICKERS_VALID_BATCH_REQUIRED")
-    _, raw = add.build_preview_from_copy(
-        paths, request, now=payload.get("created_at_utc"),
-        network_allowed=bool(plan.get("network_allowed")),
-    )
-    if raw["generic_batch_plan"]["plan_fingerprint"] != plan.get("plan_fingerprint"):
+    if exact_production_paths:
+        add.validate_exact_production_paths(paths)
+        rebuilt_plan = add.build_generic_batch_plan(
+            paths,
+            request,
+            now=payload.get("created_at_utc"),
+            network_allowed=bool(plan.get("network_allowed")),
+        ).safe_dict(include_rows=True)
+    else:
+        _, raw = add.build_preview_from_copy(
+            paths, request, now=payload.get("created_at_utc"),
+            network_allowed=bool(plan.get("network_allowed")),
+        )
+        rebuilt_plan = raw["generic_batch_plan"]
+    if rebuilt_plan["plan_fingerprint"] != plan.get("plan_fingerprint"):
         raise ValueError("ADMIN_ADD_TICKERS_STALE_PLAN_CONTENT_CHANGED")
     eligible = [item for item in plan.get("items", []) if item.get("status") == "ELIGIBLE"]
     return {"as_of_date": str(payload["created_at_utc"])[:10], "taxonomy_dependency": active_taxonomy, "plan": plan, "request": request.as_dict(), "no_change": not eligible}
+
+
+def _add_validate_production(paths: BatchAddTickerPaths, payload: Mapping[str, Any], expected: str) -> dict[str, Any]:
+    """Validate the saved plan only after the transaction selected exact production mode."""
+    return _add_validate(paths, payload, expected, exact_production_paths=True)
 
 
 def _add_mutate(paths: BatchAddTickerPaths, preview: Mapping[str, Any]) -> dict[str, Any]:
@@ -109,6 +130,12 @@ def _taxonomy_mutate(paths: BatchAddTickerPaths, preview: Mapping[str, Any]) -> 
     return {"outcome": "NOT_REQUIRED", "taxonomy": "READ_ONLY_ACTIVE_ANALYSIS_DB"}
 
 
-ADD_TICKERS = ProductionOperation(AdminOperationType.ADD_TICKERS, ("provider", "canonical", "analysis"), _add_validate, _add_mutate)
+ADD_TICKERS = ProductionOperation(
+    AdminOperationType.ADD_TICKERS,
+    ("provider", "canonical", "analysis"),
+    _add_validate,
+    _add_mutate,
+    production_validate_preview=_add_validate_production,
+)
 SECTOR_INDUSTRY = ProductionOperation(AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY, ("analysis",), _sector_validate, _sector_mutate)
 TAXONOMY = ProductionOperation(AdminOperationType.CHECK_UPDATE_TAXONOMY, ("analysis",), _taxonomy_validate, _taxonomy_mutate)
