@@ -277,6 +277,17 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
     taxonomy = taxonomy_preview_presentation(result)
     if taxonomy:
         return _taxonomy_preview_rows(taxonomy, result)
+    if result.get("operation_type") == "REFRESH_FUNDAMENTALS":
+        counts = _mapping(result.get("summary_counts"))
+        discovery = _mapping(_mapping(result.get("refresh_preview")).get("discovery"))
+        return (
+            final_status_message(result),
+            f"Sharadar discovery: {discovery.get('returned_source_rows', 0)} rows across {discovery.get('unique_changed_source_tickers', 0)} tickers.",
+            f"Known tickers with effective changes: {counts.get('effective_changed_known', 0)}.",
+            f"New quarter: {counts.get('NEW_QUARTER', 0)}; historical revision: {counts.get('HISTORICAL_REVISION', 0)}; both: {counts.get('NEW_QUARTER_AND_REVISION', 0)}.",
+            f"Source removal: {counts.get('SOURCE_REMOVAL', 0)}; no effective change: {counts.get('NO_EFFECTIVE_CHANGE', 0)}.",
+            f"Not in canonical universe: {counts.get('NOT_IN_CANONICAL_UNIVERSE', 0)}; review required: {counts.get('REVIEW_REQUIRED', 0)}.",
+        )
     counts = _mapping(result.get("summary_counts"))
     downstream = _mapping(result.get("downstream"))
     rollback = _mapping(result.get("rollback"))
@@ -355,6 +366,7 @@ def render_operation_report(
     taxonomy = taxonomy_preview_presentation(result)
     operation = {
         "ADD_TICKERS": "Add Tickers",
+        "REFRESH_FUNDAMENTALS": "Refresh Fundamentals",
         "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
         "CHECK_UPDATE_TAXONOMY": "Taxonomy",
     }.get(str(result.get("operation_type")), "Administration")
@@ -643,7 +655,11 @@ def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT) -> Opera
     result = _load_json(run_dir / "result.json") or {}
     request = _load_json(run_dir / "request.json")
     progress = _load_json(run_dir / "progress_status.json") or _load_json(run_dir / "status.json")
-    if result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"} and "write_set" in result:
+    if result.get("operation_type") == "REFRESH_FUNDAMENTALS" and result.get("refresh_preview"):
+        from rawcandle.fundamentals.admin.refresh_fundamentals import _render_refresh_report
+
+        report = _render_refresh_report(result)
+    elif result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"} and "write_set" in result:
         from rawcandle.fundamentals.admin.production_transaction import render_production_report
         report = render_production_report(result)
     else:

@@ -345,7 +345,7 @@ def test_admin_ui_service_runs_preview_through_backend_boundary_and_finalizes_re
     assert service.history_entries(limit=1)[0].report_available is True
 
 
-def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> None:
+def test_admin_page_exposes_four_operations_and_downloads_exact_report() -> None:
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -415,6 +415,7 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
 
     assert [option.key for option in controls.operation_dropdown.options] == [
         "ADD_TICKERS",
+        "REFRESH_FUNDAMENTALS",
         "CHECK_UPDATE_SECTOR_INDUSTRY",
         "CHECK_UPDATE_TAXONOMY",
     ]
@@ -587,6 +588,26 @@ def test_apply_visibility_follows_backend_capability() -> None:
 
     assert controls.copy_apply_button.visible is False
     assert controls.production_apply_button.visible is False
+
+
+def test_refresh_fundamentals_is_input_free_preview_only() -> None:
+    class Service:
+        def capabilities(self):
+            return (AdminOperationCapability("REFRESH_FUNDAMENTALS", True, False, False),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=Service())
+    controls.operation_dropdown.value = "REFRESH_FUNDAMENTALS"
+    controls.operation_dropdown.on_change(None)
+
+    assert controls.tickers_field.visible is False
+    assert controls.preview_button.disabled is False
+    assert controls.copy_apply_button.visible is False
+    assert controls.production_apply_button.visible is False
+    assert controls.full_workflow_button.visible is False
+    assert "read-only" in controls.operation_guidance_field.value
 
 
 def _taxonomy_preview_result(*, outcome="COMPLETED", counts=None, blockers=None, candidate=None, mode="CURRENT_STATE_AUDIT"):

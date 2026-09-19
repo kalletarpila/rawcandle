@@ -9,7 +9,7 @@ import re
 from contextlib import contextmanager
 from typing import Any, Callable, Mapping
 
-from rawcandle.fundamentals.admin import batch_add_tickers, sector_industry, taxonomy_v2_sync
+from rawcandle.fundamentals.admin import batch_add_tickers, refresh_fundamentals, sector_industry, taxonomy_v2_sync
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, sha256_file
 from rawcandle.fundamentals.admin.full_workflow import WORKFLOW_REPORT_NAME, run_full_workflow as orchestrate_full_workflow
 from rawcandle.fundamentals.admin.history import AdminRunHistory, RunHistoryEntry, RunProgressSummary
@@ -85,9 +85,10 @@ class AdminUIHistoryEntry:
         return operation_stage(self.mode)
 
 
-_ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|check_update_sector_industry|check_update_taxonomy)_[A-Za-z0-9_]+$")
+_ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
     "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
+    "REFRESH_FUNDAMENTALS": {"PREVIEW"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
 }
@@ -102,6 +103,7 @@ class FundamentalsAdminUIService:
         add_preview: Callable[..., dict[str, Any]] = batch_add_tickers.run_preview,
         add_apply: Callable[..., dict[str, Any]] = batch_add_tickers.run_apply,
         add_production_apply: Callable[..., dict[str, Any]] = batch_add_tickers.run_production_apply,
+        refresh_preview: Callable[..., dict[str, Any]] = refresh_fundamentals.run_preview,
         sector_preview: Callable[..., dict[str, Any]] = sector_industry.run_preview,
         sector_apply: Callable[..., dict[str, Any]] = sector_industry.run_apply,
         sector_production_apply: Callable[..., dict[str, Any]] = sector_industry.run_production_apply,
@@ -116,6 +118,7 @@ class FundamentalsAdminUIService:
         self._add_preview = add_preview
         self._add_apply = add_apply
         self._add_production_apply = add_production_apply
+        self._refresh_preview = refresh_preview
         self._sector_preview = sector_preview
         self._sector_apply = sector_apply
         self._sector_production_apply = sector_production_apply
@@ -144,6 +147,7 @@ class FundamentalsAdminUIService:
     def capabilities(self) -> tuple[AdminOperationCapability, ...]:
         return (
             AdminOperationCapability("ADD_TICKERS", True, True, True),
+            AdminOperationCapability("REFRESH_FUNDAMENTALS", True, False, False),
             AdminOperationCapability("CHECK_UPDATE_SECTOR_INDUSTRY", True, True, True),
             AdminOperationCapability(
                 "CHECK_UPDATE_TAXONOMY",
@@ -181,6 +185,11 @@ class FundamentalsAdminUIService:
                 run_root=self.run_root,
                 market=market,
                 network_allowed=network_allowed,
+                progress_callback=progress_callback,
+            )
+        elif operation == "REFRESH_FUNDAMENTALS":
+            result = self._refresh_preview(
+                run_root=self.run_root,
                 progress_callback=progress_callback,
             )
         elif operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
@@ -512,7 +521,7 @@ class FundamentalsAdminUIService:
                 "COPY_ONLY_APPLY": ("applied", "accepted", "requested", "APPLIED"),
                 "PRODUCTION_APPLY": ("applied", "accepted", "requested", "APPLIED"),
             }.get(mode, ())
-            for key in (*preferred, "requested", "requested_count", "accepted", "changed", "inspected", "eligible", "applied", "ELIGIBLE", "APPLIED"):
+            for key in (*preferred, "effective_changed_known", "requested", "requested_count", "accepted", "changed", "inspected", "eligible", "applied", "ELIGIBLE", "APPLIED"):
                 if key in counts:
                     try:
                         return int(counts[key])
@@ -529,7 +538,9 @@ class FundamentalsAdminUIService:
         if taxonomy and taxonomy.get("memberships") is not None:
             return f"{taxonomy['memberships']} memberships"
         count = self._primary_count(payload)
-        return f"{count} items" if count is not None else None
+        if count is None:
+            return None
+        return f"{count} changed tickers" if payload.get("operation_type") == "REFRESH_FUNDAMENTALS" else f"{count} items"
 
     def _duration_seconds(self, payload: Mapping[str, Any]) -> float | None:
         started = payload.get("started_at_utc")

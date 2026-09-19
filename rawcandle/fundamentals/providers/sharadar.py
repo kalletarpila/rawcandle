@@ -217,6 +217,7 @@ class SharadarClient:
         start_date: str | None = None,
         end_date: str | None = None,
         limit: int | None = None,
+        filters: Mapping[str, str] | None = None,
         use_legacy_alias: bool = False,
     ) -> SharadarResult:
         params: dict[str, str] = {}
@@ -234,6 +235,10 @@ class SharadarClient:
             params["end_date"] = end_date
         if limit is not None:
             params["limit"] = str(limit)
+        for key, value in (filters or {}).items():
+            if key in params:
+                raise ValueError(f"duplicate Sharadar fundamentals filter: {key}")
+            params[str(key)] = str(value)
         endpoint = "/data/SF1" if use_legacy_alias else "/data/fundamentals"
         result = self._request("GET", endpoint, params, auth=True)
         if result.ok and dimension:

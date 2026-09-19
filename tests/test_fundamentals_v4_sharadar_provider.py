@@ -6,6 +6,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
+import pytest
+
 from rawcandle.fundamentals.providers.base import ProviderObservation
 from rawcandle.fundamentals.providers.sharadar import (
     AUTH_OK,
@@ -131,6 +133,21 @@ def test_field_projection_query() -> None:
     opener = FakeOpener([FakeResponse(200, [{"ticker": "AAPL", "revenue": 1}])])
     SharadarClient(api_key="key", opener=opener).fundamentals(ticker="AAPL", fields=["ticker", "revenue"])
     assert "fields=ticker%2Crevenue" in opener.requests[0].full_url
+
+
+def test_generic_table_filter_supports_lastupdated_range() -> None:
+    opener = FakeOpener([FakeResponse(200, [])])
+    SharadarClient(api_key="key", opener=opener).fundamentals(
+        dimension="ARQ",
+        filters={"lastupdated.gte": "2026-09-06"},
+    )
+    assert "lastupdated.gte=2026-09-06" in opener.requests[0].full_url
+
+
+def test_generic_table_filter_cannot_override_typed_filter() -> None:
+    client = SharadarClient(api_key="key", opener=FakeOpener([]))
+    with pytest.raises(ValueError, match="duplicate Sharadar fundamentals filter"):
+        client.fundamentals(dimension="ARQ", filters={"dimension": "MRQ"})
 
 
 def test_401_classified_auth_failed() -> None:

@@ -72,6 +72,14 @@ class ProgressStage(str, Enum):
     ROLLBACK = "ROLLBACK"
     CLEANUP = "CLEANUP"
     COMPLETED = "COMPLETED"
+    REFRESH_STATE = "REFRESH_STATE"
+    SOURCE_SCHEMA = "SOURCE_SCHEMA"
+    CHANGE_DISCOVERY = "CHANGE_DISCOVERY"
+    IDENTITY_RESOLUTION = "IDENTITY_RESOLUTION"
+    COMPLETE_HISTORY_FETCH = "COMPLETE_HISTORY_FETCH"
+    SOURCE_COMPARISON = "SOURCE_COMPARISON"
+    CLASSIFICATION = "CLASSIFICATION"
+    REPORT = "REPORT"
 
 
 class ProgressState(str, Enum):
@@ -103,6 +111,19 @@ BATCH_ADD_TICKERS_STAGES: tuple[ProgressStage, ...] = (
     ProgressStage.FINAL_VALIDATION,
     ProgressStage.ROLLBACK,
     ProgressStage.CLEANUP,
+    ProgressStage.COMPLETED,
+)
+
+
+REFRESH_FUNDAMENTALS_STAGES: tuple[ProgressStage, ...] = (
+    ProgressStage.REFRESH_STATE,
+    ProgressStage.SOURCE_SCHEMA,
+    ProgressStage.CHANGE_DISCOVERY,
+    ProgressStage.IDENTITY_RESOLUTION,
+    ProgressStage.COMPLETE_HISTORY_FETCH,
+    ProgressStage.SOURCE_COMPARISON,
+    ProgressStage.CLASSIFICATION,
+    ProgressStage.REPORT,
     ProgressStage.COMPLETED,
 )
 

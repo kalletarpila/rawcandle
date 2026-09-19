@@ -135,6 +135,7 @@ def build_fundamentals_admin_page(
         width=360,
         options=[
             ft.dropdown.Option("ADD_TICKERS", "Add Tickers"),
+            ft.dropdown.Option("REFRESH_FUNDAMENTALS", "Refresh Fundamentals"),
             ft.dropdown.Option("CHECK_UPDATE_SECTOR_INDUSTRY", "Sector and Industry"),
             ft.dropdown.Option("CHECK_UPDATE_TAXONOMY", "Taxonomy"),
         ],
@@ -293,6 +294,8 @@ def build_fundamentals_admin_page(
             )
         if operation == "CHECK_UPDATE_TAXONOMY":
             return "Rebuilds Fundamentals from the active dc_ecosystem version in data/analysis.db."
+        if operation == "REFRESH_FUNDAMENTALS":
+            return "Checks Sharadar for new quarterly results and historical revisions. Preview is read-only."
         return (
             "Enter 1 to 25 tickers. Commas, spaces, newlines and duplicates are accepted. "
             "Provider network access is enabled automatically when local data is insufficient."
@@ -301,6 +304,7 @@ def build_fundamentals_admin_page(
     def update_operation_visibility() -> None:
         operation = (operation_dropdown.value or "ADD_TICKERS").strip().upper()
         is_add = operation == "ADD_TICKERS"
+        is_refresh = operation == "REFRESH_FUNDAMENTALS"
         is_sector = operation == "CHECK_UPDATE_SECTOR_INDUSTRY"
         is_taxonomy = operation == "CHECK_UPDATE_TAXONOMY"
         tickers_field.visible = is_add
@@ -315,6 +319,8 @@ def build_fundamentals_admin_page(
         production_confirmation_field.visible = False
         operation_guidance_field.value = operation_guidance()
         if is_sector:
+            tickers_field.value = ""
+        if is_refresh:
             tickers_field.value = ""
 
     def can_preview() -> bool:
@@ -358,6 +364,7 @@ def build_fundamentals_admin_page(
             count_text = getattr(item, "count_label", None) or (f"{primary} items" if primary is not None else "")
             operation_label = {
                 "ADD_TICKERS": "Add Tickers",
+                "REFRESH_FUNDAMENTALS": "Refresh Fundamentals",
                 "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
                 "CHECK_UPDATE_TAXONOMY": "Taxonomy",
             }.get(item.operation_type, item.operation_type.replace("_", " ").title())
