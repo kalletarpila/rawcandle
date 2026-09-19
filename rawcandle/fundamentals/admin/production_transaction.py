@@ -258,6 +258,10 @@ def render_production_report(result: Mapping[str, Any]) -> str:
             "- Full V2 analysis, RP V2 and RV were rebuilt and validated.",
             "- Production postflight checks passed.",
         ])
+    if result.get("operation_type") == "ADD_TICKERS" and result.get("ticker_reporting"):
+        from rawcandle.fundamentals.admin.ticker_reporting import render_ticker_sections
+
+        lines.extend(["", render_ticker_sections(result.get("ticker_reporting") or []).rstrip()])
     lines.extend(["", "## Guard and Sources", ""])
     lines.extend([
         f"- Preview: {'Validated' if result.get('preview') else 'Not reached'}",
@@ -371,6 +375,21 @@ def run_transaction(
             else operation.validate_preview
         )
         preview = validate_preview(source_paths, payload, preview_fingerprint)
+
+        def attach_ticker_reporting(stage_name: str, actions: Mapping[str, str] | None = None) -> None:
+            if operation.operation_type != AdminOperationType.ADD_TICKERS:
+                return
+            try:
+                from rawcandle.fundamentals.admin.ticker_reporting import enrich_after_state
+
+                result["ticker_reporting"] = enrich_after_state(
+                    preview.get("plan", {}).get("ticker_reporting") or (),
+                    source_paths,
+                    stage=stage_name,
+                    final_actions=actions,
+                )
+            except Exception as reporting_exc:
+                result["ticker_reporting_error"] = f"{type(reporting_exc).__name__}: {reporting_exc}"
         result["as_of_date"] = preview["as_of_date"]
         result["requested_change"] = preview.get("request") or preview.get("requested") or preview.get("taxonomy_dependency", {}).get("domain")
         result["preview"] = {"payload": str(payload_path), "fingerprint": preview_fingerprint}
@@ -378,6 +397,10 @@ def run_transaction(
         if preview.get("no_change"):
             writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="No source or analysis change required.", preview_fingerprint=preview_fingerprint)
             result.update(outcome="NO_CHANGE", completed_at_utc=utc_now(), backups={})
+            attach_ticker_reporting(result["mode"], {
+                str(item.get("ticker")): "Already present - no source change"
+                for item in preview.get("plan", {}).get("items", [])
+            })
             progress(9, "COMPLETED", "COMPLETED", "Production update completed; no changes were required.")
             return result
         test = _verify_test(run_root, test_run_id, operation.operation_type, preview_fingerprint)
@@ -411,6 +434,10 @@ def run_transaction(
             progress(5, "SOURCE_UPDATE", "COMPLETED", "Authorized source updates completed.")
             if mutation.get("outcome") == "NO_CHANGE":
                 result.update(outcome="NO_CHANGE", completed_at_utc=utc_now())
+                attach_ticker_reporting(result["mode"], {
+                    str(item.get("ticker")): "Already present - no source change"
+                    for item in preview.get("plan", {}).get("items", [])
+                })
                 progress(9, "COMPLETED", "COMPLETED", "Production update completed; no changes were required.")
                 return result
             stage = "SOURCE_STABILITY"
@@ -450,6 +477,18 @@ def run_transaction(
             if _sha256(source_paths.analysis_db) != result["atomic_replacement"]["candidate_sha256"]:
                 raise RuntimeError("ADMIN_PRODUCTION_PATH_FINGERPRINT_MISMATCH")
             result["postflight"] = postflight
+            added = {str(ticker).upper() for ticker in (result.get("source_writes") or {}).get("tickers", [])}
+            attach_ticker_reporting(result["mode"], {
+                str(item.get("ticker")): (
+                    "Added" if str(item.get("ticker")).upper() in added and not (report.get("before") or {}).get("canonical_identity")
+                    else "Updated" if str(item.get("ticker")).upper() in added
+                    else "Already present - no source change"
+                )
+                for item, report in zip(
+                    preview.get("plan", {}).get("items", []),
+                    preview.get("plan", {}).get("ticker_reporting", []),
+                )
+            })
             progress(8, "POSTFLIGHT", "COMPLETED", "Production postflight checks passed.")
             result.update(outcome="COMPLETED", completed_at_utc=utc_now(), rollback={"status": "NOT_REQUIRED"})
             progress(9, "COMPLETED", "COMPLETED", "Production update completed successfully.")

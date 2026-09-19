@@ -468,6 +468,15 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
     assert rehearsed["full_v2_rebuild"]["status"] == "READY"
     assert rehearsed["atomic_replacement"]["status"] == "REPLACED"
     assert rehearsed["postflight"]["status"] == "READY"
+    preview_report = Path(preview["artifact_dir"], "operation_report.md").read_text(encoding="utf-8")
+    test_report = Path(tested["artifact_dir"], "operation_report.md").read_text(encoding="utf-8")
+    production_report = Path(rehearsed["artifact_dir"], "operation_report.md").read_text(encoding="utf-8")
+    assert "## Ticker Summary" in preview_report
+    assert "Verified local archive" in preview_report
+    assert "Not calculated during Preview" in preview_report
+    assert "Tested successfully" in test_report
+    assert "## Ticker Details" in production_report
+    assert "- Added" in production_report
 
 
 def test_cli_preview_smoke(tmp_path: Path, capsys) -> None:

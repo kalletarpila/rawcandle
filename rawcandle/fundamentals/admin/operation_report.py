@@ -260,12 +260,14 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
     rollback = _mapping(result.get("rollback"))
     warnings = _sequence(result.get("warnings"))
     blockers = _sequence(result.get("blockers"))
-    duration = _duration_seconds(result.get("started_at_utc"), result.get("completed_at_utc"))
     stage = operation_stage(result.get("mode"))
     rows = [final_status_message(result)]
-    if duration is not None:
-        minutes, seconds = divmod(round(duration), 60)
-        rows.append(f"Completed in {minutes} min {seconds} sec")
+    ticker_reporting = _sequence(result.get("ticker_reporting"))
+    if result.get("operation_type") == "ADD_TICKERS" and ticker_reporting:
+        new_count = sum((item.get("before") or {}).get("category") == "New" for item in ticker_reporting if isinstance(item, Mapping))
+        network_count = sum(bool((item.get("acquisition") or {}).get("network_requested")) for item in ticker_reporting if isinstance(item, Mapping))
+        taxonomy_count = sum(bool((item.get("taxonomy") or {}).get("member")) for item in ticker_reporting if isinstance(item, Mapping))
+        rows.append(f"{len(ticker_reporting)} tickers: {new_count} new, {network_count} required network access, {taxonomy_count} in the active taxonomy.")
     if counts:
         for key in ("requested", "eligible", "applied", "accepted", "changed", "already_present", "failed"):
             if key in counts:
@@ -351,6 +353,10 @@ def render_operation_report(
     ]
     lines = ["# Fundamentals Administration Operation Report"]
     section(lines, "Executive Summary", executive)
+    if result.get("operation_type") == "ADD_TICKERS" and result.get("ticker_reporting"):
+        from rawcandle.fundamentals.admin.ticker_reporting import render_ticker_sections
+
+        lines.extend(["", render_ticker_sections(_sequence(result.get("ticker_reporting"))).rstrip()])
 
     checked = [f"Operation: {operation}."]
     if taxonomy:

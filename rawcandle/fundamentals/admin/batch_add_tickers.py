@@ -210,6 +210,7 @@ class GenericBatchPlan:
     source_state: Mapping[str, Any]
     items: tuple[GenericBatchItemPlan, ...]
     network: Mapping[str, Any]
+    ticker_reporting: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def accepted_tickers(self) -> tuple[str, ...]:
@@ -224,6 +225,7 @@ class GenericBatchPlan:
             "source_state": dict(self.source_state),
             "items": [item.safe_dict(include_rows=include_rows) for item in self.items],
             "network": dict(self.network),
+            "ticker_reporting": [dict(item) for item in self.ticker_reporting],
         }
         core["accepted_tickers"] = list(self.accepted_tickers)
         core["plan_fingerprint"] = stable_hash(core)
@@ -773,7 +775,7 @@ def build_generic_batch_plan(
             source_fingerprint=stable_hash({"ticker": ticker, "source_category": source_category, "rows": rows}),
             rows=safe_rows,
         ))
-    return GenericBatchPlan(
+    plan = GenericBatchPlan(
         contract_version=CONTRACT_VERSION,
         created_at_utc=created,
         network_allowed=network_allowed,
@@ -781,6 +783,12 @@ def build_generic_batch_plan(
         source_state=source_state(paths),
         items=tuple(items),
         network=network,
+    )
+    from rawcandle.fundamentals.admin.ticker_reporting import build_preview_reporting
+
+    return replace(
+        plan,
+        ticker_reporting=tuple(build_preview_reporting(paths, plan.safe_dict(include_rows=True))),
     )
 
 
@@ -1540,7 +1548,8 @@ def run_preview(
             recommended_next_action="Review the preview. Copy-only apply requires --apply, --confirm-apply and the preview fingerprint.",
         )
         result_dict = result.as_dict()
-        writer.write_final_result(result)
+        result_dict["ticker_reporting"] = raw_preview["generic_batch_plan"].get("ticker_reporting", [])
+        writer.write_json("result.json", result_dict)
         writer.write_text("report.md", render_markdown_report(result_dict))
         progress.running(ProgressStage.CLEANUP, "Removing preview copy lane.")
         cleanup = cleanup_copy_lane(lane)
@@ -1732,6 +1741,20 @@ def run_apply(
             recommended_next_action="Review copy-only evidence. A production run still requires a separate explicit authorization.",
         )
         result_dict = result.as_dict()
+        from rawcandle.fundamentals.admin.ticker_reporting import enrich_after_state
+
+        action_labels = {
+            item.normalized_value: (
+                "Tested successfully" if item.status == AdminStatus.APPLIED
+                else "Already present - no source change" if item.status == AdminStatus.ALREADY_PRESENT
+                else item.status.value.replace("_", " ").title()
+            )
+            for item in decisions
+        }
+        result_dict["ticker_reporting"] = enrich_after_state(
+            saved_plan.get("ticker_reporting") or (), lane.paths,
+            stage="COPY_ONLY_APPLY", final_actions=action_labels,
+        )
         result_dict["copy_apply"] = {
             "phase13d_result": applied,
             "repeat_result": repeated,
@@ -1739,7 +1762,7 @@ def run_apply(
             "after_inventory": after,
             "copy_lane": str(lane.lane_dir),
         }
-        writer.write_final_result(result)
+        writer.write_json("result.json", result_dict)
         writer.write_json("copy_apply_technical.json", result_dict["copy_apply"])
         writer.write_items_csv([item.as_dict() for item in decisions])
         writer.write_text("report.md", render_markdown_report(result_dict))
