@@ -372,8 +372,9 @@ def test_routine_refresh_never_overrides_established_first_public_date(tmp_path:
     assert impact[0]["proposed_first_public_result_date_baseline"] == "2026-08-26"
 
 
-def test_ui_service_exposes_refresh_as_preview_only(tmp_path: Path) -> None:
+def test_ui_service_exposes_refresh_as_preview_and_copy_test_only(tmp_path: Path) -> None:
     calls: list[dict[str, object]] = []
+    apply_calls: list[dict[str, object]] = []
 
     def preview(**kwargs):
         calls.append(kwargs)
@@ -384,11 +385,27 @@ def test_ui_service_exposes_refresh_as_preview_only(tmp_path: Path) -> None:
             "summary_counts": {"effective_changed_known": 0},
         }
 
-    service = FundamentalsAdminUIService(run_root=tmp_path, refresh_preview=preview)
+    def apply(**kwargs):
+        apply_calls.append(kwargs)
+        return {
+            "operation_type": "REFRESH_FUNDAMENTALS",
+            "outcome": "COMPLETED",
+            "mode": "COPY_ONLY_APPLY",
+            "preview_fingerprint": "f" * 64,
+        }
+
+    service = FundamentalsAdminUIService(run_root=tmp_path, refresh_preview=preview, refresh_apply=apply)
     capability = next(item for item in service.capabilities() if item.operation_type == "REFRESH_FUNDAMENTALS")
     assert capability.preview_enabled is True
-    assert capability.copy_apply_enabled is False
+    assert capability.copy_apply_enabled is True
     assert capability.production_apply_enabled is False
     response = service.preview("REFRESH_FUNDAMENTALS")
     assert response.outcome == "NO_CHANGE"
     assert len(calls) == 1
+    tested = service.copy_apply(
+        "REFRESH_FUNDAMENTALS",
+        preview_payload_path=str(tmp_path / "preview.json"),
+        preview_fingerprint="f" * 64,
+    )
+    assert tested.outcome == "COMPLETED"
+    assert apply_calls[0]["confirm_apply"] is True

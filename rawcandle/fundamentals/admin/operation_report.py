@@ -279,6 +279,20 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
         return _taxonomy_preview_rows(taxonomy, result)
     if result.get("operation_type") == "REFRESH_FUNDAMENTALS":
         counts = _mapping(result.get("summary_counts"))
+        if result.get("mode") == "COPY_ONLY_APPLY":
+            downstream = _mapping(result.get("downstream"))
+            provider = _mapping(downstream.get("provider"))
+            canonical = _mapping(downstream.get("canonical"))
+            bootstrap = _mapping(canonical.get("publication_date_bootstrap"))
+            analysis = _mapping(downstream.get("analysis"))
+            return (
+                final_status_message(result),
+                f"Changed known tickers tested: {counts.get('effective_changed_known', 0)}.",
+                f"Complete ARQ/MRQ replacement completed for {provider.get('ticker_count', 0)} tickers.",
+                f"First-public preservation map: {bootstrap.get('preservation_map_applied', 0)}/{bootstrap.get('preservation_map_applicable_existing_quarters', 0)} existing quarters.",
+                f"Full V2, RP V2 and RV rebuild: {analysis.get('status', 'not completed')}.",
+                "Production writes: 0. Production update is not yet enabled for Refresh Fundamentals.",
+            )
         discovery = _mapping(_mapping(result.get("refresh_preview")).get("discovery"))
         return (
             final_status_message(result),
@@ -655,7 +669,11 @@ def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT) -> Opera
     result = _load_json(run_dir / "result.json") or {}
     request = _load_json(run_dir / "request.json")
     progress = _load_json(run_dir / "progress_status.json") or _load_json(run_dir / "status.json")
-    if result.get("operation_type") == "REFRESH_FUNDAMENTALS" and result.get("refresh_preview"):
+    if result.get("operation_type") == "REFRESH_FUNDAMENTALS" and result.get("mode") == "COPY_ONLY_APPLY":
+        from rawcandle.fundamentals.admin.refresh_copy_runtime import _render_report
+
+        report = _render_report(result)
+    elif result.get("operation_type") == "REFRESH_FUNDAMENTALS" and result.get("refresh_preview"):
         from rawcandle.fundamentals.admin.refresh_fundamentals import _render_refresh_report
 
         report = _render_refresh_report(result)

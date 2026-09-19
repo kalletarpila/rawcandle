@@ -590,10 +590,10 @@ def test_apply_visibility_follows_backend_capability() -> None:
     assert controls.production_apply_button.visible is False
 
 
-def test_refresh_fundamentals_is_input_free_preview_only() -> None:
+def test_refresh_fundamentals_is_input_free_preview_and_test_only() -> None:
     class Service:
         def capabilities(self):
-            return (AdminOperationCapability("REFRESH_FUNDAMENTALS", True, False, False),)
+            return (AdminOperationCapability("REFRESH_FUNDAMENTALS", True, True, False),)
 
         def history_entries(self, *, limit, include_technical=False):
             return []
@@ -608,6 +608,34 @@ def test_refresh_fundamentals_is_input_free_preview_only() -> None:
     assert controls.production_apply_button.visible is False
     assert controls.full_workflow_button.visible is False
     assert "read-only" in controls.operation_guidance_field.value
+
+
+@pytest.mark.parametrize(
+    ("outcome", "test_visible"),
+    [("COMPLETED", True), ("NO_CHANGE", False), ("REVIEW_REQUIRED", False)],
+)
+def test_refresh_test_action_requires_authorized_changing_preview(outcome: str, test_visible: bool) -> None:
+    class Service:
+        def capabilities(self):
+            return (AdminOperationCapability("REFRESH_FUNDAMENTALS", True, True, False),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def preview(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED", message="Preview completed.", run_id="refresh-preview",
+                outcome=outcome, mode="PREVIEW", preview_fingerprint="f" * 64,
+                preview_payload_path="/tmp/refresh-preview.json",
+            )
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=Service())
+    controls.operation_dropdown.value = "REFRESH_FUNDAMENTALS"
+    controls.operation_dropdown.on_change(None)
+    controls.preview_button.on_click(None)
+    assert controls.copy_apply_button.visible is test_visible
+    assert controls.production_apply_button.visible is False
+    assert controls.full_workflow_button.visible is False
 
 
 def _taxonomy_preview_result(*, outcome="COMPLETED", counts=None, blockers=None, candidate=None, mode="CURRENT_STATE_AUDIT"):

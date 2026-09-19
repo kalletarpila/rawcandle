@@ -527,26 +527,38 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
             "ORDER BY s.lastupdated,po.observation_id",
             (ticker.upper(), dimension.upper()),
         )]
-    normalized: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
     invalid: list[str] = []
-    duplicates = 0
     for row in rows:
         try:
             item = normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension)
         except HistoryValidationError as exc:
             invalid.append(f"{row.get('observation_id')}:{exc}")
             continue
-        key = source_key(item)
-        if key in normalized:
-            duplicates += 1
-        normalized[key] = item
+        grouped.setdefault(source_key(item), []).append(item)
+    normalized: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    ambiguities: list[dict[str, Any]] = []
+    for key, versions in grouped.items():
+        maximum = max(str(item["lastupdated"]) for item in versions)
+        latest = [item for item in versions if str(item["lastupdated"]) == maximum]
+        effective = {fingerprint(_effective_row(item)) for item in latest}
+        if len(effective) > 1:
+            ambiguities.append({
+                "source_key": source_key_evidence(dict(zip(SOURCE_PRIMARY_KEY, key, strict=True))),
+                "maximum_lastupdated": maximum,
+                "conflicting_version_count": len(latest),
+                "reason": "LEGACY_SOURCE_VERSION_AMBIGUITY",
+            })
+            continue
+        normalized[key] = min(latest, key=lambda item: fingerprint(_raw_row(item)))
     ordered = tuple(normalized[key] for key in sorted(normalized))
     hashes = history_fingerprints(ordered)
     return {
         "rows": ordered,
         "physical_row_count": len(rows),
         "current_row_count": len(ordered),
-        "legacy_versions_collapsed": duplicates,
+        "legacy_versions_collapsed": sum(max(0, len(items) - 1) for items in grouped.values()),
+        "legacy_source_version_ambiguities": ambiguities,
         "invalid_rows": invalid,
         **hashes,
     }
@@ -582,6 +594,17 @@ def compare_ticker_histories(
             "ticker": ticker,
             "classification": "REVIEW_REQUIRED",
             "review_reason": "CURRENT_PROVIDER_HISTORY_INVALID",
+            "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
+        }
+    if any(current[dimension].get("legacy_source_version_ambiguities") for dimension in REFRESH_DIMENSIONS):
+        return {
+            "ticker": ticker,
+            "classification": "REVIEW_REQUIRED",
+            "review_reason": "LEGACY_SOURCE_VERSION_AMBIGUITY",
+            "legacy_source_version_ambiguities": {
+                dimension: current[dimension].get("legacy_source_version_ambiguities", [])
+                for dimension in REFRESH_DIMENSIONS
+            },
             "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
         }
     added: list[tuple[str, str, str, str]] = []
@@ -810,17 +833,43 @@ def publish_date_impact(
 def provider_key_diagnostics(provider_db: Path) -> dict[str, Any]:
     with _readonly(provider_db) as connection:
         rows = connection.execute(
-            "SELECT po.provider_record_key,s.ticker,s.dimension,s.date,s.reportperiod "
+            "SELECT po.provider_record_key,po.observation_id,s.* "
             "FROM provider_observation po JOIN sharadar_fundamental_observation s USING(observation_id)"
         ).fetchall()
     legacy = Counter(str(row["provider_record_key"]) for row in rows)
     true_keys: Counter[tuple[str, str, str, str]] = Counter()
     clean = 0
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
     for row in rows:
-        key = source_key(dict(row))
+        raw = dict(row)
+        key = source_key(raw)
         if all(key):
             clean += 1
             true_keys[key] += 1
+            if true_keys[key] > 1 or key in grouped:
+                grouped.setdefault(key, []).append(raw)
+            else:
+                grouped[key] = [raw]
+    repeated = {key: items for key, items in grouped.items() if true_keys[key] > 1}
+    resolution = Counter()
+    ambiguous_tickers: set[str] = set()
+    for key, versions in repeated.items():
+        maximum = max(str(item.get("lastupdated") or "") for item in versions)
+        latest = [item for item in versions if str(item.get("lastupdated") or "") == maximum]
+        if len(latest) == 1:
+            resolution["unique_max_groups"] += 1
+            continue
+        normalized = []
+        for item in latest:
+            try:
+                normalized.append(normalize_source_row(item))
+            except HistoryValidationError:
+                normalized.append(item)
+        if len({fingerprint(_effective_row(item)) for item in normalized}) == 1:
+            resolution["same_max_identical_groups"] += 1
+        else:
+            resolution["same_max_conflicting_content_groups"] += 1
+            ambiguous_tickers.add(key[0])
     return {
         "provider_observation_count": len(rows),
         "legacy_provider_record_key_groups": len(legacy),
@@ -830,6 +879,8 @@ def provider_key_diagnostics(provider_db: Path) -> dict[str, Any]:
         "true_source_key_groups": len(true_keys),
         "true_source_key_duplicate_groups": sum(1 for count in true_keys.values() if count > 1),
         "true_source_key_extra_versions": sum(count - 1 for count in true_keys.values() if count > 1),
+        **dict(resolution),
+        "same_max_conflicting_affected_tickers": sorted(ambiguous_tickers),
     }
 
 

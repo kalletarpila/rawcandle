@@ -295,7 +295,10 @@ def build_fundamentals_admin_page(
         if operation == "CHECK_UPDATE_TAXONOMY":
             return "Rebuilds Fundamentals from the active dc_ecosystem version in data/analysis.db."
         if operation == "REFRESH_FUNDAMENTALS":
-            return "Checks Sharadar for new quarterly results and historical revisions. Preview is read-only."
+            return (
+                "Checks Sharadar for new quarterly results and historical revisions. Preview is read-only; "
+                "Test on copies performs complete source replacement and a fresh V2 rebuild. Production update is not yet enabled."
+            )
         return (
             "Enter 1 to 25 tickers. Commas, spaces, newlines and duplicates are accepted. "
             "Provider network access is enabled automatically when local data is insufficient."
@@ -564,7 +567,16 @@ def build_fundamentals_admin_page(
         copy_authorized = bool(getattr(capability, "copy_apply_enabled", False if taxonomy else True))
         production_authorized = bool(getattr(capability, "production_apply_enabled", False if taxonomy else True))
         taxonomy_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.mode == "ACTIVE_TAXONOMY_PREVIEW" and taxonomy_domain_dropdown.value == "dc_ecosystem")
-        generic_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.outcome != "NO_CHANGE")
+        operation = (operation_dropdown.value or "").strip().upper()
+        generic_preview_ok = bool(
+            current_preview_result
+            and current_preview_result.status == "COMPLETED"
+            and (
+                current_preview_result.outcome == "COMPLETED"
+                if operation == "REFRESH_FUNDAMENTALS"
+                else current_preview_result.outcome != "NO_CHANGE"
+            )
+        )
         copy_available = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.copy_actionable is True)))
         copy_ready = bool(copy_available and not current_test_run_id)
         production_ready = bool(current_test_run_id and preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.production_actionable is True)))
