@@ -264,11 +264,10 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
     rows = [final_status_message(result)]
     ticker_reporting = _sequence(result.get("ticker_reporting"))
     if result.get("operation_type") == "ADD_TICKERS" and ticker_reporting:
-        new_count = sum((item.get("before") or {}).get("category") == "New" for item in ticker_reporting if isinstance(item, Mapping))
-        network_count = sum(bool((item.get("acquisition") or {}).get("network_requested")) for item in ticker_reporting if isinstance(item, Mapping))
-        taxonomy_count = sum(bool((item.get("taxonomy") or {}).get("member")) for item in ticker_reporting if isinstance(item, Mapping))
-        rows.append(f"{len(ticker_reporting)} tickers: {new_count} new, {network_count} required network access, {taxonomy_count} in the active taxonomy.")
-    if counts:
+        from rawcandle.fundamentals.admin.ticker_reporting import summary_rows
+
+        rows.extend(summary_rows(ticker_reporting))
+    elif counts:
         for key in ("requested", "eligible", "applied", "accepted", "changed", "already_present", "failed"):
             if key in counts:
                 rows.append(f"{str(key).replace('_', ' ').title()}: {counts[key]}.")
@@ -406,12 +405,22 @@ def render_operation_report(
             ] or ["No stage completed before the failure."],
         )
 
+    ticker_reporting = _sequence(result.get("ticker_reporting"))
     if taxonomy and taxonomy["business_outcome"] == "NO_CHANGE":
         changes = ["No additions or removals.", "No role or tier changes.", "No primary-membership changes."]
     elif taxonomy:
         changes = [f"{taxonomy['changes']} proposed changes found."]
     elif result.get("outcome") == "NO_CHANGE":
         changes = ["No changes were needed."]
+    elif result.get("operation_type") == "ADD_TICKERS" and ticker_reporting:
+        from rawcandle.fundamentals.admin.ticker_reporting import human_reasons
+
+        changes = []
+        for item in ticker_reporting:
+            action = str(item.get("final_action") or "Not available")
+            reasons = (item.get("eligibility") or {}).get("user_reasons") or human_reasons((item.get("eligibility") or {}).get("reason"))
+            detail = "; ".join(str(reason) for reason in reasons) if action in {"Review required", "Rejected"} else ""
+            changes.append(f"{item.get('ticker')}: {action}" + (f" - {detail}" if detail else "") + ".")
     else:
         changes = [f"{key.replace('_', ' ').title()}: {counts[key]}." for key in ("requested", "accepted", "changed", "already_present", "failed") if key in counts]
         for item in (_sequence(result.get("items")) or _sequence(result.get("item_results")))[:25]:
@@ -441,7 +450,12 @@ def render_operation_report(
     if preview_only and failed:
         actions = ["Preview stopped at the recorded failure stage.", "No database writes were performed."]
     elif preview_only:
-        actions = ["Preview checked the current state and recorded its findings.", "No database writes were performed.", "Next step: run Test on copies."]
+        review_count = sum(
+            str((item.get("eligibility") or {}).get("status") or "").upper() == "REVIEW_REQUIRED"
+            for item in ticker_reporting
+        )
+        next_step = "Next step: resolve review items if needed, then run Test on copies." if review_count else "Next step: run Test on copies."
+        actions = ["Preview checked the current state and recorded its findings.", "No database writes were performed.", next_step]
     elif mode == "COPY_ONLY_APPLY":
         actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed.", "Next step: Production update is available after this successful test."]
     elif result.get("outcome") == "NO_CHANGE":
@@ -471,16 +485,48 @@ def render_operation_report(
     if taxonomy and not blockers and taxonomy["blockers"]:
         blockers = [f"{taxonomy['blockers']} review blockers were recorded."]
     notices = []
+    review_reasons = {
+        str((item.get("eligibility") or {}).get("reason") or "")
+        for item in ticker_reporting
+        if str((item.get("eligibility") or {}).get("status") or "").upper() == "REVIEW_REQUIRED"
+    }
     for label, values in (("Warning", warnings), ("Blocker", blockers)):
         for value in values[:10]:
             detail = str(value.get("reason") or value.get("message") or value.get("status") or label) if isinstance(value, Mapping) else str(value)
+            if result.get("operation_type") == "ADD_TICKERS" and detail in review_reasons:
+                continue
+            if result.get("operation_type") == "ADD_TICKERS":
+                from rawcandle.fundamentals.admin.ticker_reporting import human_reasons
+
+                translated = human_reasons(detail)
+                detail = "; ".join(translated) if translated else detail
             if "/" in detail or "\\" in detail or "{" in detail:
                 detail = "Details are available in the retained run evidence."
             notices.append(f"{label}: {detail}.")
+    review_count = sum(
+        str((item.get("eligibility") or {}).get("status") or "").upper() == "REVIEW_REQUIRED"
+        for item in ticker_reporting
+    )
+    if review_count:
+        notices.append("No operation-level blockers were found.")
+        notices.append(f"{review_count} ticker{'s' if review_count != 1 else ''} require{'s' if review_count == 1 else ''} review.")
     section(lines, "Warnings or Blockers", notices or ["No warnings or blockers were found."])
 
     if taxonomy and taxonomy["business_outcome"] == "NO_CHANGE":
         final = ["No changes. No further action is required."]
+    elif result.get("operation_type") == "ADD_TICKERS" and preview_only and ticker_reporting:
+        from rawcandle.fundamentals.admin.ticker_reporting import reporting_counts
+
+        ticker_counts = reporting_counts(ticker_reporting)
+        eligible_noun = "ticker is" if ticker_counts["eligible"] == 1 else "tickers are"
+        present_noun = "is" if ticker_counts["already_present"] == 1 else "are"
+        review_verb = "requires" if ticker_counts["review_required"] == 1 else "require"
+        final = [
+            "Preview completed.",
+            f"{ticker_counts['eligible']} {eligible_noun} eligible to add, {ticker_counts['already_present']} {present_noun} already present, and {ticker_counts['review_required']} {review_verb} review.",
+            "No database writes were performed.",
+            "Next step: resolve review items if needed, then run Test on copies.",
+        ]
     else:
         outcome = str(result.get("outcome") or "Recorded").replace("_", " ").title()
         final = [f"Result: {outcome}."]

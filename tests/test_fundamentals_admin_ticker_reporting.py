@@ -8,7 +8,9 @@ from rawcandle.fundamentals.admin.operation_report import render_operation_repor
 from rawcandle.fundamentals.admin.ticker_reporting import (
     build_preview_reporting,
     enrich_after_state,
+    reporting_counts,
     render_ticker_sections,
+    summary_rows,
 )
 
 
@@ -207,3 +209,83 @@ def test_ticker_report_layout_is_stage_aware_and_duration_is_not_duplicated(tmp_
     assert "Not calculated during Preview" in detail
     assert "Duration: 1 min 2 sec" in operation
     assert "Completed in 1 min 2 sec" not in operation
+
+
+def test_preview_semantics_reconcile_mixed_states_and_explain_review(tmp_path: Path) -> None:
+    paths = _databases(tmp_path)
+    arq_rows = [
+        {"dimension": "ARQ", "fiscalperiod": "2025-Q1", "reportperiod": "2025-03-31"},
+        {"dimension": "ARQ", "fiscalperiod": "2026-Q2", "reportperiod": "2026-06-30"},
+    ]
+    zero_arq = [{"dimension": "MRY", "fiscalperiod": "2025-FY", "reportperiod": "2025-12-31"}]
+    eligible = _item("NEW", source="verified_archive", rows=arq_rows)
+    zero = _item("ZERO", source="verified_archive", rows=zero_arq)
+    review = _item("PLPC", source="verified_archive", rows=arq_rows)
+    review["status"] = "REVIEW_REQUIRED"
+    review["reason"] = "MARKET_NOT_UNAMBIGUOUS_USA,MISSING_CLASSIFICATION"
+    review["classification"] = {"status": "MISSING", "sector": None, "industry": None}
+    complete = _item("FULL", source="local_provider", canonical=True, rows=arq_rows)
+    incomplete = _item("INCOMP", source="local_provider", canonical=True, v2=False, rows=zero_arq)
+    for existing in (complete, incomplete):
+        existing["status"] = "ALREADY_PRESENT"
+        existing["reason"] = "Ticker is already present in canonical identities."
+    reports = build_preview_reporting(paths, {
+        "items": [eligible, zero, review, complete, incomplete],
+        "network": {"calls": []},
+    })
+    result = {
+        "run_id": "mixed", "operation_type": "ADD_TICKERS", "mode": "PREVIEW",
+        "outcome": "COMPLETED", "ticker_reporting": reports,
+    }
+
+    report = render_operation_report(run_id="mixed", result=result)
+    counts = reporting_counts(reports)
+
+    assert counts == {
+        "requested": 5, "new": 3, "eligible": 2, "already_present": 2,
+        "review_required": 1, "rejected": 0, "network": 0, "taxonomy": 1,
+    }
+    assert "5 tickers requested: 3 new, 2 already present." in report
+    assert "Eligible to add: 2. Review required: 1. Rejected: 0." in report
+    assert "## Items Requiring Review" in report
+    assert "USA market listing could not be confirmed unambiguously" in report
+    assert "Sector/Industry classification is missing" in report
+    assert "No operation-level blockers were found." in report
+    assert "1 ticker requires review." in report
+    assert "No warnings or blockers were found." not in report
+    assert "FULL: Already present - complete." in report
+    assert "INCOMP: Already present - V2 analysis incomplete." in report
+    assert "| ZERO | New | Verified local archive; no network | 0 ARQ |" in report
+    assert "Provider data exists, but no usable quarterly ARQ history was identified." in report
+    assert "Classification unavailable" in report
+    assert "Canonical identity: Not present - will be created if applied" in report
+    assert "Canonical identity: Not present - pending review" in report
+    assert "Existing V2 analysis" in report
+    assert "No existing V2 analysis" in report
+    assert "Yes - CORE" not in report
+
+
+def test_canonical_identity_and_final_action_wording_follow_stage(tmp_path: Path) -> None:
+    paths = _databases(tmp_path)
+    preview = build_preview_reporting(paths, {
+        "items": [_item("NEW", source="verified_archive")],
+        "network": {"calls": []},
+    })
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute("INSERT INTO security VALUES(30,3,'NEW','NASDAQ',1)")
+
+    copied = enrich_after_state(
+        preview, paths, stage="COPY_ONLY_APPLY",
+        final_actions={"NEW": "Tested successfully - new ticker"},
+    )
+    produced = enrich_after_state(
+        preview, paths, stage="PRODUCTION_APPLY",
+        final_actions={"NEW": "Added"},
+    )
+
+    assert "Canonical identity on copies: Created" in render_ticker_sections(copied)
+    assert "Tested successfully - new ticker" in render_ticker_sections(copied)
+    assert any(row.startswith("Tested successfully: 1.") for row in summary_rows(copied))
+    assert "Canonical identity: Created" in render_ticker_sections(produced)
+    assert "- Added" in render_ticker_sections(produced)
+    assert "Added: 1. Updated or rebuilt: 0. No source change: 0." in summary_rows(produced)

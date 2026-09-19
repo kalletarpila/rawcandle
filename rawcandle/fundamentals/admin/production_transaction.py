@@ -243,6 +243,10 @@ def render_production_report(result: Mapping[str, Any]) -> str:
         f"- Duration: {duration}",
         f"- {final_status_message(result)}",
     ]
+    if result.get("operation_type") == "ADD_TICKERS" and result.get("ticker_reporting"):
+        from rawcandle.fundamentals.admin.ticker_reporting import summary_rows
+
+        lines.extend(f"- {row}" for row in summary_rows(result.get("ticker_reporting") or []))
     if preflight_failure:
         lines.extend([
             "- The safety preflight rejected the operation.",
@@ -390,6 +394,31 @@ def run_transaction(
                 )
             except Exception as reporting_exc:
                 result["ticker_reporting_error"] = f"{type(reporting_exc).__name__}: {reporting_exc}"
+
+        def production_actions(*, added: set[str] | None = None, rebuilt: bool = False) -> dict[str, str]:
+            added = added or set()
+            reports = {
+                str(report.get("ticker") or "").upper(): report
+                for report in preview.get("plan", {}).get("ticker_reporting", [])
+            }
+            actions: dict[str, str] = {}
+            for item in preview.get("plan", {}).get("items", []):
+                ticker = str(item.get("ticker") or "").upper()
+                status = str(item.get("status") or "").upper()
+                before = reports.get(ticker, {}).get("before") or {}
+                if status == "REVIEW_REQUIRED":
+                    actions[ticker] = "Review required"
+                elif status == "REJECTED":
+                    actions[ticker] = "Rejected"
+                elif ticker in added and not before.get("canonical_identity"):
+                    actions[ticker] = "Added"
+                elif ticker in added:
+                    actions[ticker] = "Updated"
+                elif rebuilt and before.get("canonical_identity"):
+                    actions[ticker] = "Existing ticker - analysis rebuilt"
+                else:
+                    actions[ticker] = "Already present - no source change"
+            return actions
         result["as_of_date"] = preview["as_of_date"]
         result["requested_change"] = preview.get("request") or preview.get("requested") or preview.get("taxonomy_dependency", {}).get("domain")
         result["preview"] = {"payload": str(payload_path), "fingerprint": preview_fingerprint}
@@ -397,10 +426,7 @@ def run_transaction(
         if preview.get("no_change"):
             writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="No source or analysis change required.", preview_fingerprint=preview_fingerprint)
             result.update(outcome="NO_CHANGE", completed_at_utc=utc_now(), backups={})
-            attach_ticker_reporting(result["mode"], {
-                str(item.get("ticker")): "Already present - no source change"
-                for item in preview.get("plan", {}).get("items", [])
-            })
+            attach_ticker_reporting(result["mode"], production_actions())
             progress(9, "COMPLETED", "COMPLETED", "Production update completed; no changes were required.")
             return result
         test = _verify_test(run_root, test_run_id, operation.operation_type, preview_fingerprint)
@@ -434,10 +460,7 @@ def run_transaction(
             progress(5, "SOURCE_UPDATE", "COMPLETED", "Authorized source updates completed.")
             if mutation.get("outcome") == "NO_CHANGE":
                 result.update(outcome="NO_CHANGE", completed_at_utc=utc_now())
-                attach_ticker_reporting(result["mode"], {
-                    str(item.get("ticker")): "Already present - no source change"
-                    for item in preview.get("plan", {}).get("items", [])
-                })
+                attach_ticker_reporting(result["mode"], production_actions())
                 progress(9, "COMPLETED", "COMPLETED", "Production update completed; no changes were required.")
                 return result
             stage = "SOURCE_STABILITY"
@@ -478,17 +501,7 @@ def run_transaction(
                 raise RuntimeError("ADMIN_PRODUCTION_PATH_FINGERPRINT_MISMATCH")
             result["postflight"] = postflight
             added = {str(ticker).upper() for ticker in (result.get("source_writes") or {}).get("tickers", [])}
-            attach_ticker_reporting(result["mode"], {
-                str(item.get("ticker")): (
-                    "Added" if str(item.get("ticker")).upper() in added and not (report.get("before") or {}).get("canonical_identity")
-                    else "Updated" if str(item.get("ticker")).upper() in added
-                    else "Already present - no source change"
-                )
-                for item, report in zip(
-                    preview.get("plan", {}).get("items", []),
-                    preview.get("plan", {}).get("ticker_reporting", []),
-                )
-            })
+            attach_ticker_reporting(result["mode"], production_actions(added=added, rebuilt=True))
             progress(8, "POSTFLIGHT", "COMPLETED", "Production postflight checks passed.")
             result.update(outcome="COMPLETED", completed_at_utc=utc_now(), rollback={"status": "NOT_REQUIRED"})
             progress(9, "COMPLETED", "COMPLETED", "Production update completed successfully.")

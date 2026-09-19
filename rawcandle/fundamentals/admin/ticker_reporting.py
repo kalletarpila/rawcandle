@@ -5,6 +5,93 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
+REASON_TEXT = {
+    "IDENTITY_AMBIGUOUS": "Canonical identity could not be resolved unambiguously",
+    "PROVIDER_IDENTITY_AMBIGUOUS": "Provider identity could not be resolved unambiguously",
+    "PROVIDER_METADATA_MISSING": "Provider identity metadata is missing",
+    "DELISTED_SECURITY": "The security is marked as delisted",
+    "UNSUPPORTED_SECURITY_TYPE": "The security type is not supported",
+    "INCOMPATIBLE_EXCHANGE": "The exchange is not supported",
+    "MARKET_NOT_UNAMBIGUOUS_USA": "USA market listing could not be confirmed unambiguously",
+    "MISSING_CLASSIFICATION": "Sector/Industry classification is missing",
+    "FUNDAMENTAL_SOURCE_ROWS_MISSING": "No usable fundamental observations were found",
+}
+
+
+def _reason_codes(reason: Any) -> list[str]:
+    text = str(reason or "").strip()
+    if not text:
+        return []
+    codes = [part.strip() for part in text.split(",") if part.strip()]
+    return codes if all(code.replace("_", "").isalnum() and code.upper() == code for code in codes) else []
+
+
+def human_reasons(reason: Any) -> list[str]:
+    codes = _reason_codes(reason)
+    if codes:
+        return [REASON_TEXT.get(code, code.replace("_", " ").capitalize()) for code in codes]
+    text = str(reason or "").strip().rstrip(".")
+    return [text] if text else []
+
+
+def _preview_action(status: Any, before: Mapping[str, Any]) -> str:
+    normalized = str(status or "").upper()
+    if normalized == "ELIGIBLE":
+        return "Eligible to add"
+    if normalized == "ALREADY_PRESENT":
+        return "Already present - complete" if before.get("v2_analysis") else "Already present - V2 analysis incomplete"
+    if normalized == "REVIEW_REQUIRED":
+        return "Review required"
+    if normalized == "REJECTED":
+        return "Rejected"
+    return normalized.replace("_", " ").title() or "Not available"
+
+
+def reporting_counts(reports: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    counts = {
+        "requested": len(reports), "new": 0, "eligible": 0, "already_present": 0,
+        "review_required": 0, "rejected": 0, "network": 0, "taxonomy": 0,
+    }
+    for report in reports:
+        before = report.get("before") or {}
+        status = str((report.get("eligibility") or {}).get("status") or "").upper()
+        if not before.get("canonical_identity"):
+            counts["new"] += 1
+        if status == "ELIGIBLE":
+            counts["eligible"] += 1
+        elif status == "ALREADY_PRESENT":
+            counts["already_present"] += 1
+        elif status == "REVIEW_REQUIRED":
+            counts["review_required"] += 1
+        elif status == "REJECTED":
+            counts["rejected"] += 1
+        counts["network"] += int(bool((report.get("acquisition") or {}).get("network_requested")))
+        counts["taxonomy"] += int(bool((report.get("taxonomy") or {}).get("member")))
+    return counts
+
+
+def summary_rows(reports: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    counts = reporting_counts(reports)
+    requested_label = "ticker" if counts["requested"] == 1 else "tickers"
+    rows = [f"{counts['requested']} {requested_label} requested: {counts['new']} new, {counts['already_present']} already present."]
+    stages = {str((report.get("after") or {}).get("stage") or "PREVIEW") for report in reports}
+    actions = [str(report.get("final_action") or "") for report in reports]
+    if stages == {"PREVIEW"}:
+        rows.append(f"Eligible to add: {counts['eligible']}. Review required: {counts['review_required']}. Rejected: {counts['rejected']}.")
+    elif stages == {"COPY_ONLY_APPLY"}:
+        tested = sum(action.startswith("Tested successfully") or action.startswith("Existing ticker - V2") for action in actions)
+        rows.append(f"Tested successfully: {tested}. Review required: {actions.count('Review required')}. Rejected: {actions.count('Rejected')}.")
+    else:
+        added = actions.count("Added")
+        changed = sum(action in {"Updated", "Existing ticker - analysis rebuilt"} for action in actions)
+        unchanged = actions.count("Already present - no source change")
+        rows.append(f"Added: {added}. Updated or rebuilt: {changed}. No source change: {unchanged}.")
+        if actions.count("Review required") or actions.count("Rejected"):
+            rows.append(f"Review required: {actions.count('Review required')}. Rejected: {actions.count('Rejected')}.")
+    rows.append(f"Network access required: {counts['network']}. Active taxonomy members: {counts['taxonomy']}.")
+    return tuple(rows)
+
+
 def _readonly(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
@@ -208,9 +295,18 @@ def build_preview_reporting(paths: Any, plan: Mapping[str, Any]) -> list[dict[st
                 "authority": "ticker_meta",
             },
             "taxonomy": _taxonomy(paths.taxonomy_db, ticker),
-            "eligibility": {"status": item.get("status"), "reason": item.get("reason")},
+            "eligibility": {
+                "status": item.get("status"),
+                "reason": item.get("reason"),
+                "reason_codes": _reason_codes(item.get("reason")),
+                "user_reasons": human_reasons(item.get("reason")),
+            },
             "after": {"stage": "PREVIEW", "canonical_identity": "Not calculated during Preview", "analysis": "Not calculated during Preview"},
-            "final_action": str(item.get("status") or "Not available").replace("_", " ").title(),
+            "final_action": _preview_action(item.get("status"), {
+                "provider_data": provider_before,
+                "canonical_identity": canonical_before,
+                "v2_analysis": v2_before,
+            }),
         })
     return reports
 
@@ -240,18 +336,23 @@ def enrich_after_state(
 def _compact(report: Mapping[str, Any]) -> list[str]:
     coverage = report.get("coverage") or {}
     span = "Not available"
-    if coverage.get("arq_count"):
+    if coverage.get("arq_count") is not None:
         span = f"{coverage['arq_count']} ARQ"
         if coverage.get("first_fiscal_quarter") and coverage.get("latest_fiscal_quarter"):
             span += f", {coverage['first_fiscal_quarter']}-{coverage['latest_fiscal_quarter']}"
     classification = report.get("classification") or {}
-    sector = " / ".join(str(value) for value in (classification.get("sector"), classification.get("industry")) if value) or "Not available"
+    sector = " / ".join(str(value) for value in (classification.get("sector"), classification.get("industry")) if value) or "Classification unavailable"
     taxonomy = report.get("taxonomy") or {}
-    tax = "No" if not taxonomy.get("member") else "Yes - " + ", ".join(taxonomy.get("roles") or ["role not specified"])
+    tax = "No" if not taxonomy.get("member") else ", ".join(taxonomy.get("roles") or ["Role not specified"])
     after = report.get("after") or {}
     analysis = after.get("analysis") if isinstance(after.get("analysis"), Mapping) else {}
-    v2 = "Not calculated during Preview" if not analysis else f"Score {_display((analysis.get('score') or {}).get('status'))} / Valuation {_display((analysis.get('valuation') or {}).get('status'), 'VALUATION_')}"
-    rp = "Not calculated during Preview" if not analysis else f"{(analysis.get('rp_v2') or {}).get('total_results', 0)} results"
+    if not analysis:
+        before = report.get("before") or {}
+        v2 = "Existing V2 analysis" if before.get("v2_analysis") else "No existing V2 analysis" if before.get("canonical_identity") else "Not calculated during Preview"
+        rp = "Existing" if before.get("v2_analysis") else "None" if before.get("canonical_identity") else "Not calculated during Preview"
+    else:
+        v2 = f"Score {_display((analysis.get('score') or {}).get('status'))} / Valuation {_display((analysis.get('valuation') or {}).get('status'), 'VALUATION_')}"
+        rp = f"{(analysis.get('rp_v2') or {}).get('total_results', 0)} results"
     source = (report.get("acquisition") or {}).get("source") or "Not available"
     if not (report.get("acquisition") or {}).get("network_requested"):
         source += "; no network"
@@ -271,6 +372,15 @@ def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
     lines = ["## Ticker Summary", "", "| Ticker | Before | Data source | Quarter coverage | V2 status | Sector / Industry | Taxonomy | RP V2 | Final action |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for report in reports:
         lines.append("| " + " | ".join(value.replace("|", "/") for value in _compact(report)) + " |")
+    review_items = [
+        report for report in reports
+        if str((report.get("eligibility") or {}).get("status") or "").upper() == "REVIEW_REQUIRED"
+    ]
+    if review_items:
+        lines.extend(["", "## Items Requiring Review", ""])
+        for report in review_items:
+            reasons = (report.get("eligibility") or {}).get("user_reasons") or human_reasons((report.get("eligibility") or {}).get("reason"))
+            lines.append(f"- {report.get('ticker')} - " + "; ".join(str(reason) for reason in reasons) + ".")
     lines.extend(["", "## Ticker Details"])
     for report in reports:
         ticker = report.get("ticker") or "Ticker"
@@ -282,7 +392,25 @@ def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
         taxonomy = report.get("taxonomy") or {}
         after = report.get("after") or {}
         analysis = after.get("analysis") if isinstance(after.get("analysis"), Mapping) else None
-        lines.extend(["", f"### {ticker} - {name}", "", "#### Identity", "", f"- Market / exchange: {report.get('market') or 'Not available'} / {report.get('exchange') or 'Not available'}", f"- Canonical identity after operation: {after.get('canonical_identity', 'Not calculated during Preview')}", "", "#### Before the run", "", f"- State: {before.get('category', 'Not available')}", f"- Provider data: {'Yes' if before.get('provider_data') else 'No'}", f"- Canonical identity: {'Present' if before.get('canonical_identity') else 'Not present'}", f"- Existing V2 analysis: {'Yes' if before.get('v2_analysis') else 'No'}", "", "#### Data acquisition", "", f"- Source: {acquisition.get('source', 'Not available')}", f"- Network request: {'Yes' if acquisition.get('network_requested') else 'No'}", f"- Network result used: {'Yes' if acquisition.get('network_used') else 'No'}", f"- Provider rows: {coverage.get('provider_rows', 'Not available')}", f"- Quarterly coverage: {coverage.get('arq_count', 'Not available')} ARQ", f"- First fiscal quarter: {coverage.get('first_fiscal_quarter') or 'Not available'}", f"- Latest fiscal quarter: {coverage.get('latest_fiscal_quarter') or 'Not available'}", "", "#### Classification", "", f"- Sector / Industry: {classification.get('sector') or 'Not available'} / {classification.get('industry') or 'Not available'}", "", "#### Taxonomy", "", f"- Member: {'Yes' if taxonomy.get('member') else 'No'}", f"- Roles: {', '.join(taxonomy.get('roles') or []) or 'Not applicable'}"])
+        stage = str(after.get("stage") or "PREVIEW")
+        if stage == "PREVIEW":
+            status = str((report.get("eligibility") or {}).get("status") or "")
+            if before.get("canonical_identity"):
+                identity_text = "Canonical identity: Present"
+            elif status == "ELIGIBLE":
+                identity_text = "Canonical identity: Not present - will be created if applied"
+            elif status == "REVIEW_REQUIRED":
+                identity_text = "Canonical identity: Not present - pending review"
+            else:
+                identity_text = "Canonical identity: Not present"
+        elif stage == "COPY_ONLY_APPLY":
+            identity_text = "Canonical identity on copies: " + ("Present" if before.get("canonical_identity") else "Created" if after.get("canonical_identity") == "Present" else "Not present")
+        else:
+            identity_text = "Canonical identity: " + ("Present" if before.get("canonical_identity") else "Created" if after.get("canonical_identity") == "Present" else "Not present")
+        lines.extend(["", f"### {ticker} - {name}", "", "#### Identity", "", f"- Market / exchange: {report.get('market') or 'Not available'} / {report.get('exchange') or 'Not available'}", f"- {identity_text}", "", "#### Before the run", "", f"- State: {before.get('category', 'Not available')}", f"- Provider data: {'Yes' if before.get('provider_data') else 'No'}", f"- Canonical identity: {'Present' if before.get('canonical_identity') else 'Not present'}", f"- Existing V2 analysis: {'Yes' if before.get('v2_analysis') else 'No'}", "", "#### Data acquisition", "", f"- Source: {acquisition.get('source', 'Not available')}", f"- Network request: {'Yes' if acquisition.get('network_requested') else 'No'}", f"- Network result used: {'Yes' if acquisition.get('network_used') else 'No'}", f"- Provider rows: {coverage.get('provider_rows', 'Not available')}", f"- Quarterly coverage: {coverage.get('arq_count', 'Not available')} ARQ", f"- First fiscal quarter: {coverage.get('first_fiscal_quarter') or 'Not available'}", f"- Latest fiscal quarter: {coverage.get('latest_fiscal_quarter') or 'Not available'}"])
+        if coverage.get("provider_rows", 0) > 0 and coverage.get("arq_count") == 0:
+            lines.append("- Provider data exists, but no usable quarterly ARQ history was identified.")
+        lines.extend(["", "#### Classification", "", f"- Sector: {classification.get('sector') or 'Not available'}", f"- Industry: {classification.get('industry') or 'Not available'}", "", "#### Taxonomy", "", f"- Member: {'Yes' if taxonomy.get('member') else 'No'}", f"- Roles: {', '.join(taxonomy.get('roles') or []) or 'Not applicable'}"])
         memberships = taxonomy.get("memberships") or []
         if memberships:
             lines.append("- Memberships: " + ", ".join(str(item.get("parent_name") or item.get("parent_code")) for item in memberships))

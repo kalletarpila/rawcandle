@@ -1743,14 +1743,24 @@ def run_apply(
         result_dict = result.as_dict()
         from rawcandle.fundamentals.admin.ticker_reporting import enrich_after_state
 
-        action_labels = {
-            item.normalized_value: (
-                "Tested successfully" if item.status == AdminStatus.APPLIED
-                else "Already present - no source change" if item.status == AdminStatus.ALREADY_PRESENT
-                else item.status.value.replace("_", " ").title()
-            )
-            for item in decisions
+        preview_reports = {
+            str(report.get("ticker") or "").upper(): report
+            for report in saved_plan.get("ticker_reporting") or ()
         }
+        action_labels = {}
+        for item in decisions:
+            before = (preview_reports.get(item.normalized_value, {}).get("before") or {})
+            if item.status == AdminStatus.APPLIED:
+                label = "Tested successfully - existing ticker" if before.get("canonical_identity") else "Tested successfully - new ticker"
+            elif item.status == AdminStatus.ALREADY_PRESENT:
+                label = "Existing ticker - V2 analysis now available" if not before.get("v2_analysis") else "Tested successfully - existing ticker"
+            elif item.status == AdminStatus.REVIEW_REQUIRED:
+                label = "Review required"
+            elif item.status == AdminStatus.REJECTED:
+                label = "Rejected"
+            else:
+                label = item.status.value.replace("_", " ").title()
+            action_labels[item.normalized_value] = label
         result_dict["ticker_reporting"] = enrich_after_state(
             saved_plan.get("ticker_reporting") or (), lane.paths,
             stage="COPY_ONLY_APPLY", final_actions=action_labels,
