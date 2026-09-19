@@ -108,9 +108,6 @@ _DATACENTER_LOG_FILENAME_RE = re.compile(
 _EC_SOURCE_LAYER_LOG_FILENAME_RE = re.compile(
     r"^ec_source_layer_([a-z0-9_]+)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
 )
-_SWINGMASTER_LOG_FILENAME_RE = re.compile(
-    r"^swingmaster_(usa_result_check|usa_weekly_update)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
-)
 _TIMER_PATH = Path.home() / ".config/systemd/user/stock-update-scheduler.timer"
 _TAXONOMY_EVIDENCE_ROOT = "temp/datacenter_taxonomy_changes"
 TOP_LEVEL_ROUTES = ("/scheduler", "/taxonomy", FUNDAMENTALS_ROUTE, FUNDAMENTALS_ADMIN_ROUTE)
@@ -194,7 +191,6 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> list[dict[str, An
         market_match = _MARKET_LOG_FILENAME_RE.match(path.name)
         datacenter_match = _DATACENTER_LOG_FILENAME_RE.match(path.name)
         ec_source_layer_match = _EC_SOURCE_LAYER_LOG_FILENAME_RE.match(path.name)
-        swingmaster_match = _SWINGMASTER_LOG_FILENAME_RE.match(path.name)
         if market_match:
             timestamp = market_match.group(2)
             suffix = market_match.group(3) or "0"
@@ -207,10 +203,6 @@ def list_scheduler_log_files(log_dir: str, limit: int = 10) -> list[dict[str, An
             timestamp = ec_source_layer_match.group(2)
             suffix = ec_source_layer_match.group(3) or "0"
             entry_type = "ec_source_layer_log"
-        elif swingmaster_match:
-            timestamp = swingmaster_match.group(2)
-            suffix = swingmaster_match.group(3) or "0"
-            entry_type = "swingmaster_fundamentals_log"
         else:
             continue
         stat_result = path.stat()
@@ -1044,16 +1036,6 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                 f"{latest.get('technical_relevance_status', '')}",
                 "ec_source_layer_status="
                 f"{latest.get('ec_source_layer_status', '')}",
-                "swingmaster_result_check_status="
-                f"{latest.get('swingmaster_result_check_status', '')}",
-                "swingmaster_weekly_update_status="
-                f"{latest.get('swingmaster_weekly_update_status', '')}",
-                "swingmaster_result_check_log_path="
-                f"{latest.get('swingmaster_result_check_log_path', '')}",
-                "swingmaster_weekly_update_log_path="
-                f"{latest.get('swingmaster_weekly_update_log_path', '')}",
-                "swingmaster_result_check_plan_json="
-                f"{latest.get('swingmaster_result_check_plan_json', '')}",
             ]
             for market_result in latest.get("market_results", []):
                 lines.append(_market_row_text(market_result))

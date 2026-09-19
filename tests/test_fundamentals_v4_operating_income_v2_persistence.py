@@ -26,7 +26,6 @@ from rawcandle.fundamentals.operating_income_v2.reporting import render_company_
 from rawcandle.fundamentals.operating_income_v2.rehearsal import _ro, _score_delta_observation
 from rawcandle.fundamentals.schema.migrations import ANALYSIS_SCHEMA_SQL
 from rawcandle.fundamentals.schema.analysis_compat_schema import DIAGNOSTIC_SCHEMA_SQL, LIFECYCLE_SCHEMA_SQL
-from rawcandle.fundamentals.schema.v1_cleanup import cleanup_legacy_v1_schema
 from tests.test_fundamentals_v4_operating_income_v2 import (
     diagnostic_endpoint, relative_observation, ttm, valuation_observation,
 )
@@ -110,38 +109,6 @@ def database() -> sqlite3.Connection:
     conn.close()
 
 
-def _current_database_file(path: Path, *, with_legacy_schema: bool) -> None:
-    with sqlite3.connect(path) as conn:
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.executescript(ANALYSIS_SCHEMA_SQL)
-        conn.executescript(LIFECYCLE_SCHEMA_SQL)
-        conn.executescript(DIAGNOSTIC_SCHEMA_SQL)
-        ensure_schema(conn)
-        phase10b.apply_candidate_package(
-            conn, _calculated(), applied_at="2026-09-01T00:00:00Z"
-        )
-        activate_v2(conn, activated_at="2026-09-01T00:00:00Z")
-        if with_legacy_schema:
-            conn.executescript(
-                """
-                CREATE TABLE lifecycle_result(legacy_id INTEGER PRIMARY KEY);
-                CREATE TABLE valuation_result(legacy_id INTEGER PRIMARY KEY);
-                CREATE INDEX idx_lifecycle_result_company_quarter
-                    ON lifecycle_result(legacy_id);
-                CREATE INDEX idx_valuation_result_company_quarter
-                    ON valuation_result(legacy_id);
-                CREATE TABLE operating_income_v2_package_manifest_history AS
-                    SELECT persistence_fingerprint,family_fingerprint,family_version,
-                           persistence_version,model_manifest_json,
-                           economic_result_fingerprint,physical_content_fingerprint,
-                           status,applied_at_utc
-                    FROM operating_income_v2_package_manifest;
-                """
-            )
-        conn.commit()
-
-
 def test_fresh_analysis_schema_omits_retired_v1_structures(database: sqlite3.Connection) -> None:
     tables = {
         str(row[0])
@@ -151,59 +118,6 @@ def test_fresh_analysis_schema_omits_retired_v1_structures(database: sqlite3.Con
     assert "valuation_result" not in tables
     assert "operating_income_v2_package_manifest_history" not in tables
     assert {"lifecycle_revised_result", "valuation_revised_result"} <= tables
-
-
-def test_v1_cleanup_is_copy_only_atomic_and_idempotent(tmp_path: Path) -> None:
-    target = (tmp_path / "analysis-copy.db").resolve()
-    _current_database_file(target, with_legacy_schema=True)
-    with sqlite3.connect(target) as conn:
-        before = physical_fingerprint(conn)
-
-    first = cleanup_legacy_v1_schema(target)
-    second = cleanup_legacy_v1_schema(target)
-
-    assert first["outcome"] == "APPLIED"
-    assert set(first["removed"]) == {
-        "lifecycle_result",
-        "valuation_result",
-        "operating_income_v2_package_manifest_history",
-        "idx_lifecycle_result_company_quarter",
-        "idx_valuation_result_company_quarter",
-    }
-    assert second["outcome"] == "NO_CHANGE"
-    with sqlite3.connect(target) as conn:
-        assert physical_fingerprint(conn) == before
-        assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-        assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
-
-
-def test_v1_cleanup_fails_closed_when_legacy_rows_exist(tmp_path: Path) -> None:
-    target = (tmp_path / "analysis-copy.db").resolve()
-    _current_database_file(target, with_legacy_schema=True)
-    with sqlite3.connect(target) as conn:
-        conn.execute("INSERT INTO lifecycle_result VALUES(1)")
-        conn.commit()
-
-    with pytest.raises(RuntimeError, match="LEGACY_ROWS_PRESENT:lifecycle_result"):
-        cleanup_legacy_v1_schema(target)
-
-    with sqlite3.connect(target) as conn:
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='lifecycle_result'"
-        ).fetchone() is not None
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_schema WHERE type='table' "
-            "AND name='operating_income_v2_package_manifest_history'"
-        ).fetchone() is not None
-
-
-def test_v1_cleanup_rejects_relative_and_production_paths() -> None:
-    with pytest.raises(PermissionError, match="PRODUCTION_OR_ALIAS_BLOCKED"):
-        cleanup_legacy_v1_schema(Path("analysis-copy.db"))
-    with pytest.raises(PermissionError, match="PRODUCTION_OR_ALIAS_BLOCKED"):
-        cleanup_legacy_v1_schema(
-            Path("/home/kalle/projects/rawcandle/data/fundamentals_analysis.db")
-        )
 
 
 def test_complete_parallel_apply_noop_and_v2_readers(database: sqlite3.Connection, tmp_path: Path) -> None:

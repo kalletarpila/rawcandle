@@ -39,7 +39,6 @@ STATUS_FAILED = "FAILED"
 @dataclass(frozen=True)
 class RecoveryRuntimeAdapters:
     stock_factory: Callable[[str], Any]
-    maybe_update_quarter_state: Callable[[str, str, Any], dict]
     sync_splits: Callable[[str, Any], int]
     maybe_backfill_splits: Callable[[str], bool]
     calculate_divergences: Callable[[str, bool], tuple]
@@ -67,9 +66,6 @@ class RecoveryApplyReport:
     already_present_skipped: int
     invalid_ohlc_skipped: int
     insert_failed: int
-    quarter_state_attempted: int
-    quarter_state_ok: int
-    quarter_state_failed: int
     downstream_attempted: int
     downstream_ok: int
     downstream_failed: int
@@ -185,7 +181,6 @@ def _build_runtime_adapters(osakedata_db_path: str) -> RecoveryRuntimeAdapters:
     adapters = app._build_stock_update_service_adapters()
     return RecoveryRuntimeAdapters(
         stock_factory=adapters["stock_factory"],
-        maybe_update_quarter_state=adapters["maybe_update_quarter_state"],
         sync_splits=adapters["sync_splits"],
         maybe_backfill_splits=adapters["maybe_backfill_splits"],
         calculate_divergences=adapters["calculate_divergences"],
@@ -277,9 +272,6 @@ def build_recovery_apply_report(
             already_present_skipped=0,
             invalid_ohlc_skipped=0,
             insert_failed=0,
-            quarter_state_attempted=0,
-            quarter_state_ok=0,
-            quarter_state_failed=0,
             downstream_attempted=0,
             downstream_ok=0,
             downstream_failed=0,
@@ -335,9 +327,6 @@ def build_recovery_apply_report(
                 already_present_skipped=0,
                 invalid_ohlc_skipped=0,
                 insert_failed=0,
-                quarter_state_attempted=0,
-                quarter_state_ok=0,
-                quarter_state_failed=0,
                 downstream_attempted=0,
                 downstream_ok=0,
                 downstream_failed=0,
@@ -376,9 +365,6 @@ def build_recovery_apply_report(
                 already_present_skipped=0,
                 invalid_ohlc_skipped=0,
                 insert_failed=0,
-                quarter_state_attempted=0,
-                quarter_state_ok=0,
-                quarter_state_failed=0,
                 downstream_attempted=0,
                 downstream_ok=0,
                 downstream_failed=0,
@@ -418,9 +404,6 @@ def build_recovery_apply_report(
         already_present_skipped=0,
         invalid_ohlc_skipped=0,
         insert_failed=0,
-        quarter_state_attempted=0,
-        quarter_state_ok=0,
-        quarter_state_failed=0,
         downstream_attempted=0,
         downstream_ok=0,
         downstream_failed=0,
@@ -488,15 +471,6 @@ def build_recovery_apply_report(
                     elif insert_status == "inserted":
                         base_report.inserted += 1
                         stock = adapters.stock_factory(ticker)
-                        base_report.quarter_state_attempted += 1
-                        try:
-                            adapters.maybe_update_quarter_state(ticker, market, stock)
-                            base_report.quarter_state_ok += 1
-                        except Exception as exc:
-                            base_report.quarter_state_failed += 1
-                            base_report.errors.append(
-                                f"quarter_state_failed {ticker}: {exc}"
-                            )
                         base_report.downstream_attempted += 1
                         try:
                             downstream_result = execute_ticker_downstream_updates(
@@ -546,7 +520,7 @@ def build_recovery_apply_report(
                 remaining_missing += 1
         base_report.still_missing_after = remaining_missing
 
-    if base_report.errors or base_report.quarter_state_failed or base_report.downstream_failed:
+    if base_report.errors or base_report.downstream_failed:
         base_report.status = STATUS_APPLY_COMPLETED_WITH_WARNINGS
     return base_report
 
@@ -574,9 +548,6 @@ def _print_text_report(report: RecoveryApplyReport, missing_limit: int) -> None:
     print(f"already_present_skipped: {report.already_present_skipped}")
     print(f"invalid_ohlc_skipped: {report.invalid_ohlc_skipped}")
     print(f"insert_failed: {report.insert_failed}")
-    print(f"quarter_state_attempted: {report.quarter_state_attempted}")
-    print(f"quarter_state_ok: {report.quarter_state_ok}")
-    print(f"quarter_state_failed: {report.quarter_state_failed}")
     print(f"downstream_attempted: {report.downstream_attempted}")
     print(f"downstream_ok: {report.downstream_ok}")
     print(f"downstream_failed: {report.downstream_failed}")

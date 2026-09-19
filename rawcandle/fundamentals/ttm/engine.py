@@ -137,7 +137,6 @@ class TtmPaths:
     provider_db: Path
     canonical_db: Path
     analysis_db: Path
-    v3_db: Path
     v4_1b1_artifact_root: Path
 
 
@@ -172,7 +171,6 @@ def ttm_paths(repo_root: Path, timestamp: str | None = None) -> TtmPaths:
         provider_db=repo_root / "data" / "fundamentals_provider.db",
         canonical_db=repo_root / "data" / "fundamentals_v4.db",
         analysis_db=repo_root / "data" / "fundamentals_analysis.db",
-        v3_db=Path("/home/kalle/projects/swingmaster/rc_fundamentals_v3.db"),
         v4_1b1_artifact_root=locate_latest_v4_1b1_artifact(repo_root),
     )
 
@@ -582,45 +580,6 @@ def availability_validation(ttm_rows: list[dict[str, Any]]) -> tuple[list[dict[s
     return rows, {"rule": "ttm_source_available_date = MAX(input source_availability_date)", "rows_with_source_availability_date": with_date, "rows_without_usable_availability_date": without_date, "fake_first_public_dates_created": 0, "mismatches": sum(1 for row in rows if not row["matches"])}
 
 
-def parity_analysis(paths: TtmPaths, ttm_rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if not paths.v3_db.exists():
-        return [], {"overlapping_clean_comparisons": 0, "V3_MISSING": len([r for r in ttm_rows if r["readiness_status"] == "TTM_READY"]), "ENGINE_LOGIC_DIFFERENCE": 0}
-    v4 = {(row.get("ticker"), int(row["endpoint_fiscal_year"]), row["endpoint_fiscal_quarter"]): row for row in ttm_rows if row["readiness_status"] == "TTM_READY"}
-    with connect(paths.v3_db, readonly=True) as conn:
-        v3_rows = [dict(row) for row in conn.execute("""
-            SELECT c.ticker,t.endpoint_fiscal_year,t.endpoint_fiscal_quarter,t.ttm_revenue,t.ttm_ebit,t.ttm_fcf,t.cash,t.total_debt,t.shares_outstanding
-            FROM v3_ttm t JOIN v3_company c ON c.company_id=t.company_id
-            WHERE t.core_ttm_ebit_ready=1
-        """)]
-    fields = [("ttm_revenue", "revenue_ttm"), ("ttm_ebit", "ebit_ttm"), ("ttm_fcf", "fcf_ttm"), ("cash", "endpoint_cash"), ("total_debt", "endpoint_debt"), ("shares_outstanding", "endpoint_shares")]
-    out = []
-    counts = Counter()
-    for old in v3_rows:
-        key = (old["ticker"], int(old["endpoint_fiscal_year"]), old["endpoint_fiscal_quarter"])
-        new = v4.get(key)
-        if not new:
-            counts["V4_MISSING"] += 1
-            continue
-        for field, label in fields:
-            old_value = old[field]
-            new_field = "ttm_free_cashflow" if field == "ttm_fcf" else field
-            new_value = new[new_field]
-            if numbers_equal(old_value, new_value, 0.0):
-                cls = "EXACT_MATCH"
-            elif numbers_equal(old_value, new_value, 1.0):
-                cls = "ROUNDING_MATCH"
-            else:
-                cls = "INPUT_DATA_DIFFERENCE"
-            counts[cls] += 1
-            out.append({"ticker": key[0], "fiscal_year": key[1], "fiscal_quarter": key[2], "field": label, "v3_value": old_value, "v4_value": new_value, "classification": cls})
-    counts["overlapping_clean_comparisons"] = len(out)
-    counts.setdefault("ENGINE_LOGIC_DIFFERENCE", 0)
-    counts.setdefault("FISCAL_IDENTITY_DIFFERENCE", 0)
-    counts.setdefault("V3_MISSING", 0)
-    counts.setdefault("UNRESOLVED", 0)
-    return out, dict(counts)
-
-
 def integrity(paths: TtmPaths, before_fingerprint: str, after_fingerprint: str) -> dict[str, Any]:
     with connect(paths.provider_db, readonly=True) as p, connect(paths.canonical_db, readonly=True) as c, connect(paths.analysis_db, readonly=True) as a:
         return {
@@ -966,10 +925,6 @@ def run_v4_ttm(paths: TtmPaths, *, write_production: bool = True) -> dict[str, A
     write_csv(paths.artifact_root / "ttm_availability_date_validation.csv", availability_rows)
     write_doc(paths.artifact_root / "ttm_point_in_time_contract.md", point_in_time_contract_md({}))
 
-    parity_rows, parity_summary = parity_analysis(paths, computed)
-    write_csv(paths.artifact_root / "v3_v4_ttm_parity.csv", parity_rows)
-    write_json(paths.artifact_root / "v3_v4_ttm_parity_summary.json", parity_summary)
-
     production_write = {"rows_before": 0, "rows_after": 0, "rows_written": 0, "row_delta": 0}
     replay = {"first_ttm_row_count": 0, "second_ttm_row_count": 0, "changed_ttm_values": 0, "duplicate_rows_created": 0, "fingerprints_identical": False}
     if write_production:
@@ -1004,8 +959,8 @@ def run_v4_ttm(paths: TtmPaths, *, write_production: bool = True) -> dict[str, A
     write_json(paths.artifact_root / "post_ttm_integrity.json", integ)
 
     hard = hard_cases(computed, known_rows)
-    safety = {"score_rows": integ["score_rows"], "lifecycle_rows": integ["lifecycle_rows"], "valuation_rows": integ["valuation_rows"], "yahoo_calls": 0, "sec_calls": 0, "v3_writes": 0, "swingmaster_runtime_dependency": 0, "canonical_financial_writes": 0}
-    gates_ok = math_summary["mathematical_logic_mismatches"] == 0 and parity_summary.get("ENGINE_LOGIC_DIFFERENCE", 0) == 0 and integ["canonical_financial_fingerprint_unchanged"] and replay["fingerprints_identical"] and prod_summary["duplicate_ttm_rows"] == 0 and all(safety[key] == 0 for key in ("score_rows", "lifecycle_rows", "valuation_rows", "yahoo_calls", "sec_calls", "v3_writes", "swingmaster_runtime_dependency", "canonical_financial_writes"))
+    safety = {"score_rows": integ["score_rows"], "lifecycle_rows": integ["lifecycle_rows"], "valuation_rows": integ["valuation_rows"], "yahoo_calls": 0, "sec_calls": 0, "canonical_financial_writes": 0}
+    gates_ok = math_summary["mathematical_logic_mismatches"] == 0 and integ["canonical_financial_fingerprint_unchanged"] and replay["fingerprints_identical"] and prod_summary["duplicate_ttm_rows"] == 0 and all(safety[key] == 0 for key in ("score_rows", "lifecycle_rows", "valuation_rows", "yahoo_calls", "sec_calls", "canonical_financial_writes"))
     classification = CLASSIFICATION_NON_BLOCKING if gates_ok and readiness["TTM_NOT_READY"] else CLASSIFICATION_READY if gates_ok else CLASSIFICATION_BLOCKED
     next_action = NEXT_READY if classification != CLASSIFICATION_BLOCKED else NEXT_BLOCKED
     summary = {
@@ -1020,7 +975,6 @@ def run_v4_ttm(paths: TtmPaths, *, write_production: bool = True) -> dict[str, A
         "math_validation": math_summary,
         "window_validation": window_summary,
         "availability": availability_summary,
-        "v3_v4_parity": parity_summary,
         "hard_cases": hard,
         "integrity": integ,
         "replay": replay,

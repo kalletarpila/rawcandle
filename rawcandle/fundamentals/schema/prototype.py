@@ -6,30 +6,17 @@ import json
 import math
 import sqlite3
 from collections import Counter
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from rawcandle.fundamentals.schema.contract import SHARADAR_ARQ_FIELD_MAPPING, SHARADAR_SUPPORT_FIELDS, V4_CANONICAL_FINANCIAL_FIELDS
-from rawcandle.fundamentals.schema.migrations import bootstrap_all, canonical_field_contract_present, connect
+from rawcandle.fundamentals.schema.migrations import canonical_field_contract_present, connect
 from rawcandle.fundamentals.schema.provenance import count_provenance, read_provenance, write_provenance
 
 
 PROTOTYPE_TICKERS = ("AAPL", "WDAY", "ASTH", "CECO")
-V3_CIK_SOURCE = Path("/home/kalle/projects/swingmaster/rc_fundamentals_v3.db")
 ZERO_OR_NULL = {"", "None", "NULL", "null"}
-
-
-@dataclass(frozen=True)
-class PrototypePaths:
-    artifact_root: Path
-    provider_db: Path
-    canonical_db: Path
-    analysis_db: Path
-    acceptance_root: Path
-    v3_db: Path = V3_CIK_SOURCE
-
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -57,17 +44,6 @@ def default_acceptance_root(repo_root: Path) -> Path:
             accepted.append(summary_path.parent)
     return sorted(accepted or [path.parent for path in summaries])[-1]
 
-
-def prototype_paths(repo_root: Path, timestamp: str | None = None, acceptance_root: Path | None = None) -> PrototypePaths:
-    stamp = timestamp or utc_stamp()
-    artifact_root = repo_root / "temp" / "fundamentals_v4_1a_schema_design" / stamp
-    return PrototypePaths(
-        artifact_root=artifact_root,
-        provider_db=artifact_root / "prototype_provider.db",
-        canonical_db=artifact_root / "prototype_v4.db",
-        analysis_db=artifact_root / "prototype_analysis.db",
-        acceptance_root=acceptance_root or default_acceptance_root(repo_root),
-    )
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
@@ -127,88 +103,6 @@ def parse_fiscalperiod(value: Any) -> tuple[int, str]:
         raise ValueError(f"Invalid fiscal quarter: {value!r}")
     return int(fy_text), quarter
 
-
-def inspect_v3_cik_source(v3_db: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    conn = sqlite3.connect(f"file:{v3_db}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    try:
-        table_rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
-        inventory = []
-        cik_columns: list[tuple[str, str]] = []
-        for table_row in table_rows:
-            table = table_row["name"]
-            columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})")]
-            matches = [column for column in columns if "cik" in column.lower()]
-            inventory.append({"table": table, "columns": ",".join(columns), "cik_columns": ",".join(matches)})
-            cik_columns.extend((table, column) for column in matches)
-        if not cik_columns:
-            audit_rows = [
-                {
-                    "source_table": "v3_company",
-                    "source_row_id": str(row["company_id"]),
-                    "ticker": row["ticker"],
-                    "cik_raw": "",
-                    "cik_normalized": "",
-                    "classification": "CIK_MISSING",
-                    "reason": "no CIK column found in rc_fundamentals_v3.db schema",
-                }
-                for row in conn.execute("SELECT company_id, ticker FROM v3_company ORDER BY company_id")
-            ]
-            return inventory, audit_rows
-        return inventory, _audit_cik_columns(conn, cik_columns)
-    finally:
-        conn.close()
-
-
-def _audit_cik_columns(conn: sqlite3.Connection, cik_columns: Iterable[tuple[str, str]]) -> list[dict[str, Any]]:
-    candidates: dict[str, list[tuple[str, str, str]]] = {}
-    for table, column in cik_columns:
-        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-        ticker_column = "ticker" if "ticker" in columns else "provider_symbol" if "provider_symbol" in columns else None
-        if not ticker_column:
-            continue
-        rowid_column = "company_id" if "company_id" in columns else "rowid"
-        for row in conn.execute(f"SELECT {rowid_column} AS source_row_id, {ticker_column} AS ticker, {column} AS cik FROM {table}"):
-            ticker = str(row["ticker"] or "").upper()
-            cik = normalize_cik(row["cik"])
-            if ticker:
-                candidates.setdefault(ticker, []).append((table, str(row["source_row_id"]), cik or ""))
-    audit_rows = []
-    for ticker, rows in sorted(candidates.items()):
-        normalized = {cik for _, _, cik in rows if cik}
-        if not normalized:
-            classification = "CIK_MISSING"
-        elif any(not cik for _, _, cik in rows):
-            classification = "TICKER_MAPPING_AMBIGUOUS"
-        elif any(len(cik) > 10 or not cik.isdigit() for cik in normalized):
-            classification = "CIK_FORMAT_INVALID"
-        elif len(normalized) == 1:
-            classification = "CIK_VALID_UNIQUE"
-        else:
-            classification = "CIK_CONFLICT"
-        first = rows[0]
-        audit_rows.append(
-            {
-                "source_table": first[0],
-                "source_row_id": first[1],
-                "ticker": ticker,
-                "cik_raw": next((cik for _, _, cik in rows if cik), ""),
-                "cik_normalized": next(iter(normalized), ""),
-                "classification": classification,
-                "reason": classification.lower(),
-            }
-        )
-    return audit_rows
-
-
-def normalize_cik(value: Any) -> str | None:
-    text = nullable_text(value)
-    if text is None:
-        return None
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if not digits:
-        return None
-    return digits.lstrip("0") or "0"
 
 
 def load_provider_subset(provider_db: Path, acceptance_root: Path, tickers: Iterable[str], run_id: str, now: str) -> dict[str, int]:
@@ -386,30 +280,6 @@ def ensure_identity(conn: sqlite3.Connection, ticker: str, permaticker: str | No
     return company_id, security_id
 
 
-def bootstrap_cik_into_canonical(canonical_db: Path, audit_rows: Iterable[Mapping[str, Any]], now: str) -> dict[str, int]:
-    counts = Counter()
-    with connect(canonical_db) as conn:
-        ticker_to_company = {row["current_ticker"]: row["company_id"] for row in conn.execute("SELECT current_ticker, company_id FROM security")}
-        for row in audit_rows:
-            counts[str(row["classification"])] += 1
-            if row["classification"] != "CIK_VALID_UNIQUE":
-                continue
-            company_id = ticker_to_company.get(str(row["ticker"]).upper())
-            if company_id is None:
-                counts["REJECTED_NO_V4_SECURITY"] += 1
-                continue
-            cik_normalized = str(row["cik_normalized"])
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO company_cik(company_id, cik_normalized, cik_display, source, source_table, source_row_id, status, created_at_utc)
-                VALUES (?, ?, ?, 'MIGRATED_FROM_V3', ?, ?, 'ACTIVE', ?)
-                """,
-                (company_id, cik_normalized, cik_normalized.zfill(10), row["source_table"], row["source_row_id"], now),
-            )
-            counts["IMPORTED"] += 1
-    counts["REJECTED"] = sum(counts[key] for key in ("CIK_MISSING", "CIK_CONFLICT", "CIK_FORMAT_INVALID", "TICKER_MAPPING_AMBIGUOUS", "REJECTED_NO_V4_SECURITY"))
-    return dict(counts)
-
 
 def canonicalize_arq(provider_db: Path, canonical_db: Path, now: str) -> dict[str, int]:
     with connect(provider_db) as provider_conn, connect(canonical_db) as canonical_conn:
@@ -479,7 +349,7 @@ def canonical_counts(canonical_db: Path) -> dict[str, int]:
         }
 
 
-def validate_integrity(paths: PrototypePaths) -> dict[str, Any]:
+def validate_integrity(paths: Any) -> dict[str, Any]:
     output: dict[str, Any] = {}
     for key, db_path in (("provider", paths.provider_db), ("canonical", paths.canonical_db), ("analysis", paths.analysis_db)):
         with connect(db_path) as conn:
@@ -540,51 +410,8 @@ def canonical_fields_without_provenance(conn: sqlite3.Connection) -> int:
     return missing
 
 
-def export_prototype_rows(paths: PrototypePaths) -> None:
-    with connect(paths.canonical_db) as conn:
-        canonical_rows = [dict(row) for row in conn.execute(
-            """
-            SELECT s.current_ticker AS ticker, q.fiscal_year, q.fiscal_quarter, q.period_end,
-                   f.revenue, f.gross_profit, f.operating_income, f.ebit, f.ebitda, f.net_income,
-                   f.operating_cashflow, f.capex, f.free_cashflow, f.cash, f.total_debt, f.shares_outstanding,
-                   q.source_availability_date, q.first_public_result_date
-            FROM v4_quarter q
-            JOIN v4_quarter_financials f ON f.quarter_id=q.quarter_id
-            JOIN security s ON s.company_id=q.company_id
-            ORDER BY s.current_ticker, q.fiscal_year, q.fiscal_quarter
-            """
-        )]
-        provenance_rows = [dict(row) for row in conn.execute(
-            """
-            SELECT s.current_ticker AS ticker, q.fiscal_year, q.fiscal_quarter, p.canonical_field, p.provider,
-                   p.provider_observation_id, p.source_native_field, p.transformation, p.rule_version
-            FROM v4_field_provenance p
-            JOIN v4_quarter q ON q.quarter_id=p.quarter_id
-            JOIN security s ON s.company_id=q.company_id
-            ORDER BY s.current_ticker, q.fiscal_year, q.fiscal_quarter, p.canonical_field
-            """
-        )]
-    with connect(paths.provider_db) as conn:
-        arq_mrq_rows = [dict(row) for row in conn.execute(
-            """
-            SELECT arq.ticker, arq.fiscalperiod, arq.reportperiod,
-                   arq.observation_id AS arq_observation_id,
-                   mrq.observation_id AS mrq_observation_id
-            FROM sharadar_fundamental_observation arq
-            JOIN sharadar_fundamental_observation mrq
-              ON arq.ticker=mrq.ticker
-             AND arq.reportperiod=mrq.reportperiod
-             AND arq.fiscalperiod=mrq.fiscalperiod
-            WHERE arq.dimension='ARQ' AND mrq.dimension='MRQ'
-            ORDER BY arq.ticker, arq.reportperiod
-            """
-        )]
-    write_csv(paths.artifact_root / "prototype_canonical_rows.csv", canonical_rows)
-    write_csv(paths.artifact_root / "prototype_field_provenance.csv", provenance_rows)
-    write_csv(paths.artifact_root / "prototype_arq_mrq_test.csv", arq_mrq_rows)
 
-
-def schema_validation(paths: PrototypePaths) -> dict[str, Any]:
+def schema_validation(paths: Any) -> dict[str, Any]:
     with connect(paths.provider_db) as provider, connect(paths.canonical_db) as canonical, connect(paths.analysis_db) as analysis:
         return {
             "provider_schema_version": provider.execute("SELECT version FROM schema_version WHERE db_name='fundamentals_provider'").fetchone()[0],
@@ -602,96 +429,3 @@ def schema_validation(paths: PrototypePaths) -> dict[str, Any]:
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
-
-
-def run_schema_prototype(paths: PrototypePaths) -> dict[str, Any]:
-    now = utc_now()
-    paths.artifact_root.mkdir(parents=True, exist_ok=True)
-    bootstrap_all(paths.provider_db, paths.canonical_db, paths.analysis_db, now)
-    inventory_rows, cik_audit_rows = inspect_v3_cik_source(paths.v3_db)
-    write_csv(paths.artifact_root / "v3_cik_source_inventory.csv", inventory_rows)
-    write_csv(paths.artifact_root / "v3_cik_bootstrap_audit.csv", cik_audit_rows)
-
-    first_provider_counts = load_provider_subset(paths.provider_db, paths.acceptance_root, PROTOTYPE_TICKERS, "v4_1a_prototype_run", now)
-    first_canonical_counts = canonicalize_arq(paths.provider_db, paths.canonical_db, now)
-    cik_counts = bootstrap_cik_into_canonical(paths.canonical_db, cik_audit_rows, now)
-    first_canonical_counts = canonical_counts(paths.canonical_db)
-
-    second_provider_counts = load_provider_subset(paths.provider_db, paths.acceptance_root, PROTOTYPE_TICKERS, "v4_1a_prototype_run", now)
-    second_canonical_counts = canonicalize_arq(paths.provider_db, paths.canonical_db, now)
-
-    replay = {
-        "first_provider_counts": first_provider_counts,
-        "second_provider_counts": second_provider_counts,
-        "first_canonical_counts": first_canonical_counts,
-        "second_canonical_counts": second_canonical_counts,
-        "duplicate_provider_observations": second_provider_counts["provider_observations"] - first_provider_counts["provider_observations"],
-        "duplicate_canonical_quarters": second_canonical_counts["canonical_quarters"] - first_canonical_counts["canonical_quarters"],
-        "duplicate_provenance": second_canonical_counts["provenance_rows"] - first_canonical_counts["provenance_rows"],
-    }
-    integrity = validate_integrity(paths)
-    validation = schema_validation(paths)
-    export_prototype_rows(paths)
-    if cik_counts.get("IMPORTED", 0) == 0 and sum(1 for row in cik_audit_rows if row["cik_normalized"]) == 0:
-        classification = "V4_SCHEMA_DESIGN_COMPLETE_WITH_OPEN_ARCHITECTURE_ITEMS"
-        next_action = (
-            "DECIDE V4-1B CIK SOURCE: ACCEPT NULL CIK BOOTSTRAP UNTIL SEC PROVIDER INGEST OR SUPPLY A DETERMINISTIC LOCAL CIK SOURCE; "
-            "DO NOT INVENT CIKS"
-        )
-    else:
-        classification = "V4_SCHEMA_DESIGN_COMPLETE_BOOTSTRAP_READY"
-        next_action = (
-            "PROCEED TO V4-1B: CREATE THE THREE PRODUCTION V4 DATABASES IN RAWCANDLE AND BOOTSTRAP THE PAID 5-YEAR SHARADAR FUNDAMENTALS DATA "
-            "USING THE APPROVED SCHEMA; KEEP YAHOO/SEC AS COMPLEMENTARY PROVIDERS AND DO NOT MIGRATE SCORE/LIFECYCLE/VALUATION YET"
-        )
-    summary = {
-        "artifact_root": str(paths.artifact_root),
-        "acceptance_root": str(paths.acceptance_root),
-        "prototype_tickers": list(PROTOTYPE_TICKERS),
-        "provider_counts": second_provider_counts,
-        "canonical_counts": second_canonical_counts,
-        "cik_bootstrap": {
-            "v3_companies_inspected": sum(1 for row in cik_audit_rows if row["source_table"] == "v3_company"),
-            "cik_candidates": sum(1 for row in cik_audit_rows if row["cik_normalized"]),
-            "valid_unique": cik_counts.get("CIK_VALID_UNIQUE", 0),
-            "missing": cik_counts.get("CIK_MISSING", 0),
-            "conflicting": cik_counts.get("CIK_CONFLICT", 0),
-            "imported": cik_counts.get("IMPORTED", 0),
-            "rejected": cik_counts.get("REJECTED", 0),
-        },
-        "schema_validation": validation,
-        "integrity": integrity,
-        "replay": replay,
-        "safety": {
-            "production_v4_dbs_created": 0,
-            "v3_writes": 0,
-            "bulk_sharadar_download": 0,
-            "score_migration": 0,
-            "lifecycle_migration": 0,
-            "valuation_migration": 0,
-            "swingmaster_runtime_dependency": 0,
-        },
-        "classification": classification,
-        "next_action": next_action,
-    }
-    write_json(paths.artifact_root / "prototype_schema_validation.json", validation)
-    write_json(paths.artifact_root / "prototype_integrity.json", integrity)
-    write_json(paths.artifact_root / "prototype_replay_test.json", replay)
-    write_json(paths.artifact_root / "phase_v4_1a_summary.json", summary)
-    (paths.artifact_root / "next_action.md").write_text(summary["next_action"] + "\n", encoding="utf-8")
-    write_design_artifacts(paths)
-    return summary
-
-
-def write_design_artifacts(paths: PrototypePaths) -> None:
-    design_docs = {
-        "provider_db_schema_design.md": "# Provider DB Schema Design\n\nStores provider runs, provider observations, and normalized Sharadar quarterly observation columns while retaining raw JSON and content hashes. ARQ and MRQ coexist because dimension is part of provider record identity.\n",
-        "canonical_v4_db_schema_design.md": "# Canonical V4 DB Schema Design\n\nStores company/security identity, fiscal-quarter identity, wide 12-field canonical financial rows, field-level provenance, and a TTM contract placeholder. Fiscal FY/Q is the canonical identity; period_end is critical metadata.\n",
-        "analysis_db_schema_design.md": "# Analysis DB Schema Design\n\nDefines rebuildable contracts for Score, Score components, Lifecycle, and Valuation outputs. Engines are not migrated in V4-1A.\n",
-        "company_security_identity_design.md": "# Company / Security Identity Design\n\nCompany and security are separate. Ticker is not the stable key. Sharadar permaticker is provider identity metadata. SEC CIK is stored separately when deterministic migration or SEC provider evidence exists.\n",
-        "provenance_design.md": "# Provenance Design\n\nEvery non-null canonical financial field has one field-level provenance row pointing to provider, provider observation id, source-native field, transformation, rule version, and confidence.\n",
-        "ttm_contract_design.md": "# TTM Contract Design\n\nTTM belongs in fundamentals_v4.db as deterministic financial data derived from canonical quarters. V4-1A creates only the contract placeholder; the EBIT-first engine is not migrated.\n",
-        "v4_1b_bootstrap_plan.md": "# V4-1B Bootstrap Plan\n\nCreate production fundamentals_provider.db, fundamentals_v4.db, and fundamentals_analysis.db using the V4-1A schema. Bootstrap targeted minimum-ten-year Sharadar ARQ/MRQ data through provider ingestion, canonicalize ARQ only, preserve field-level provenance, and keep Yahoo/SEC complementary. Do not migrate Score/Lifecycle/Valuation yet.\n",
-    }
-    for name, content in design_docs.items():
-        (paths.artifact_root / name).write_text(content, encoding="utf-8")

@@ -6,9 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from rawcandle.cli.run_fundamentals_v4_relative_valuation_phase11c import (
-    _validate, build_parser,
-)
 from rawcandle.fundamentals.operating_income_v2 import valuation
 from rawcandle.fundamentals.relative_valuation.engine import (
     HistoricalEndpoint, RelativeValuationInput, calculate_relative_valuation,
@@ -279,31 +276,3 @@ def test_production_and_symlink_migration_are_rejected(tmp_path: Path) -> None:
     alias.symlink_to(target)
     with pytest.raises(PermissionError):
         migrate_analysis_copy(alias, applied_at_utc=NOW)
-
-
-def test_cli_defaults_dry_and_requires_safe_full_universe_destination(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    sources = []
-    for name in ("canonical.db", "analysis.db", "market.db", "taxonomy.db"):
-        path = tmp_path / name
-        sqlite3.connect(path).close()
-        sources.append(path)
-    destination = tmp_path / "temp" / "copy.db"
-    destination.parent.mkdir()
-    sqlite3.connect(destination).close()
-    base = [
-        "--canonical-db", str(sources[0]), "--analysis-source-db", str(sources[1]),
-        "--market-db", str(sources[2]), "--taxonomy-db", str(sources[3]),
-        "--destination", str(destination), "--as-of-date", "2026-09-08",
-        "--model-fingerprint", MODEL_FINGERPRINT,
-    ]
-    planned = build_parser().parse_args(base)
-    assert not planned.apply
-    _validate(planned)
-    with pytest.raises(ValueError, match="FULL_UNIVERSE"):
-        _validate(build_parser().parse_args([*base, "--apply"]))
-    _validate(build_parser().parse_args([*base, "--apply", "--full-universe"]))
-    unsafe = list(base)
-    unsafe[unsafe.index("--destination") + 1] = str(sources[0])
-    with pytest.raises(PermissionError, match="DESTINATION_REJECTED"):
-        _validate(build_parser().parse_args(unsafe))

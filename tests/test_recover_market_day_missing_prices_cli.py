@@ -67,13 +67,8 @@ def _runtime(call_log: dict) -> cli.RecoveryRuntimeAdapters:
         call_log.setdefault("stock_factory", []).append(ticker)
         return f"stock:{ticker}"
 
-    def maybe_update_quarter_state(ticker: str, market: str, stock: str) -> dict:
-        call_log.setdefault("quarter_state", []).append((ticker, market, stock))
-        return {"checked": True}
-
     return cli.RecoveryRuntimeAdapters(
         stock_factory=stock_factory,
-        maybe_update_quarter_state=maybe_update_quarter_state,
         sync_splits=lambda ticker, stock: 0,
         maybe_backfill_splits=lambda ticker: False,
         calculate_divergences=lambda ticker, only_missing: (True, 1, ""),
@@ -169,7 +164,6 @@ def test_latest_right_edge_apply_inserts_and_runs_hooks(tmp_path, monkeypatch) -
     ).fetchone()
     conn.close()
     assert report.inserted == 1
-    assert report.quarter_state_attempted == 1
     assert report.downstream_attempted == 1
     assert calls["downstream"] == ["MSFT"]
     assert row == ("MSFT", "2026-06-13")
@@ -383,9 +377,6 @@ def test_json_output_contains_counters(tmp_path, monkeypatch, capsys) -> None:
             already_present_skipped=0,
             invalid_ohlc_skipped=0,
             insert_failed=0,
-            quarter_state_attempted=0,
-            quarter_state_ok=0,
-            quarter_state_failed=0,
             downstream_attempted=0,
             downstream_ok=0,
             downstream_failed=0,

@@ -4,8 +4,8 @@ import inspect
 import json
 from pathlib import Path
 
+import rawcandle.fundamentals.ttm.engine as engine
 from rawcandle.fundamentals.schema.migrations import bootstrap_all, canonical_ttm_contract_present, connect
-from rawcandle.fundamentals.ttm import engine
 from rawcandle.fundamentals.ttm.engine import (
     FLOW_FIELDS,
     INSTANT_FIELDS,
@@ -15,7 +15,6 @@ from rawcandle.fundamentals.ttm.engine import (
     ensure_ttm_schema,
     hash_json,
     markdown_known_gaps,
-    parity_analysis,
     ttm_fingerprints,
 )
 
@@ -195,14 +194,6 @@ def test_hard_case_tickers_and_alias_continuity_are_company_based():
     assert latest[("AAPL", "Q4")] == "TTM_READY"
     assert latest[("ASTH", "Q4")] == "TTM_READY"
     assert latest[("CECO", "Q4")] == "TTM_READY"
-
-
-def test_v3_v4_parity_classifier_has_no_engine_logic_difference(tmp_path: Path):
-    paths = engine.TtmPaths(tmp_path, tmp_path, tmp_path / "p.db", tmp_path / "c.db", tmp_path / "a.db", tmp_path / "missing_v3.db", tmp_path)
-    rows, summary = parity_analysis(paths, [endpoint(four_rows())])
-    assert rows == []
-    assert summary["ENGINE_LOGIC_DIFFERENCE"] == 0
-    assert summary["V3_MISSING"] == 1
 
 
 def test_known_gaps_markdown_document_contract():

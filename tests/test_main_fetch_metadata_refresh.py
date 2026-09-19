@@ -305,11 +305,6 @@ def test_update_stock_data_includes_latest_available_day(tmp_path, monkeypatch):
     app.page = _FakePage()
     app.update_start_input = SimpleNamespace(value="")
     app.update_market_dropdown = SimpleNamespace(value="usa")
-    app._quarter_detection_run_id = lambda: "run-1"
-    app._update_quarter_state_from_yahoo_detection = lambda **kwargs: {}
-    app._extract_yahoo_latest_quarter_period_end_date = lambda stock: None
-    app._quarter_state_timestamp_utc = lambda: "2026-01-01T00:00:00Z"
-    app._quarter_state_db_path_for_market = lambda market: str(tmp_path / "fundamentals.db")
     app._calculate_and_save_divergences = (
         lambda ticker, only_missing=True: div_calls.append((ticker, only_missing))
         or (True, 0, "")
@@ -416,11 +411,6 @@ def test_update_stock_data_defaults_blank_market_to_omxh(tmp_path, monkeypatch):
     app.page = _FakePage()
     app.update_start_input = SimpleNamespace(value="")
     app.update_market_dropdown = SimpleNamespace(value="")
-    app._quarter_detection_run_id = lambda: "run-1"
-    app._update_quarter_state_from_yahoo_detection = lambda **kwargs: {}
-    app._extract_yahoo_latest_quarter_period_end_date = lambda stock: None
-    app._quarter_state_timestamp_utc = lambda: "2026-01-01T00:00:00Z"
-    app._quarter_state_db_path_for_market = lambda market: str(tmp_path / "fundamentals.db")
     app._calculate_and_save_divergences = lambda ticker, only_missing=True: (True, 0, "")
     app._maybe_backfill_splits_for_ticker = lambda ticker: False
     app._run_incremental_candlestick_analysis = (

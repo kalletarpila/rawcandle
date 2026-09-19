@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 from rawcandle.fundamentals.schema.contract import SCHEMA_VERSION, SHARADAR_ARQ_FIELD_MAPPING, V4_CANONICAL_FINANCIAL_FIELDS
 from rawcandle.fundamentals.schema.migrations import (
@@ -14,30 +15,25 @@ from rawcandle.fundamentals.schema.migrations import (
     connect,
 )
 from rawcandle.fundamentals.schema.prototype import (
-    PrototypePaths,
-    bootstrap_cik_into_canonical,
     canonical_counts,
     canonicalize_arq,
-    inspect_v3_cik_source,
     insert_sharadar_observation,
     load_provider_subset,
     parse_fiscalperiod,
-    run_schema_prototype,
     validate_integrity,
 )
 
 
-def _paths(tmp_path: Path) -> PrototypePaths:
+def _paths(tmp_path: Path) -> SimpleNamespace:
     acceptance_root = tmp_path / "acceptance"
     acceptance_root.mkdir()
     _write_acceptance_csvs(acceptance_root)
-    return PrototypePaths(
+    return SimpleNamespace(
         artifact_root=tmp_path / "artifact",
         provider_db=tmp_path / "artifact" / "prototype_provider.db",
         canonical_db=tmp_path / "artifact" / "prototype_v4.db",
         analysis_db=tmp_path / "artifact" / "prototype_analysis.db",
         acceptance_root=acceptance_root,
-        v3_db=tmp_path / "v3.db",
     )
 
 
@@ -95,23 +91,6 @@ def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
-def _create_v3_fixture(path: Path) -> None:
-    conn = sqlite3.connect(path)
-    try:
-        conn.executescript(
-            """
-            CREATE TABLE v3_company(company_id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, company_name TEXT, cik TEXT);
-            INSERT INTO v3_company(company_id, ticker, company_name, cik) VALUES
-              (1, 'AAPL', 'Apple', '0000320193'),
-              (2, 'WDAY', 'Workday', '001328259'),
-              (3, 'ASTH', 'Astrana', ''),
-              (4, 'CECO', 'CECO', 'bad');
-            """
-        )
-    finally:
-        conn.close()
-
-
 def test_all_three_schemas_bootstrap(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     bootstrap_all(paths.provider_db, paths.canonical_db, paths.analysis_db, "now")
@@ -158,34 +137,7 @@ def test_permaticker_unique_mapping(tmp_path: Path) -> None:
         assert conn.execute("SELECT COUNT(*) FROM provider_security_identity").fetchone()[0] == 1
 
 
-def test_cik_bootstrap_from_v3_deterministic_mapping(tmp_path: Path) -> None:
-    paths = _paths(tmp_path)
-    _create_v3_fixture(paths.v3_db)
-    bootstrap_all(paths.provider_db, paths.canonical_db, paths.analysis_db, "now")
-    load_provider_subset(paths.provider_db, paths.acceptance_root, ["AAPL", "WDAY"], "run", "now")
-    canonicalize_arq(paths.provider_db, paths.canonical_db, "now")
-    _, audit = inspect_v3_cik_source(paths.v3_db)
-    counts = bootstrap_cik_into_canonical(paths.canonical_db, audit, "now")
-    assert counts["IMPORTED"] == 2
-
-
-def test_cik_conflict_rejected(tmp_path: Path) -> None:
-    v3 = tmp_path / "v3.db"
-    conn = sqlite3.connect(v3)
-    conn.executescript(
-        """
-        CREATE TABLE v3_company(company_id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, cik TEXT);
-        CREATE TABLE v3_provider_symbol_alias(alias_id INTEGER PRIMARY KEY, provider_symbol TEXT NOT NULL, cik TEXT);
-        INSERT INTO v3_company VALUES (1, 'ABC', '1');
-        INSERT INTO v3_provider_symbol_alias VALUES (1, 'ABC', '2');
-        """
-    )
-    conn.close()
-    _, audit = inspect_v3_cik_source(v3)
-    assert any(row["classification"] == "CIK_CONFLICT" for row in audit)
-
-
-def test_all_12_v3_compatible_fields_exist(tmp_path: Path) -> None:
+def test_all_12_canonical_fields_exist(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     bootstrap_all(paths.provider_db, paths.canonical_db, paths.analysis_db, "now")
     with connect(paths.canonical_db) as conn:
@@ -348,11 +300,10 @@ def test_schema_design_uses_disposable_paths_not_production(tmp_path: Path) -> N
     assert paths.analysis_db != production / "fundamentals_analysis.db"
 
 
-def test_no_v3_writes_and_no_runtime_swingmaster_import() -> None:
+def test_schema_helpers_have_no_external_runtime_import() -> None:
     import rawcandle.fundamentals.schema.prototype as prototype
 
     source = Path(prototype.__file__).read_text()
-    assert "mode=ro" in source
     assert "import swingmaster" not in source.lower()
     assert "from swingmaster" not in source.lower()
 
@@ -361,18 +312,3 @@ def test_no_api_key_exposure() -> None:
     import rawcandle.fundamentals.schema.prototype as prototype
 
     assert "SHARADAR_API_KEY" not in Path(prototype.__file__).read_text()
-
-
-def test_run_schema_prototype_end_to_end(tmp_path: Path) -> None:
-    paths = _paths(tmp_path)
-    _create_v3_fixture(paths.v3_db)
-    summary = run_schema_prototype(paths)
-    assert summary["provider_counts"]["provider_observations"] == 10
-    assert summary["provider_counts"]["arq_observations"] == 5
-    assert summary["provider_counts"]["mrq_observations"] == 5
-    assert summary["canonical_counts"]["canonical_quarters"] == 5
-    assert summary["canonical_counts"]["canonical_financial_rows"] == 5
-    assert summary["replay"]["duplicate_provider_observations"] == 0
-    assert summary["replay"]["duplicate_canonical_quarters"] == 0
-    assert summary["replay"]["duplicate_provenance"] == 0
-    assert summary["classification"] == "V4_SCHEMA_DESIGN_COMPLETE_BOOTSTRAP_READY"

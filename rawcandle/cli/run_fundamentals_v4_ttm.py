@@ -21,7 +21,6 @@ def main() -> int:
             provider_db=paths.provider_db,
             canonical_db=paths.canonical_db,
             analysis_db=paths.analysis_db,
-            v3_db=paths.v3_db,
             v4_1b1_artifact_root=paths.v4_1b1_artifact_root,
         )
     summary = run_v4_ttm(paths, write_production=not args.no_production_write)
@@ -31,7 +30,7 @@ def main() -> int:
     print(f"ttm_not_ready={summary['ttm_readiness']['TTM_NOT_READY']}")
     print(f"ttm_rows={summary['production']['ttm_rows_written']}")
     print(f"next_action={summary['next_action']}")
-    print(json.dumps({"math_mismatches": summary["math_validation"]["mathematical_logic_mismatches"], "engine_logic_differences": summary["v3_v4_parity"].get("ENGINE_LOGIC_DIFFERENCE", 0)}, sort_keys=True))
+    print(json.dumps({"math_mismatches": summary["math_validation"]["mathematical_logic_mismatches"]}, sort_keys=True))
     return 0 if summary["classification"] != "V4_TTM_MIGRATION_BLOCKED" else 2
 
 
