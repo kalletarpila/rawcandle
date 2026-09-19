@@ -1,5 +1,28 @@
 # Fundamentals V4 Production Baseline
 
+## Current Production State (Phase 13G.2.5F)
+
+As of `2026-09-19`, production `data/fundamentals_analysis.db` is V2-only.
+Fundamentals V1 runtime, routes, result state, fallback behavior, and the retired
+V1 schema objects are absent. The canonical correctness and recovery path is a
+fresh full V2 + RP V2 + RV rebuild followed by guarded whole-database
+replacement. Rollback uses the verified database backup plus the corresponding
+Git revision; no in-place live schema cleanup is the normal production path.
+
+Fundamentals Administration routes Add Tickers, Sector/Industry synchronization,
+Taxonomy synchronization, and repair through that same full rebuild. Sector and
+Industry are read from authoritative `data/osakedata.db.ticker_meta` without
+editing it. Taxonomy is read only from the active `dc_ecosystem` domain in
+`data/analysis.db`; Fundamentals Administration never accepts a taxonomy CSV.
+
+Current production analysis SHA-256 is
+`eaab1d962e95434fdd8fdb406817a2ece8e3cb33959918c3968c965f34b1a594`.
+The full publication record is in
+`fundamentals_v4_phase13g2_5f_final_v2_production_publication.md`.
+
+The material below is retained as historical bootstrap evidence and does not
+override this current production contract.
+
 Classification: `V4_PRODUCTION_BOOTSTRAP_COMPLETE_WITH_REVIEW_ITEMS`
 
 Artifact root: `/home/kalle/projects/rawcandle/temp/fundamentals_v4_1b_production_bootstrap/20260830T205438Z`

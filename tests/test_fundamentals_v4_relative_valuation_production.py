@@ -267,6 +267,9 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
 
     distinct_dates = copy.deepcopy(first["snapshot"])
     distinct_dates["report_date"] = "2026-09-20"
+    distinct_dates["relative_valuation"]["current_valuation"]["price_date"] = (
+        "2026-09-17"
+    )
     distinct_dates["current_price_valuation"]["price_date"] = "2026-09-16"
     distinct_markdown = render_snapshot(distinct_dates).markdown
     assert len({
@@ -275,7 +278,7 @@ def test_future_report_uses_active_snapshot_without_refresh_or_database_write(
         distinct_dates["relative_valuation"]["current_valuation"]["price_date"],
         distinct_dates["current_price_valuation"]["price_date"],
     }) == 4
-    for date_value in ("2026-09-20", report_date, persisted["current_price_date"], "2026-09-16"):
+    for date_value in ("2026-09-20", report_date, "2026-09-17", "2026-09-16"):
         assert date_value in distinct_markdown
     assert (
         relative["current_valuation"]["total_valuation_score"]
