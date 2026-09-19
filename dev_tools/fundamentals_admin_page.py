@@ -525,9 +525,10 @@ def build_fundamentals_admin_page(
         production_authorized = bool(getattr(capability, "production_apply_enabled", False if taxonomy else True))
         taxonomy_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.mode == "ACTIVE_TAXONOMY_PREVIEW" and taxonomy_domain_dropdown.value == "dc_ecosystem")
         generic_preview_ok = bool(current_preview_result and current_preview_result.status == "COMPLETED" and current_preview_result.outcome != "NO_CHANGE")
-        copy_ready = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.copy_actionable is True)))
+        copy_available = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.copy_actionable is True)))
+        copy_ready = bool(copy_available and not current_test_run_id)
         production_ready = bool(current_test_run_id and preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.production_actionable is True)))
-        copy_apply_button.visible = bool(copy_authorized and copy_ready)
+        copy_apply_button.visible = bool(copy_authorized and copy_available)
         copy_apply_button.disabled = bool(operation_running or not copy_authorized or not copy_ready)
         production_apply_button.visible = bool(production_authorized and production_ready)
         production_apply_button.disabled = bool(operation_running or not production_authorized or not production_ready)
@@ -691,7 +692,7 @@ def build_fundamentals_admin_page(
 
     preview_button = ft.ElevatedButton("Preview", icon=ft.Icons.PREVIEW, on_click=on_preview)
     copy_apply_button = ft.OutlinedButton("Test on copies", icon=ft.Icons.CHECKLIST, on_click=on_copy_apply, visible=False)
-    production_apply_button = ft.OutlinedButton("Production update", icon=ft.Icons.LOCK, on_click=on_production_apply, visible=False)
+    production_apply_button = ft.ElevatedButton("Production update", icon=ft.Icons.LOCK, on_click=on_production_apply, visible=False)
     for control in (
         operation_dropdown,
         tickers_field,

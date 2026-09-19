@@ -521,11 +521,12 @@ def render_operation_report(
         eligible_noun = "ticker is" if ticker_counts["eligible"] == 1 else "tickers are"
         present_noun = "is" if ticker_counts["already_present"] == 1 else "are"
         review_verb = "requires" if ticker_counts["review_required"] == 1 else "require"
+        next_step = "Next step: resolve review items if needed, then run Test on copies." if ticker_counts["review_required"] else "Next step: run Test on copies."
         final = [
             "Preview completed.",
             f"{ticker_counts['eligible']} {eligible_noun} eligible to add, {ticker_counts['already_present']} {present_noun} already present, and {ticker_counts['review_required']} {review_verb} review.",
             "No database writes were performed.",
-            "Next step: resolve review items if needed, then run Test on copies.",
+            next_step,
         ]
     else:
         outcome = str(result.get("outcome") or "Recorded").replace("_", " ").title()

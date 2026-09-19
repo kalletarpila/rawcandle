@@ -255,9 +255,6 @@ def render_production_report(result: Mapping[str, Any]) -> str:
             "- No rollback was required.",
         ])
     elif outcome == "COMPLETED":
-        tickers = (result.get("source_writes") or {}).get("tickers") or []
-        if tickers:
-            lines.append(f"- {len(tickers)} tickers were added successfully.")
         lines.extend([
             "- Full V2 analysis, RP V2 and RV were rebuilt and validated.",
             "- Production postflight checks passed.",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -83,9 +84,10 @@ def summary_rows(reports: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
         rows.append(f"Tested successfully: {tested}. Review required: {actions.count('Review required')}. Rejected: {actions.count('Rejected')}.")
     else:
         added = actions.count("Added")
-        changed = sum(action in {"Updated", "Existing ticker - analysis rebuilt"} for action in actions)
+        source_updated = actions.count("Updated")
+        rebuilt = actions.count("Existing ticker - analysis rebuilt")
         unchanged = actions.count("Already present - no source change")
-        rows.append(f"Added: {added}. Updated or rebuilt: {changed}. No source change: {unchanged}.")
+        rows.append(f"Added: {added}. Existing tickers included in rebuild: {rebuilt}. Source-data updates: {source_updated}. No source change: {unchanged}.")
         if actions.count("Review required") or actions.count("Rejected"):
             rows.append(f"Review required: {actions.count('Review required')}. Rejected: {actions.count('Rejected')}.")
     rows.append(f"Network access required: {counts['network']}. Active taxonomy members: {counts['taxonomy']}.")
@@ -193,20 +195,60 @@ def _latest(connection: sqlite3.Connection, query: str, params: tuple[Any, ...])
     return dict(row) if row else None
 
 
-def _analysis(analysis_db: Path, company_id: int | None) -> dict[str, Any]:
-    unavailable = {
-        "score": {"status": "Not available", "reason": None},
-        "lifecycle": {"status": "Not available", "reason": None},
-        "valuation": {"status": "Not available", "reason": None},
-        "rp_v2": {"total_results": 0, "ecosystem_results": 0, "status": "Not available", "reason": None},
-        "rv": {"included": False, "status": "Not available", "reason": None},
+def _status(value: Any, *prefixes: str) -> str:
+    text = str(value or "No result").upper().strip().replace(" ", "_")
+    for prefix in prefixes:
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+    return text
+
+
+def _reason_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return text.replace("_", " ").lower()
+
+
+def _score_result(row: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not row:
+        return {"status": "No result", "reason": None, "technical_reason": None}
+    raw_reason = row.get("reason")
+    reason = None
+    try:
+        evidence = json.loads(str(raw_reason)) if raw_reason else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        evidence = {}
+    if isinstance(evidence, Mapping):
+        missing = [str(value).replace("_", " ").title() for value in evidence.get("missing_components") or []]
+        if evidence.get("ttm_core_ready") is False:
+            reason = "TTM core inputs unavailable"
+        elif missing:
+            reason = "missing " + ", ".join(missing)
+    if reason is None and raw_reason and not evidence:
+        reason = _reason_text(raw_reason)
+    return {"status": row.get("status"), "reason": reason, "technical_reason": raw_reason}
+
+
+def _integrity_analysis(reason: str) -> dict[str, Any]:
+    return {
+        "integrity_status": "REPORTING_INTEGRITY_ERROR",
+        "integrity_reason": reason,
+        "score": {"status": "No result", "reason": None, "technical_reason": None},
+        "lifecycle": {"status": "No result", "reason": None, "state": None},
+        "valuation": {"status": "No result", "reason": None},
+        "rp_v2": {"total_results": 0, "ecosystem_results": 0, "status": "No result", "reason": None},
+        "rv": {"included": False, "status": "Not eligible", "reason": None},
     }
+
+
+def _analysis(analysis_db: Path, company_id: int | None) -> dict[str, Any]:
     if company_id is None:
-        return unavailable
+        return _integrity_analysis("Canonical company identity was not resolved for after-state reporting")
     try:
         with _readonly(analysis_db) as connection:
             score = _latest(connection, "SELECT readiness_status status,missing_input_reason reason FROM score_result WHERE company_id=? ORDER BY quarter_id DESC LIMIT 1", (company_id,)) if _table(connection, "score_result") else None
-            lifecycle = _latest(connection, "SELECT lifecycle_status status,reason_code reason FROM lifecycle_revised_result WHERE company_id=? ORDER BY fiscal_sequence DESC LIMIT 1", (company_id,)) if _table(connection, "lifecycle_revised_result") else None
+            lifecycle = _latest(connection, "SELECT lifecycle_status status,final_state state,reason_code reason FROM lifecycle_revised_result WHERE company_id=? ORDER BY fiscal_sequence DESC LIMIT 1", (company_id,)) if _table(connection, "lifecycle_revised_result") else None
             valuation = _latest(connection, "SELECT valuation_status status,reason_code reason FROM valuation_revised_result WHERE company_id=? ORDER BY fiscal_sequence DESC LIMIT 1", (company_id,)) if _table(connection, "valuation_revised_result") else None
             rp = None
             if _table(connection, "relative_position_result") and _table(connection, "relative_position_active_snapshot"):
@@ -215,15 +257,23 @@ def _analysis(analysis_db: Path, company_id: int | None) -> dict[str, Any]:
                     "JOIN relative_position_active_snapshot a ON a.snapshot_id=r.snapshot_id WHERE r.company_id=?", (company_id,))
             rp_reason = None
             if rp and int(rp.get("total_results") or 0) == 0 and _table(connection, "relative_position_coverage") and _table(connection, "relative_position_active_snapshot"):
-                reason = connection.execute("SELECT GROUP_CONCAT(DISTINCT c.coverage_status) FROM relative_position_coverage c JOIN relative_position_active_snapshot a ON a.snapshot_id=c.snapshot_id WHERE c.company_id=?", (company_id,)).fetchone()
+                reason = connection.execute("SELECT GROUP_CONCAT(DISTINCT c.reason_code) FROM relative_position_coverage c JOIN relative_position_active_snapshot a ON a.snapshot_id=c.snapshot_id WHERE c.company_id=?", (company_id,)).fetchone()
                 rp_reason = str(reason[0]) if reason and reason[0] else "No eligible RP V2 source result"
             rv = None
             if _table(connection, "relative_valuation_company_result") and _table(connection, "relative_valuation_active_snapshot"):
                 rv = _latest(connection, "SELECT r.valuation_status status,r.valuation_reason reason FROM relative_valuation_company_result r JOIN relative_valuation_active_snapshot a ON a.snapshot_id=r.snapshot_id WHERE r.company_id=?", (company_id,))
+            if not any((score, lifecycle, valuation)):
+                return _integrity_analysis("The rebuilt analysis contains no Score, Lifecycle, or Valuation rows for the resolved company")
+            lifecycle_result = dict(lifecycle) if lifecycle else {"status": "No result", "reason": None, "state": None}
+            valuation_result = dict(valuation) if valuation else {"status": "No result", "reason": None}
+            if _status(valuation_result.get("reason"), "VALUATION_") == _status(valuation_result.get("status"), "VALUATION_"):
+                valuation_result["reason"] = None
             return {
-                "score": score or unavailable["score"],
-                "lifecycle": lifecycle or unavailable["lifecycle"],
-                "valuation": valuation or unavailable["valuation"],
+                "integrity_status": "READY",
+                "integrity_reason": None,
+                "score": _score_result(score),
+                "lifecycle": lifecycle_result,
+                "valuation": valuation_result,
                 "rp_v2": {
                     "total_results": int((rp or {}).get("total_results") or 0),
                     "ecosystem_results": int((rp or {}).get("ecosystem_results") or 0),
@@ -232,8 +282,8 @@ def _analysis(analysis_db: Path, company_id: int | None) -> dict[str, Any]:
                 },
                 "rv": {"included": bool(rv), "status": (rv or {}).get("status") or "Not eligible", "reason": (rv or {}).get("reason")},
             }
-    except (OSError, sqlite3.Error):
-        return unavailable
+    except (OSError, sqlite3.Error) as exc:
+        return _integrity_analysis(f"After-state analysis lookup failed: {type(exc).__name__}")
 
 
 def _before_label(provider: bool, canonical: bool, v2: bool) -> str:
@@ -322,11 +372,17 @@ def enrich_after_state(
         ticker = str(report.get("ticker") or "").upper()
         identity = _company_identity(paths.canonical_db, ticker)
         company_id = identity.get("company_id")
+        if identity.get("ambiguous"):
+            analysis = _integrity_analysis("Canonical ticker resolved to multiple after-state identities")
+        elif not identity.get("exists"):
+            analysis = _integrity_analysis("Canonical ticker was not found in the after-state identity database")
+        else:
+            analysis = _analysis(paths.analysis_db, int(company_id) if company_id is not None else None)
         report["after"] = {
             "stage": stage,
             "canonical_identity": "Present" if identity.get("exists") else "Not present",
             "identity": identity,
-            "analysis": _analysis(paths.analysis_db, int(company_id) if company_id is not None else None),
+            "analysis": analysis,
         }
         report["final_action"] = actions.get(ticker) or ("Tested successfully" if stage == "COPY_ONLY_APPLY" else "Updated")
         output.append(report)
@@ -351,7 +407,10 @@ def _compact(report: Mapping[str, Any]) -> list[str]:
         v2 = "Existing V2 analysis" if before.get("v2_analysis") else "No existing V2 analysis" if before.get("canonical_identity") else "Not calculated during Preview"
         rp = "Existing" if before.get("v2_analysis") else "None" if before.get("canonical_identity") else "Not calculated during Preview"
     else:
-        v2 = f"Score {_display((analysis.get('score') or {}).get('status'))} / Valuation {_display((analysis.get('valuation') or {}).get('status'), 'VALUATION_')}"
+        if analysis.get("integrity_status") == "REPORTING_INTEGRITY_ERROR":
+            v2 = "Reporting integrity error"
+        else:
+            v2 = f"Score V2 {_status((analysis.get('score') or {}).get('status'), 'SCORE_')} / Valuation {_status((analysis.get('valuation') or {}).get('status'), 'VALUATION_')}"
         rp = f"{(analysis.get('rp_v2') or {}).get('total_results', 0)} results"
     source = (report.get("acquisition") or {}).get("source") or "Not available"
     if not (report.get("acquisition") or {}).get("network_requested"):
@@ -366,12 +425,60 @@ def _display(value: Any, prefix: str = "") -> str:
     return text.replace("_", " ")
 
 
+def _analysis_outcome(reports: Sequence[Mapping[str, Any]]) -> list[str]:
+    analyses = [
+        (report.get("after") or {}).get("analysis")
+        for report in reports
+        if isinstance((report.get("after") or {}).get("analysis"), Mapping)
+    ]
+    if not analyses:
+        return []
+    rows: list[str] = []
+    for label, key, prefixes in (
+        ("Score V2", "score", ("SCORE_",)),
+        ("Lifecycle", "lifecycle", ("LIFECYCLE_",)),
+        ("Valuation", "valuation", ("VALUATION_",)),
+    ):
+        counts: dict[str, int] = {}
+        for analysis in analyses:
+            status = _status((analysis.get(key) or {}).get("status"), *prefixes)
+            counts[status] = counts.get(status, 0) + 1
+        rows.extend(f"{label} {status}: {count}" for status, count in sorted(counts.items()) if status != "NO_RESULT")
+    rows.append(f"RP V2 with at least one result: {sum(int((analysis.get('rp_v2') or {}).get('total_results') or 0) > 0 for analysis in analyses)}")
+    rv_counts: dict[str, int] = {}
+    for analysis in analyses:
+        status = _status((analysis.get("rv") or {}).get("status"), "VALUATION_")
+        rv_counts[status] = rv_counts.get(status, 0) + 1
+    rows.extend(f"RV {status.replace('_', ' ').title() if status == 'NOT_ELIGIBLE' else status}: {count}" for status, count in sorted(rv_counts.items()))
+    integrity_errors = sum(analysis.get("integrity_status") == "REPORTING_INTEGRITY_ERROR" for analysis in analyses)
+    if integrity_errors:
+        rows.append(f"Reporting integrity errors: {integrity_errors}")
+    return rows
+
+
+def _rp_presentation(item: Mapping[str, Any]) -> str:
+    total = int(item.get("total_results") or 0)
+    ecosystem = int(item.get("ecosystem_results") or 0)
+    statuses = {str(value).strip() for value in str(item.get("status") or "").split(",") if value.strip()}
+    if total:
+        text = f"{total} results ({ecosystem} ecosystem) - "
+        text += "READY" if "RELATIVE_POSITION_READY" in statuses else "Results available"
+        if "PEER_GROUP_TOO_SMALL" in statuses:
+            text += "; some peer groups too small"
+        return text
+    return "0 results" + (f" - {_reason_text(item.get('reason'))}" if item.get("reason") else "")
+
+
 def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
     if not reports:
         return ""
     lines = ["## Ticker Summary", "", "| Ticker | Before | Data source | Quarter coverage | V2 status | Sector / Industry | Taxonomy | RP V2 | Final action |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for report in reports:
         lines.append("| " + " | ".join(value.replace("|", "/") for value in _compact(report)) + " |")
+    outcome_rows = _analysis_outcome(reports)
+    if outcome_rows:
+        lines.extend(["", "## Analysis Outcome", ""])
+        lines.extend(f"- {row}" for row in outcome_rows)
     review_items = [
         report for report in reports
         if str((report.get("eligibility") or {}).get("status") or "").upper() == "REVIEW_REQUIRED"
@@ -416,17 +523,40 @@ def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
             lines.append("- Memberships: " + ", ".join(str(item.get("parent_name") or item.get("parent_code")) for item in memberships))
         lines.extend(["", "#### V2 analysis", ""])
         if analysis is None:
-            lines.append("- Not calculated during Preview")
+            if before.get("v2_analysis"):
+                lines.append("- Existing V2 analysis")
+            elif before.get("canonical_identity"):
+                lines.append("- No existing V2 analysis")
+            else:
+                lines.append("- Not calculated during Preview")
+        elif analysis.get("integrity_status") == "REPORTING_INTEGRITY_ERROR":
+            lines.append(f"- Reporting integrity error: {analysis.get('integrity_reason') or 'after-state lookup failed'}")
         else:
-            for label, key in (("Score V2", "score"), ("Lifecycle", "lifecycle"), ("Valuation V2", "valuation")):
-                item = analysis.get(key) or {}
-                text = _display(item.get("status"), "VALUATION_" if key == "valuation" else "")
-                if item.get("reason"):
-                    text += f" - {_display(item['reason'])}"
-                lines.append(f"- {label}: {text}")
+            score = analysis.get("score") or {}
+            score_text = _status(score.get("status"), "SCORE_")
+            if score.get("reason"):
+                score_text += f" - {score['reason']}"
+            lines.append(f"- Score V2: {score_text}")
+            lifecycle = analysis.get("lifecycle") or {}
+            lifecycle_text = _status(lifecycle.get("status"), "LIFECYCLE_")
+            if lifecycle_text == "READY" and lifecycle.get("state"):
+                lifecycle_text += " - " + str(lifecycle["state"]).replace("_", " ").title()
+            elif lifecycle.get("reason"):
+                lifecycle_text += f" - {_reason_text(lifecycle['reason'])}"
+            lines.append(f"- Lifecycle: {lifecycle_text}")
+            valuation = analysis.get("valuation") or {}
+            valuation_text = _status(valuation.get("status"), "VALUATION_")
+            if valuation.get("reason"):
+                valuation_text += f" - {_reason_text(valuation['reason'])}"
+            lines.append(f"- Valuation V2: {valuation_text}")
             rp = analysis.get("rp_v2") or {}
-            lines.append(f"- RP V2: {rp.get('total_results', 0)} results ({rp.get('ecosystem_results', 0)} ecosystem); {_display(rp.get('status'), 'RELATIVE_POSITION_')}" + (f" - {_display(rp['reason'])}" if rp.get("reason") else ""))
+            lines.append(f"- RP V2: {_rp_presentation(rp)}")
             rv = analysis.get("rv") or {}
-            lines.append(f"- RV: {_display(rv.get('status'), 'VALUATION_')}" + (f" - {_display(rv['reason'])}" if rv.get("reason") else ""))
+            rv_text = _status(rv.get("status"), "VALUATION_")
+            if rv_text == "NOT_ELIGIBLE":
+                rv_text = "Not eligible"
+            elif rv.get("reason") and _status(rv.get("reason"), "VALUATION_") != _status(rv.get("status"), "VALUATION_"):
+                rv_text += f" - {_reason_text(rv['reason'])}"
+            lines.append(f"- RV: {rv_text}")
         lines.extend(["", "#### Final result", "", f"- {report.get('final_action') or 'Not available'}"])
     return "\n".join(lines) + "\n"

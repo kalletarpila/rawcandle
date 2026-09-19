@@ -370,6 +370,9 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
             )
 
         def copy_apply(self, operation_type, **kwargs):
+            assert controls.preview_button.disabled is True
+            assert controls.copy_apply_button.disabled is True
+            assert controls.production_apply_button.disabled is True
             self.apply_calls.append({"operation_type": operation_type, **kwargs})
             return AdminUIRunResult(
                 status="COMPLETED",
@@ -421,6 +424,8 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
     controls.copy_apply_button.on_click(None)
     assert service.apply_calls[0]["preview_payload_path"] == "/tmp/payload.json"
     assert service.apply_calls[0]["preview_fingerprint"] == "f" * 64
+    assert controls.copy_apply_button.visible is True
+    assert controls.copy_apply_button.disabled is True
     assert controls.production_apply_button.disabled is False
     controls.tickers_field.value = "MSFT"
     controls.tickers_field.on_change(None)
@@ -490,6 +495,9 @@ def test_production_confirmation_uses_internal_token_and_waits_for_confirm() -> 
             )
 
         def production_apply(self, operation_type, **kwargs):
+            assert controls.preview_button.disabled is True
+            assert controls.copy_apply_button.disabled is True
+            assert controls.production_apply_button.disabled is True
             self.production_calls.append({"operation_type": operation_type, **kwargs})
             return AdminUIRunResult(
                 status="COMPLETED",
@@ -1039,6 +1047,8 @@ def test_successful_add_tickers_production_clears_batch_and_next_preview_submits
     page.dialog.actions[1].on_click(None)
 
     assert controls.tickers_field.value == ""
+    assert controls.copy_apply_button.disabled is True
+    assert controls.production_apply_button.disabled is True
     controls.tickers_field.value = "STM TECK TEM"
     controls.tickers_field.on_change(None)
     controls.preview_button.on_click(None)

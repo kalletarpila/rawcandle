@@ -1762,7 +1762,11 @@ def run_apply(
                 label = item.status.value.replace("_", " ").title()
             action_labels[item.normalized_value] = label
         result_dict["ticker_reporting"] = enrich_after_state(
-            saved_plan.get("ticker_reporting") or (), lane.paths,
+            saved_plan.get("ticker_reporting") or (),
+            replace(
+                lane.paths,
+                analysis_db=Path(downstream["candidate_analysis_db"]),
+            ) if downstream.get("candidate_analysis_db") else lane.paths,
             stage="COPY_ONLY_APPLY", final_actions=action_labels,
         )
         result_dict["copy_apply"] = {

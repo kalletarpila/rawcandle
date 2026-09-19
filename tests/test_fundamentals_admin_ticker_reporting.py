@@ -15,6 +15,7 @@ from rawcandle.fundamentals.admin.ticker_reporting import (
 
 
 def _databases(tmp_path: Path) -> SimpleNamespace:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     paths = SimpleNamespace(
         canonical_db=tmp_path / "canonical.db",
         analysis_db=tmp_path / "analysis.db",
@@ -28,15 +29,15 @@ def _databases(tmp_path: Path) -> SimpleNamespace:
     with sqlite3.connect(paths.analysis_db) as connection:
         connection.executescript(
             "CREATE TABLE score_result(company_id INTEGER,quarter_id INTEGER,readiness_status TEXT,missing_input_reason TEXT);"
-            "CREATE TABLE lifecycle_revised_result(company_id INTEGER,fiscal_sequence INTEGER,lifecycle_status TEXT,reason_code TEXT);"
+            "CREATE TABLE lifecycle_revised_result(company_id INTEGER,fiscal_sequence INTEGER,lifecycle_status TEXT,final_state TEXT,reason_code TEXT);"
             "CREATE TABLE valuation_revised_result(company_id INTEGER,fiscal_sequence INTEGER,valuation_status TEXT,reason_code TEXT);"
             "CREATE TABLE relative_position_active_snapshot(snapshot_id TEXT);"
             "CREATE TABLE relative_position_result(snapshot_id TEXT,company_id INTEGER,peer_scope TEXT,result_status TEXT);"
-            "CREATE TABLE relative_position_coverage(snapshot_id TEXT,company_id INTEGER,coverage_status TEXT);"
+            "CREATE TABLE relative_position_coverage(snapshot_id TEXT,company_id INTEGER,coverage_status TEXT,reason_code TEXT);"
             "CREATE TABLE relative_valuation_active_snapshot(snapshot_id TEXT);"
             "CREATE TABLE relative_valuation_company_result(snapshot_id TEXT,company_id INTEGER,valuation_status TEXT,valuation_reason TEXT);"
             "INSERT INTO score_result VALUES(1,2,'FULL',NULL);"
-            "INSERT INTO lifecycle_revised_result VALUES(1,2,'READY','CURRENT_STATE_READY');"
+            "INSERT INTO lifecycle_revised_result VALUES(1,2,'READY','SCALING','CURRENT_STATE_READY');"
             "INSERT INTO valuation_revised_result VALUES(1,2,'VALUATION_FULL','READY');"
             "INSERT INTO relative_position_active_snapshot VALUES('rp');"
             "INSERT INTO relative_position_result VALUES('rp',1,'UNIVERSE','RELATIVE_POSITION_READY');"
@@ -170,9 +171,9 @@ def test_non_ready_analysis_and_zero_rp_rv_results_keep_reasons(tmp_path: Path) 
         connection.execute("INSERT INTO security VALUES(20,2,'LIMITED','NYSE',1)")
     with sqlite3.connect(paths.analysis_db) as connection:
         connection.execute("INSERT INTO score_result VALUES(2,3,'LIMITED','TTM_SOURCE_MEASURE_UNAVAILABLE')")
-        connection.execute("INSERT INTO lifecycle_revised_result VALUES(2,3,'NOT_READY','INSUFFICIENT_HISTORY')")
+        connection.execute("INSERT INTO lifecycle_revised_result VALUES(2,3,'NOT_READY',NULL,'INSUFFICIENT_HISTORY')")
         connection.execute("INSERT INTO valuation_revised_result VALUES(2,3,'VALUATION_NOT_APPLICABLE','SECTOR_POLICY_EXCLUDED')")
-        connection.execute("INSERT INTO relative_position_coverage VALUES('rp',2,'NOT_ECOSYSTEM_MEMBER')")
+        connection.execute("INSERT INTO relative_position_coverage VALUES('rp',2,'NOT_COVERED','NOT_ECOSYSTEM_MEMBER')")
     preview = build_preview_reporting(paths, {
         "items": [_item("LIMITED", source="local_provider", canonical=True)],
         "network": {"calls": []},
@@ -180,8 +181,11 @@ def test_non_ready_analysis_and_zero_rp_rv_results_keep_reasons(tmp_path: Path) 
 
     analysis = enrich_after_state(preview, paths, stage="COPY_ONLY_APPLY")[0]["after"]["analysis"]
 
-    assert analysis["score"] == {"status": "LIMITED", "reason": "TTM_SOURCE_MEASURE_UNAVAILABLE"}
-    assert analysis["lifecycle"] == {"status": "NOT_READY", "reason": "INSUFFICIENT_HISTORY"}
+    assert analysis["score"] == {
+        "status": "LIMITED", "reason": "ttm source measure unavailable",
+        "technical_reason": "TTM_SOURCE_MEASURE_UNAVAILABLE",
+    }
+    assert analysis["lifecycle"] == {"status": "NOT_READY", "state": None, "reason": "INSUFFICIENT_HISTORY"}
     assert analysis["valuation"] == {"status": "VALUATION_NOT_APPLICABLE", "reason": "SECTOR_POLICY_EXCLUDED"}
     assert analysis["rp_v2"]["total_results"] == 0
     assert analysis["rp_v2"]["reason"] == "NOT_ECOSYSTEM_MEMBER"
@@ -206,9 +210,10 @@ def test_ticker_report_layout_is_stage_aware_and_duration_is_not_duplicated(tmp_
 
     assert "## Ticker Summary" in detail
     assert "### FULL - FULL Co" in detail
-    assert "Not calculated during Preview" in detail
+    assert "Existing V2 analysis" in detail
     assert "Duration: 1 min 2 sec" in operation
     assert "Completed in 1 min 2 sec" not in operation
+    assert "Next step: run Test on copies." in operation
 
 
 def test_preview_semantics_reconcile_mixed_states_and_explain_review(tmp_path: Path) -> None:
@@ -252,6 +257,7 @@ def test_preview_semantics_reconcile_mixed_states_and_explain_review(tmp_path: P
     assert "Sector/Industry classification is missing" in report
     assert "No operation-level blockers were found." in report
     assert "1 ticker requires review." in report
+    assert "Next step: resolve review items if needed, then run Test on copies." in report
     assert "No warnings or blockers were found." not in report
     assert "FULL: Already present - complete." in report
     assert "INCOMP: Already present - V2 analysis incomplete." in report
@@ -288,4 +294,103 @@ def test_canonical_identity_and_final_action_wording_follow_stage(tmp_path: Path
     assert any(row.startswith("Tested successfully: 1.") for row in summary_rows(copied))
     assert "Canonical identity: Created" in render_ticker_sections(produced)
     assert "- Added" in render_ticker_sections(produced)
-    assert "Added: 1. Updated or rebuilt: 0. No source change: 0." in summary_rows(produced)
+    assert "Added: 1. Existing tickers included in rebuild: 0. Source-data updates: 0. No source change: 0." in summary_rows(produced)
+
+
+def test_new_candidate_identities_resolve_full_limited_not_ready_and_not_applicable(tmp_path: Path) -> None:
+    preview_paths = _databases(tmp_path / "preview")
+    candidate_paths = _databases(tmp_path / "candidate")
+    with sqlite3.connect(preview_paths.taxonomy_db) as connection:
+        connection.execute("INSERT INTO ec_entity VALUES(10,'TICKER','NEWFULL','New Full','NEWFULL','ACTIVE')")
+        connection.execute("INSERT INTO ec_membership VALUES(10,4,1,'WATCH_ONLY','ACTIVE')")
+    tickers = ("NEWFULL", "NEWLIMIT", "NEWNOT", "NEWNA")
+    preview = build_preview_reporting(preview_paths, {
+        "items": [_item(ticker, source="verified_archive") for ticker in tickers],
+        "network": {"calls": []},
+    })
+    with sqlite3.connect(candidate_paths.canonical_db) as connection:
+        connection.executemany(
+            "INSERT INTO security VALUES(?,?,?,?,1)",
+            [(20 + company_id, company_id, ticker, "NASDAQ") for company_id, ticker in enumerate(tickers, 2)],
+        )
+    with sqlite3.connect(candidate_paths.analysis_db) as connection:
+        connection.executemany(
+            "INSERT INTO score_result VALUES(?,?,?,?)",
+            [
+                (2, 3, "SCORE_FULL", '{"missing_components":[],"ttm_core_ready":true}'),
+                (3, 3, "SCORE_LIMITED", '{"missing_components":["REVENUE_GROWTH","OPERATING_MARGIN_DIRECTION"],"ttm_core_ready":true}'),
+                (4, 3, "SCORE_NOT_READY", '{"missing_components":["REVENUE_GROWTH"],"ttm_core_ready":false}'),
+                (5, 3, "SCORE_FULL", '{"missing_components":[],"ttm_core_ready":true}'),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO lifecycle_revised_result VALUES(?,?,?,?,?)",
+            [
+                (2, 3, "LIFECYCLE_READY", "TRANSITION", "CLASSIFIED_TRANSITION"),
+                (3, 3, "LIFECYCLE_NOT_READY", None, "TTM_INPUTS_NOT_READY"),
+                (4, 3, "LIFECYCLE_NOT_READY", None, "SOURCE_AVAILABILITY_DATE_MISSING"),
+                (5, 3, "LIFECYCLE_READY", "MATURE", "CLASSIFIED_MATURE"),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO valuation_revised_result VALUES(?,?,?,?)",
+            [
+                (2, 3, "VALUATION_FULL", "VALUATION_FULL"),
+                (3, 3, "VALUATION_FULL", "VALUATION_FULL"),
+                (4, 3, "VALUATION_NOT_READY", "TTM_NOT_READY"),
+                (5, 3, "VALUATION_NOT_APPLICABLE", "UNSUPPORTED_FINANCIAL_MODEL"),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO relative_position_result VALUES('rp',?,?,?)",
+            [
+                (2, "UNIVERSE", "RELATIVE_POSITION_READY"),
+                (2, "SECTOR", "PEER_GROUP_TOO_SMALL"),
+                (3, "UNIVERSE", "RELATIVE_POSITION_READY"),
+                (5, "UNIVERSE", "RELATIVE_POSITION_READY"),
+            ],
+        )
+        connection.execute("INSERT INTO relative_position_coverage VALUES('rp',4,'NOT_COVERED','SOURCE_MEASURE_NOT_ELIGIBLE')")
+        connection.execute("INSERT INTO relative_valuation_company_result VALUES('rv',2,'VALUATION_FULL','VALUATION_FULL')")
+
+    reports = enrich_after_state(
+        preview, candidate_paths, stage="COPY_ONLY_APPLY",
+        final_actions={ticker: "Tested successfully - new ticker" for ticker in tickers},
+    )
+    by_ticker = {report["ticker"]: report for report in reports}
+    rendered = render_ticker_sections(reports)
+
+    assert by_ticker["NEWFULL"]["after"]["identity"]["company_id"] == 2
+    assert by_ticker["NEWFULL"]["after"]["analysis"]["score"]["status"] == "SCORE_FULL"
+    assert by_ticker["NEWLIMIT"]["after"]["analysis"]["score"]["status"] == "SCORE_LIMITED"
+    assert by_ticker["NEWNOT"]["after"]["analysis"]["score"]["status"] == "SCORE_NOT_READY"
+    assert by_ticker["NEWNA"]["after"]["analysis"]["valuation"]["status"] == "VALUATION_NOT_APPLICABLE"
+    assert by_ticker["NEWFULL"]["taxonomy"]["roles"] == ["WATCH_ONLY"]
+    assert by_ticker["NEWFULL"]["after"]["analysis"]["rp_v2"]["ecosystem_results"] == 0
+    assert "Score V2: FULL" in rendered
+    assert "Score V2: LIMITED - missing Revenue Growth, Operating Margin Direction" in rendered
+    assert "Score V2: NOT_READY - TTM core inputs unavailable" in rendered
+    assert "Lifecycle: READY - Transition" in rendered
+    assert "Valuation V2: NOT_APPLICABLE - unsupported financial model" in rendered
+    assert "RP V2: 2 results (0 ecosystem) - READY; some peer groups too small" in rendered
+    assert "RV: Not eligible" in rendered
+    assert "## Analysis Outcome" in rendered
+    assert "Score V2 FULL: 2" in rendered
+    assert "missing_components" not in rendered
+
+
+def test_after_state_lookup_failure_is_explicit_reporting_integrity_error(tmp_path: Path) -> None:
+    paths = _databases(tmp_path)
+    preview = build_preview_reporting(paths, {
+        "items": [_item("BROKEN", source="verified_archive")],
+        "network": {"calls": []},
+    })
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute("INSERT INTO security VALUES(30,3,'BROKEN','NASDAQ',1)")
+
+    report = enrich_after_state(preview, paths, stage="COPY_ONLY_APPLY")[0]
+    rendered = render_ticker_sections([report])
+
+    assert report["after"]["analysis"]["integrity_status"] == "REPORTING_INTEGRITY_ERROR"
+    assert "Reporting integrity error" in rendered
+    assert "Score V2: Not available" not in rendered

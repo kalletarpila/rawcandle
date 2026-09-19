@@ -375,11 +375,39 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
     }
 
     def downstream(*args, **kwargs):
+        copy_paths = args[0]
+        with sqlite3.connect(copy_paths.canonical_db) as conn:
+            company_id = conn.execute(
+                "SELECT company_id FROM security WHERE current_ticker='NEWC'"
+            ).fetchone()[0]
+        candidate_analysis = tmp_path / "temp" / "candidate_analysis.db"
+        candidate_analysis.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(candidate_analysis) as conn:
+            conn.executescript(
+                "CREATE TABLE score_result(company_id INTEGER,quarter_id INTEGER,readiness_status TEXT,missing_input_reason TEXT);"
+                "CREATE TABLE lifecycle_revised_result(company_id INTEGER,fiscal_sequence INTEGER,lifecycle_status TEXT,final_state TEXT,reason_code TEXT);"
+                "CREATE TABLE valuation_revised_result(company_id INTEGER,fiscal_sequence INTEGER,valuation_status TEXT,reason_code TEXT);"
+                "CREATE TABLE relative_position_active_snapshot(snapshot_id TEXT);"
+                "CREATE TABLE relative_position_result(snapshot_id TEXT,company_id INTEGER,peer_scope TEXT,result_status TEXT);"
+                "CREATE TABLE relative_position_coverage(snapshot_id TEXT,company_id INTEGER,coverage_status TEXT,reason_code TEXT);"
+                "CREATE TABLE relative_valuation_active_snapshot(snapshot_id TEXT);"
+                "CREATE TABLE relative_valuation_company_result(snapshot_id TEXT,company_id INTEGER,valuation_status TEXT,valuation_reason TEXT);"
+            )
+            conn.execute("INSERT INTO score_result VALUES(?,1,'SCORE_FULL',NULL)", (company_id,))
+            conn.execute(
+                "INSERT INTO lifecycle_revised_result VALUES(?,1,'LIFECYCLE_READY','SCALING','CLASSIFIED_SCALING')",
+                (company_id,),
+            )
+            conn.execute(
+                "INSERT INTO valuation_revised_result VALUES(?,1,'VALUATION_FULL','VALUATION_FULL')",
+                (company_id,),
+            )
         return {
             "package": {"first_apply": {"outcome": "APPLIED"}},
             "relative_position": {"apply": {"outcome": "APPLIED"}},
             "relative_valuation": {"first_apply": {"outcome": "ACTIVATED"}},
             "active_taxonomy": active_taxonomy,
+            "candidate_analysis_db": str(candidate_analysis),
             "invocation_counts": {
                 "full_v2_rebuild": 1,
                 "package": 1,
@@ -402,6 +430,7 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
         temp_root=tmp_path / "temp",
         confirm_apply=True,
     )
+    tested_ticker = tested["ticker_reporting"][0]
     tested_result_path = Path(tested["artifact_dir"]) / "result.json"
     tested_result = json.loads(tested_result_path.read_text(encoding="utf-8"))
     tested_result["downstream"]["active_taxonomy"] = active_taxonomy
@@ -463,6 +492,9 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
 
     assert preview["outcome"] == "COMPLETED"
     assert tested["outcome"] == "COMPLETED"
+    assert tested_ticker["ticker"] == "NEWC"
+    assert tested_ticker["after"]["analysis"]["integrity_status"] == "READY"
+    assert tested_ticker["after"]["analysis"]["score"]["status"] == "SCORE_FULL"
     assert rehearsed["outcome"] == "COMPLETED", rehearsed
     assert rehearsed["source_writes"]["tickers"] == ["NEWC"]
     assert rehearsed["full_v2_rebuild"]["status"] == "READY"
