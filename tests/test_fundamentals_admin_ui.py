@@ -939,7 +939,7 @@ def test_add_tickers_reports_use_stage_and_user_facing_language() -> None:
     copy_report = render_operation_report(run_id="copy-run", result=copy)
 
     assert "Stage: Preview" in preview_report
-    assert "TSEM: Eligible - from provider identity" in preview_report
+    assert "TSEM: Eligible - provider identity" in preview_report
     assert "Eligible - Eligible" not in preview_report
     assert ".." not in preview_report
     assert "Next step: run Test on copies." in preview_report

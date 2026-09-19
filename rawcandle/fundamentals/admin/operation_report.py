@@ -387,6 +387,8 @@ def render_operation_report(
                 else:
                     if clean_reason.lower().startswith(status_label.lower() + " from"):
                         clean_reason = clean_reason[len(status_label):].strip()
+                        if clean_reason.lower().startswith("from "):
+                            clean_reason = clean_reason[5:]
                     line = f"{ticker}: {status_label}"
                     if clean_reason and "/" not in clean_reason and "\\" not in clean_reason:
                         line += f" - {clean_reason}"
