@@ -14,6 +14,7 @@ from rawcandle.io_atomic import write_text_atomic
 
 
 OPERATION_REPORT_NAME = "operation_report.md"
+WORKFLOW_REPORT_NAME = "workflow_report.md"
 
 STAGE_LABELS = {
     "PREVIEW": "Preview",
@@ -27,6 +28,7 @@ STAGE_LABELS = {
     "PRODUCTION_NO_CHANGE_APPLY": "Production update",
     "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY": "Production update",
     "TRANSACTION_REHEARSAL": "Production update",
+    "FULL_WORKFLOW": "Full workflow",
 }
 
 
@@ -108,6 +110,26 @@ def final_status_message(result: Mapping[str, Any]) -> str:
         location = f" during {failed_stage}" if failed_stage else ""
         return f"Preview failed{location}. No database changes were made."
     return f"{stage}: {operation_result(result)}."
+
+
+def production_failure_reason(result: Mapping[str, Any]) -> str | None:
+    explicit = str(result.get("user_failure_reason") or "").strip()
+    if explicit:
+        return explicit
+    error = str(result.get("error") or "")
+    translations = (
+        ("ADMIN_PRODUCTION_UPDATE_ALREADY_RUNNING", "Another Administration operation currently holds the production lock."),
+        ("SCHEDULER_ALREADY_RUNNING", "The scheduler currently holds the database update lock."),
+        ("ADMIN_INSUFFICIENT_DISK", "There is not enough free disk space for backup, rebuild, and rollback."),
+        ("STALE", "The authoritative source state changed after the tested Preview."),
+        ("MISMATCH", "The saved Preview or Test evidence no longer matches the production request."),
+        ("CHANGED_DURING", "An authoritative source database changed during production preflight."),
+        ("MATCHING_SUCCESSFUL_TEST_REQUIRED", "The matching successful Test on copies evidence is missing or invalid."),
+    )
+    for code, message in translations:
+        if code in error:
+            return message
+    return None
 
 
 def taxonomy_preview_presentation(result: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -236,7 +258,7 @@ def resolve_operation_report_download(
     *,
     root: Path = ADMIN_RUN_ROOT,
 ) -> Path:
-    if artifact_name != OPERATION_REPORT_NAME:
+    if artifact_name not in {OPERATION_REPORT_NAME, WORKFLOW_REPORT_NAME}:
         raise ValueError("invalid operation report artifact")
     run_dir = _safe_run_dir(run_id, root)
     path = (run_dir / artifact_name).resolve()
@@ -262,6 +284,15 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
     blockers = _sequence(result.get("blockers"))
     stage = operation_stage(result.get("mode"))
     rows = [final_status_message(result)]
+    if stage == "Production update" and str(result.get("outcome") or "").upper() in {"FAILED", "ERROR"}:
+        reason = production_failure_reason(result)
+        if reason:
+            rows.append(reason)
+        retry = _mapping(result.get("retry_authorization"))
+        if retry.get("direct_production_retry_available"):
+            rows.append("The successful Preview and Test remain valid; Production update may be retried directly.")
+        elif retry:
+            rows.append("Preview and Test must be rerun before another Production update.")
     ticker_reporting = _sequence(result.get("ticker_reporting"))
     if result.get("operation_type") == "ADD_TICKERS" and ticker_reporting:
         from rawcandle.fundamentals.admin.ticker_reporting import summary_rows
@@ -384,6 +415,16 @@ def render_operation_report(
         errors = _sequence(result.get("errors"))
         first_error = errors[0] if errors and isinstance(errors[0], Mapping) else {}
         failure_rows = [final_status_message(result)]
+        if operation_stage(mode) == "Production update":
+            failure_rows.append("Production update did not modify production databases." if not result.get("write_boundary_crossed") else "See rollback evidence for database restoration status.")
+            reason = production_failure_reason(result)
+            if reason:
+                failure_rows.append(reason)
+            retry = _mapping(result.get("retry_authorization"))
+            if retry.get("direct_production_retry_available"):
+                failure_rows.append("Direct Production retry remains available; Preview and Test do not need to be rerun.")
+            elif retry:
+                failure_rows.append("Direct Production retry is unavailable; rerun Preview and Test.")
         if first_error.get("message"):
             failure_rows.append(str(first_error["message"]))
         section(lines, "Failure", failure_rows)
@@ -457,7 +498,16 @@ def render_operation_report(
         next_step = "Next step: resolve review items if needed, then run Test on copies." if review_count else "Next step: run Test on copies."
         actions = ["Preview checked the current state and recorded its findings.", "No database writes were performed.", next_step]
     elif mode == "COPY_ONLY_APPLY":
-        actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed.", "Next step: Production update is available after this successful test."]
+        from rawcandle.fundamentals.admin.ticker_reporting import analysis_reporting_counts
+
+        analysis_counts = analysis_reporting_counts(ticker_reporting)
+        if failed:
+            next_step = "Next step: resolve the Test on copies failure before Production update."
+        elif analysis_counts["reporting_integrity_errors"]:
+            next_step = "Reporting integrity requires attention. Manual Production update remains backend-authorized by the successful Test, but automatic workflow progression is stopped."
+        else:
+            next_step = "Next step: Production update is available."
+        actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed.", next_step]
     elif result.get("outcome") == "NO_CHANGE":
         actions = ["No production change was required."]
     else:
@@ -479,6 +529,20 @@ def render_operation_report(
         else:
             impact = ["Downstream details are retained in the run evidence."]
     section(lines, "Downstream Impact", impact)
+
+    if result.get("operation_type") == "ADD_TICKERS" and ticker_reporting:
+        from rawcandle.fundamentals.admin.ticker_reporting import no_quarterly_history_tickers
+
+        no_history = no_quarterly_history_tickers(ticker_reporting)
+        if no_history:
+            section(
+                lines,
+                "Analytical Limitations",
+                [
+                    f"{len(no_history)} ticker{'s' if len(no_history) != 1 else ''} {'have' if len(no_history) != 1 else 'has'} provider data but no usable quarterly ARQ history: {', '.join(no_history)}.",
+                    "These tickers may be added successfully even though V2 analysis is not currently available.",
+                ],
+            )
 
     warnings = _sequence(result.get("warnings"))
     blockers = _sequence(result.get("blockers"))
@@ -510,6 +574,15 @@ def render_operation_report(
     if review_count:
         notices.append("No operation-level blockers were found.")
         notices.append(f"{review_count} ticker{'s' if review_count != 1 else ''} require{'s' if review_count == 1 else ''} review.")
+    if result.get("operation_type") == "ADD_TICKERS" and ticker_reporting:
+        from rawcandle.fundamentals.admin.ticker_reporting import analysis_reporting_counts
+
+        integrity_errors = analysis_reporting_counts(ticker_reporting)["reporting_integrity_errors"]
+        if integrity_errors:
+            notices.append(
+                f"Warning: {integrity_errors} reporting integrity error{'s' if integrity_errors != 1 else ''} "
+                f"{'require' if integrity_errors != 1 else 'requires'} attention."
+            )
     section(lines, "Warnings or Blockers", notices or ["No warnings or blockers were found."])
 
     if taxonomy and taxonomy["business_outcome"] == "NO_CHANGE":
@@ -557,6 +630,8 @@ def render_operation_report(
             appendix.append(f"Exception class: `{errors[0]['type']}`")
         if errors[0].get("message"):
             appendix.append(f"Technical error: `{errors[0]['message']}`")
+    elif result.get("error"):
+        appendix.append(f"Technical error: `{result['error']}`")
     if result.get("artifact_dir"):
         appendix.append(f"Artifact directory: `{result['artifact_dir']}`")
     section(lines, "Technical Appendix", appendix)

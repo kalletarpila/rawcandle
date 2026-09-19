@@ -20,6 +20,7 @@ from rawcandle.fundamentals.admin.artifacts import sha256_file
 from rawcandle.fundamentals.admin.history import AdminRunHistory
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
+    WORKFLOW_REPORT_NAME,
     build_operation_summary,
     final_status_message,
     render_operation_report,
@@ -204,6 +205,27 @@ def test_admin_download_route_serves_exact_operation_report(tmp_path: Path, monk
     assert error.value.status_code == 404
 
 
+def test_admin_download_route_serves_workflow_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    run_dir = tmp_path / "20260919T120000Z_add_tickers_fixture_full_workflow"
+    run_dir.mkdir()
+    (run_dir / WORKFLOW_REPORT_NAME).write_text("# Add Tickers Full Workflow Report\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.resolve_operation_report_download",
+        lambda run_id, filename: resolve_operation_report_download(run_id, filename, root=tmp_path),
+    )
+    app = FastAPI()
+    add_fundamentals_admin_download_route(app)
+    route = next(
+        route for route in app.routes
+        if getattr(route, "path", None) == "/fundamentals/admin/reports/{run_id}/{filename:path}"
+    )
+
+    response = asyncio.run(route.endpoint(run_dir.name, WORKFLOW_REPORT_NAME))
+
+    assert Path(response.path).read_text(encoding="utf-8").startswith("# Add Tickers Full Workflow Report")
+    assert response.headers["content-disposition"] == 'attachment; filename="workflow_report.md"'
+
+
 def test_admin_download_route_matches_artifact_hash_and_rejects_unsafe_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -373,6 +395,7 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
             assert controls.preview_button.disabled is True
             assert controls.copy_apply_button.disabled is True
             assert controls.production_apply_button.disabled is True
+            assert controls.full_workflow_button.disabled is True
             self.apply_calls.append({"operation_type": operation_type, **kwargs})
             return AdminUIRunResult(
                 status="COMPLETED",
@@ -406,6 +429,7 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
     assert controls.candidate_path_field.visible is False
     controls.tickers_field.value = "NVDA"
     controls.tickers_field.on_change(None)
+    assert controls.full_workflow_button.disabled is False
     controls.preview_button.on_click(None)
 
     assert service.calls[0]["operation_type"] == "ADD_TICKERS"
@@ -421,6 +445,7 @@ def test_admin_page_exposes_three_operations_and_downloads_exact_report() -> Non
     assert controls.copy_apply_button.disabled is False
     assert controls.production_apply_button.disabled is True
     assert controls.copy_apply_button.visible is True
+    assert controls.full_workflow_button.disabled is True
     controls.copy_apply_button.on_click(None)
     assert service.apply_calls[0]["preview_payload_path"] == "/tmp/payload.json"
     assert service.apply_calls[0]["preview_fingerprint"] == "f" * 64
@@ -1077,3 +1102,144 @@ def test_production_preflight_failure_report_is_plain_and_technical_details_are_
     assert "Requested change: null" not in report
     assert "Failure phase: `PREFLIGHT`" in appendix
     assert "PermissionError: INTERNAL_PATH_FAILURE" in appendix
+
+
+def test_retryable_production_failure_keeps_preview_test_and_direct_retry_enabled() -> None:
+    class Service:
+        def __init__(self) -> None:
+            self.production_calls = 0
+
+        def capabilities(self):
+            return (AdminOperationCapability("ADD_TICKERS", True, True, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def preview(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED", message="Preview completed.", run_id="preview-run",
+                outcome="COMPLETED", mode="PREVIEW", preview_fingerprint="preview-fp",
+                preview_payload_path="/tmp/preview.json",
+            )
+
+        def copy_apply(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED", message="Test completed.", run_id="test-run",
+                outcome="COMPLETED", mode="COPY_ONLY_APPLY", preview_fingerprint="preview-fp",
+            )
+
+        def production_apply(self, operation_type, **kwargs):
+            self.production_calls += 1
+            if self.production_calls == 1:
+                return AdminUIRunResult(
+                    status="FAILED", message="Production lock is temporarily unavailable.", run_id="prod-failed",
+                    outcome="FAILED", mode="PRODUCTION_APPLY", preview_fingerprint="preview-fp",
+                    preview_payload_path="/tmp/preview.json", test_run_id="test-run",
+                    direct_production_retry_available=True,
+                )
+            return AdminUIRunResult(
+                status="COMPLETED", message="Production update completed successfully.", run_id="prod-ok",
+                outcome="COMPLETED", mode="PRODUCTION_APPLY",
+            )
+
+    service = Service()
+    page = _Page()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+    controls.tickers_field.value = "NVDA"
+    controls.tickers_field.on_change(None)
+    controls.preview_button.on_click(None)
+    controls.copy_apply_button.on_click(None)
+    controls.production_apply_button.on_click(None)
+    page.dialog.actions[1].on_click(None)
+
+    assert service.production_calls == 1
+    assert controls.production_apply_button.visible is True
+    assert controls.production_apply_button.disabled is False
+    assert controls.copy_apply_button.disabled is True
+    assert "temporarily unavailable" in controls.status_field.value
+
+    controls.production_apply_button.on_click(None)
+    page.dialog.actions[1].on_click(None)
+    assert service.production_calls == 2
+    assert controls.tickers_field.value == ""
+
+
+def test_full_workflow_button_disables_conflicting_actions_and_resets_successful_batch() -> None:
+    class Service:
+        def capabilities(self):
+            return (AdminOperationCapability("ADD_TICKERS", True, True, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def full_workflow(self, **kwargs):
+            assert controls.preview_button.disabled is True
+            assert controls.copy_apply_button.disabled is True
+            assert controls.production_apply_button.disabled is True
+            assert controls.full_workflow_button.disabled is True
+            kwargs["progress_callback"]({
+                "current_stage_number": 1, "total_declared_stages": 3,
+                "current_stage_id": "PREVIEW", "stage_state": "COMPLETED",
+                "message": "Preview - Completed",
+            })
+            kwargs["progress_callback"]({
+                "current_stage_number": 2, "total_declared_stages": 3,
+                "current_stage_id": "TEST_ON_COPIES", "stage_state": "COMPLETED",
+                "message": "Test on copies - Completed",
+            })
+            kwargs["progress_callback"]({
+                "current_stage_number": 3, "total_declared_stages": 3,
+                "current_stage_id": "PRODUCTION_UPDATE", "stage_state": "COMPLETED",
+                "message": "Production update - Completed",
+            })
+            return AdminUIRunResult(
+                status="COMPLETED", message="Full workflow completed.", run_id="workflow-run",
+                outcome="COMPLETED", mode="FULL_WORKFLOW", report_filename="workflow_report.md",
+                workflow_stage_run_ids=("preview-run", "test-run", "production-run"),
+            )
+
+    page = _Page()
+    controls = build_fundamentals_admin_page(page=page, service=Service())
+    controls.tickers_field.value = "NVDA"
+    controls.tickers_field.on_change(None)
+
+    assert controls.full_workflow_button.disabled is False
+    assert controls.copy_apply_button.disabled is True
+    assert controls.production_apply_button.disabled is True
+    controls.full_workflow_button.on_click(None)
+
+    assert "Preview - Completed" in controls.progress_field.value
+    assert "Test on copies - Completed" in controls.progress_field.value
+    assert "Production update - Completed" in controls.progress_field.value
+    assert controls.tickers_field.value == ""
+    assert controls.full_workflow_button.disabled is True
+
+
+def test_full_workflow_test_failure_preserves_preview_for_manual_test_retry() -> None:
+    class Service:
+        def capabilities(self):
+            return (AdminOperationCapability("ADD_TICKERS", True, True, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def full_workflow(self, **kwargs):
+            return AdminUIRunResult(
+                status="FAILED", message="Test on copies failed.", run_id="workflow-stopped",
+                outcome="STOPPED", mode="FULL_WORKFLOW",
+                preview_payload_path="/tmp/preview.json", preview_fingerprint="preview-fp",
+                direct_test_retry_available=True,
+            )
+
+        def copy_apply(self, operation_type, **kwargs):
+            raise AssertionError("state assertion does not invoke Test")
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=Service())
+    controls.tickers_field.value = "NVDA"
+    controls.tickers_field.on_change(None)
+    controls.full_workflow_button.on_click(None)
+
+    assert controls.copy_apply_button.visible is True
+    assert controls.copy_apply_button.disabled is False
+    assert controls.production_apply_button.disabled is True
+    assert controls.full_workflow_button.disabled is True

@@ -53,6 +53,7 @@ from rawcandle.fundamentals.snapshot.ui_service import (
 )
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
+    WORKFLOW_REPORT_NAME,
     resolve_operation_report_download,
 )
 from rawcandle.datacenter_taxonomy_change_orchestrator import (
@@ -1959,7 +1960,7 @@ def add_fundamentals_admin_download_route(application: FastAPI) -> None:
     @application.get(f"{FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE}" + "/{run_id}/{filename:path}")
     async def download_fundamentals_admin_report(run_id: str, filename: str) -> FileResponse:
         try:
-            if filename != OPERATION_REPORT_NAME:
+            if filename not in {OPERATION_REPORT_NAME, WORKFLOW_REPORT_NAME}:
                 raise ValueError("unsupported admin report")
             report_path = resolve_operation_report_download(run_id, filename)
         except (ValueError, FileNotFoundError):

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from rawcandle.fundamentals.admin.operation_report import render_operation_report
 from rawcandle.fundamentals.admin.ticker_reporting import (
+    analysis_reporting_counts,
     build_preview_reporting,
     enrich_after_state,
     reporting_counts,
@@ -394,3 +395,82 @@ def test_after_state_lookup_failure_is_explicit_reporting_integrity_error(tmp_pa
     assert report["after"]["analysis"]["integrity_status"] == "REPORTING_INTEGRITY_ERROR"
     assert "Reporting integrity error" in rendered
     assert "Score V2: Not available" not in rendered
+
+
+def test_zero_arq_expected_absence_is_not_reporting_integrity_error(tmp_path: Path) -> None:
+    paths = _databases(tmp_path)
+    zero_rows = [{"dimension": "MRY", "fiscalperiod": "2025-FY", "reportperiod": "2025-12-31"}]
+    preview = build_preview_reporting(paths, {
+        "items": [_item("ZERO", source="verified_archive", rows=zero_rows)],
+        "network": {"calls": []},
+    })
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute("INSERT INTO security VALUES(30,3,'ZERO','NASDAQ',1)")
+
+    report = enrich_after_state(preview, paths, stage="COPY_ONLY_APPLY")[0]
+    analysis = report["after"]["analysis"]
+    rendered = render_ticker_sections([report])
+    operation = render_operation_report(
+        run_id="zero",
+        result={
+            "run_id": "zero", "operation_type": "ADD_TICKERS", "mode": "COPY_ONLY_APPLY",
+            "outcome": "COMPLETED", "ticker_reporting": [report],
+        },
+    )
+
+    assert analysis["integrity_status"] == "EXPECTED_NO_ANALYSIS"
+    assert analysis["analysis_availability"] == "NO_USABLE_QUARTERLY_HISTORY"
+    assert analysis["rp_v2"]["total_results"] == 0
+    assert analysis_reporting_counts([report]) == {
+        "no_usable_quarterly_history": 1,
+        "reporting_integrity_errors": 0,
+    }
+    assert "No usable quarterly history: 1" in rendered
+    assert "Reporting integrity error" not in rendered
+    assert "1 ticker has provider data but no usable quarterly ARQ history: ZERO." in operation
+    assert "No warnings or blockers were found." in operation
+    assert "Next step: Production update is available." in operation
+
+
+def test_real_analysis_wins_over_zero_arq_source_evidence(tmp_path: Path) -> None:
+    paths = _databases(tmp_path)
+    zero_rows = [{"dimension": "MRY", "fiscalperiod": "2025-FY", "reportperiod": "2025-12-31"}]
+    preview = build_preview_reporting(paths, {
+        "items": [_item("ZERORESULT", source="verified_archive", rows=zero_rows)],
+        "network": {"calls": []},
+    })
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute("INSERT INTO security VALUES(30,3,'ZERORESULT','NASDAQ',1)")
+    with sqlite3.connect(paths.analysis_db) as connection:
+        connection.execute("INSERT INTO score_result VALUES(3,3,'FULL',NULL)")
+
+    analysis = enrich_after_state(preview, paths, stage="COPY_ONLY_APPLY")[0]["after"]["analysis"]
+
+    assert analysis["integrity_status"] == "READY"
+    assert analysis["score"]["status"] == "FULL"
+    assert analysis.get("analysis_availability") != "NO_USABLE_QUARTERLY_HISTORY"
+
+
+def test_integrity_error_is_a_warning_and_does_not_claim_no_warnings(tmp_path: Path) -> None:
+    paths = _databases(tmp_path)
+    arq_rows = [{"dimension": "ARQ", "fiscalperiod": "2026-Q2", "reportperiod": "2026-06-30"}]
+    preview = build_preview_reporting(paths, {
+        "items": [_item("BROKEN", source="verified_archive", rows=arq_rows)],
+        "network": {"calls": []},
+    })
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute("INSERT INTO security VALUES(30,3,'BROKEN','NASDAQ',1)")
+    report = enrich_after_state(preview, paths, stage="COPY_ONLY_APPLY")[0]
+
+    rendered = render_operation_report(
+        run_id="broken",
+        result={
+            "run_id": "broken", "operation_type": "ADD_TICKERS", "mode": "COPY_ONLY_APPLY",
+            "outcome": "COMPLETED", "ticker_reporting": [report],
+        },
+    )
+
+    assert "Reporting integrity errors: 1" in rendered
+    assert "Warning: 1 reporting integrity error requires attention." in rendered
+    assert "No warnings or blockers were found." not in rendered
+    assert "automatic workflow progression is stopped" in rendered

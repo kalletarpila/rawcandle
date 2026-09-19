@@ -275,15 +275,31 @@ def _run_git(args: tuple[str, ...]) -> str:
 
 
 def _assert_clean_worktree() -> dict[str, Any]:
-    status = _run_git(("status", "--porcelain"))
-    if status:
-        raise RuntimeError("PHASE13G2_CLEAN_GIT_WORKTREE_REQUIRED")
-    return {
-        "head": _run_git(("rev-parse", "HEAD")),
-        "short_head": _run_git(("rev-parse", "--short", "HEAD")),
-        "branch": _run_git(("branch", "--show-current")),
-        "status_clean": True,
-    }
+    """Capture Git provenance without making repository cleanliness a safety gate."""
+    try:
+        status = _run_git(("status", "--porcelain"))
+        changed_paths = tuple(
+            line[3:].strip()
+            for line in status.splitlines()
+            if len(line) > 3 and not line.startswith("??")
+        )
+        return {
+            "head": _run_git(("rev-parse", "HEAD")),
+            "short_head": _run_git(("rev-parse", "--short", "HEAD")),
+            "branch": _run_git(("branch", "--show-current")),
+            "status_clean": not bool(status),
+            "dirty": bool(status),
+            "changed_tracked_paths": list(changed_paths[:50]),
+        }
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "head": None,
+            "short_head": None,
+            "branch": None,
+            "status_clean": None,
+            "dirty": None,
+            "error": type(exc).__name__,
+        }
 
 
 def _process_inventory() -> dict[str, Any]:

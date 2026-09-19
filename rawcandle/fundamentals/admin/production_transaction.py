@@ -29,6 +29,44 @@ ROOT = Path(__file__).resolve().parents[3]
 ADMIN_LOCK = ROOT / "temp/.fundamentals_admin_production.lock"
 BACKUP_ROOT = ROOT / "backups/fundamentals_admin_production"
 
+_STALE_AUTHORIZATION_MARKERS = (
+    "STALE",
+    "MISMATCH",
+    "MATCHING_SUCCESSFUL_TEST_REQUIRED",
+    "SOURCE_CHANGED",
+    "TAXONOMY_CHANGED",
+    "PREVIEW_FINGERPRINT",
+    "TEST_PATH_INVALID",
+)
+
+
+def _preflight_failure_reason(error: str) -> str:
+    translations = (
+        ("ADMIN_PRODUCTION_UPDATE_ALREADY_RUNNING", "Another Administration operation currently holds the production lock."),
+        ("SchedulerAlreadyRunningError", "The scheduler currently holds the database update lock."),
+        ("ADMIN_INSUFFICIENT_DISK", "There is not enough free disk space for backup, rebuild, and rollback."),
+        ("MATCHING_SUCCESSFUL_TEST_REQUIRED", "The matching successful Test on copies evidence is missing or invalid."),
+        ("STALE", "The authoritative source state changed after the tested Preview."),
+        ("MISMATCH", "The saved Preview or Test evidence no longer matches the production request."),
+        ("SOURCE_CHANGED", "An authoritative source database changed during production preflight."),
+    )
+    for marker, reason in translations:
+        if marker in error:
+            return reason
+    return "Production preflight could not complete. Technical details are retained in the run evidence."
+
+
+def _retry_authorization(result: Mapping[str, Any], error: str, *, write_boundary_crossed: bool) -> dict[str, Any]:
+    evidence_bound = bool(result.get("preview") and result.get("test_on_copies"))
+    stale = any(marker in error for marker in _STALE_AUTHORIZATION_MARKERS)
+    direct = bool(evidence_bound and not write_boundary_crossed and not stale)
+    return {
+        "direct_production_retry_available": direct,
+        "preview_test_preserved": direct,
+        "preview_test_rerun_required": not direct,
+        "reason": "RETRYABLE_PREWRITE_FAILURE" if direct else "STALE_OR_UNBOUND_EVIDENCE",
+    }
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -250,10 +288,17 @@ def render_production_report(result: Mapping[str, Any]) -> str:
     if preflight_failure:
         lines.extend([
             "- The safety preflight rejected the operation.",
+            f"- {result.get('user_failure_reason') or 'Production preflight could not complete.'}",
             "- No production database writes were performed.",
             "- No backup was required.",
             "- No rollback was required.",
         ])
+        retry = result.get("retry_authorization") or {}
+        lines.append(
+            "- The successful Preview and Test remain valid; Production update may be retried directly."
+            if retry.get("direct_production_retry_available")
+            else "- Preview and Test must be rerun before another Production update."
+        )
     elif outcome == "COMPLETED":
         lines.extend([
             "- Full V2 analysis, RP V2 and RV were rebuilt and validated.",
@@ -270,6 +315,12 @@ def render_production_report(result: Mapping[str, Any]) -> str:
         f"- Production lock: {'Acquired' if result.get('lock_owner') else 'Not reached'}",
         f"- Source state verification: {'Passed' if result.get('source_state_verified') else 'Not reached'}",
     ])
+    git_state = result.get("git_state") or {}
+    if git_state:
+        lines.append(f"- Git HEAD: `{git_state.get('head') or 'Unavailable'}`; dirty={git_state.get('dirty')}")
+    for warning in result.get("warnings") or []:
+        detail = warning.get("message") if isinstance(warning, Mapping) else str(warning)
+        lines.append(f"- Warning: {detail}")
     lines.extend(["", "## Verified backups", ""])
     backups = result.get("backups") or {}
     if backups:
@@ -344,7 +395,7 @@ def run_transaction(
     if candidate.exists() or candidate.is_symlink():
         raise FileExistsError("ADMIN_CANDIDATE_STAGING_PATH_EXISTS")
     backup_dir = (backup_root or BACKUP_ROOT) / run_id
-    result: dict[str, Any] = {"run_id": run_id, "artifact_dir": str(writer.run_dir), "operation_type": operation.operation_type.value, "mode": "PRODUCTION_APPLY" if actual_production else "TRANSACTION_REHEARSAL", "preview_fingerprint": preview_fingerprint, "test_run_id": test_run_id, "as_of_date": None, "started_at_utc": started, "outcome": "FAILED", "write_set": list(operation.written_roles), "write_boundary_crossed": False}
+    result: dict[str, Any] = {"run_id": run_id, "artifact_dir": str(writer.run_dir), "operation_type": operation.operation_type.value, "mode": "PRODUCTION_APPLY" if actual_production else "TRANSACTION_REHEARSAL", "preview_fingerprint": preview_fingerprint, "test_run_id": test_run_id, "as_of_date": None, "started_at_utc": started, "outcome": "FAILED", "write_set": list(operation.written_roles), "write_boundary_crossed": False, "warnings": []}
 
     def progress(number: int, stage_id: str, state: str, message: str) -> None:
         if progress_callback is None:
@@ -369,7 +420,11 @@ def run_transaction(
     try:
         if actual_production:
             from rawcandle.fundamentals.admin.batch_add_tickers import _assert_clean_worktree
-            _assert_clean_worktree()
+            result["git_state"] = _assert_clean_worktree()
+            if result["git_state"].get("dirty"):
+                result["warnings"].append({"code": "DIRTY_GIT_WORKTREE", "message": "Git worktree contains uncommitted changes."})
+            elif result["git_state"].get("error"):
+                result["warnings"].append({"code": "GIT_STATE_UNAVAILABLE", "message": "Git provenance could not be read."})
         validate_preview = (
             operation.production_validate_preview
             if actual_production and operation.production_validate_preview is not None
@@ -505,6 +560,7 @@ def run_transaction(
             return result
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
+        result["errors"] = [{"type": type(exc).__name__, "message": str(exc)}]
         result["failed_stage"] = stage
         if backups and (source_mutation_started or publication_started):
             try:
@@ -515,6 +571,14 @@ def run_transaction(
             except Exception as rollback_exc:
                 result["rollback"] = {"status": "CRITICAL_ROLLBACK_FAILED", "error": f"{type(rollback_exc).__name__}: {rollback_exc}"}
                 result["outcome"] = "CRITICAL_ROLLBACK_FAILED"
+        if not write_boundary_crossed:
+            result["database_safety"] = "NO_DATABASE_WRITES"
+            result["user_failure_reason"] = _preflight_failure_reason(result["error"])
+            result["retry_authorization"] = _retry_authorization(
+                result,
+                result["error"],
+                write_boundary_crossed=write_boundary_crossed,
+            )
         result["completed_at_utc"] = utc_now()
         progress(9, "COMPLETED", "FAILED", "Production update failed; see the final summary.")
         return result

@@ -94,6 +94,34 @@ def summary_rows(reports: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
     return tuple(rows)
 
 
+def analysis_reporting_counts(reports: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    analyses = [
+        (report.get("after") or {}).get("analysis")
+        for report in reports
+        if isinstance((report.get("after") or {}).get("analysis"), Mapping)
+    ]
+    return {
+        "no_usable_quarterly_history": sum(
+            analysis.get("analysis_availability") == "NO_USABLE_QUARTERLY_HISTORY"
+            for analysis in analyses
+        ),
+        "reporting_integrity_errors": sum(
+            analysis.get("integrity_status") == "REPORTING_INTEGRITY_ERROR"
+            for analysis in analyses
+        ),
+    }
+
+
+def no_quarterly_history_tickers(reports: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    return tuple(
+        str(report.get("ticker") or "")
+        for report in reports
+        if isinstance((report.get("after") or {}).get("analysis"), Mapping)
+        and (report.get("after") or {}).get("analysis", {}).get("analysis_availability")
+        == "NO_USABLE_QUARTERLY_HISTORY"
+    )
+
+
 def _readonly(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
@@ -242,7 +270,25 @@ def _integrity_analysis(reason: str) -> dict[str, Any]:
     }
 
 
-def _analysis(analysis_db: Path, company_id: int | None) -> dict[str, Any]:
+def _no_usable_quarterly_history_analysis() -> dict[str, Any]:
+    return {
+        "integrity_status": "EXPECTED_NO_ANALYSIS",
+        "integrity_reason": None,
+        "analysis_availability": "NO_USABLE_QUARTERLY_HISTORY",
+        "score": {"status": "No result", "reason": "No usable quarterly ARQ history", "technical_reason": None},
+        "lifecycle": {"status": "No result", "reason": "No usable quarterly ARQ history", "state": None},
+        "valuation": {"status": "No result", "reason": "No usable quarterly ARQ history"},
+        "rp_v2": {"total_results": 0, "ecosystem_results": 0, "status": "No results", "reason": "No usable quarterly ARQ history"},
+        "rv": {"included": False, "status": "Not eligible", "reason": "No usable quarterly ARQ history"},
+    }
+
+
+def _analysis(
+    analysis_db: Path,
+    company_id: int | None,
+    *,
+    coverage: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     if company_id is None:
         return _integrity_analysis("Canonical company identity was not resolved for after-state reporting")
     try:
@@ -262,6 +308,12 @@ def _analysis(analysis_db: Path, company_id: int | None) -> dict[str, Any]:
             rv = None
             if _table(connection, "relative_valuation_company_result") and _table(connection, "relative_valuation_active_snapshot"):
                 rv = _latest(connection, "SELECT r.valuation_status status,r.valuation_reason reason FROM relative_valuation_company_result r JOIN relative_valuation_active_snapshot a ON a.snapshot_id=r.snapshot_id WHERE r.company_id=?", (company_id,))
+            if not any((score, lifecycle, valuation)) and (
+                coverage
+                and int(coverage.get("provider_rows") or 0) > 0
+                and coverage.get("arq_count") == 0
+            ):
+                return _no_usable_quarterly_history_analysis()
             if not any((score, lifecycle, valuation)):
                 return _integrity_analysis("The rebuilt analysis contains no Score, Lifecycle, or Valuation rows for the resolved company")
             lifecycle_result = dict(lifecycle) if lifecycle else {"status": "No result", "reason": None, "state": None}
@@ -377,7 +429,11 @@ def enrich_after_state(
         elif not identity.get("exists"):
             analysis = _integrity_analysis("Canonical ticker was not found in the after-state identity database")
         else:
-            analysis = _analysis(paths.analysis_db, int(company_id) if company_id is not None else None)
+            analysis = _analysis(
+                paths.analysis_db,
+                int(company_id) if company_id is not None else None,
+                coverage=report.get("coverage") if isinstance(report.get("coverage"), Mapping) else None,
+            )
         report["after"] = {
             "stage": stage,
             "canonical_identity": "Present" if identity.get("exists") else "Not present",
@@ -407,7 +463,9 @@ def _compact(report: Mapping[str, Any]) -> list[str]:
         v2 = "Existing V2 analysis" if before.get("v2_analysis") else "No existing V2 analysis" if before.get("canonical_identity") else "Not calculated during Preview"
         rp = "Existing" if before.get("v2_analysis") else "None" if before.get("canonical_identity") else "Not calculated during Preview"
     else:
-        if analysis.get("integrity_status") == "REPORTING_INTEGRITY_ERROR":
+        if analysis.get("analysis_availability") == "NO_USABLE_QUARTERLY_HISTORY":
+            v2 = "No usable quarterly history"
+        elif analysis.get("integrity_status") == "REPORTING_INTEGRITY_ERROR":
             v2 = "Reporting integrity error"
         else:
             v2 = f"Score V2 {_status((analysis.get('score') or {}).get('status'), 'SCORE_')} / Valuation {_status((analysis.get('valuation') or {}).get('status'), 'VALUATION_')}"
@@ -433,20 +491,28 @@ def _analysis_outcome(reports: Sequence[Mapping[str, Any]]) -> list[str]:
     ]
     if not analyses:
         return []
-    rows: list[str] = []
+    no_history = sum(
+        analysis.get("analysis_availability") == "NO_USABLE_QUARTERLY_HISTORY"
+        for analysis in analyses
+    )
+    model_analyses = [
+        analysis for analysis in analyses
+        if analysis.get("analysis_availability") != "NO_USABLE_QUARTERLY_HISTORY"
+    ]
+    rows: list[str] = [f"No usable quarterly history: {no_history}"] if no_history else []
     for label, key, prefixes in (
         ("Score V2", "score", ("SCORE_",)),
         ("Lifecycle", "lifecycle", ("LIFECYCLE_",)),
         ("Valuation", "valuation", ("VALUATION_",)),
     ):
         counts: dict[str, int] = {}
-        for analysis in analyses:
+        for analysis in model_analyses:
             status = _status((analysis.get(key) or {}).get("status"), *prefixes)
             counts[status] = counts.get(status, 0) + 1
         rows.extend(f"{label} {status}: {count}" for status, count in sorted(counts.items()) if status != "NO_RESULT")
-    rows.append(f"RP V2 with at least one result: {sum(int((analysis.get('rp_v2') or {}).get('total_results') or 0) > 0 for analysis in analyses)}")
+    rows.append(f"RP V2 with at least one result: {sum(int((analysis.get('rp_v2') or {}).get('total_results') or 0) > 0 for analysis in model_analyses)}")
     rv_counts: dict[str, int] = {}
-    for analysis in analyses:
+    for analysis in model_analyses:
         status = _status((analysis.get("rv") or {}).get("status"), "VALUATION_")
         rv_counts[status] = rv_counts.get(status, 0) + 1
     rows.extend(f"RV {status.replace('_', ' ').title() if status == 'NOT_ELIGIBLE' else status}: {count}" for status, count in sorted(rv_counts.items()))
@@ -529,6 +595,10 @@ def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
                 lines.append("- No existing V2 analysis")
             else:
                 lines.append("- Not calculated during Preview")
+        elif analysis.get("analysis_availability") == "NO_USABLE_QUARTERLY_HISTORY":
+            lines.append("- V2 analysis: Not available - no usable quarterly ARQ history")
+            lines.append("- RP V2: 0 results")
+            lines.append("- RV: Not eligible")
         elif analysis.get("integrity_status") == "REPORTING_INTEGRITY_ERROR":
             lines.append(f"- Reporting integrity error: {analysis.get('integrity_reason') or 'after-state lookup failed'}")
         else:

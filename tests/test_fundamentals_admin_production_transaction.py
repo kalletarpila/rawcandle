@@ -314,6 +314,75 @@ def test_stale_preview_fails_before_backup(tmp_path, monkeypatch):
     assert result["outcome"] == "FAILED"
     assert "STALE_PREVIEW" in result["error"]
     assert not (tmp_path / "backups").exists()
+    assert result["retry_authorization"]["direct_production_retry_available"] is False
+    assert result["retry_authorization"]["preview_test_rerun_required"] is True
+
+
+def test_retryable_prewrite_lock_failure_preserves_test_and_allows_direct_retry(tmp_path, monkeypatch):
+    op, paths, kwargs = _fixture(tmp_path, monkeypatch)
+
+    with tx.production_lock(lock_path=kwargs["lock_path"], scheduler_log_dir=kwargs["scheduler_log_dir"]):
+        failed = tx.run_transaction(op, **kwargs)
+
+    assert failed["outcome"] == "FAILED"
+    assert failed["write_boundary_crossed"] is False
+    assert failed["retry_authorization"] == {
+        "direct_production_retry_available": True,
+        "preview_test_preserved": True,
+        "preview_test_rerun_required": False,
+        "reason": "RETRYABLE_PREWRITE_FAILURE",
+    }
+    assert "Another Administration operation" in failed["user_failure_reason"]
+    assert _value(paths.analysis_db) == "old"
+
+    retried = tx.run_transaction(op, **kwargs)
+
+    assert retried["outcome"] == "COMPLETED"
+    assert _value(paths.analysis_db) == "new"
+
+
+def test_dirty_git_is_recorded_as_warning_and_does_not_block_production(tmp_path, monkeypatch):
+    paths = _fixture(tmp_path, monkeypatch)[1]
+    run_root = tmp_path / "production-runs"
+    lock_path = tmp_path / "production.lock"
+    payload = tmp_path / "production-preview.json"
+    payload.write_text("{}", encoding="utf-8")
+    for role, path in paths.as_dict().items():
+        monkeypatch.setitem(tx.PRODUCTION, role, path)
+    monkeypatch.setattr(tx, "ADMIN_RUN_ROOT", run_root)
+    monkeypatch.setattr(tx, "ADMIN_LOCK", lock_path)
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.batch_add_tickers._assert_clean_worktree",
+        lambda: {"head": "abc123", "dirty": True, "status_clean": False, "changed_tracked_paths": ["module.py"]},
+    )
+    operation = tx.ProductionOperation(
+        AdminOperationType.ADD_TICKERS,
+        ("provider", "canonical", "analysis"),
+        lambda *args: {},
+        lambda *args: {"outcome": "NOT_REQUIRED"},
+        production_validate_preview=lambda *args: {
+            "as_of_date": "2026-09-19", "taxonomy_dependency": IDENTITY, "no_change": True,
+        },
+    )
+
+    result = tx.run_transaction(
+        operation,
+        preview_payload_path=payload,
+        preview_fingerprint="preview-fp",
+        test_run_id="unused-for-no-change",
+        source_paths=paths,
+        run_root=run_root,
+        lock_path=lock_path,
+        production_intent=True,
+    )
+
+    assert result["outcome"] == "NO_CHANGE"
+    assert result["git_state"]["dirty"] is True
+    assert result["warnings"] == [{
+        "code": "DIRTY_GIT_WORKTREE",
+        "message": "Git worktree contains uncommitted changes.",
+    }]
+    assert "CLEAN_GIT_WORKTREE_REQUIRED" not in json.dumps(result)
 
 
 def test_lock_excludes_second_admin_and_scheduler_then_releases(tmp_path):

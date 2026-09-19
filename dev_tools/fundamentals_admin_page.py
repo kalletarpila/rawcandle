@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import flet as ft
 
-from rawcandle.fundamentals.admin.operation_report import OPERATION_REPORT_NAME
+from rawcandle.fundamentals.admin.operation_report import OPERATION_REPORT_NAME, WORKFLOW_REPORT_NAME
 from rawcandle.fundamentals.admin.ui_service import (
     AdminUIRunResult,
     FundamentalsAdminUIService,
@@ -34,6 +34,7 @@ class FundamentalsAdminPageControls:
     preview_button: Any
     copy_apply_button: Any
     production_apply_button: Any
+    full_workflow_button: Any
     preview_payload_field: Any
     preview_fingerprint_field: Any
     production_confirmation_field: Any
@@ -53,9 +54,9 @@ class FundamentalsAdminPageControls:
     progress_details: Any
 
 
-def admin_report_download_url(run_id: str) -> str:
+def admin_report_download_url(run_id: str, filename: str = OPERATION_REPORT_NAME) -> str:
     safe_run_id = quote(str(run_id), safe="")
-    safe_name = quote(OPERATION_REPORT_NAME, safe="")
+    safe_name = quote(filename, safe="")
     return f"{FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE}/{safe_run_id}/{safe_name}"
 
 
@@ -375,7 +376,14 @@ def build_fundamentals_admin_page(
                             tooltip="View details",
                             on_click=lambda _event, selected_run_id=run_id: select_history_run(selected_run_id),
                         ),
-                        download_button(item.run_id, enabled=item.report_available),
+                        ft.IconButton(
+                            icon=ft.Icons.DOWNLOAD,
+                            tooltip="Download workflow report" if item.report_filename == WORKFLOW_REPORT_NAME else "Download operation report",
+                            disabled=not item.report_available,
+                            on_click=lambda _event, selected_run_id=run_id, filename=item.report_filename: _launch_browser_url(
+                                page, admin_report_download_url(selected_run_id, filename)
+                            ),
+                        ),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
@@ -437,6 +445,7 @@ def build_fundamentals_admin_page(
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
         nonlocal current_preview_fingerprint, current_test_run_id, current_report_run_id, selected_history_run_id
         is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "ACTIVE_TAXONOMY_PREVIEW"}
+        is_workflow = result.mode == "FULL_WORKFLOW"
         status_field.value = _result_text(result)
         final_section.visible = not is_preview or result.status == "FAILED"
         status_field.visible = not is_preview or result.status == "FAILED"
@@ -446,12 +455,36 @@ def build_fundamentals_admin_page(
         if result.preview_fingerprint:
             current_preview_fingerprint = result.preview_fingerprint
             preview_fingerprint_field.value = result.preview_fingerprint
-        if result.preview_payload_path and result.preview_fingerprint:
+        if is_preview and result.preview_payload_path and result.preview_fingerprint:
             current_preview_signature = current_signature()
             current_preview_result = result
             current_test_run_id = None
         elif result.mode == "COPY_ONLY_APPLY" and result.status == "COMPLETED" and result.outcome == "COMPLETED" and result.preview_fingerprint == current_preview_fingerprint:
             current_test_run_id = result.run_id
+        elif is_workflow and result.direct_production_retry_available and result.preview_payload_path and result.preview_fingerprint:
+            current_preview_signature = current_signature()
+            current_preview_result = AdminUIRunResult(
+                status="COMPLETED",
+                message="Preview completed.",
+                outcome="COMPLETED",
+                mode="PREVIEW",
+                preview_payload_path=result.preview_payload_path,
+                preview_fingerprint=result.preview_fingerprint,
+            )
+            current_test_run_id = result.test_run_id
+        elif is_workflow and result.direct_test_retry_available and result.preview_payload_path and result.preview_fingerprint:
+            current_preview_signature = current_signature()
+            current_preview_result = AdminUIRunResult(
+                status="COMPLETED",
+                message="Preview completed.",
+                outcome="COMPLETED",
+                mode="PREVIEW",
+                preview_payload_path=result.preview_payload_path,
+                preview_fingerprint=result.preview_fingerprint,
+            )
+            current_test_run_id = None
+        elif result.mode == "PRODUCTION_APPLY" and result.status == "FAILED" and result.direct_production_retry_available:
+            current_test_run_id = result.test_run_id or current_test_run_id
         elif not is_preview:
             current_test_run_id = None
             current_preview_signature = None
@@ -461,7 +494,7 @@ def build_fundamentals_admin_page(
             preview_payload_field.value = ""
             preview_fingerprint_field.value = ""
         if (
-            result.mode == "PRODUCTION_APPLY"
+            result.mode in {"PRODUCTION_APPLY", "FULL_WORKFLOW"}
             and result.status == "COMPLETED"
             and (operation_dropdown.value or "").strip().upper() == "ADD_TICKERS"
         ):
@@ -471,7 +504,7 @@ def build_fundamentals_admin_page(
             selected_history_run_id = result.run_id
             report_button.on_click = lambda _event, run_id=result.run_id: _launch_browser_url(
                 page,
-                admin_report_download_url(run_id),
+                admin_report_download_url(run_id, result.report_filename or OPERATION_REPORT_NAME),
             )
             report_button.visible = bool(result.report_filename)
         update_summary(result)
@@ -532,6 +565,12 @@ def build_fundamentals_admin_page(
         copy_apply_button.disabled = bool(operation_running or not copy_authorized or not copy_ready)
         production_apply_button.visible = bool(production_authorized and production_ready)
         production_apply_button.disabled = bool(operation_running or not production_authorized or not production_ready)
+        full_workflow_button.visible = (operation_dropdown.value or "").strip().upper() == "ADD_TICKERS"
+        full_workflow_button.disabled = bool(
+            operation_running
+            or not can_preview()
+            or current_preview_signature is not None
+        )
 
     def invalidate_preview(_event: Any | None = None) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
@@ -565,6 +604,7 @@ def build_fundamentals_admin_page(
         preview_button.disabled = True
         copy_apply_button.disabled = True
         production_apply_button.disabled = True
+        full_workflow_button.disabled = True
         progress_section.visible = True
         progress_field.visible = True
         progress_follow_latest = True
@@ -690,9 +730,30 @@ def build_fundamentals_admin_page(
             return
         open_production_confirmation(_event)
 
+    def on_full_workflow(_event: Any) -> None:
+        nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
+        nonlocal current_preview_fingerprint, current_test_run_id, last_progress_count
+        current_preview_signature = None
+        current_preview_result = None
+        current_preview_payload_path = None
+        current_preview_fingerprint = None
+        current_test_run_id = None
+        preview_payload_field.value = ""
+        preview_fingerprint_field.value = ""
+        last_progress_count = None
+        run_guarded(
+            full_workflow_button,
+            lambda: admin_service.full_workflow(
+                raw_inputs=tickers_field.value or "",
+                market=market_field.value or "usa",
+                progress_callback=progress_callback,
+            ),
+        )
+
     preview_button = ft.ElevatedButton("Preview", icon=ft.Icons.PREVIEW, on_click=on_preview)
     copy_apply_button = ft.OutlinedButton("Test on copies", icon=ft.Icons.CHECKLIST, on_click=on_copy_apply, visible=False)
     production_apply_button = ft.ElevatedButton("Production update", icon=ft.Icons.LOCK, on_click=on_production_apply, visible=False)
+    full_workflow_button = ft.ElevatedButton("Run full workflow", icon=ft.Icons.PLAY_ARROW, on_click=on_full_workflow)
     for control in (
         operation_dropdown,
         tickers_field,
@@ -720,7 +781,7 @@ def build_fundamentals_admin_page(
             ft.Text("Preview checks proposed changes. Test on copies runs them in isolated databases. Production update writes an approved change under the existing safeguards."),
             tickers_field,
             ft.Row([candidate_path_field, candidate_version_field], wrap=True, spacing=12),
-            ft.Row([preview_button, copy_apply_button, production_apply_button], spacing=12),
+            ft.Row([full_workflow_button, preview_button, copy_apply_button, production_apply_button], spacing=12, wrap=True),
             preview_section,
             progress_section,
             final_section,
@@ -772,6 +833,7 @@ def build_fundamentals_admin_page(
         preview_button=preview_button,
         copy_apply_button=copy_apply_button,
         production_apply_button=production_apply_button,
+        full_workflow_button=full_workflow_button,
         preview_payload_field=preview_payload_field,
         preview_fingerprint_field=preview_fingerprint_field,
         production_confirmation_field=production_confirmation_field,

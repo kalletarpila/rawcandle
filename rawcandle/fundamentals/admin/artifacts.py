@@ -75,7 +75,12 @@ class AdminRunWriter:
         return path
 
     def append_heartbeat(self, payload: Mapping[str, Any]) -> Path:
-        path = self.run_dir / "heartbeat.jsonl"
+        return self.append_jsonl("heartbeat.jsonl", payload)
+
+    def append_jsonl(self, name: str, payload: Mapping[str, Any]) -> Path:
+        if "/" in name or "\\" in name or not name.endswith(".jsonl"):
+            raise ValueError("invalid JSONL artifact name")
+        path = self.run_dir / name
         safe = self._safe(dict(payload))
         safe.setdefault("run_id", self.run_id)
         safe.setdefault("operation_type", self.operation_type.value)

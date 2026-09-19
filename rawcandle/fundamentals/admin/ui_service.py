@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import fcntl
 import json
 from pathlib import Path
 import re
+from contextlib import contextmanager
 from typing import Any, Callable, Mapping
 
 from rawcandle.fundamentals.admin import batch_add_tickers, sector_industry, taxonomy_v2_sync
-from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT
+from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, sha256_file
+from rawcandle.fundamentals.admin.full_workflow import WORKFLOW_REPORT_NAME, run_full_workflow as orchestrate_full_workflow
 from rawcandle.fundamentals.admin.history import AdminRunHistory, RunHistoryEntry, RunProgressSummary
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
@@ -55,6 +58,11 @@ class AdminUIRunResult:
     failure_stage: str | None = None
     exception_type: str | None = None
     technical_error: str | None = None
+    direct_production_retry_available: bool = False
+    preview_test_rerun_required: bool = False
+    workflow_stage_run_ids: tuple[str, ...] = ()
+    test_run_id: str | None = None
+    direct_test_retry_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,6 +78,7 @@ class AdminUIHistoryEntry:
     primary_count: int | None = None
     duration_seconds: float | None = None
     count_label: str | None = None
+    report_filename: str = OPERATION_REPORT_NAME
 
     @property
     def stage(self) -> str:
@@ -78,7 +87,7 @@ class AdminUIHistoryEntry:
 
 _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|check_update_sector_industry|check_update_taxonomy)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
-    "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
+    "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
 }
@@ -100,6 +109,7 @@ class FundamentalsAdminUIService:
         taxonomy_apply: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_apply,
         taxonomy_production_preview: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_preview,
         taxonomy_production_apply: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_production_apply,
+        operation_lock_path: Path | None = None,
     ) -> None:
         self.run_root = run_root.resolve()
         self.history = history or AdminRunHistory(self.run_root)
@@ -113,6 +123,23 @@ class FundamentalsAdminUIService:
         self._taxonomy_apply = taxonomy_apply
         self._taxonomy_production_preview = taxonomy_production_preview
         self._taxonomy_production_apply = taxonomy_production_apply
+        self.operation_lock_path = (
+            operation_lock_path
+            or (self.run_root.parent / ".fundamentals_admin_ui_operation.lock")
+        ).resolve()
+
+    @contextmanager
+    def _operation_lock(self):
+        self.operation_lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.operation_lock_path.open("a+", encoding="utf-8") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise RuntimeError("ADMIN_OPERATION_ALREADY_RUNNING") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     def capabilities(self) -> tuple[AdminOperationCapability, ...]:
         return (
@@ -127,6 +154,14 @@ class FundamentalsAdminUIService:
         )
 
     def preview(
+        self,
+        operation_type: str,
+        **kwargs: Any,
+    ) -> AdminUIRunResult:
+        with self._operation_lock():
+            return self._preview_unlocked(operation_type, **kwargs)
+
+    def _preview_unlocked(
         self,
         operation_type: str,
         *,
@@ -170,6 +205,14 @@ class FundamentalsAdminUIService:
     def copy_apply(
         self,
         operation_type: str,
+        **kwargs: Any,
+    ) -> AdminUIRunResult:
+        with self._operation_lock():
+            return self._copy_apply_unlocked(operation_type, **kwargs)
+
+    def _copy_apply_unlocked(
+        self,
+        operation_type: str,
         *,
         preview_payload_path: str,
         preview_fingerprint: str,
@@ -208,6 +251,14 @@ class FundamentalsAdminUIService:
         return self._finalize(result, default_message="Copy-only apply completed.")
 
     def production_apply(
+        self,
+        operation_type: str,
+        **kwargs: Any,
+    ) -> AdminUIRunResult:
+        with self._operation_lock():
+            return self._production_apply_unlocked(operation_type, **kwargs)
+
+    def _production_apply_unlocked(
         self,
         operation_type: str,
         *,
@@ -249,6 +300,43 @@ class FundamentalsAdminUIService:
         else:
             raise ValueError("UNSUPPORTED_ADMIN_OPERATION")
         return self._finalize(result, default_message="Production apply completed.")
+
+    def full_workflow(
+        self,
+        *,
+        raw_inputs: str,
+        market: str = "usa",
+        progress_callback: AdminProgressCallback | None = None,
+    ) -> AdminUIRunResult:
+        with self._operation_lock():
+            result = orchestrate_full_workflow(
+                raw_inputs,
+                market=market,
+                run_root=self.run_root,
+                preview_stage=lambda callback: self._preview_unlocked(
+                    "ADD_TICKERS",
+                    raw_inputs=raw_inputs,
+                    market=market,
+                    network_allowed=True,
+                    progress_callback=callback,
+                ),
+                test_stage=lambda preview, callback: self._copy_apply_unlocked(
+                    "ADD_TICKERS",
+                    preview_payload_path=preview.preview_payload_path or "",
+                    preview_fingerprint=preview.preview_fingerprint or "",
+                    progress_callback=callback,
+                ),
+                production_stage=lambda preview, test, callback: self._production_apply_unlocked(
+                    "ADD_TICKERS",
+                    preview_payload_path=preview.preview_payload_path or "",
+                    preview_fingerprint=preview.preview_fingerprint or "",
+                    confirmation="CONFIRM_PRODUCTION_BATCH_ADD_TICKERS",
+                    test_run_id=test.run_id or "",
+                    progress_callback=callback,
+                ),
+                progress_callback=progress_callback,
+            )
+        return self._finalize(result, default_message="Full workflow completed.")
 
     def progress(self, run_id: str) -> RunProgressSummary:
         return self.history.progress(run_id)
@@ -293,6 +381,9 @@ class FundamentalsAdminUIService:
 
     def resolve_report_download(self, run_id: str) -> Path:
         return resolve_operation_report_download(run_id, root=self.run_root)
+
+    def resolve_named_report_download(self, run_id: str, filename: str) -> Path:
+        return resolve_operation_report_download(run_id, filename, root=self.run_root)
 
     def _artifact_names(self, run_id: str) -> tuple[str, ...]:
         try:
@@ -357,6 +448,7 @@ class FundamentalsAdminUIService:
                 primary_count=self._primary_count(result or request or {}),
                 duration_seconds=self._duration_seconds(result or {}),
                 count_label=self._count_label(result or request or {}),
+                report_filename=WORKFLOW_REPORT_NAME if self._mode_for_entry(item) == "FULL_WORKFLOW" else OPERATION_REPORT_NAME,
             )
         payload = result or request or status or {}
         return AdminUIHistoryEntry(
@@ -457,17 +549,35 @@ class FundamentalsAdminUIService:
         run_id = str(result.get("run_id") or "")
         taxonomy = taxonomy_preview_presentation(result)
         report: OperationReportSummary | None = None
-        if run_id:
+        workflow_mode = result.get("mode") == "FULL_WORKFLOW"
+        if run_id and workflow_mode:
+            report_path = self.run_root / run_id / WORKFLOW_REPORT_NAME
+            if report_path.is_file() and not report_path.is_symlink():
+                report = OperationReportSummary(
+                    run_id=run_id,
+                    operation_type=str(result.get("operation_type") or "ADD_TICKERS"),
+                    outcome=str(result.get("outcome") or "RECORDED"),
+                    mode="FULL_WORKFLOW",
+                    summary_rows=(
+                        f"Full workflow: {str(result.get('outcome') or 'RECORDED').replace('_', ' ').title()}.",
+                        f"Current stage: {result.get('current_stage') or 'Not recorded'}.",
+                        f"Production completed: {'Yes' if result.get('production_completed') else 'No'}.",
+                    ),
+                    report_path=str(report_path),
+                    report_sha256=sha256_file(report_path),
+                )
+        elif run_id:
             report = write_operation_report(run_id, root=self.run_root)
         payload_path = (
             result.get("phase13d_preview_payload_path")
             or result.get("preview_payload_path")
             or result.get("payload_path")
+            or ((result.get("preview") or {}).get("payload") if isinstance(result.get("preview"), Mapping) else None)
         )
         errors = result.get("errors")
         first_error = errors[0] if isinstance(errors, (list, tuple)) and errors and isinstance(errors[0], Mapping) else {}
         return AdminUIRunResult(
-            status="FAILED" if result.get("outcome") in {"FAILED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED",
+            status="FAILED" if result.get("outcome") in {"FAILED", "STOPPED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED",
             message=final_status_message(result) if result.get("mode") else default_message,
             run_id=run_id or None,
             outcome=str(result.get("outcome")) if result.get("outcome") is not None else None,
@@ -475,7 +585,7 @@ class FundamentalsAdminUIService:
             preview_fingerprint=str(result.get("preview_fingerprint")) if result.get("preview_fingerprint") else None,
             preview_payload_path=str(payload_path) if payload_path else None,
             artifact_dir=str(result.get("artifact_dir")) if result.get("artifact_dir") else None,
-            report_filename=OPERATION_REPORT_NAME if report else None,
+            report_filename=(WORKFLOW_REPORT_NAME if workflow_mode else OPERATION_REPORT_NAME) if report else None,
             report_sha256=report.report_sha256 if report else None,
             summary_rows=report.summary_rows if report else (),
             business_outcome=taxonomy["business_outcome"] if taxonomy else None,
@@ -486,4 +596,13 @@ class FundamentalsAdminUIService:
             failure_stage=str(result.get("failed_stage")) if result.get("failed_stage") else None,
             exception_type=str(first_error.get("type")) if first_error.get("type") else None,
             technical_error=str(first_error.get("message")) if first_error.get("message") else None,
+            direct_production_retry_available=bool((result.get("retry_authorization") or {}).get("direct_production_retry_available") or result.get("manual_production_retry_available") or result.get("manual_production_available")),
+            preview_test_rerun_required=bool((result.get("retry_authorization") or {}).get("preview_test_rerun_required")),
+            workflow_stage_run_ids=tuple(
+                str(stage.get("run_id"))
+                for stage in (result.get("stages") or [])
+                if isinstance(stage, Mapping) and stage.get("run_id")
+            ),
+            test_run_id=str(result.get("test_run_id")) if result.get("test_run_id") else None,
+            direct_test_retry_available=bool(result.get("manual_test_retry_available")),
         )
