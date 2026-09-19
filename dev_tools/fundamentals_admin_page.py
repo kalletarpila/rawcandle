@@ -163,7 +163,7 @@ def build_fundamentals_admin_page(
     network_allowed_checkbox = ft.Checkbox(label="Allow provider network for preview", value=True, visible=False)
     production_preview_checkbox = ft.Checkbox(label="Protected production preview", value=False, visible=False)
     operation_guidance_field = ft.Text(
-        "Provider network access is enabled automatically when local data is insufficient."
+        "Enter up to 25 tickers. Provider network access is enabled automatically when local data is insufficient."
     )
     preview_payload_field = ft.TextField(label="Preview payload path", width=620, read_only=True, visible=False)
     preview_fingerprint_field = ft.TextField(label="Preview fingerprint", width=620, read_only=True, visible=False)
@@ -293,7 +293,7 @@ def build_fundamentals_admin_page(
         if operation == "CHECK_UPDATE_TAXONOMY":
             return "Rebuilds Fundamentals from the active dc_ecosystem version in data/analysis.db."
         return (
-            "Enter one or more tickers. Commas, spaces, newlines and duplicates are accepted. "
+            "Enter 1 to 25 tickers. Commas, spaces, newlines and duplicates are accepted. "
             "Provider network access is enabled automatically when local data is insufficient."
         )
 
@@ -438,8 +438,8 @@ def build_fundamentals_admin_page(
         nonlocal current_preview_fingerprint, current_test_run_id, current_report_run_id, selected_history_run_id
         is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "ACTIVE_TAXONOMY_PREVIEW"}
         status_field.value = _result_text(result)
-        final_section.visible = not is_preview
-        status_field.visible = not is_preview
+        final_section.visible = not is_preview or result.status == "FAILED"
+        status_field.visible = not is_preview or result.status == "FAILED"
         if result.preview_payload_path:
             current_preview_payload_path = result.preview_payload_path
             preview_payload_field.value = result.preview_payload_path
@@ -460,6 +460,12 @@ def build_fundamentals_admin_page(
             current_preview_fingerprint = None
             preview_payload_field.value = ""
             preview_fingerprint_field.value = ""
+        if (
+            result.mode == "PRODUCTION_APPLY"
+            and result.status == "COMPLETED"
+            and (operation_dropdown.value or "").strip().upper() == "ADD_TICKERS"
+        ):
+            tickers_field.value = ""
         if result.run_id:
             current_report_run_id = result.run_id
             selected_history_run_id = result.run_id
@@ -501,6 +507,9 @@ def build_fundamentals_admin_page(
             ft.Text(f"Operation: {(operation_dropdown.value or '').strip()}"),
             ft.Text(f"Execution status: {result.status}; backend outcome: {result.outcome or 'not recorded'}"),
             ft.Text(f"Mode: {result.mode or 'not recorded'}"),
+            ft.Text(f"Failure stage: {result.failure_stage or 'not recorded'}"),
+            ft.Text(f"Exception type: {result.exception_type or 'not recorded'}"),
+            ft.Text(f"Technical error: {result.technical_error or 'not recorded'}"),
             ft.Text(f"Preview fingerprint: {result.preview_fingerprint or 'not recorded'}"),
             ft.Text(f"Artifact directory: {result.artifact_dir or 'not recorded'}"),
             ft.Text(f"Report sha256: {result.report_sha256 or 'not recorded'}"),

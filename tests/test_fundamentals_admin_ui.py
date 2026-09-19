@@ -949,6 +949,104 @@ def test_add_tickers_reports_use_stage_and_user_facing_language() -> None:
     assert "Next step: Production update is available" in copy_report
 
 
+def test_failed_preview_is_visible_downloadable_and_has_technical_details(tmp_path: Path) -> None:
+    run_id = "20260919T120000Z_add_tickers_failure1234"
+    run_dir = tmp_path / run_id
+    run_dir.mkdir()
+    request = {
+        "operation_type": "ADD_TICKERS",
+        "requested_inputs": ["STM", "TECK", "TEM"],
+        "normalized_inputs": ["STM", "TECK", "TEM"],
+        "options": {"contract_version": "test"},
+    }
+    result = {
+        "run_id": run_id,
+        "artifact_dir": str(run_dir),
+        "operation_type": "ADD_TICKERS",
+        "mode": "PREVIEW",
+        "outcome": "FAILED",
+        "failed_stage": "SOURCE_RESOLUTION",
+        "started_at_utc": "2026-09-19T12:00:00Z",
+        "completed_at_utc": "2026-09-19T12:00:03Z",
+        "request": request,
+        "summary_counts": {"requested": 3, "failed": 3},
+        "database_safety": "NO_DATABASE_WRITES",
+        "errors": [{"type": "TimeoutError", "message": "provider timed out"}],
+    }
+    (run_dir / "request.json").write_text(json.dumps(request), encoding="utf-8")
+    (run_dir / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    (run_dir / "progress_status.json").write_text(json.dumps({
+        "operation_type": "ADD_TICKERS", "current_stage_id": "SOURCE_RESOLUTION",
+        "current_stage_number": 3, "total_declared_stages": 19, "stage_state": "FAILED",
+    }), encoding="utf-8")
+
+    service = FundamentalsAdminUIService(run_root=tmp_path)
+    finalized = service._finalize(result, default_message="unused")
+    history = service.history_entries(limit=1)
+
+    assert finalized.status == "FAILED"
+    assert finalized.message == "Preview failed during source resolution. No database changes were made."
+    assert finalized.failure_stage == "SOURCE_RESOLUTION"
+    assert finalized.exception_type == "TimeoutError"
+    assert finalized.technical_error == "provider timed out"
+    assert finalized.report_sha256
+    assert service.resolve_report_download(run_id).name == OPERATION_REPORT_NAME
+    assert len(history) == 1
+    assert (history[0].stage, history[0].outcome, history[0].count_label) == ("Preview", "FAILED", "3 items")
+
+
+def test_successful_add_tickers_production_clears_batch_and_next_preview_submits_visible_value() -> None:
+    class Service:
+        def __init__(self) -> None:
+            self.preview_inputs: list[str] = []
+
+        def capabilities(self):
+            return (AdminOperationCapability("ADD_TICKERS", True, True, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def preview(self, operation_type, **kwargs):
+            self.preview_inputs.append(kwargs["raw_inputs"])
+            sequence = len(self.preview_inputs)
+            return AdminUIRunResult(
+                status="COMPLETED", message="Preview completed.", run_id=f"preview-{sequence}",
+                outcome="COMPLETED", mode="PREVIEW", preview_fingerprint=f"fp-{sequence}",
+                preview_payload_path=f"/tmp/preview-{sequence}.json", summary_rows=("Preview completed.",),
+            )
+
+        def copy_apply(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED", message="Test on copies completed successfully.", run_id="copy-1",
+                outcome="COMPLETED", mode="COPY_ONLY_APPLY", preview_fingerprint="fp-1",
+            )
+
+        def production_apply(self, operation_type, **kwargs):
+            return AdminUIRunResult(
+                status="COMPLETED", message="Production update completed successfully.", run_id="prod-1",
+                outcome="COMPLETED", mode="PRODUCTION_APPLY",
+            )
+
+    service = Service()
+    page = _Page()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+    old_batch = " ".join(f"OLD{number}" for number in range(20))
+    controls.tickers_field.value = old_batch
+    controls.tickers_field.on_change(None)
+    controls.preview_button.on_click(None)
+    controls.copy_apply_button.on_click(None)
+    controls.production_apply_button.on_click(None)
+    page.dialog.actions[1].on_click(None)
+
+    assert controls.tickers_field.value == ""
+    controls.tickers_field.value = "STM TECK TEM"
+    controls.tickers_field.on_change(None)
+    controls.preview_button.on_click(None)
+
+    assert service.preview_inputs == [old_batch, "STM TECK TEM"]
+    assert "1 to 25 tickers" in controls.operation_guidance_field.value
+
+
 def test_production_preflight_failure_report_is_plain_and_technical_details_are_secondary() -> None:
     result = {
         "run_id": "production-failure", "operation_type": "ADD_TICKERS", "mode": "PRODUCTION_APPLY",

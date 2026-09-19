@@ -52,6 +52,9 @@ class AdminUIRunResult:
     copy_actionable: bool | None = None
     production_actionable: bool | None = None
     duration_seconds: float | None = None
+    failure_stage: str | None = None
+    exception_type: str | None = None
+    technical_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -461,6 +464,8 @@ class FundamentalsAdminUIService:
             or result.get("preview_payload_path")
             or result.get("payload_path")
         )
+        errors = result.get("errors")
+        first_error = errors[0] if isinstance(errors, (list, tuple)) and errors and isinstance(errors[0], Mapping) else {}
         return AdminUIRunResult(
             status="FAILED" if result.get("outcome") in {"FAILED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED",
             message=final_status_message(result) if result.get("mode") else default_message,
@@ -478,4 +483,7 @@ class FundamentalsAdminUIService:
             copy_actionable=True if result.get("mode") == "ACTIVE_TAXONOMY_PREVIEW" else (bool(taxonomy["changes"] and taxonomy["eligible"] and not taxonomy["blockers"] and taxonomy["candidate"] and result.get("mode") == "CANDIDATE_PREVIEW" and taxonomy["business_outcome"] == "CHANGES_AVAILABLE") if taxonomy else None),
             production_actionable=result.get("mode") == "ACTIVE_TAXONOMY_PREVIEW" if result.get("operation_type") == "CHECK_UPDATE_TAXONOMY" else None,
             duration_seconds=self._duration_seconds(result),
+            failure_stage=str(result.get("failed_stage")) if result.get("failed_stage") else None,
+            exception_type=str(first_error.get("type")) if first_error.get("type") else None,
+            technical_error=str(first_error.get("message")) if first_error.get("message") else None,
         )

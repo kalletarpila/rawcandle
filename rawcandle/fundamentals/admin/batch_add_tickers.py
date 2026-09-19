@@ -1496,9 +1496,14 @@ def run_preview(
     progress.completed(ProgressStage.PREFLIGHT, "Preview request recorded.", processed_items=0, total_items=len(request.normalized_inputs))
     progress.running(ProgressStage.PREVIEW_VALIDATION, "Creating copy lane for read-only preview.")
     writer.checkpoint(RunStage.PREVIEW_STARTED, message="Creating copy lane for read-only production-shaped preview.")
-    lane = create_copy_lane(source_paths, lane_dir=temp_root / run_id / "preview_lane", writer=writer)
+    lane: CopyLane | None = None
+    failure_stage = ProgressStage.PREVIEW_VALIDATION
     try:
+        if len(request.normalized_inputs) > 25:
+            raise ValueError("ADD_TICKERS_MAXIMUM_25_TICKERS")
+        lane = create_copy_lane(source_paths, lane_dir=temp_root / run_id / "preview_lane", writer=writer)
         progress.completed(ProgressStage.PREVIEW_VALIDATION, "Preview copy lane ready.")
+        failure_stage = ProgressStage.SOURCE_RESOLUTION
         progress.running(ProgressStage.SOURCE_RESOLUTION, "Resolving provider, market, identity and classification evidence.", processed_items=0, total_items=len(request.normalized_inputs))
         preview, raw_preview = build_preview_from_copy(lane.paths, request, network_allowed=network_allowed)
         progress.completed(ProgressStage.SOURCE_RESOLUTION, "Source resolution completed.", processed_items=len(request.normalized_inputs), total_items=len(request.normalized_inputs))
@@ -1553,12 +1558,57 @@ def run_preview(
         }
     except Exception as exc:
         writer.write_error(exc)
-        progress.failed(ProgressStage.SOURCE_RESOLUTION, "Preview failed.", errors=(f"{type(exc).__name__}: {exc}",))
+        reason = (
+            "Preview accepts at most 25 tickers. Shorten the list and try again."
+            if str(exc) == "ADD_TICKERS_MAXIMUM_25_TICKERS"
+            else "Preview failed during source resolution."
+            if failure_stage == ProgressStage.SOURCE_RESOLUTION
+            else "Preview failed during validation."
+        )
+        progress.failed(failure_stage, reason, errors=(f"{type(exc).__name__}: {exc}",))
         writer.checkpoint(RunStage.FAILED_BEFORE_WRITE, message="Preview failed before any write boundary.")
+        error_decisions = tuple(
+            AdminItemDecision(
+                item_key=value,
+                requested_value=value,
+                normalized_value=value,
+                status=AdminStatus.FAILED,
+                reason=f"Preview failed before ticker eligibility could be determined: {type(exc).__name__}",
+            )
+            for value in request.normalized_inputs
+        )
+        result = AdminFinalResult(
+            run_id=run_id,
+            operation_type=AdminOperationType.ADD_TICKERS,
+            outcome=AdminStatus.FAILED,
+            mode="PREVIEW",
+            started_at_utc=started,
+            completed_at_utc=utc_now(),
+            preview_fingerprint=None,
+            request=request.as_dict(),
+            item_results=error_decisions,
+            summary_counts={"requested": len(request.normalized_inputs), "failed": len(error_decisions)},
+            rollback={"status": "NOT_REQUIRED", "write_boundary_crossed": False},
+            artifacts={
+                "error": str(writer.run_dir / "error.json"),
+                "progress": str(writer.run_dir / "progress_events.jsonl"),
+            },
+            recommended_next_action="Review Technical details and the operation report before retrying Preview.",
+            errors=({"type": type(exc).__name__, "message": str(exc)},),
+        ).as_dict()
+        result.update({
+            "artifact_dir": str(writer.run_dir),
+            "failed_stage": failure_stage.value,
+            "database_safety": "NO_DATABASE_WRITES",
+            "user_error": reason,
+        })
+        writer.write_json("result.json", result)
         writer.write_exit_code(2)
+        from rawcandle.fundamentals.admin.operation_report import write_operation_report
+        write_operation_report(run_id, root=run_root)
         writer.write_manifest()
-        cleanup_copy_lane(lane)
-        raise
+        cleanup = cleanup_copy_lane(lane) if lane is not None else {"removed_files": [], "removed_count": 0}
+        return result | {"cleanup": cleanup, "error": type(exc).__name__}
 
 
 def run_apply(

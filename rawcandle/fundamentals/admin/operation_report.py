@@ -100,7 +100,13 @@ def final_status_message(result: Mapping[str, Any]) -> str:
     if stage == "Test on copies":
         return "Test on copies completed successfully." if outcome == "COMPLETED" else "Test on copies failed."
     if stage == "Preview":
-        return "Preview completed." if outcome in {"COMPLETED", "NO_CHANGE"} else "Preview failed."
+        if outcome in {"COMPLETED", "NO_CHANGE"}:
+            return "Preview completed."
+        if result.get("user_error"):
+            return f"{str(result['user_error']).rstrip('.')}. No database changes were made."
+        failed_stage = str(result.get("failed_stage") or "").replace("_", " ").lower()
+        location = f" during {failed_stage}" if failed_stage else ""
+        return f"Preview failed{location}. No database changes were made."
     return f"{stage}: {operation_result(result)}."
 
 
@@ -363,7 +369,36 @@ def render_operation_report(
         checked.append("Provider network data was used.")
     elif result.get("network_allowed") is not None:
         checked.append("Provider network data was not used.")
+    failed = str(result.get("outcome") or "").upper() in {
+        "FAILED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED",
+    }
     section(lines, "What Was Checked", checked)
+    if failed and inputs:
+        section(lines, "Requested Inputs", [str(value) for value in inputs])
+    if failed:
+        errors = _sequence(result.get("errors"))
+        first_error = errors[0] if errors and isinstance(errors[0], Mapping) else {}
+        failure_rows = [final_status_message(result)]
+        if first_error.get("message"):
+            failure_rows.append(str(first_error["message"]))
+        section(lines, "Failure", failure_rows)
+        section(
+            lines,
+            "Database Safety",
+            ["No database writes were performed." if preview_only or result.get("database_safety") == "NO_DATABASE_WRITES" else "See rollback and write-boundary evidence below."],
+        )
+        completed_events = [
+            event for event in (events or [])
+            if str(event.get("stage_state")) == "COMPLETED"
+        ]
+        section(
+            lines,
+            "Completed Work",
+            [
+                f"{str(event.get('current_stage_id') or 'Stage').replace('_', ' ').title()}: {event.get('message') or 'Completed.'}"
+                for event in completed_events
+            ] or ["No stage completed before the failure."],
+        )
 
     if taxonomy and taxonomy["business_outcome"] == "NO_CHANGE":
         changes = ["No additions or removals.", "No role or tier changes.", "No primary-membership changes."]
@@ -397,7 +432,9 @@ def render_operation_report(
             changes = ["See the per-item run evidence for detailed changes."]
     section(lines, "Changes Found", changes)
 
-    if preview_only:
+    if preview_only and failed:
+        actions = ["Preview stopped at the recorded failure stage.", "No database writes were performed."]
+    elif preview_only:
         actions = ["Preview checked the current state and recorded its findings.", "No database writes were performed.", "Next step: run Test on copies."]
     elif mode == "COPY_ONLY_APPLY":
         actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed.", "Next step: Production update is available after this successful test."]
@@ -415,6 +452,8 @@ def render_operation_report(
             impact = ["No downstream calculations were required or run."]
         elif invocations:
             impact = [f"{str(key).replace('_', ' ').title()}: {value} run(s)." for key, value in sorted(invocations.items())]
+        elif preview_only and failed:
+            impact = ["No downstream calculations were run."]
         elif preview_only:
             impact = ["Potential downstream work was evaluated. No calculations were run during Preview."]
         else:
@@ -457,6 +496,16 @@ def render_operation_report(
     artifacts = _mapping(result.get("artifacts"))
     if artifacts:
         appendix.append("Artifact files: " + ", ".join(sorted({Path(str(value)).name for value in artifacts.values() if isinstance(value, str)})))
+    if result.get("failed_stage"):
+        appendix.append(f"Failure stage: `{result['failed_stage']}`")
+    errors = _sequence(result.get("errors"))
+    if errors and isinstance(errors[0], Mapping):
+        if errors[0].get("type"):
+            appendix.append(f"Exception class: `{errors[0]['type']}`")
+        if errors[0].get("message"):
+            appendix.append(f"Technical error: `{errors[0]['message']}`")
+    if result.get("artifact_dir"):
+        appendix.append(f"Artifact directory: `{result['artifact_dir']}`")
     section(lines, "Technical Appendix", appendix)
     return redact_text("\n".join(lines).rstrip() + "\n")
 

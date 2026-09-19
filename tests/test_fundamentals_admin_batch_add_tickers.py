@@ -22,6 +22,7 @@ from rawcandle.fundamentals.admin.batch_add_tickers import (
     validate_exact_production_paths,
 )
 from rawcandle.fundamentals.admin.history import AdminRunHistory
+from rawcandle.fundamentals.admin.contracts import AdminStatus
 from rawcandle.fundamentals.phase12d import write_json
 from rawcandle.fundamentals.schema.migrations import PROVIDER_SCHEMA_SQL
 from rawcandle.fundamentals.phase13d_backend import Phase13DPaths
@@ -120,6 +121,66 @@ def test_preview_fingerprint_and_mixed_statuses_are_stable(tmp_path: Path) -> No
     assert statuses["BAD$"] == "REJECTED"
     assert first.as_dict()["preview_fingerprint"] == second.as_dict()["preview_fingerprint"]
     assert raw_first["phase13g2_preview_fingerprint"] == raw_second["phase13g2_preview_fingerprint"]
+
+
+def test_preview_rejects_more_than_25_tickers_before_source_resolution(tmp_path: Path) -> None:
+    result = run_preview(
+        [f"T{number:02d}" for number in range(26)],
+        source_paths=_generic_paths(tmp_path / "source"),
+        run_root=tmp_path / "runs",
+        temp_root=tmp_path / "temp",
+    )
+
+    assert result["outcome"] == "FAILED"
+    assert result["failed_stage"] == "PREVIEW_VALIDATION"
+    assert result["summary_counts"] == {"requested": 26, "failed": 26}
+    assert result["user_error"] == "Preview accepts at most 25 tickers. Shorten the list and try again."
+    assert not (tmp_path / "temp" / result["run_id"] / "preview_lane").exists()
+    report = Path(result["artifact_dir"], "operation_report.md").read_text(encoding="utf-8")
+    assert "Preview accepts at most 25 tickers. Shorten the list and try again." in report
+    assert "No database changes were made." in report
+
+
+def test_stm_teck_tem_are_ticker_results_not_an_operation_level_error(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    request = parse_batch_tickers("STM TECK TEM")
+
+    preview, raw = build_preview_from_copy(paths, request, now="2026-09-19T00:00:00Z")
+
+    assert [item.item_key for item in preview.decisions] == ["STM", "TECK", "TEM"]
+    assert all(item.status in {AdminStatus.REVIEW_REQUIRED, AdminStatus.REJECTED} for item in preview.decisions)
+    assert [row["ticker"] for row in raw["ticker_results"]] == ["STM", "TECK", "TEM"]
+
+
+def test_failed_preview_writes_result_report_manifest_and_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import rawcandle.fundamentals.admin.batch_add_tickers as batch
+
+    def fail_source_resolution(*args, **kwargs):
+        raise TimeoutError("provider request timed out; token=do-not-expose")
+
+    monkeypatch.setattr(batch, "build_preview_from_copy", fail_source_resolution)
+    result = run_preview(
+        "STM TECK TEM",
+        source_paths=_generic_paths(tmp_path / "source"),
+        run_root=tmp_path / "runs",
+        temp_root=tmp_path / "temp",
+    )
+
+    run_dir = Path(result["artifact_dir"])
+    report = (run_dir / "operation_report.md").read_text(encoding="utf-8")
+    stored = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+    assert result["outcome"] == "FAILED"
+    assert result["failed_stage"] == "SOURCE_RESOLUTION"
+    assert stored["summary_counts"] == {"failed": 3, "requested": 3}
+    assert "Preview failed during source resolution. No database changes were made." in report
+    assert "## Requested Inputs" in report
+    assert "## Database Safety" in report
+    assert "TimeoutError" in report
+    assert "do-not-expose" not in report
+    assert (run_dir / "artifact_manifest.json").is_file()
+    entry = AdminRunHistory(tmp_path / "runs").summarize(result["run_id"])
+    assert entry.outcome == "FAILED"
+    assert entry.status == "failed"
 
 
 def test_run_preview_writes_durable_artifacts_and_history(tmp_path: Path) -> None:
@@ -510,6 +571,69 @@ def test_generic_plan_network_requires_flag_and_redacts_url(tmp_path: Path) -> N
     assert enabled["network"]["request_count"] == 1
     assert "SECRET" not in json.dumps(enabled["network"])
     assert "api_key=%2A%2A%2A" in enabled["network"]["calls"][0]["url"]
+
+
+def test_provider_timeout_and_malformed_response_remain_system_errors(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    request = parse_batch_tickers("NEWC")
+
+    class TimeoutClient:
+        request_count = 0
+
+        def fundamentals(self, **kwargs):
+            raise TimeoutError("provider timed out")
+
+    class MalformedClient:
+        request_count = 0
+
+        def fundamentals(self, **kwargs):
+            self.request_count += 1
+            return SimpleNamespace(ok=True, status="SUCCESS")
+
+    for client, error in ((TimeoutClient(), TimeoutError), (MalformedClient(), AttributeError)):
+        with pytest.raises(error):
+            build_generic_batch_plan(
+                paths,
+                request,
+                archive_path=tmp_path / "missing.zip",
+                network_allowed=True,
+                network_client=client,
+            )
+
+
+def test_one_provider_not_found_is_per_ticker_result_and_batch_continues(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    request = parse_batch_tickers("NEWC ADR")
+
+    class MixedClient:
+        request_count = 0
+
+        def fundamentals(self, *, ticker, **kwargs):
+            self.request_count += 1
+            ok = ticker == "NEWC"
+            return SimpleNamespace(
+                ok=ok,
+                status="SUCCESS" if ok else "NOT_FOUND",
+                auth_status="AUTH_OK",
+                http_status=200,
+                endpoint="/data/fundamentals",
+                url=f"https://api.example.test/data/fundamentals?ticker={ticker}",
+                records=[dict(_archive_row(ticker))] if ok else [],
+            )
+
+    plan = build_generic_batch_plan(
+        paths,
+        request,
+        archive_path=tmp_path / "missing.zip",
+        network_allowed=True,
+        network_client=MixedClient(),
+    )
+
+    assert [(item.ticker, item.status) for item in plan.items] == [
+        ("NEWC", "ELIGIBLE"),
+        ("ADR", "REVIEW_REQUIRED"),
+    ]
+    assert "FUNDAMENTAL_SOURCE_ROWS_MISSING" in plan.items[1].reason
 
 
 def _archive_row(ticker: str) -> dict[str, str]:

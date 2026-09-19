@@ -158,6 +158,11 @@ class AdminRunWriter:
         return self.write_text("exit_code", f"{int(code)}\n")
 
     def write_manifest(self) -> Path:
+        report_path = self.run_dir / "operation_report.md"
+        if (self.run_dir / "result.json").is_file() and not report_path.exists():
+            from rawcandle.fundamentals.admin.operation_report import write_operation_report
+
+            write_operation_report(self.run_id, root=self.root)
         artifacts = []
         for path in sorted(self.run_dir.iterdir()):
             if not path.is_file() or path.name == "artifact_manifest.json":
