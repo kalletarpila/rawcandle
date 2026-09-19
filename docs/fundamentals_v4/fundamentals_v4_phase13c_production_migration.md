@@ -1,5 +1,8 @@
 # Fundamentals V4 Phase 13C Production Migration
 
+Historical audit record only. Its executable production command was retired in
+Phase 13G.2.5E and must not be used as current operating guidance.
+
 Outcome: **PHASE 13C COMPLETE — UNIVERSE AND DEPENDENCY FOUNDATION ACTIVE IN PRODUCTION**.
 
 Phase 13C deployed the Phase 13B operational-universe and dependency foundation to production on 2026-09-11. The migration was explicitly limited to additive foundation schema and dependency metadata. It did not add tickers, change taxonomy content, fetch provider data, recalculate scores, refresh Relative Position or Relative Valuation economics, regenerate production reports, or change Scheduler behavior.

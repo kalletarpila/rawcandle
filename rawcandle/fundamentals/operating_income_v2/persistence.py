@@ -3,22 +3,20 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals.schema.analysis_runtime_layout import DeltaLayout as delta_tables
 from rawcandle.fundamentals.schema.analysis_runtime_layout import DiagnosticLayout as diagnostic_tables
 
-from . import contract, delta, diagnostic_flags, lifecycle, relative_position, score, snapshot, valuation
+from . import contract, delta, diagnostic_flags_eight, lifecycle, relative_position, score, valuation
 
 
 PRODUCTION_ANALYSIS_DB = Path("/home/kalle/projects/rawcandle/data/fundamentals_analysis.db")
 HISTORY_MODE = "REVISED_HISTORY"
 DIAGNOSTIC_HISTORY_MODE = "CURRENTLY_REVISED_DIAGNOSTIC_FLAGS_HISTORY"
-PERSISTENCE_VERSION = "OPERATING_INCOME_V2_PARALLEL_PERSISTENCE_V1"
 MANIFEST_TABLE = "operating_income_v2_package_manifest"
-MANIFEST_HISTORY_TABLE = "operating_income_v2_package_manifest_history"
 EVIDENCE_FIELD_TABLE = "operating_income_v2_diagnostic_evidence_field"
 NON_NUMERIC_EVIDENCE = {
     "applicability_classification", "applicability_reason",
@@ -32,21 +30,13 @@ NON_NUMERIC_EVIDENCE = {
     "metric_value", "threshold", "current_revenue", "prior_revenue",
 }
 
-MODEL_MAP = {
+CORE_MODEL_MAP = {
     "score": (score.MODEL_VERSION, score.MODEL_FINGERPRINT),
     "lifecycle": (lifecycle.MODEL_VERSION, lifecycle.MODEL_FINGERPRINT),
     "valuation": (valuation.MODEL_VERSION, valuation.MODEL_FINGERPRINT),
     "delta": (delta.MODEL_VERSION, delta.MODEL_FINGERPRINT),
     "relative_position": (relative_position.MODEL_VERSION, relative_position.MODEL_FINGERPRINT),
-    "diagnostic_flags": (diagnostic_flags.MODEL_VERSION, diagnostic_flags.MODEL_FINGERPRINT),
-    "snapshot": (snapshot.MODEL_VERSION, snapshot.MODEL_FINGERPRINT),
 }
-PACKAGE_FINGERPRINT = contract.fingerprint({
-    "persistence_version": PERSISTENCE_VERSION,
-    "family_fingerprint": contract.FAMILY_FINGERPRINT,
-    "models": MODEL_MAP,
-    "tables": "existing versioned V1 tables plus additive operating-income columns",
-})
 
 SCHEMA_SQL = f"""
 CREATE TABLE IF NOT EXISTS {MANIFEST_TABLE}(
@@ -54,17 +44,6 @@ CREATE TABLE IF NOT EXISTS {MANIFEST_TABLE}(
  family_version TEXT NOT NULL,
  persistence_version TEXT NOT NULL,
  persistence_fingerprint TEXT NOT NULL,
- model_manifest_json TEXT NOT NULL,
- economic_result_fingerprint TEXT NOT NULL,
- physical_content_fingerprint TEXT NOT NULL,
- status TEXT NOT NULL CHECK(status IN ('COMPLETE')),
- applied_at_utc TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS {MANIFEST_HISTORY_TABLE}(
- persistence_fingerprint TEXT PRIMARY KEY,
- family_fingerprint TEXT NOT NULL,
- family_version TEXT NOT NULL,
- persistence_version TEXT NOT NULL,
  model_manifest_json TEXT NOT NULL,
  economic_result_fingerprint TEXT NOT NULL,
  physical_content_fingerprint TEXT NOT NULL,
@@ -88,15 +67,6 @@ CREATE TABLE IF NOT EXISTS relative_position_v2_taxonomy_dependency(
  source_fingerprint TEXT NOT NULL
 );
 """
-
-
-@dataclass(frozen=True)
-class ApplyReport:
-    outcome: str
-    economic_result_fingerprint: str
-    physical_content_fingerprint: str
-    rows: dict[str, int]
-    logical_changes: int
 
 
 def _hash(value: Any) -> str:
@@ -158,60 +128,6 @@ def economic_fingerprint(calculated: Mapping[str, Any]) -> str:
             for key in ("domain", "version", "semantic_fingerprint")
         },
     })
-
-
-def validate_calculated_package(calculated: Mapping[str, Any]) -> None:
-    dependency = calculated.get("taxonomy_dependency")
-    if not dependency or dependency.get("domain") != "dc_ecosystem" or not dependency.get("version") or not dependency.get("semantic_fingerprint"):
-        raise ValueError("OPERATING_INCOME_V2_TAXONOMY_DEPENDENCY_REQUIRED")
-    if calculated["relative"].snapshot_date != calculated.get("as_of_date", calculated["relative"].snapshot_date):
-        raise ValueError("OPERATING_INCOME_V2_AS_OF_MISMATCH")
-    score_keys=set()
-    for row in calculated["score_v2"]:
-        key=(int(row["company_id"]),int(row["quarter_id"])); score_keys.add(key)
-        components=row["components"]
-        if len(components)!=7 or {item["component_name"] for item in components}!=set(contract.COMPONENTS):
-            raise ValueError(f"OPERATING_INCOME_V2_SCORE_COMPONENT_CONTRACT:{key}")
-        observed=[item["component_score"] for item in components]
-        if row["total_score"] is not None and abs(float(row["total_score"])-sum(float(value) for value in observed if value is not None))>1e-12:
-            raise ValueError(f"OPERATING_INCOME_V2_SCORE_TOTAL_RECONCILIATION:{key}")
-    layer_keys={
-        "lifecycle":set(calculated["lifecycle_v2"]),
-        "valuation":set(calculated["valuation_v2"]),
-        "delta":{(int(row.company_id),int(row.current_observation_id)) for row in calculated["delta_results"]},
-    }
-    diagnostic_groups={}
-    for row in calculated["diagnostics_full"]:
-        key=(int(row["company_id"]),int(row["quarter_id"]))
-        diagnostic_groups.setdefault(key,set()).add(row["flag_name"])
-        if row["model_fingerprint"]!=diagnostic_flags.MODEL_FINGERPRINT:
-            raise ValueError(f"OPERATING_INCOME_V2_DIAGNOSTIC_MODEL_MISMATCH:{key}")
-    layer_keys["diagnostic"]=set(diagnostic_groups)
-    for key,names in diagnostic_groups.items():
-        if len(names)!=7:
-            raise ValueError(f"OPERATING_INCOME_V2_DIAGNOSTIC_FLAG_CONTRACT:{key}")
-    mismatches=[name for name,keys in layer_keys.items() if keys!=score_keys]
-    if mismatches:
-        raise ValueError("OPERATING_INCOME_V2_ENDPOINT_SET_MISMATCH:"+",".join(mismatches))
-
-
-def _existing_manifest(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    conn.row_factory = sqlite3.Row
-    if MANIFEST_TABLE not in {row[0] for row in conn.execute("SELECT name FROM sqlite_schema WHERE type='table'")}:
-        return None
-    return conn.execute(f"SELECT * FROM {MANIFEST_TABLE} WHERE family_fingerprint=?", (contract.FAMILY_FINGERPRINT,)).fetchone()
-
-
-def _archive_current_manifest(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        f"INSERT OR REPLACE INTO {MANIFEST_HISTORY_TABLE}("
-        "persistence_fingerprint,family_fingerprint,family_version,persistence_version,"
-        "model_manifest_json,economic_result_fingerprint,physical_content_fingerprint,"
-        "status,applied_at_utc) "
-        f"SELECT persistence_fingerprint,family_fingerprint,family_version,persistence_version,"
-        "model_manifest_json,economic_result_fingerprint,physical_content_fingerprint,"
-        f"status,applied_at_utc FROM {MANIFEST_TABLE}"
-    )
 
 
 def _score_rows(conn: sqlite3.Connection) -> int:
@@ -311,8 +227,8 @@ def _apply_diagnostics(
     calculated: Mapping[str, Any],
     applied_at: str,
     *,
-    diagnostic_model: Any = diagnostic_flags,
-    persistence_version: str = PERSISTENCE_VERSION,
+    diagnostic_model: Any,
+    persistence_version: str,
 ) -> None:
     pid=_id((diagnostic_model.MODEL_FINGERPRINT,DIAGNOSTIC_HISTORY_MODE)); old=conn.execute(f"SELECT package_id FROM {diagnostic_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",(diagnostic_model.MODEL_FINGERPRINT,)).fetchone()
     if old:
@@ -382,7 +298,7 @@ def _apply_relative(conn: sqlite3.Connection, calculated: Mapping[str, Any], app
     ))
 
 
-def physical_fingerprint(conn: sqlite3.Connection, *, diagnostic_model: Any = diagnostic_flags) -> str:
+def physical_fingerprint(conn: sqlite3.Connection, *, diagnostic_model: Any = diagnostic_flags_eight) -> str:
     digest = hashlib.sha256()
 
     def consume(name: str, sql: str, params: tuple[Any, ...]) -> None:
@@ -411,63 +327,6 @@ def physical_fingerprint(conn: sqlite3.Connection, *, diagnostic_model: Any = di
     return digest.hexdigest()
 
 
-def row_counts(conn: sqlite3.Connection, *, diagnostic_model: Any = diagnostic_flags) -> dict[str,int]:
+def row_counts(conn: sqlite3.Connection, *, diagnostic_model: Any = diagnostic_flags_eight) -> dict[str,int]:
     delta_pid=conn.execute(f"SELECT package_id FROM {delta_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",(delta.MODEL_FINGERPRINT,)).fetchone(); diag_pid=conn.execute(f"SELECT package_id FROM {diagnostic_tables.PACKAGE_TABLE} WHERE model_fingerprint=?",(diagnostic_model.MODEL_FINGERPRINT,)).fetchone(); snap=conn.execute("SELECT snapshot_id FROM relative_position_active_snapshot WHERE model_fingerprint=?",(relative_position.MODEL_FINGERPRINT,)).fetchone()
     return {"score":_score_rows(conn),"score_component":int(conn.execute("SELECT COUNT(*) FROM score_component c JOIN score_result r USING(score_result_id) WHERE r.model_fingerprint=?",(score.MODEL_FINGERPRINT,)).fetchone()[0]),"lifecycle":int(conn.execute("SELECT COUNT(*) FROM lifecycle_revised_result WHERE model_fingerprint=?",(lifecycle.MODEL_FINGERPRINT,)).fetchone()[0]),"valuation":int(conn.execute("SELECT COUNT(*) FROM valuation_revised_result WHERE model_fingerprint=?",(valuation.MODEL_FINGERPRINT,)).fetchone()[0]),"delta":0 if not delta_pid else int(conn.execute(f"SELECT COUNT(*) FROM {delta_tables.TOTAL_TABLE} WHERE package_id=?",(delta_pid[0],)).fetchone()[0]),"delta_component":0 if not delta_pid else int(conn.execute(f"SELECT COUNT(*) FROM {delta_tables.COMPONENT_TABLE} c JOIN {delta_tables.TOTAL_TABLE} r USING(endpoint_id) WHERE r.package_id=?",(delta_pid[0],)).fetchone()[0]),"diagnostic_endpoint":0 if not diag_pid else int(conn.execute(f"SELECT COUNT(*) FROM {diagnostic_tables.ENDPOINT_TABLE} WHERE package_id=?",(diag_pid[0],)).fetchone()[0]),"diagnostic_evaluation":0 if not diag_pid else int(conn.execute(f"SELECT COUNT(*) FROM {diagnostic_tables.EVALUATION_TABLE} v JOIN {diagnostic_tables.ENDPOINT_TABLE} e USING(endpoint_id) WHERE e.package_id=?",(diag_pid[0],)).fetchone()[0]),"relative_result":0 if not snap else int(conn.execute("SELECT COUNT(*) FROM relative_position_result WHERE snapshot_id=?",(snap[0],)).fetchone()[0]),"relative_coverage":0 if not snap else int(conn.execute("SELECT COUNT(*) FROM relative_position_coverage WHERE snapshot_id=?",(snap[0],)).fetchone()[0])}
-
-
-def apply_package(conn: sqlite3.Connection, calculated: Mapping[str, Any], *, applied_at: str, inject_failure_at: str | None=None, stage_callback: Callable[[str,sqlite3.Connection],None] | None=None) -> ApplyReport:
-    validate_calculated_package(calculated)
-    ensure_schema(conn); target=economic_fingerprint(calculated); existing=_existing_manifest(conn)
-    if existing is not None and existing["economic_result_fingerprint"]==target:
-        physical=physical_fingerprint(conn)
-        if physical != existing["physical_content_fingerprint"]: raise RuntimeError("OPERATING_INCOME_V2_PHYSICAL_CONTENT_CHANGED")
-        return ApplyReport("NO_CHANGE",target,physical,row_counts(conn),0)
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        _archive_current_manifest(conn)
-        _apply_score(conn,calculated["score_v2"],applied_at)
-        if stage_callback: stage_callback("score",conn)
-        if inject_failure_at=="score": raise RuntimeError("INJECTED_PHASE9D_SCORE_FAILURE")
-        _apply_lifecycle(conn,calculated,applied_at)
-        if stage_callback: stage_callback("lifecycle",conn)
-        if inject_failure_at=="lifecycle": raise RuntimeError("INJECTED_PHASE9D_LIFECYCLE_FAILURE")
-        _apply_valuation(conn,calculated,applied_at)
-        if stage_callback: stage_callback("valuation",conn)
-        if inject_failure_at=="valuation": raise RuntimeError("INJECTED_PHASE9D_VALUATION_FAILURE")
-        _apply_delta(conn,calculated,applied_at)
-        if stage_callback: stage_callback("delta",conn)
-        if inject_failure_at=="delta": raise RuntimeError("INJECTED_PHASE9D_DELTA_FAILURE")
-        _apply_diagnostics(conn,calculated,applied_at)
-        if stage_callback: stage_callback("diagnostic",conn)
-        if inject_failure_at=="diagnostic": raise RuntimeError("INJECTED_PHASE9D_DIAGNOSTIC_FAILURE")
-        _apply_relative(conn,calculated,applied_at)
-        if stage_callback: stage_callback("relative",conn)
-        if inject_failure_at in {"relative","activation"}: raise RuntimeError("INJECTED_PHASE9D_RELATIVE_FAILURE")
-        physical=physical_fingerprint(conn)
-        conn.execute(f"INSERT OR REPLACE INTO {MANIFEST_TABLE} VALUES(?,?,?,?,?,?,?,'COMPLETE',?)",(contract.FAMILY_FINGERPRINT,contract.FAMILY_VERSION,PERSISTENCE_VERSION,PACKAGE_FINGERPRINT,json.dumps(MODEL_MAP,sort_keys=True,separators=(",",":")),target,physical,applied_at))
-        _archive_current_manifest(conn)
-        conn.commit()
-    except Exception:
-        conn.rollback(); raise
-    return ApplyReport("APPLIED",target,physical,row_counts(conn),sum(row_counts(conn).values()))
-
-
-def validate_package(conn: sqlite3.Connection) -> dict[str,Any]:
-    manifest=_existing_manifest(conn)
-    if manifest is None: raise LookupError("OPERATING_INCOME_V2_PACKAGE_NOT_FOUND")
-    if manifest["persistence_fingerprint"]!=PACKAGE_FINGERPRINT: raise ValueError("OPERATING_INCOME_V2_PERSISTENCE_FINGERPRINT_REJECTED")
-    counts=row_counts(conn)
-    expected={
-        "score_component":counts["score"]*7,
-        "lifecycle":counts["score"],
-        "valuation":counts["score"],
-        "delta":counts["score"],
-        "delta_component":counts["delta"]*7,
-        "diagnostic_endpoint":counts["score"],
-        "diagnostic_evaluation":counts["diagnostic_endpoint"]*7,
-    }
-    errors=[f"{name}:{counts[name]}!={value}" for name,value in expected.items() if counts[name]!=value]
-    errors.extend(row[0] for row in conn.execute("PRAGMA foreign_key_check"))
-    if errors: raise RuntimeError("OPERATING_INCOME_V2_PACKAGE_INVALID:"+",".join(map(str,errors)))
-    return {"ok":True,"counts":counts,"quick_check":conn.execute("PRAGMA quick_check").fetchone()[0],"physical_content_fingerprint":physical_fingerprint(conn)}

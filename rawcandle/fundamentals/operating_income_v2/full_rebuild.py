@@ -128,9 +128,18 @@ def validate_rebuild(
                 (phase10b.MODEL_MAP[component][1],),
             ).fetchone():
                 raise RuntimeError(f"V2_REBUILD_NON_V2_RESULT:{table}")
-        for table in ("lifecycle_result", "valuation_result"):
-            if conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
-                raise RuntimeError(f"V2_REBUILD_LEGACY_RESULT:{table}")
+        removed = {
+            "lifecycle_result", "valuation_result",
+            "operating_income_v2_package_manifest_history",
+        }
+        present = {
+            str(row[0]) for row in conn.execute(
+                "SELECT name FROM sqlite_schema WHERE type='table' AND name IN (?,?,?)",
+                tuple(sorted(removed)),
+            )
+        }
+        if present:
+            raise RuntimeError(f"V2_REBUILD_LEGACY_SCHEMA:{','.join(sorted(present))}")
         if conn.execute(
             "SELECT 1 FROM relative_position_active_snapshot WHERE model_fingerprint<>? LIMIT 1",
             (relative_position.MODEL_FINGERPRINT,),

@@ -418,8 +418,8 @@ def pre_ttm_baseline(paths: TtmPaths) -> dict[str, Any]:
             "permaticker_null": int(c.execute("SELECT COUNT(*) FROM security s LEFT JOIN provider_security_identity psi ON psi.security_id=s.security_id AND psi.provider='SHARADAR' WHERE psi.security_id IS NULL").fetchone()[0]),
             "existing_ttm_rows": ttm_rows,
             "score_rows": table_count(a, "score_result"),
-            "lifecycle_rows": table_count(a, "lifecycle_result"),
-            "valuation_rows": table_count(a, "valuation_result"),
+            "lifecycle_rows": table_count(a, "lifecycle_revised_result"),
+            "valuation_rows": table_count(a, "valuation_revised_result"),
             "canonical_financial_fingerprint": canonical_financial_fingerprint(c),
         }
 
@@ -635,8 +635,8 @@ def integrity(paths: TtmPaths, before_fingerprint: str, after_fingerprint: str) 
             "canonical_financial_fingerprint_after": after_fingerprint,
             "canonical_financial_fingerprint_unchanged": before_fingerprint == after_fingerprint,
             "score_rows": table_count(a, "score_result"),
-            "lifecycle_rows": table_count(a, "lifecycle_result"),
-            "valuation_rows": table_count(a, "valuation_result"),
+            "lifecycle_rows": table_count(a, "lifecycle_revised_result"),
+            "valuation_rows": table_count(a, "valuation_revised_result"),
         }
 
 

@@ -1,5 +1,8 @@
 # Phase 13G.2.5D: Fundamentals V1 Runtime Retirement
 
+Historical phase record. Phase 13G.2.5E supersedes its deferred-schema guidance
+with the final V2-only schema and copy-proven cleanup migration.
+
 Current Fundamentals Administration and Snapshot use the active full V2 package.
 Add Tickers, Sector/Industry synchronization, and Taxonomy synchronization use
 the same fresh full V2 + RP V2 + RV rebuild and guarded publication workflow.

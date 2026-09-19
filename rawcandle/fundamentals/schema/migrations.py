@@ -16,6 +16,8 @@ from rawcandle.fundamentals.schema.provenance import (
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 from rawcandle.fundamentals.schema.analysis_compat_schema import (
     DELTA_SCHEMA_SQL,
+    DIAGNOSTIC_SCHEMA_SQL,
+    LIFECYCLE_SCHEMA_SQL,
     RELATIVE_POSITION_SCHEMA_SQL,
     VALUATION_SCHEMA_SQL,
 )
@@ -365,36 +367,8 @@ CREATE TABLE score_component (
     UNIQUE(score_result_id, component_name)
 );
 
-CREATE TABLE lifecycle_result (
-    lifecycle_result_id INTEGER PRIMARY KEY,
-    company_id INTEGER NOT NULL,
-    quarter_id INTEGER NOT NULL,
-    model_version TEXT NOT NULL,
-    model_fingerprint TEXT NOT NULL,
-    lifecycle_class TEXT,
-    evidence_json TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL,
-    generated_at_utc TEXT NOT NULL,
-    run_id TEXT REFERENCES analysis_model_run(run_id)
-);
-
-CREATE TABLE valuation_result (
-    valuation_result_id INTEGER PRIMARY KEY,
-    company_id INTEGER NOT NULL,
-    quarter_id INTEGER NOT NULL,
-    valuation_date TEXT,
-    price REAL,
-    valuation_metrics_json TEXT NOT NULL DEFAULT '{}',
-    ohlcv_source_db TEXT NOT NULL DEFAULT 'data/osakedata.db',
-    status TEXT NOT NULL,
-    generated_at_utc TEXT NOT NULL,
-    run_id TEXT REFERENCES analysis_model_run(run_id)
-);
-
 CREATE INDEX idx_score_result_company_quarter ON score_result(company_id, quarter_id);
-CREATE INDEX idx_lifecycle_result_company_quarter ON lifecycle_result(company_id, quarter_id);
-CREATE INDEX idx_valuation_result_company_quarter ON valuation_result(company_id, quarter_id);
-""" + VALUATION_SCHEMA_SQL + RELATIVE_POSITION_SCHEMA_SQL + DELTA_SCHEMA_SQL + RELATIVE_VALUATION_SCHEMA_SQL
+""" + LIFECYCLE_SCHEMA_SQL + VALUATION_SCHEMA_SQL + DELTA_SCHEMA_SQL + DIAGNOSTIC_SCHEMA_SQL + RELATIVE_POSITION_SCHEMA_SQL + RELATIVE_VALUATION_SCHEMA_SQL
 
 
 def connect(path: Path) -> sqlite3.Connection:

@@ -23,7 +23,7 @@ from .readers import ParallelModelRepository
 
 PERSISTENCE_VERSION = "OPERATING_INCOME_V2_PARALLEL_PERSISTENCE_V2"
 MODEL_MAP = {
-    **persistence.MODEL_MAP,
+    **persistence.CORE_MODEL_MAP,
     "diagnostic_flags": (
         diagnostic_flags_eight.MODEL_VERSION,
         diagnostic_flags_eight.MODEL_FINGERPRINT,
@@ -235,16 +235,10 @@ def _candidate_manifest(
     conn: sqlite3.Connection, persistence_fingerprint: str = PACKAGE_FINGERPRINT
 ) -> sqlite3.Row | None:
     conn.row_factory = sqlite3.Row
-    for table in (persistence.MANIFEST_TABLE, persistence.MANIFEST_HISTORY_TABLE):
-        if not conn.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone():
-            continue
-        row = conn.execute(
-            f"SELECT * FROM {table} WHERE persistence_fingerprint=?",
-            (persistence_fingerprint,),
-        ).fetchone()
-        if row is not None:
-            return row
-    return None
+    return conn.execute(
+        f"SELECT * FROM {persistence.MANIFEST_TABLE} WHERE persistence_fingerprint=?",
+        (persistence_fingerprint,),
+    ).fetchone()
 
 
 def _validate(calculated: Mapping[str, Any]) -> None:
@@ -294,7 +288,6 @@ def apply_candidate_package(
 
     conn.execute("BEGIN IMMEDIATE")
     try:
-        persistence._archive_current_manifest(conn)
         persistence._apply_score(conn, calculated["score_v2"], applied_at)
         if stage_callback:
             stage_callback("score", conn)
@@ -347,7 +340,6 @@ def apply_candidate_package(
         )
         if stage_callback:
             stage_callback("manifest", conn)
-        persistence._archive_current_manifest(conn)
         if inject_failure_at == "manifest":
             raise RuntimeError("INJECTED_PHASE10B_MANIFEST_FAILURE")
         conn.commit()
@@ -412,7 +404,3 @@ def validate_candidate_package(conn: sqlite3.Connection) -> dict[str, Any]:
             conn, diagnostic_model=diagnostic_flags_eight
         ),
     }
-
-
-ACTIVE_PACKAGE_FINGERPRINT = persistence.PACKAGE_FINGERPRINT
-assert ACTIVE_PACKAGE_FINGERPRINT == "a36d6903c3d640da5e9bd7034faee700b7b064e74ea871880c1bfa2348f4964d"

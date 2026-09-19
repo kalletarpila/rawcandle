@@ -228,8 +228,8 @@ def test_no_downstream_provider_or_v3_execution_markers():
     assert "query2.finance.yahoo" not in source
     assert "sec.gov" not in source
     assert "score_result" in source
-    assert "lifecycle_result" in source
-    assert "valuation_result" in source
+    assert "lifecycle_revised_result" in source
+    assert "valuation_revised_result" in source
     assert "INSERT INTO score" not in source
     assert "INSERT INTO lifecycle" not in source
     assert "INSERT INTO valuation" not in source

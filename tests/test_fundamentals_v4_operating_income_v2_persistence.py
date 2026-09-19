@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from rawcandle.fundamentals.operating_income_v2 import delta, diagnostic_flags, lifecycle
+from rawcandle.fundamentals.operating_income_v2 import (
+    delta, diagnostic_flags, diagnostic_flags_eight, lifecycle, phase10b,
+)
 from rawcandle.fundamentals.operating_income_v2 import relative_position, score, valuation
 from rawcandle.fundamentals.operating_income_v2.persistence import (
-    MANIFEST_HISTORY_TABLE, MANIFEST_TABLE, MODEL_MAP, apply_package, ensure_schema,
-    migrate_copy, physical_fingerprint,
+    MANIFEST_TABLE, ensure_schema, migrate_copy, physical_fingerprint,
 )
 from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
 from rawcandle.fundamentals.operating_income_v2.activation import (
@@ -25,6 +26,7 @@ from rawcandle.fundamentals.operating_income_v2.reporting import render_company_
 from rawcandle.fundamentals.operating_income_v2.rehearsal import _ro, _score_delta_observation
 from rawcandle.fundamentals.schema.migrations import ANALYSIS_SCHEMA_SQL
 from rawcandle.fundamentals.schema.analysis_compat_schema import DIAGNOSTIC_SCHEMA_SQL, LIFECYCLE_SCHEMA_SQL
+from rawcandle.fundamentals.schema.v1_cleanup import cleanup_legacy_v1_schema
 from tests.test_fundamentals_v4_operating_income_v2 import (
     diagnostic_endpoint, relative_observation, ttm, valuation_observation,
 )
@@ -48,8 +50,11 @@ def _calculated() -> dict[str, object]:
         delta_observation, (delta_observation,), source_fingerprint="fixture",
     )
     diagnostic_rows = []
-    for result in diagnostic_flags.evaluate_diagnostic_flags(
-        diagnostic_flags.DiagnosticInput(diagnostic_endpoint(1, 10.0), None, False)
+    current = phase10b._candidate_endpoint(
+        source, diagnostic_endpoint(1, 10.0), coherent=True,
+    )
+    for result in diagnostic_flags_eight.evaluate_diagnostic_flags(
+        diagnostic_flags_eight.DiagnosticInput(current, None, False, False)
     ):
         diagnostic_rows.append({
             "company_id": 1, "quarter_id": 1, "ticker": "TEST",
@@ -77,7 +82,7 @@ def _calculated() -> dict[str, object]:
     )
     valuation_source = {
         **value.to_dict(), "security_active": 1, "sector": "Technology",
-        "industry": "Software - Application", "source_fingerprint": "v1-source",
+        "industry": "Software - Application", "source_fingerprint": "current-source",
     }
     return {
         "rows": [source], "score_v2": scores, "lifecycle_v2": {(1, 1): state_result},
@@ -105,14 +110,110 @@ def database() -> sqlite3.Connection:
     conn.close()
 
 
+def _current_database_file(path: Path, *, with_legacy_schema: bool) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(ANALYSIS_SCHEMA_SQL)
+        conn.executescript(LIFECYCLE_SCHEMA_SQL)
+        conn.executescript(DIAGNOSTIC_SCHEMA_SQL)
+        ensure_schema(conn)
+        phase10b.apply_candidate_package(
+            conn, _calculated(), applied_at="2026-09-01T00:00:00Z"
+        )
+        activate_v2(conn, activated_at="2026-09-01T00:00:00Z")
+        if with_legacy_schema:
+            conn.executescript(
+                """
+                CREATE TABLE lifecycle_result(legacy_id INTEGER PRIMARY KEY);
+                CREATE TABLE valuation_result(legacy_id INTEGER PRIMARY KEY);
+                CREATE INDEX idx_lifecycle_result_company_quarter
+                    ON lifecycle_result(legacy_id);
+                CREATE INDEX idx_valuation_result_company_quarter
+                    ON valuation_result(legacy_id);
+                CREATE TABLE operating_income_v2_package_manifest_history AS
+                    SELECT persistence_fingerprint,family_fingerprint,family_version,
+                           persistence_version,model_manifest_json,
+                           economic_result_fingerprint,physical_content_fingerprint,
+                           status,applied_at_utc
+                    FROM operating_income_v2_package_manifest;
+                """
+            )
+        conn.commit()
+
+
+def test_fresh_analysis_schema_omits_retired_v1_structures(database: sqlite3.Connection) -> None:
+    tables = {
+        str(row[0])
+        for row in database.execute("SELECT name FROM sqlite_schema WHERE type='table'")
+    }
+    assert "lifecycle_result" not in tables
+    assert "valuation_result" not in tables
+    assert "operating_income_v2_package_manifest_history" not in tables
+    assert {"lifecycle_revised_result", "valuation_revised_result"} <= tables
+
+
+def test_v1_cleanup_is_copy_only_atomic_and_idempotent(tmp_path: Path) -> None:
+    target = (tmp_path / "analysis-copy.db").resolve()
+    _current_database_file(target, with_legacy_schema=True)
+    with sqlite3.connect(target) as conn:
+        before = physical_fingerprint(conn)
+
+    first = cleanup_legacy_v1_schema(target)
+    second = cleanup_legacy_v1_schema(target)
+
+    assert first["outcome"] == "APPLIED"
+    assert set(first["removed"]) == {
+        "lifecycle_result",
+        "valuation_result",
+        "operating_income_v2_package_manifest_history",
+        "idx_lifecycle_result_company_quarter",
+        "idx_valuation_result_company_quarter",
+    }
+    assert second["outcome"] == "NO_CHANGE"
+    with sqlite3.connect(target) as conn:
+        assert physical_fingerprint(conn) == before
+        assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        assert conn.execute("PRAGMA foreign_key_check").fetchone() is None
+
+
+def test_v1_cleanup_fails_closed_when_legacy_rows_exist(tmp_path: Path) -> None:
+    target = (tmp_path / "analysis-copy.db").resolve()
+    _current_database_file(target, with_legacy_schema=True)
+    with sqlite3.connect(target) as conn:
+        conn.execute("INSERT INTO lifecycle_result VALUES(1)")
+        conn.commit()
+
+    with pytest.raises(RuntimeError, match="LEGACY_ROWS_PRESENT:lifecycle_result"):
+        cleanup_legacy_v1_schema(target)
+
+    with sqlite3.connect(target) as conn:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='lifecycle_result'"
+        ).fetchone() is not None
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' "
+            "AND name='operating_income_v2_package_manifest_history'"
+        ).fetchone() is not None
+
+
+def test_v1_cleanup_rejects_relative_and_production_paths() -> None:
+    with pytest.raises(PermissionError, match="PRODUCTION_OR_ALIAS_BLOCKED"):
+        cleanup_legacy_v1_schema(Path("analysis-copy.db"))
+    with pytest.raises(PermissionError, match="PRODUCTION_OR_ALIAS_BLOCKED"):
+        cleanup_legacy_v1_schema(
+            Path("/home/kalle/projects/rawcandle/data/fundamentals_analysis.db")
+        )
+
+
 def test_complete_parallel_apply_noop_and_v2_readers(database: sqlite3.Connection, tmp_path: Path) -> None:
     calculated = _calculated()
-    first = apply_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
-    second = apply_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
+    first = phase10b.apply_candidate_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
+    second = phase10b.apply_candidate_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
     assert first.outcome == "APPLIED"
     assert first.rows["score"] == first.rows["lifecycle"] == first.rows["valuation"] == 1
     assert first.rows["score_component"] == first.rows["delta_component"] == 7
-    assert first.rows["diagnostic_evaluation"] == 7
+    assert first.rows["diagnostic_evaluation"] == 8
     assert second.outcome == "NO_CHANGE" and second.logical_changes == 0
     assert tuple(database.execute(
         "SELECT taxonomy_domain,taxonomy_version,taxonomy_semantic_fingerprint,calculation_as_of_date "
@@ -121,9 +222,9 @@ def test_complete_parallel_apply_noop_and_v2_readers(database: sqlite3.Connectio
     assert first.physical_content_fingerprint == second.physical_content_fingerprint
     current_manifest = database.execute(f"SELECT persistence_fingerprint FROM {MANIFEST_TABLE}").fetchone()[0]
     assert database.execute(
-        f"SELECT persistence_fingerprint FROM {MANIFEST_HISTORY_TABLE} WHERE persistence_fingerprint=?",
-        (current_manifest,),
-    ).fetchone()[0] == current_manifest
+        "SELECT 1 FROM sqlite_schema WHERE type='table' "
+        "AND name='operating_income_v2_package_manifest_history'"
+    ).fetchone() is None
     assert ParallelModelRepository(database).package_manifest(current_manifest)[
         "persistence_fingerprint"
     ] == current_manifest
@@ -136,8 +237,8 @@ def test_complete_parallel_apply_noop_and_v2_readers(database: sqlite3.Connectio
     assert repository.lifecycle_quarter(1, 2023, "Q1", model_fingerprint=lifecycle.MODEL_FINGERPRINT)["raw_state"]
     assert repository.valuation_quarter(1, 2023, "Q1", model_fingerprint=valuation.MODEL_FINGERPRINT)["valuation_status"]
     assert repository.delta_quarter(1, 2023, 1, model_fingerprint=delta.MODEL_FINGERPRINT)["fiscal_quarter"] == 1
-    assert repository.diagnostic_quarter(1, 2023, 1, model_fingerprint=diagnostic_flags.MODEL_FINGERPRINT)["evaluations"]
-    assert len(repository.diagnostic_current(1, model_fingerprint=diagnostic_flags.MODEL_FINGERPRINT)["evaluations"]) == 7
+    assert repository.diagnostic_quarter(1, 2023, 1, model_fingerprint=diagnostic_flags_eight.MODEL_FINGERPRINT)["evaluations"]
+    assert len(repository.diagnostic_current(1, model_fingerprint=diagnostic_flags_eight.MODEL_FINGERPRINT)["evaluations"]) == 8
     with pytest.raises(ValueError, match="UNKNOWN_SCORE"):
         repository.score_current(1, model_fingerprint="unknown")
 
@@ -152,13 +253,13 @@ def test_complete_parallel_apply_noop_and_v2_readers(database: sqlite3.Connectio
 
 def test_manifest_mixing_tamper_and_failure_are_rejected(database: sqlite3.Connection) -> None:
     calculated = _calculated()
-    apply_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
+    phase10b.apply_candidate_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
     original = physical_fingerprint(database)
     component = database.execute("SELECT score_component_id,component_score FROM score_component ORDER BY score_component_id DESC LIMIT 1").fetchone()
     database.execute("UPDATE score_component SET component_score=999 WHERE score_component_id=?", (component[0],))
     database.commit()
     with pytest.raises(RuntimeError, match="PHYSICAL_CONTENT_CHANGED"):
-        apply_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
+        phase10b.apply_candidate_package(database, calculated, applied_at="2026-09-01T00:00:00Z")
     database.execute("UPDATE score_component SET component_score=? WHERE score_component_id=?", (component[1], component[0]))
     assert physical_fingerprint(database) == original
     database.execute(f"UPDATE {MANIFEST_TABLE} SET model_manifest_json='{{}}'")
@@ -169,8 +270,8 @@ def test_manifest_mixing_tamper_and_failure_are_rejected(database: sqlite3.Conne
     database.execute(f"DELETE FROM {MANIFEST_TABLE}")
     database.commit()
     before = physical_fingerprint(database)
-    with pytest.raises(RuntimeError, match="INJECTED_PHASE9D_LIFECYCLE_FAILURE"):
-        apply_package(database, calculated, applied_at="later", inject_failure_at="lifecycle")
+    with pytest.raises(RuntimeError, match="INJECTED_PHASE10B_LIFECYCLE_FAILURE"):
+        phase10b.apply_candidate_package(database, calculated, applied_at="later", inject_failure_at="lifecycle")
     assert physical_fingerprint(database) == before
 
 
@@ -194,12 +295,10 @@ def test_migration_guards_and_wal_aware_reader(tmp_path: Path) -> None:
     writer.close()
 
 
-def test_activation_is_atomic_coherent_and_reversible(
-    database: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_activation_is_atomic_coherent_and_reversible(database: sqlite3.Connection) -> None:
     with pytest.raises(LookupError, match="NOT_ACTIVE"):
         assert_v2_active(database)
-    apply_package(database, _calculated(), applied_at="2026-09-01T00:00:00Z")
+    phase10b.apply_candidate_package(database, _calculated(), applied_at="2026-09-01T00:00:00Z")
     database.execute("BEGIN")
     activated = activate_v2(database, activated_at="2026-09-06T00:00:00Z")
     database.commit()
@@ -221,28 +320,13 @@ def test_activation_is_atomic_coherent_and_reversible(
         ParallelModelRepository(database).score_current(1, model_fingerprint="retired-v1")
 
     archived = "archived-package"
-    database.execute(
-        f"INSERT INTO {MANIFEST_HISTORY_TABLE} "
-        "SELECT ?,family_fingerprint,family_version,persistence_version,model_manifest_json,"
-        "economic_result_fingerprint,physical_content_fingerprint,status,applied_at_utc "
-        f"FROM {MANIFEST_TABLE}",
-        (archived,),
-    )
-    monkeypatch.setitem(
-        __import__(
-            "rawcandle.fundamentals.operating_income_v2.activation",
-            fromlist=["KNOWN_PACKAGES"],
-        ).KNOWN_PACKAGES,
-        archived,
-        MODEL_MAP,
-    )
-    with pytest.raises(RuntimeError, match="ARCHIVED_MANIFEST_NOT_ACTIVATABLE"):
+    with pytest.raises(ValueError, match="UNKNOWN_PACKAGE"):
         activate_package(database, archived, activated_at="later")
     database.execute(
         "UPDATE fundamentals_active_model_family SET persistence_fingerprint=?",
         (archived,),
     )
-    with pytest.raises(ValueError, match="CONTENT_REPLACED"):
+    with pytest.raises(ValueError, match="ACTIVE_PACKAGE_MISMATCH"):
         assert_v2_active(database)
     database.rollback()
 

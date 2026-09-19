@@ -4,7 +4,10 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from . import contract, delta, diagnostic_flags, lifecycle, relative_position, score, snapshot, valuation
+from . import (
+    contract, delta, diagnostic_flags_eight, lifecycle, relative_position, score,
+    snapshot_eight, valuation,
+)
 from .readers import ParallelModelRepository
 
 
@@ -27,7 +30,7 @@ def build_company_report(
     life=lifecycle_history[-1] if lifecycle_history else None
     value=valuation_history[-1] if valuation_history else None
     change=delta_history[-1] if delta_history else None
-    diagnostics=repository.diagnostic_current(company_id,model_fingerprint=diagnostic_flags.MODEL_FINGERPRINT)
+    diagnostics=repository.diagnostic_current(company_id,model_fingerprint=diagnostic_flags_eight.MODEL_FINGERPRINT)
     relative=repository.relative_current(company_id,model_fingerprint=relative_position.MODEL_FINGERPRINT)
     if not score_row or not life or not value: raise LookupError(f"OPERATING_INCOME_V2_REPORT_COMPANY_NOT_FOUND:{company_id}")
     ticker=life.get("ticker") or value.get("ticker") or str(company_id)
@@ -72,7 +75,7 @@ def build_company_report(
     lines.extend(["", "## Diagnostic Flags", "", "| Flag | Status | Reason |", "|---|---|---|"])
     lines.extend(f"| {item['flag_name']} | {item['status_text']} | {item['reason_text']} |" for item in (diagnostics or {}).get("evaluations",[]))
     lines.extend(["", "## Model Identities", ""])
-    lines.extend(f"- {name}: `{version}` / `{fingerprint}`" for name,(version,fingerprint) in (("Score",(score.MODEL_VERSION,score.MODEL_FINGERPRINT)),("Lifecycle",(lifecycle.MODEL_VERSION,lifecycle.MODEL_FINGERPRINT)),("Valuation",(valuation.MODEL_VERSION,valuation.MODEL_FINGERPRINT)),("Delta",(delta.MODEL_VERSION,delta.MODEL_FINGERPRINT)),("Relative Position",(relative_position.MODEL_VERSION,relative_position.MODEL_FINGERPRINT)),("Diagnostic Flags",(diagnostic_flags.MODEL_VERSION,diagnostic_flags.MODEL_FINGERPRINT)),("Snapshot",(snapshot.MODEL_VERSION,snapshot.MODEL_FINGERPRINT))))
+    lines.extend(f"- {name}: `{version}` / `{fingerprint}`" for name,(version,fingerprint) in (("Score",(score.MODEL_VERSION,score.MODEL_FINGERPRINT)),("Lifecycle",(lifecycle.MODEL_VERSION,lifecycle.MODEL_FINGERPRINT)),("Valuation",(valuation.MODEL_VERSION,valuation.MODEL_FINGERPRINT)),("Delta",(delta.MODEL_VERSION,delta.MODEL_FINGERPRINT)),("Relative Position",(relative_position.MODEL_VERSION,relative_position.MODEL_FINGERPRINT)),("Diagnostic Flags",(diagnostic_flags_eight.MODEL_VERSION,diagnostic_flags_eight.MODEL_FINGERPRINT)),("Snapshot",(snapshot_eight.MODEL_VERSION,snapshot_eight.MODEL_FINGERPRINT))))
     markdown = "\n".join(lines) + "\n"
     metadata = {
         "identity": {"company_id": company_id, "ticker": ticker},
@@ -90,8 +93,8 @@ def build_company_report(
             "valuation": valuation.MODEL_FINGERPRINT,
             "delta": delta.MODEL_FINGERPRINT,
             "relative_position": relative_position.MODEL_FINGERPRINT,
-            "diagnostic_flags": diagnostic_flags.MODEL_FINGERPRINT,
-            "snapshot": snapshot.MODEL_FINGERPRINT,
+            "diagnostic_flags": diagnostic_flags_eight.MODEL_FINGERPRINT,
+            "snapshot": snapshot_eight.MODEL_FINGERPRINT,
         },
     }
     return ticker, markdown, metadata

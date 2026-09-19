@@ -1039,8 +1039,8 @@ def production_integrity(paths: ProductionPaths) -> tuple[dict[str, Any], dict[s
         analysis["quick_check"] = conn.execute("PRAGMA quick_check").fetchone()[0]
         analysis["foreign_key_errors"] = len(conn.execute("PRAGMA foreign_key_check").fetchall())
         analysis["score_rows"] = conn.execute("SELECT COUNT(*) FROM score_result").fetchone()[0]
-        analysis["lifecycle_rows"] = conn.execute("SELECT COUNT(*) FROM lifecycle_result").fetchone()[0]
-        analysis["valuation_rows"] = conn.execute("SELECT COUNT(*) FROM valuation_result").fetchone()[0]
+        analysis["lifecycle_rows"] = conn.execute("SELECT COUNT(*) FROM lifecycle_revised_result").fetchone()[0]
+        analysis["valuation_rows"] = conn.execute("SELECT COUNT(*) FROM valuation_revised_result").fetchone()[0]
     cross = cross_db_integrity(paths)
     write_json(paths.artifact_root / "provider_integrity.json", provider)
     write_json(paths.artifact_root / "canonical_integrity.json", canonical)
@@ -1058,7 +1058,7 @@ def cross_db_integrity(paths: ProductionPaths) -> dict[str, int]:
         canonical_company_ids = {row["company_id"] for row in canonical.execute("SELECT company_id FROM company")}
         analysis_company_ids = {
             row["company_id"]
-            for table in ("score_result", "lifecycle_result", "valuation_result")
+            for table in ("score_result", "lifecycle_revised_result", "valuation_revised_result")
             for row in analysis.execute(f"SELECT DISTINCT company_id FROM {table}")
         }
     return {

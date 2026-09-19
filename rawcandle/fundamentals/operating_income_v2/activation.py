@@ -5,38 +5,14 @@ import sqlite3
 from dataclasses import dataclass
 
 from . import contract
-from .persistence import MODEL_MAP, PACKAGE_FINGERPRINT
 from .readers import ParallelModelRepository
 
 
 ACTIVATION_TABLE = "fundamentals_active_model_family"
-PRE_PHASE9G_PACKAGE_FINGERPRINT = "cf4ce8134c362399ea94667e4659e27a32b1e8b9de199eaaba32c91b450a51bc"
-TEN_YEAR_OPERATIONAL_PACKAGE_FINGERPRINT = "f9621556445ef7c85f5486ea170e2366cbd356fa9283cd8528436abeab0d0d40"
-PRE_PHASE9G_MODEL_MAP = {
-    **MODEL_MAP,
-    "diagnostic_flags": (
-        contract.DIAGNOSTIC_MODEL_VERSION,
-        "d5434e139b68ee8af44dffce34cb9225538f0badb61d5d1074fb976a4de3185d",
-    ),
-    "snapshot": (
-        contract.SNAPSHOT_MODEL_VERSION,
-        "7bfa88aa64f3897ea610894a1b7a3613abfc7881d9b9ea8e26912ef0426e7ee8",
-    ),
-}
-KNOWN_PACKAGES = {
-    PRE_PHASE9G_PACKAGE_FINGERPRINT: PRE_PHASE9G_MODEL_MAP,
-    PACKAGE_FINGERPRINT: MODEL_MAP,
-}
-
-
 def known_packages() -> dict[str, dict[str, tuple[str, str]]]:
     from .phase10b import MODEL_MAP as PHASE10B_MODEL_MAP, PACKAGE_FINGERPRINT as PHASE10B_PACKAGE
 
-    return {
-        **KNOWN_PACKAGES,
-        PHASE10B_PACKAGE: PHASE10B_MODEL_MAP,
-        TEN_YEAR_OPERATIONAL_PACKAGE_FINGERPRINT: PHASE10B_MODEL_MAP,
-    }
+    return {PHASE10B_PACKAGE: PHASE10B_MODEL_MAP}
 ACTIVATION_SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {ACTIVATION_TABLE}(
  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -114,6 +90,8 @@ def assert_v2_active(conn: sqlite3.Connection) -> ActiveFamily:
 
 
 def activate_v2(conn: sqlite3.Connection, *, activated_at: str) -> ActiveFamily:
+    from .phase10b import PACKAGE_FINGERPRINT
+
     return activate_package(conn, PACKAGE_FINGERPRINT, activated_at=activated_at)
 
 
@@ -129,7 +107,7 @@ def activate_package(
     repository = ParallelModelRepository(conn)
     current_manifest = repository.package_manifest()
     if current_manifest["persistence_fingerprint"] != package_fingerprint:
-        raise RuntimeError("OPERATING_INCOME_V2_ARCHIVED_MANIFEST_NOT_ACTIVATABLE")
+        raise RuntimeError("OPERATING_INCOME_V2_CURRENT_MANIFEST_MISMATCH")
     model_map = packages[package_fingerprint]
     repository.assert_v2_bundle(
         model_map, persistence_fingerprint=package_fingerprint

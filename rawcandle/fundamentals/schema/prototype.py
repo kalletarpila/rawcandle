@@ -594,8 +594,8 @@ def schema_validation(paths: PrototypePaths) -> dict[str, Any]:
             "missing_canonical_financial_fields": sorted(set(V4_CANONICAL_FINANCIAL_FIELDS) - {row["name"] for row in canonical.execute("PRAGMA table_info(v4_quarter_financials)")}),
             "sharadar_support_fields": sorted(set(SHARADAR_SUPPORT_FIELDS) & {row["name"] for row in provider.execute("PRAGMA table_info(sharadar_fundamental_observation)")}),
             "score_contract_exists": _table_exists(analysis, "score_result"),
-            "lifecycle_contract_exists": _table_exists(analysis, "lifecycle_result"),
-            "valuation_contract_exists": _table_exists(analysis, "valuation_result"),
+            "lifecycle_contract_exists": _table_exists(analysis, "lifecycle_revised_result"),
+            "valuation_contract_exists": _table_exists(analysis, "valuation_revised_result"),
             "ttm_contract_exists": _table_exists(canonical, "v4_ttm_contract"),
         }
 

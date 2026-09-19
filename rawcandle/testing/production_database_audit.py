@@ -42,7 +42,6 @@ LOGICAL_TABLES = {
 SCAN_EXCLUDES = {".git", ".venv", "venv", "temp", "backups", "__pycache__"}
 
 EXPECTED_ACTIVE_PACKAGE = "0e269e52a63500342df8a08ee2f91552fdc8fb216fa68cfe469bafb6aa8e3c30"
-EXPECTED_ARCHIVED_PACKAGE = "a36d6903c3d640da5e9bd7034faee700b7b064e74ea871880c1bfa2348f4964d"
 
 
 def _sha_json(value: Any) -> str:
@@ -342,14 +341,6 @@ def production_invariants(repo_root: Path) -> dict[str, Any]:
                 (package_id,),
             ).fetchone()[0]
         )
-        archived = dict(
-            connection.execute(
-                "SELECT persistence_fingerprint,status,applied_at_utc "
-                "FROM operating_income_v2_package_manifest_history "
-                "WHERE persistence_fingerprint=?",
-                (EXPECTED_ARCHIVED_PACKAGE,),
-            ).fetchone()
-        )
     report_root = repo_root / "fundamental_reports"
     report_records = []
     if report_root.is_dir():
@@ -369,7 +360,6 @@ def production_invariants(repo_root: Path) -> dict[str, Any]:
             "actual_evaluations": actual_evaluations,
             "wrong_evaluation_cardinality": wrong_evaluation_cardinality,
         },
-        "archived_package": archived,
         "fundamental_reports": {
             "file_count": len(report_records),
             "aggregate_fingerprint": _sha_json(report_records),
@@ -574,8 +564,6 @@ def main() -> int:
         raise RuntimeError("TAXONOMY_ORPHAN_RELATIONSHIP")
     if invariants["active_package"]["persistence_fingerprint"] != EXPECTED_ACTIVE_PACKAGE:
         raise RuntimeError("ACTIVE_PACKAGE_IDENTITY_CHANGED")
-    if invariants["archived_package"]["persistence_fingerprint"] != EXPECTED_ARCHIVED_PACKAGE:
-        raise RuntimeError("ARCHIVED_PACKAGE_IDENTITY_CHANGED")
     diagnostic = invariants["candidate_diagnostic"]
     if (
         diagnostic["actual_endpoints"] != 50_585

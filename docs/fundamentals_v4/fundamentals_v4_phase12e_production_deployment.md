@@ -1,5 +1,8 @@
 # Phase 12E Ten-Year Operational History Production Deployment
 
+Historical audit record only. Its executable production command was retired in
+Phase 13G.2.5E and must not be used as current operating guidance.
+
 ## Outcome
 
 `PHASE 12E COMPLETE - TEN-YEAR OPERATIONAL HISTORY ACTIVE AND STABLE`
