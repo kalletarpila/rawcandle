@@ -755,6 +755,11 @@ def audit_publish_date_bootstrap(paths: BatchAddTickerPaths) -> dict[str, Any]:
                 "status": "REPAIR_REQUIRED",
                 "reason": reason,
             })
+    explicit_counts = {
+        "ALREADY_ESTABLISHED": int(counts.get("ALREADY_ESTABLISHED", 0)),
+        "BOOTSTRAP_ELIGIBLE": int(counts.get("BOOTSTRAP_ELIGIBLE", 0)),
+        "REPAIR_REQUIRED": int(counts.get("REPAIR_REQUIRED", 0)),
+    }
     return {
         "contract": {
             "stable_quarter_identity": ["company_id", "fiscal_year", "fiscal_quarter"],
@@ -763,10 +768,18 @@ def audit_publish_date_bootstrap(paths: BatchAddTickerPaths) -> dict[str, Any]:
             "explicit_repair_required_to_change_first_public_result_date": True,
         },
         "total_quarters": len(rows),
-        "counts": dict(counts),
+        "counts": explicit_counts,
+        "existing_canonical_quarters": len(rows),
+        "established_first_public_dates": explicit_counts["ALREADY_ESTABLISHED"],
+        "historical_bootstrap_eligible": explicit_counts["BOOTSTRAP_ELIGIBLE"],
+        "historical_preservation_applicable": explicit_counts["ALREADY_ESTABLISHED"],
+        "repair_required": explicit_counts["REPAIR_REQUIRED"],
         "exception_count": len(exceptions),
         "exceptions": exceptions,
-        "all_current_quarters_bootstrap_eligible": not exceptions,
+        "all_current_quarters_bootstrap_eligible": (
+            explicit_counts["BOOTSTRAP_ELIGIBLE"] == len(rows) and not exceptions
+        ),
+        "all_current_quarter_dates_valid": not exceptions,
     }
 
 
@@ -814,7 +827,7 @@ def publish_date_impact(
                 "source_availability_date_would_drift": bool(winner.get("date") and winner.get("date") != current.get("source_availability_date")),
                 "policy_result": policy,
             })
-        else:
+        elif winner.get("date"):
             output.append({
                 "ticker": identity["ticker"],
                 "company_id": identity["company_id"],
@@ -827,7 +840,76 @@ def publish_date_impact(
                 "source_lastupdated": winner.get("lastupdated"),
                 "policy_result": "ESTABLISH_INITIAL_DATE_USING_EXISTING_CANONICAL_POLICY",
             })
+        else:
+            output.append({
+                "ticker": identity["ticker"],
+                "company_id": identity["company_id"],
+                "fiscal_year": fiscal[0],
+                "fiscal_quarter": fiscal[1],
+                "existing_source_availability_date": None,
+                "existing_first_public_result_date": None,
+                "proposed_first_public_result_date_baseline": None,
+                "source_date": None,
+                "source_lastupdated": None,
+                "policy_result": "NO_CANONICAL_DATE_IMPACT",
+                "reason": "NO_ARQ_CANONICAL_WINNER_FOR_AFFECTED_SOURCE_FISCAL_IDENTITY",
+            })
     return output
+
+
+def publication_date_status(impacts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    new_quarters = sum(
+        item.get("policy_result") == "ESTABLISH_INITIAL_DATE_USING_EXISTING_CANONICAL_POLICY"
+        and bool(item.get("source_date"))
+        for item in impacts
+    )
+    preserved = sum(
+        item.get("policy_result") == "PRESERVE_EXISTING_FIRST_PUBLIC_RESULT_DATE"
+        for item in impacts
+    )
+    no_impact = sum(item.get("policy_result") == "NO_CANONICAL_DATE_IMPACT" for item in impacts)
+    if new_quarters and preserved:
+        code, label = "NEW_QUARTER_AND_PRESERVED_HISTORY", "New quarter + preserved history"
+    elif new_quarters:
+        code, label = "NEW_QUARTER", "New quarter"
+    elif preserved:
+        code, label = "PRESERVED", "Preserved"
+    else:
+        code, label = "NO_DATE_IMPACT", "No date impact"
+    return {
+        "status": code,
+        "label": label,
+        "expected_new_quarter_initializations": int(new_quarters),
+        "existing_quarters_preserved": int(preserved),
+        "source_only_fiscal_identities_without_canonical_date_impact": int(no_impact),
+        "source_availability_date_changes": sum(
+            bool(item.get("source_availability_date_would_drift")) for item in impacts
+        ),
+    }
+
+
+def _publication_date_state(
+    bootstrap: Mapping[str, Any], changes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    statuses = Counter(
+        str((item.get("publication_date_status") or {}).get("status") or "NO_DATE_IMPACT")
+        for item in changes
+        if item.get("classification") in {
+            "NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION", "SOURCE_REMOVAL",
+        }
+    )
+    return {
+        "existing_canonical_quarters": int(bootstrap.get("existing_canonical_quarters", 0)),
+        "established_first_public_dates": int(bootstrap.get("established_first_public_dates", 0)),
+        "historical_bootstrap_eligible": int(bootstrap.get("historical_bootstrap_eligible", 0)),
+        "historical_preservation_applicable": int(bootstrap.get("historical_preservation_applicable", 0)),
+        "repair_required": int(bootstrap.get("repair_required", 0)),
+        "expected_new_quarter_initializations": sum(
+            int((item.get("publication_date_status") or {}).get("expected_new_quarter_initializations", 0))
+            for item in changes
+        ),
+        "ticker_status_counts": dict(sorted(statuses.items())),
+    }
 
 
 def provider_key_diagnostics(provider_db: Path) -> dict[str, Any]:
@@ -914,6 +996,7 @@ def _summary_counts(changes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
 def _render_refresh_report(result: Mapping[str, Any]) -> str:
     counts = result.get("summary_counts") or {}
     discovery = result.get("refresh_preview", {}).get("discovery", {})
+    date_state = result.get("refresh_preview", {}).get("publication_date_state", {})
     lines = [
         "# Refresh Fundamentals Preview",
         "",
@@ -937,14 +1020,13 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         "",
         "## Effective Known-Ticker Changes",
         "",
-        "| Ticker | Current latest Q | Sharadar latest Q | Change | ARQ before/after | Added | Changed | Removed | Publish date |",
+        "| Ticker | Current latest Q | Sharadar latest Q | Change | ARQ before/after | Added | Changed | Removed | Publication-date impact |",
         "| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |",
     ]
     for item in result.get("refresh_preview", {}).get("ticker_changes", []):
         if item.get("classification") not in {"NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION", "SOURCE_REMOVAL"}:
             continue
-        impacts = item.get("publish_date_impact") or []
-        policy = "New Q" if any(row.get("policy_result") == "ESTABLISH_INITIAL_DATE_USING_EXISTING_CANONICAL_POLICY" for row in impacts) else "Baseline preserved"
+        policy = (item.get("publication_date_status") or {}).get("label", "No date impact")
         lines.append(
             f"| {item.get('ticker')} | {item.get('old_latest_fiscal_quarter') or '-'} | "
             f"{item.get('new_latest_fiscal_quarter') or '-'} | {str(item.get('classification')).replace('_', ' ').title()} | "
@@ -955,10 +1037,20 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         "",
         "## Publication-Date Contract",
         "",
+        "- The historical `first_public_result_date` baseline is established in production.",
+        "- Routine Refresh preserves established historical values by `(company_id, fiscal_year, fiscal_quarter)`.",
+        "- A genuinely new canonical quarter receives its initial first-public date under the accepted canonical policy.",
         "- `source_availability_date` may follow the current winning Sharadar row.",
-        "- `first_public_result_date` will be bootstrapped on copies in Phase 13G.3.3.",
-        "- After bootstrap, routine Refresh preserves `first_public_result_date` by `(company_id, fiscal_year, fiscal_quarter)`.",
-        "- Only an explicit repair operation may change that preserved date.",
+        "- Routine Refresh does not repair an established first-public date; explicit repair remains separate.",
+        "",
+        "## Publication-Date State",
+        "",
+        f"- Existing canonical quarters: `{date_state.get('existing_canonical_quarters', 0)}`",
+        f"- Established first-public dates: `{date_state.get('established_first_public_dates', 0)}`",
+        f"- Historical bootstrap eligible: `{date_state.get('historical_bootstrap_eligible', 0)}`",
+        f"- Historical preservation applicable: `{date_state.get('historical_preservation_applicable', 0)}`",
+        f"- Repair required: `{date_state.get('repair_required', 0)}`",
+        f"- Expected new-quarter initializations at Preview level: `{date_state.get('expected_new_quarter_initializations', 0)}`",
         "",
         "## Safety",
         "",
@@ -1052,6 +1144,9 @@ def run_preview(
                     comparison=comparison,
                     source_arq_rows=histories[ticker]["ARQ"].rows,
                 )
+                comparison["publication_date_status"] = publication_date_status(
+                    comparison["publish_date_impact"]
+                )
             changes.append(comparison)
             progress.running(ProgressStage.SOURCE_COMPARISON, f"Compared {ticker}.", processed_items=index, total_items=len(known))
         for ticker in tickers:
@@ -1070,6 +1165,7 @@ def run_preview(
         changes.sort(key=lambda item: str(item.get("ticker")))
         counts = _summary_counts(changes)
         bootstrap = audit_publish_date_bootstrap(source_paths)
+        publication_state = _publication_date_state(bootstrap, changes)
         legacy = provider_key_diagnostics(source_paths.provider_db)
         replacement_classes = {"NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION", "SOURCE_REMOVAL"}
         replacement = [item for item in changes if item.get("classification") in replacement_classes]
@@ -1110,10 +1206,14 @@ def run_preview(
             "discovery": discovery,
             "ticker_changes": changes,
             "refresh_set_fingerprint": refresh_set_fingerprint,
-            "future_test_authorized": bool(replacement) and not review and discovery["status"] == "COMPLETE",
+            "future_test_authorized": (
+                trigger_source == "MANUAL" and bool(replacement) and not review
+                and discovery["status"] == "COMPLETE"
+            ),
             "published_watermark_advanced": False,
             "provider_key_diagnostics": legacy,
             "publish_date_bootstrap": {key: value for key, value in bootstrap.items() if key != "exceptions"},
+            "publication_date_state": publication_state,
         }
         preview_path = writer.write_json("refresh_preview.json", preview)
         changes_path = writer.write_json("refresh_ticker_changes.json", changes)
@@ -1162,7 +1262,9 @@ def run_preview(
                 if outcome == AdminStatus.NO_CHANGE
                 else "Resolve review items before a future Test on copies."
                 if review
-                else "Review the read-only Preview. Test on copies is not implemented until Phase 13G.3.3."
+                else "Review the read-only Preview. Use only this exact manual Preview for a separately approved Test on copies."
+                if trigger_source == "MANUAL"
+                else "Scheduler Preview is informational only; run a fresh manual Preview before Test on copies."
             ),
         )
         result = result_obj.as_dict() | {

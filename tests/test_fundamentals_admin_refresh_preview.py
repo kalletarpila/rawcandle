@@ -24,6 +24,7 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     history_fingerprints,
     normalize_source_row,
     publish_date_impact,
+    publication_date_status,
     resolve_refresh_state,
     run_preview,
     semantic_row_fingerprints,
@@ -302,7 +303,9 @@ def _create_preview_databases(root: Path) -> BatchAddTickerPaths:
 def test_publish_date_bootstrap_is_read_only_and_uses_stable_quarter_identity(tmp_path: Path) -> None:
     paths = _create_preview_databases(tmp_path)
     audit = audit_publish_date_bootstrap(paths)
-    assert audit["counts"] == {"BOOTSTRAP_ELIGIBLE": 1}
+    assert audit["counts"] == {
+        "ALREADY_ESTABLISHED": 0, "BOOTSTRAP_ELIGIBLE": 1, "REPAIR_REQUIRED": 0,
+    }
     assert audit["contract"]["stable_quarter_identity"] == ["company_id", "fiscal_year", "fiscal_quarter"]
     comparison = {
         "added_keys": [],
@@ -319,6 +322,92 @@ def test_publish_date_bootstrap_is_read_only_and_uses_stable_quarter_identity(tm
     assert impact[0]["policy_result"] == "BOOTSTRAP_FIRST_PUBLIC_RESULT_DATE_ON_COPY"
     assert impact[0]["proposed_first_public_result_date_baseline"] == "2026-08-26"
     assert impact[0]["source_lastupdated"] == "2026-09-15"
+
+
+def test_established_historical_baseline_has_zero_bootstrap_and_allows_source_difference(
+    tmp_path: Path,
+) -> None:
+    paths = _create_preview_databases(tmp_path)
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute(
+            "UPDATE v4_quarter SET first_public_result_date='2026-08-20',"
+            "source_availability_date='2026-09-15'"
+        )
+    audit = audit_publish_date_bootstrap(paths)
+    assert audit["existing_canonical_quarters"] == 1
+    assert audit["established_first_public_dates"] == 1
+    assert audit["historical_bootstrap_eligible"] == 0
+    assert audit["historical_preservation_applicable"] == 1
+    assert audit["repair_required"] == 0
+    assert audit["all_current_quarters_bootstrap_eligible"] is False
+    assert audit["all_current_quarter_dates_valid"] is True
+
+
+def test_publication_date_status_uses_canonical_impacts_not_source_row_counts() -> None:
+    new = {
+        "policy_result": "ESTABLISH_INITIAL_DATE_USING_EXISTING_CANONICAL_POLICY",
+        "source_date": "2026-11-20",
+    }
+    preserved = {
+        "policy_result": "PRESERVE_EXISTING_FIRST_PUBLIC_RESULT_DATE",
+        "source_availability_date_would_drift": True,
+    }
+    no_impact = {"policy_result": "NO_CANONICAL_DATE_IMPACT", "source_date": None}
+    assert publication_date_status([new])["status"] == "NEW_QUARTER"
+    assert publication_date_status([preserved])["status"] == "PRESERVED"
+    combined = publication_date_status([new, preserved])
+    assert combined["status"] == "NEW_QUARTER_AND_PRESERVED_HISTORY"
+    assert combined["label"] == "New quarter + preserved history"
+    assert publication_date_status([no_impact])["status"] == "NO_DATE_IMPACT"
+
+
+@pytest.mark.parametrize(
+    ("classification", "impacts", "expected"),
+    [
+        (
+            "NEW_QUARTER",
+            [{"policy_result": "ESTABLISH_INITIAL_DATE_USING_EXISTING_CANONICAL_POLICY", "source_date": "2026-11-20"}],
+            "NEW_QUARTER",
+        ),
+        (
+            "HISTORICAL_REVISION",
+            [{"policy_result": "PRESERVE_EXISTING_FIRST_PUBLIC_RESULT_DATE"}],
+            "PRESERVED",
+        ),
+        (
+            "NEW_QUARTER_AND_REVISION",
+            [
+                {"policy_result": "ESTABLISH_INITIAL_DATE_USING_EXISTING_CANONICAL_POLICY", "source_date": "2026-11-20"},
+                {"policy_result": "PRESERVE_EXISTING_FIRST_PUBLIC_RESULT_DATE"},
+            ],
+            "NEW_QUARTER_AND_PRESERVED_HISTORY",
+        ),
+        (
+            "SOURCE_REMOVAL",
+            [{"policy_result": "PRESERVE_EXISTING_FIRST_PUBLIC_RESULT_DATE"}],
+            "PRESERVED",
+        ),
+    ],
+)
+def test_change_classes_have_canonical_publication_date_status(
+    classification: str, impacts: list[dict[str, object]], expected: str,
+) -> None:
+    assert classification in {
+        "NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION", "SOURCE_REMOVAL",
+    }
+    assert publication_date_status(impacts)["status"] == expected
+
+
+def test_missing_canonical_quarter_without_arq_winner_has_no_date_impact(tmp_path: Path) -> None:
+    paths = _create_preview_databases(tmp_path)
+    impact = publish_date_impact(
+        paths,
+        identity={"ticker": "TEST", "company_id": 1},
+        comparison={"affected_fiscal_quarters": [{"fiscal_year": 2020, "fiscal_quarter": "Q1"}]},
+        source_arq_rows=[row()],
+    )
+    assert impact[0]["policy_result"] == "NO_CANONICAL_DATE_IMPACT"
+    assert publication_date_status(impact)["label"] == "No date impact"
 
 
 def test_realistic_preview_writes_artifacts_but_not_databases(tmp_path: Path) -> None:
@@ -350,6 +439,33 @@ def test_realistic_preview_writes_artifacts_but_not_databases(tmp_path: Path) ->
         assert (run_dir / name).is_file()
     preview = json.loads((run_dir / "refresh_preview.json").read_text(encoding="utf-8"))
     assert preview["refresh_set_fingerprint"] == output["preview_fingerprint"]
+
+
+def test_established_revision_report_is_preserved_and_has_current_contract_wording(
+    tmp_path: Path,
+) -> None:
+    paths = _create_preview_databases(tmp_path / "dbs")
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute("UPDATE v4_quarter SET first_public_result_date='2026-08-26'")
+    output = run_preview(
+        source_paths=paths,
+        run_root=tmp_path / "runs",
+        client=PreviewClient(
+            [row(lastupdated="2026-09-15", revenue=120)],
+            [row(dimension="MRQ", lastupdated="2026-09-15")],
+        ),
+    )
+    change = output["refresh_preview"]["ticker_changes"][0]
+    assert change["classification"] == "HISTORICAL_REVISION"
+    assert change["publication_date_status"]["status"] == "PRESERVED"
+    state = output["refresh_preview"]["publication_date_state"]
+    assert state["established_first_public_dates"] == 1
+    assert state["historical_bootstrap_eligible"] == 0
+    assert state["repair_required"] == 0
+    report = (Path(output["artifact_dir"]) / "operation_report.md").read_text(encoding="utf-8")
+    assert "| Preserved |" in report
+    assert "will be bootstrapped on copies" not in report
+    assert "historical `first_public_result_date` baseline is established in production" in report
 
 
 def test_next_preview_after_published_generation_is_no_change(tmp_path: Path) -> None:
@@ -420,6 +536,11 @@ def test_consecutive_scheduler_previews_keep_published_baseline_and_accumulate_p
         ).fetchone()
     assert state == ("2026-08-26", "published-run")
     assert first["trigger_source"] == second["trigger_source"] == "SCHEDULER"
+    assert first["refresh_preview"]["future_test_authorized"] is False
+    assert second["refresh_preview"]["future_test_authorized"] is False
+    second_report = (Path(second["artifact_dir"]) / "operation_report.md").read_text(encoding="utf-8")
+    assert "Publication-Date State" in second_report
+    assert "will be bootstrapped on copies" not in second_report
 
 
 def test_routine_refresh_never_overrides_established_first_public_date(tmp_path: Path) -> None:

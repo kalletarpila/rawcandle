@@ -294,6 +294,7 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
                 "Production writes: 0. Production update is not yet enabled for Refresh Fundamentals.",
             )
         discovery = _mapping(_mapping(result.get("refresh_preview")).get("discovery"))
+        date_state = _mapping(_mapping(result.get("refresh_preview")).get("publication_date_state"))
         return (
             final_status_message(result),
             f"Sharadar discovery: {discovery.get('returned_source_rows', 0)} rows across {discovery.get('unique_changed_source_tickers', 0)} tickers.",
@@ -301,6 +302,9 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
             f"New quarter: {counts.get('NEW_QUARTER', 0)}; historical revision: {counts.get('HISTORICAL_REVISION', 0)}; both: {counts.get('NEW_QUARTER_AND_REVISION', 0)}.",
             f"Source removal: {counts.get('SOURCE_REMOVAL', 0)}; no effective change: {counts.get('NO_EFFECTIVE_CHANGE', 0)}.",
             f"Not in canonical universe: {counts.get('NOT_IN_CANONICAL_UNIVERSE', 0)}; review required: {counts.get('REVIEW_REQUIRED', 0)}.",
+            f"First-public dates: {date_state.get('established_first_public_dates', 0)} established; "
+            f"historical bootstrap eligible: {date_state.get('historical_bootstrap_eligible', 0)}; "
+            f"repair required: {date_state.get('repair_required', 0)}.",
         )
     counts = _mapping(result.get("summary_counts"))
     downstream = _mapping(result.get("downstream"))
