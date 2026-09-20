@@ -189,6 +189,7 @@ def _cleanup_terminal_candidates(journal: Mapping[str, Any]) -> dict[str, Any]:
     run_id = str(journal.get("production_run_id") or "")
     removed: list[str] = []
     missing: list[str] = []
+    run_lane_parents: set[Path] = set()
     for role in PUBLICATION_ROLES:
         record = journal["roles"][role]
         candidate = Path(str(record.get("candidate_path") or "")).resolve()
@@ -215,6 +216,16 @@ def _cleanup_terminal_candidates(journal: Mapping[str, Any]) -> dict[str, Any]:
                 removed.append(str(sidecar))
         if candidate.parent.exists():
             fsync_directory(candidate.parent)
+        if run_id and run_id in candidate.parent.parts:
+            run_lane_parents.add(candidate.parent)
+    for parent in sorted(run_lane_parents, key=lambda value: len(value.parts), reverse=True):
+        if not parent.exists():
+            continue
+        for path in parent.rglob("*"):
+            if path.is_file() and not path.is_symlink():
+                removed.append(str(path.resolve()))
+        shutil.rmtree(parent)
+        fsync_directory(parent.parent)
     return {"status": "COMPLETED", "removed": removed, "already_missing": missing}
 
 

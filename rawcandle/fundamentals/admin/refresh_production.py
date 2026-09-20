@@ -31,12 +31,15 @@ from rawcandle.fundamentals.admin.publication_journal import (
     sha256_file,
     sqlite_verification,
     update_journal,
+    INCOMPLETE_STATES,
 )
 from rawcandle.fundamentals.admin.refresh_copy_runtime import (
+    FULL_V2_READ_ONLY_SOURCE_ROLES,
     REPLACEMENT_CLASSES,
     _analysis_state,
     _identity_mapping,
     fresh_rebuild_canonical,
+    prepare_full_v2_read_only_copies,
     replace_provider_histories,
     revalidate_bound_source,
     validate_provider_candidate,
@@ -200,21 +203,60 @@ def _publish_refresh_state(
 def _storage_preflight(paths: BatchAddTickerPaths, *, temp_root: Path, backup_root: Path) -> dict[str, Any]:
     temp_root.mkdir(parents=True, exist_ok=True)
     backup_root.mkdir(parents=True, exist_ok=True)
-    sizes = {role: paths.as_dict()[role].stat().st_size for role in PUBLICATION_ROLES}
-    total = sum(sizes.values())
-    # One candidate set, one backup set, SQLite/rebuild scratch, and a 25% margin.
-    required = max(int(total * 2.75), 64 * 1024 * 1024)
+    sizes = {role: path.stat().st_size for role, path in paths.as_dict().items()}
+    publication_total = sum(sizes[role] for role in PUBLICATION_ROLES)
+    read_only_total = sum(sizes[role] for role in FULL_V2_READ_ONLY_SOURCE_ROLES)
+    # Publication candidates/backups and rebuild scratch, plus the two required
+    # immutable read-only authority snapshots.
     requirements: dict[int, dict[str, Any]] = {}
-    for location in (temp_root, backup_root):
+    location_requirements = (
+        (temp_root, int(publication_total * 1.75) + read_only_total),
+        (backup_root, int(publication_total * 1.25)),
+    )
+    for location, location_required in location_requirements:
         device = location.stat().st_dev
         item = requirements.setdefault(device, {"paths": [], "required_bytes": 0})
         item["paths"].append(str(location.resolve()))
-        item["required_bytes"] = max(item["required_bytes"], required)
+        item["required_bytes"] += max(location_required, 64 * 1024 * 1024)
     for item in requirements.values():
         item["available_bytes"] = shutil.disk_usage(item["paths"][0]).free
         if item["available_bytes"] < item["required_bytes"]:
             raise RuntimeError("REFRESH_PRODUCTION_INSUFFICIENT_STORAGE")
-    return {str(device): item for device, item in requirements.items()}
+    return {
+        "source_sizes": sizes,
+        "required_read_only_copy_roles": list(FULL_V2_READ_ONLY_SOURCE_ROLES),
+        "filesystems": {str(device): item for device, item in requirements.items()},
+    }
+
+
+def _cleanup_candidate_lane(lane_dir: Path, journal: Mapping[str, Any] | None) -> dict[str, Any]:
+    state = str((journal or {}).get("state") or "NOT_PREPARED")
+    if journal is not None and state in INCOMPLETE_STATES:
+        return {
+            "status": "RETAINED_FOR_RECOVERY", "journal_state": state,
+            "path": str(lane_dir.resolve()), "removed": False,
+        }
+    files = []
+    removed_file_count = 0
+    removed_bytes = 0
+    if lane_dir.exists():
+        for path in lane_dir.rglob("*"):
+            if not path.is_file() or path.is_symlink():
+                continue
+            size = path.stat().st_size
+            removed_file_count += 1
+            removed_bytes += size
+            if size >= 1024 * 1024 or path.suffix in {".db", ".db-wal", ".db-shm"}:
+                files.append({"path": str(path.resolve()), "size": size})
+        shutil.rmtree(lane_dir)
+    return {
+        "status": "COMPLETED", "journal_state": state,
+        "path": str(lane_dir.resolve()), "removed": True,
+        "removed_file_count": removed_file_count,
+        "removed_bytes": removed_bytes,
+        "remaining_phase_owned_files": 0 if not lane_dir.exists() else len(list(lane_dir.rglob("*"))),
+        "files": files,
+    }
 
 
 def _verified_backups(paths: BatchAddTickerPaths, backup_dir: Path) -> dict[str, Any]:
@@ -361,26 +403,44 @@ def render_report(result: Mapping[str, Any]) -> str:
     provider = result.get("provider_candidate") or {}
     refresh_state = result.get("refresh_state") or {}
     old_state = result.get("old_refresh_state") or {}
+    published = result.get("outcome") == "COMPLETED"
+    boundary_crossed = bool(result.get("write_boundary_crossed"))
+    old_watermark = old_state.get("published_watermark")
+    proposed_watermark = refresh_state.get("published_source_watermark")
+    published_after = proposed_watermark if published else old_watermark
+    provider_candidate_count = provider.get("ticker_count", 0)
+    provider_published_count = provider_candidate_count if published else 0
+    canonical_heading = "Canonical Publication" if published else "Canonical Candidate Impact"
     lines = [
         "# Refresh Fundamentals Production Update", "", "## Executive Summary", "",
         "- Operation: Refresh Fundamentals", "- Stage: Production update",
-        f"- Result: {result.get('outcome', 'FAILED')}",
+        f"- Production result: {result.get('outcome', 'FAILED')}",
         f"- Duration: {result.get('duration_seconds', 0):.1f} seconds",
+        f"- Publication boundary entered: {'YES' if boundary_crossed else 'NO'}",
+        f"- Production DB writes: {result.get('production_writes', 3 if published else 0)}",
+        f"- Production generation changed: {'YES' if published else 'NO'}",
+        f"- Rollback required: {'YES' if (result.get('rollback') or {}).get('status') not in (None, 'NOT_REQUIRED') else 'NO'}",
         f"- Changed known tickers: {result.get('summary_counts', {}).get('effective_changed_known', 0)}",
-        f"- Provider tickers replaced: {provider.get('ticker_count', 0)}",
-        f"- Canonical source-driven added/changed/removed: {impact.get('added_quarters', 0)} / {impact.get('changed_quarters', 0)} / {impact.get('removed_quarters', 0)}",
+        f"- Provider candidate replacements: {provider_candidate_count}",
+        f"- Provider published replacements: {provider_published_count}",
+        f"- Canonical {'published' if published else 'candidate'} source-driven added/changed/removed: {impact.get('added_quarters', 0)} / {impact.get('changed_quarters', 0)} / {impact.get('removed_quarters', 0)}",
         f"- First-public bootstrap-only changes: {impact.get('bootstrap_only_date_changes', 0)}",
         f"- Full V2/RP/RV: {(result.get('analysis_candidate') or {}).get('status', 'NOT_RUN')}",
-        f"- Source watermark: {old_state.get('published_watermark') or 'BOOTSTRAP_BASELINE'} -> {refresh_state.get('published_source_watermark') or 'NOT_PUBLISHED'}",
+        f"- Published Refresh state before: {old_state.get('mode') or 'BOOTSTRAP_BASELINE'}",
+        f"- Published Refresh state after: {refresh_state.get('mode') if published else old_state.get('mode') or 'BOOTSTRAP_BASELINE'}",
+        f"- Published watermark before: {old_watermark or 'NONE'}",
+        f"- Published watermark after: {published_after or 'NONE'}",
+        f"- Candidate/proposed next watermark: {proposed_watermark or 'NOT_PREPARED'}",
         f"- Postflight: {'PASSED' if result.get('postflight') else 'NOT_COMPLETED'}",
         f"- Rollback: {(result.get('rollback') or {}).get('status', 'NOT_REQUIRED')}",
         "", "## Source Refresh", "",
         f"- Refresh-set fingerprint: `{result.get('preview_fingerprint')}`",
         f"- Source schema fingerprint: `{refresh_state.get('source_schema_fingerprint', 'not published')}`",
         f"- Source classifications: `{json.dumps(result.get('summary_counts') or {}, sort_keys=True)}`",
-        "", "## Provider Publication", "",
-        f"- ARQ/MRQ replacement tickers: {provider.get('ticker_count', 0)}",
-        "", "## Canonical Publication", "",
+        "", f"## Provider {'Publication' if published else 'Candidate'}", "",
+        f"- Candidate ARQ/MRQ replacement tickers: {provider_candidate_count}",
+        f"- Published ARQ/MRQ replacement tickers: {provider_published_count}",
+        "", f"## {canonical_heading}", "",
         f"- Quarters added: {impact.get('added_quarters', 0)}",
         f"- Quarters financially/source changed: {impact.get('changed_quarters', 0)}",
         f"- Quarters removed: {impact.get('removed_quarters', 0)}",
@@ -400,6 +460,7 @@ def render_report(result: Mapping[str, Any]) -> str:
         "", "## Publication Safety", "",
         f"- Backups verified: {len(result.get('backups') or {})}/3",
         f"- Journal state: {(result.get('journal') or {}).get('state', 'NOT_PREPARED')}",
+        f"- Candidate/source-copy cleanup: {(result.get('cleanup') or {}).get('status', 'NOT_RECORDED')}",
         "- Publication order: provider -> canonical -> analysis.",
         "- The three-file set is journaled and recoverable, not reader-atomically replaced as one filesystem operation.",
         "- A reader can observe an intermediate generation during the bounded replacement window; generation-directory activation is deferred.",
@@ -426,6 +487,15 @@ def render_report(result: Mapping[str, Any]) -> str:
             def transition(key: str) -> str:
                 return f"{before.get(key)} -> {after.get(key)}"
 
+            if published:
+                final_action = "Published"
+            elif canonical:
+                final_action = "Candidate prepared; not published"
+            elif provider:
+                final_action = "Provider candidate prepared; not published"
+            else:
+                final_action = "Candidate not prepared; not published"
+
             lines.append(
                 f"| {ticker} | {item.get('classification')} | "
                 f"{item.get('old_latest_fiscal_quarter') or '-'} -> {item.get('new_latest_fiscal_quarter') or '-'} | "
@@ -434,7 +504,7 @@ def render_report(result: Mapping[str, Any]) -> str:
                 f"{ticker_impact.get('quarters_added', 0)}/{ticker_impact.get('quarters_changed', 0)}/{ticker_impact.get('quarters_removed', 0)} | "
                 f"{transition('score')} | {transition('lifecycle')} | {transition('valuation')} | "
                 f"{transition('relative_position_count')} | {transition('relative_valuation')} | "
-                f"preserved={ticker_impact.get('first_public_dates_preserved', 0)}, new={ticker_impact.get('new_first_public_dates', 0)}, removed evidence={item.get('removed_count', 0)} | Refreshed |"
+                f"preserved={ticker_impact.get('first_public_dates_preserved', 0)}, new={ticker_impact.get('new_first_public_dates', 0)}, removed evidence={item.get('removed_count', 0)} | {final_action} |"
             )
     if result.get("error"):
         lines.extend(["", "## Technical Appendix", "", f"- Error: `{result['error']}`", f"- Failed stage: `{result.get('failed_stage')}`"])
@@ -557,7 +627,14 @@ def run_production_apply(
         canonical_candidate = lane_dir / "canonical_candidate.db"
 
         stage = "PROVIDER_CANDIDATE"
-        progress(stage, "RUNNING", "Building the provider candidate with complete ARQ/MRQ histories.")
+        progress(stage, "RUNNING", "Preparing isolated source snapshots and the provider candidate.")
+        with _durable_heartbeat(writer, stage, "Read-only source snapshots are still being copied."):
+            read_only_copies, read_only_copy_evidence = prepare_full_v2_read_only_copies(
+                source_paths, lane_dir=lane_dir,
+            )
+        result["read_only_source_copies"] = read_only_copy_evidence
+        writer.write_json("read_only_source_copy_manifest.json", read_only_copy_evidence)
+
         with _durable_heartbeat(writer, stage, "Provider candidate construction is still running."):
             online_backup(source_paths.provider_db, provider_candidate)
             provider_result = replace_provider_histories(
@@ -594,7 +671,10 @@ def run_production_apply(
         stage = "ANALYSIS_CANDIDATE"
         progress(stage, "RUNNING", "Building the full V2, RP V2, and RV candidate once.")
         before_analysis = _analysis_state(source_paths.analysis_db, source_paths.canonical_db, changed_tickers)
-        candidate_paths = BatchAddTickerPaths(provider_candidate, canonical_candidate, lane_dir / "unused.db", source_paths.market_db, source_paths.taxonomy_db)
+        candidate_paths = BatchAddTickerPaths(
+            provider_candidate, canonical_candidate, lane_dir / "unused.db",
+            read_only_copies["market"], read_only_copies["taxonomy"],
+        )
         with _durable_heartbeat(writer, stage, "Full V2, RP V2, and RV rebuild is still running."):
             analysis_result = run_full_v2_downstream(
                 candidate_paths.as_dict(), output=lane_dir / "analysis_rebuild",
@@ -756,8 +836,14 @@ def run_production_apply(
             )
     finally:
         locks.close()
-        if lane_dir.exists():
-            shutil.rmtree(lane_dir, ignore_errors=True)
+        result["cleanup"] = _cleanup_candidate_lane(lane_dir, journal)
+        if result.get("production_file_state_before"):
+            result["production_file_state_after"] = _production_file_state(source_paths)
+            result["production_file_state_unchanged"] = (
+                result["production_file_state_before"] == result["production_file_state_after"]
+            )
+        result["production_writes"] = 3 if result.get("outcome") == "COMPLETED" else 0
+        result["production_generation_changed"] = result.get("outcome") == "COMPLETED"
         completed = utc_now()
         result["completed_at_utc"] = completed
         result["duration_seconds"] = _duration(started, completed)

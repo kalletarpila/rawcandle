@@ -54,10 +54,35 @@ from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 
 TEST_CONTRACT_VERSION = "PHASE13G3_10_SHARADAR_REFRESH_RETENTION_COPY_TEST_V1"
 REPLACEMENT_CLASSES = REFRESH_REPLACEMENT_CLASSES
+FULL_V2_READ_ONLY_SOURCE_ROLES = ("market", "taxonomy")
 
 
 class StaleRefreshPreview(RefreshPreviewError):
     pass
+
+
+def prepare_full_v2_read_only_copies(
+    source_paths: BatchAddTickerPaths, *, lane_dir: Path,
+) -> tuple[dict[str, Path], dict[str, dict[str, Any]]]:
+    """Snapshot the read-only authorities required by the full V2 rebuild."""
+    copies: dict[str, Path] = {}
+    evidence: dict[str, dict[str, Any]] = {}
+    for role in FULL_V2_READ_ONLY_SOURCE_ROLES:
+        source = source_paths.as_dict()[role]
+        destination = lane_dir / f"{role}.db"
+        source_stat = source.stat()
+        copy_result = online_backup(source, destination)
+        copies[role] = destination
+        evidence[role] = {
+            **copy_result,
+            "role": role,
+            "purpose": "FULL_V2_READ_ONLY_SOURCE",
+            "source_size": source_stat.st_size,
+            "source_mtime_ns": source_stat.st_mtime_ns,
+            "immutable_after_creation": True,
+            "cleanup_required": True,
+        }
+    return copies, evidence
 
 
 def _load_bound_preview(path: Path, expected_fingerprint: str, run_root: Path) -> dict[str, Any]:
@@ -855,15 +880,15 @@ def run_apply(
         lane_dir.mkdir(parents=True, exist_ok=False)
         provider_candidate = lane_dir / "provider_candidate.db"
         canonical_candidate = lane_dir / "canonical_candidate.db"
-        market_copy = lane_dir / "market.db"
-        taxonomy_copy = lane_dir / "taxonomy.db"
         with _background_heartbeat(progress, "Database copying is still running."):
             copies = {
                 "provider": online_backup(source_paths.provider_db, provider_candidate),
                 "canonical": online_backup(source_paths.canonical_db, canonical_candidate),
-                "market": online_backup(source_paths.market_db, market_copy),
-                "taxonomy": online_backup(source_paths.taxonomy_db, taxonomy_copy),
             }
+            read_only_copies, read_only_evidence = prepare_full_v2_read_only_copies(
+                source_paths, lane_dir=lane_dir,
+            )
+            copies.update(read_only_evidence)
         writer.write_json("copy_manifest.json", copies)
         progress.completed(failed_stage, "Disposable database copies created.")
 
@@ -908,7 +933,10 @@ def run_apply(
         failed_stage = ProgressStage.ANALYSIS_REBUILD
         progress.running(failed_stage, "Building complete V2, RP V2 and RV analysis candidate.")
         analysis_before = _analysis_state(source_paths.analysis_db, source_paths.canonical_db, changed_tickers)
-        candidate_paths = BatchAddTickerPaths(provider_candidate, canonical_candidate, lane_dir / "unused_analysis.db", market_copy, taxonomy_copy)
+        candidate_paths = BatchAddTickerPaths(
+            provider_candidate, canonical_candidate, lane_dir / "unused_analysis.db",
+            read_only_copies["market"], read_only_copies["taxonomy"],
+        )
         with _background_heartbeat(progress, "Full V2, RP V2 and RV rebuild is still running."):
             analysis_result = run_full_v2_downstream(
                 candidate_paths.as_dict(), output=lane_dir / "analysis_rebuild", as_of_date=as_of_date or date.today().isoformat(),

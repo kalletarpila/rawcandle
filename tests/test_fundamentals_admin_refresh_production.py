@@ -98,6 +98,45 @@ def test_crash_recovery_restores_complete_old_generation(tmp_path: Path, publish
     assert all(not Path(str(roles[role]["candidate_path"])).exists() for role in PUBLICATION_ROLES)
 
 
+def test_terminal_recovery_removes_run_owned_read_only_source_copies(tmp_path: Path) -> None:
+    run_id = "production-run"
+    lane = tmp_path / "temp" / run_id
+    lane.mkdir(parents=True)
+    roles: dict[str, dict[str, object]] = {}
+    backup_dir = tmp_path / "backups"
+    production_dir = tmp_path / "production"
+    backup_dir.mkdir()
+    production_dir.mkdir()
+    for role in PUBLICATION_ROLES:
+        production = production_dir / f"{role}.db"
+        backup = backup_dir / f"{role}.db"
+        candidate = lane / f"{role}.db"
+        _database(production, "old")
+        shutil.copy2(production, backup)
+        _database(candidate, "new")
+        roles[role] = {
+            "production_path": str(production),
+            "old_production_fingerprint": sha256_file(production),
+            "backup_path": str(backup),
+            "verified_backup_fingerprint": sha256_file(backup),
+            "candidate_path": str(candidate),
+            "candidate_fingerprint": sha256_file(candidate),
+            "replacement_state": "NOT_STARTED",
+        }
+    _database(lane / "market.db", "authority")
+    _database(lane / "taxonomy.db", "authority")
+    journal_path = tmp_path / "journal.json"
+    journal = prepare_journal(
+        path=journal_path, operation_type="REFRESH_FUNDAMENTALS", run_id=run_id,
+        preview_run_id="preview", test_run_id="test", refresh_set_fingerprint="f" * 64,
+        old_source_watermark=None, new_source_watermark="2026-09-20",
+        source_schema_fingerprint="schema", roles=roles,
+    )
+    recovered = restore_old_generation(journal, journal_path=journal_path)
+    assert recovered["status"] == "RECOVERED"
+    assert not lane.exists()
+
+
 def test_publication_journal_intent_is_durable_before_replace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -615,6 +654,45 @@ def test_production_shaped_rehearsal_commits_only_after_postflight(
     assert not any((tmp_path / "temp").rglob("*.db"))
 
 
+def test_production_analysis_candidate_uses_isolated_market_and_taxonomy_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    observed: dict[str, Path] = {}
+
+    def rebuild_analysis(sources, *, output, **_kwargs):
+        observed.update({role: Path(path) for role, path in sources.items()})
+        output.mkdir(parents=True)
+        candidate = output / "analysis_candidate.db"
+        _database(candidate, "new")
+        return {
+            "candidate_analysis_db": str(candidate), "status": "READY",
+            "invocation_counts": {"full_v2_rebuild": 1},
+            "taxonomy_dependency": {"domain": "dc_ecosystem", "version": "v", "semantic_fingerprint": "t"},
+        }
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.run_full_v2_downstream",
+        rebuild_analysis,
+    )
+    result = run_production_apply(
+        preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+        backup_root=tmp_path / "backups", journal_path=tmp_path / "journal.json",
+        confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+    )
+    assert result["outcome"] == "COMPLETED"
+    assert observed["market"] != paths.market_db
+    assert observed["taxonomy"] != paths.taxonomy_db
+    assert observed["market"].name == "market.db"
+    assert observed["taxonomy"].name == "taxonomy.db"
+    assert result["read_only_source_copies"]["market"]["purpose"] == "FULL_V2_READ_ONLY_SOURCE"
+    assert result["cleanup"]["status"] == "COMPLETED"
+    assert result["cleanup"]["remaining_phase_owned_files"] == 0
+
+
 def test_postflight_failure_rolls_back_complete_three_database_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -671,6 +749,16 @@ def test_candidate_failure_never_crosses_publication_boundary(
     assert not journal_path.exists()
     assert not (tmp_path / "temp" / result["run_id"]).exists()
     assert not (tmp_path / "backups" / result["run_id"]).exists()
+    assert result["cleanup"]["status"] == "COMPLETED"
+    assert result["cleanup"]["remaining_phase_owned_files"] == 0
+    if failure_stage == "ANALYSIS_CANDIDATE":
+        report = (Path(result["artifact_dir"]) / "operation_report.md").read_text(encoding="utf-8")
+        assert "Publication boundary entered: NO" in report
+        assert "Provider candidate replacements: 1" in report
+        assert "Provider published replacements: 0" in report
+        assert "## Canonical Candidate Impact" in report
+        assert "Candidate prepared; not published" in report
+        assert "| Refreshed |" not in report
 
 
 def test_final_source_recheck_rejects_stale_candidate_before_backup(
@@ -852,8 +940,40 @@ def test_production_report_separates_financial_and_first_public_changes() -> Non
         "journal": {"state": "COMPLETED"}, "postflight": {"status": "PASSED"},
         "rollback": {"status": "NOT_REQUIRED"},
     })
-    assert "Canonical source-driven added/changed/removed: 1 / 2 / 3" in report
+    assert "Canonical published source-driven added/changed/removed: 1 / 2 / 3" in report
+    assert "Provider published replacements: 1" in report
+    assert "## Canonical Publication" in report
+    assert "Published watermark after: 2026-09-20" in report
     assert "First-public bootstrap-only changes: 5" in report
     assert "first_public_result_date preservation map applied: 6/6" in report
     assert "first_public_result_date repair_required: 0" in report
     assert "MRQ overlay intentionally deferred for a later impact study." in report
+
+
+def test_prepublication_failure_report_uses_candidate_not_published_semantics() -> None:
+    report = render_report({
+        "outcome": "FAILED", "write_boundary_crossed": False, "production_writes": 0,
+        "preview_fingerprint": "f" * 64, "failed_stage": "ANALYSIS_CANDIDATE",
+        "summary_counts": {"effective_changed_known": 1},
+        "old_refresh_state": {"mode": "BOOTSTRAP_BASELINE", "published_watermark": None},
+        "refresh_state": {"mode": "ESTABLISHED_PUBLISHED_STATE", "published_source_watermark": "2026-09-20"},
+        "provider_candidate": {"ticker_count": 1},
+        "canonical_candidate": {
+            "impact": {"added_quarters": 1, "changed_quarters": 2, "removed_quarters": 0},
+            "identity_contract": {"company_security_identity_mapping_unchanged": True},
+        },
+        "ticker_changes": [{"ticker": "TEST", "classification": "HISTORICAL_REVISION", "identity": {"company_id": 1}}],
+        "cleanup": {"status": "COMPLETED"},
+    })
+    assert "Production result: FAILED" in report
+    assert "Publication boundary entered: NO" in report
+    assert "Production DB writes: 0" in report
+    assert "Production generation changed: NO" in report
+    assert "Provider candidate replacements: 1" in report
+    assert "Provider published replacements: 0" in report
+    assert "## Canonical Candidate Impact" in report
+    assert "Published watermark after: NONE" in report
+    assert "Candidate/proposed next watermark: 2026-09-20" in report
+    assert "Full V2/RP/RV: NOT_RUN" in report
+    assert "Candidate prepared; not published" in report
+    assert "| Refreshed |" not in report

@@ -12,6 +12,7 @@ from rawcandle.fundamentals.admin.refresh_copy_runtime import (
     StaleRefreshPreview,
     build_publication_date_preservation_map,
     fresh_rebuild_canonical,
+    prepare_full_v2_read_only_copies,
     replace_provider_histories,
     revalidate_bound_source,
     run_apply,
@@ -598,6 +599,31 @@ def test_stale_preview_stops_before_candidate_copy(tmp_path: Path, monkeypatch: 
     assert list(tmp_path.rglob("canonical_candidate.db")) == []
     assert list(tmp_path.rglob("analysis_candidate.db")) == []
     assert "Run Preview again" in result["recommended_next_action"]
+
+
+def test_full_v2_read_only_copy_helper_prepares_market_and_taxonomy(tmp_path: Path) -> None:
+    sources = []
+    for role in ("provider", "canonical", "analysis", "market", "taxonomy"):
+        path = tmp_path / "source" / f"{role}.db"
+        path.parent.mkdir(exist_ok=True)
+        with sqlite3.connect(path) as connection:
+            connection.execute("CREATE TABLE state(value TEXT)")
+            connection.execute("INSERT INTO state VALUES(?)", (role,))
+        sources.append(path)
+    lane = tmp_path / "lane"
+    copies, evidence = prepare_full_v2_read_only_copies(
+        BatchAddTickerPaths(*sources), lane_dir=lane,
+    )
+    assert set(copies) == {"market", "taxonomy"}
+    assert set(evidence) == {"market", "taxonomy"}
+    for role, path in copies.items():
+        assert path != sources[("provider", "canonical", "analysis", "market", "taxonomy").index(role)]
+        with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
+            assert connection.execute("SELECT value FROM state").fetchone()[0] == role
+        assert evidence[role]["immutable_after_creation"] is True
+        assert evidence[role]["cleanup_required"] is True
+
+
 def test_revalidation_rejects_source_fingerprint_b_after_preview_a(monkeypatch: pytest.MonkeyPatch) -> None:
     class State(SimpleNamespace):
         def as_dict(self):
