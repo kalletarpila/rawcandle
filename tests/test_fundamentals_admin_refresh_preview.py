@@ -352,6 +352,28 @@ def test_realistic_preview_writes_artifacts_but_not_databases(tmp_path: Path) ->
     assert preview["refresh_set_fingerprint"] == output["preview_fingerprint"]
 
 
+def test_next_preview_after_published_generation_is_no_change(tmp_path: Path) -> None:
+    paths = _create_preview_databases(tmp_path / "dbs")
+    with sqlite3.connect(paths.provider_db) as connection:
+        ensure_refresh_state_schema(connection)
+        connection.execute(
+            "INSERT INTO sharadar_refresh_state VALUES(1,'SHARADAR','fundamentals',"
+            "'2026-08-26','provider','schema','published-run','2026-08-26T12:00:00Z')"
+        )
+    source_arq = [row()]
+    source_mrq = [row(dimension="MRQ")]
+    output = run_preview(
+        source_paths=paths,
+        run_root=tmp_path / "runs",
+        client=PreviewClient(source_arq, source_mrq),
+    )
+    assert output["outcome"] == "NO_CHANGE"
+    assert output["summary_counts"]["effective_changed_known"] == 0
+    assert output["refresh_preview"]["state"]["mode"] == "ESTABLISHED"
+    assert output["refresh_preview"]["state"]["published_watermark"] == "2026-08-26"
+    assert output["refresh_preview"]["future_test_authorized"] is False
+
+
 def test_routine_refresh_never_overrides_established_first_public_date(tmp_path: Path) -> None:
     paths = _create_preview_databases(tmp_path)
     with sqlite3.connect(paths.canonical_db) as connection:

@@ -22,9 +22,11 @@ from rawcandle.fundamentals.admin.publication_journal import (
 )
 from rawcandle.fundamentals.admin.refresh_fundamentals import CONTRACT_VERSION
 from rawcandle.fundamentals.admin.refresh_production import (
+    SimulatedPublicationCrash,
     _publish_refresh_state,
     _replace_role,
     load_production_authorization,
+    render_report,
     run_production_apply,
 )
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
@@ -90,7 +92,10 @@ def test_crash_recovery_restores_complete_old_generation(tmp_path: Path, publish
     assert result["status"] == "RECOVERED"
     assert result["recovered"] is True
     assert [_generation(Path(str(roles[role]["production_path"]))) for role in PUBLICATION_ROLES] == ["old"] * 3
-    assert json.loads(journal_path.read_text(encoding="utf-8"))["state"] == "RECOVERED"
+    terminal = json.loads(journal_path.read_text(encoding="utf-8"))
+    assert terminal["state"] == "RECOVERED"
+    assert terminal["candidate_cleanup"]["status"] == "COMPLETED"
+    assert all(not Path(str(roles[role]["candidate_path"])).exists() for role in PUBLICATION_ROLES)
 
 
 def test_publication_journal_intent_is_durable_before_replace(
@@ -145,8 +150,9 @@ def test_recovery_journal_intent_is_durable_before_each_restore_replace(
     ]
 
 
+@pytest.mark.parametrize("crash_role", PUBLICATION_ROLES)
 def test_crash_during_recovery_restarts_complete_old_generation_restore(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_role: str,
 ) -> None:
     journal_path, roles = _publication_fixture(tmp_path)
     journal = json.loads(journal_path.read_text(encoding="utf-8"))
@@ -158,27 +164,30 @@ def test_crash_during_recovery_restarts_complete_old_generation_restore(
         pass
 
     real_replace = os.replace
-    provider_target = Path(str(roles["provider"]["production_path"])).resolve()
+    crash_target = Path(str(roles[crash_role]["production_path"])).resolve()
     crashed = False
 
-    def crash_after_provider_restore(source, destination):
+    def crash_during_role_restore(source, destination):
         nonlocal crashed
         result = real_replace(source, destination)
-        if Path(destination).resolve() == provider_target and not crashed:
+        if Path(destination).resolve() == crash_target and not crashed:
             crashed = True
             raise RecoveryCrash("simulated process loss during recovery")
         return result
 
     monkeypatch.setattr(
         "rawcandle.fundamentals.admin.publication_journal.os.replace",
-        crash_after_provider_restore,
+        crash_during_role_restore,
     )
     with pytest.raises(RecoveryCrash):
         recover_if_required(journal_path)
     interrupted = json.loads(journal_path.read_text(encoding="utf-8"))
     assert interrupted["state"] == "RECOVERING"
-    assert interrupted["rollback_recovery_state"] == "RESTORING_PROVIDER"
-    assert [_generation(Path(str(roles[role]["production_path"]))) for role in PUBLICATION_ROLES] == ["old", "new", "new"]
+    assert interrupted["rollback_recovery_state"] == f"RESTORING_{crash_role.upper()}"
+    restored_count = PUBLICATION_ROLES.index(crash_role) + 1
+    assert [_generation(Path(str(roles[role]["production_path"]))) for role in PUBLICATION_ROLES] == (
+        ["old"] * restored_count + ["new"] * (len(PUBLICATION_ROLES) - restored_count)
+    )
 
     recovered = recover_if_required(journal_path)
     assert recovered["status"] == "RECOVERED"
@@ -230,6 +239,9 @@ def test_missing_backup_fails_closed_and_blocks_writes(tmp_path: Path) -> None:
     assert status["production_writes_blocked"] is True
     with pytest.raises(PublicationRecoveryError, match="PRODUCTION_WRITES_BLOCKED"):
         recover_if_required(journal_path)
+    terminal = json.loads(journal_path.read_text(encoding="utf-8"))
+    assert terminal["candidate_cleanup"]["status"] == "COMPLETED"
+    assert all(not Path(str(roles[role]["candidate_path"])).exists() for role in PUBLICATION_ROLES)
 
 
 def test_incomplete_refresh_journal_recovers_then_requires_fresh_add_tickers_invocation(
@@ -596,6 +608,7 @@ def test_production_shaped_rehearsal_commits_only_after_postflight(
     assert [_generation(paths.as_dict()[role]) for role in PUBLICATION_ROLES] == ["new"] * 3
     assert all(_generation(Path(record["backup"])) == "old" for record in result["backups"].values())
     assert not (tmp_path / "temp" / result["run_id"]).exists()
+    assert not any((tmp_path / "temp").rglob("*.db"))
 
 
 def test_postflight_failure_rolls_back_complete_three_database_set(
@@ -616,3 +629,226 @@ def test_postflight_failure_rolls_back_complete_three_database_set(
     assert result["rollback"]["status"] == "ROLLED_BACK"
     assert result["journal"]["state"] == "ROLLED_BACK"
     assert [_generation(paths.as_dict()[role]) for role in PUBLICATION_ROLES] == ["old"] * 3
+    assert not any((tmp_path / "temp").rglob("*.db"))
+
+
+@pytest.mark.parametrize(
+    ("failure_stage", "target"),
+    [
+        ("PROVIDER_CANDIDATE", "replace_provider_histories"),
+        ("CANONICAL_CANDIDATE", "fresh_rebuild_canonical"),
+        ("ANALYSIS_CANDIDATE", "run_full_v2_downstream"),
+        ("CANDIDATE_VALIDATION", "validate_provider_candidate"),
+    ],
+)
+def test_candidate_failure_never_crosses_publication_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_stage: str, target: str,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    original = {role: sha256_file(paths.as_dict()[role]) for role in PUBLICATION_ROLES}
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(f"fixture failure in {failure_stage}")
+
+    monkeypatch.setattr(f"rawcandle.fundamentals.admin.refresh_production.{target}", fail)
+    journal_path = tmp_path / "active-journal.json"
+    result = run_production_apply(
+        preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+        backup_root=tmp_path / "backups", journal_path=journal_path,
+        confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+    )
+    assert result["outcome"] == "FAILED"
+    assert result["failed_stage"] == failure_stage
+    assert result["write_boundary_crossed"] is False
+    assert {role: sha256_file(paths.as_dict()[role]) for role in PUBLICATION_ROLES} == original
+    assert not journal_path.exists()
+    assert not (tmp_path / "temp" / result["run_id"]).exists()
+    assert not (tmp_path / "backups" / result["run_id"]).exists()
+
+
+def test_final_source_recheck_rejects_stale_candidate_before_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    original = {role: sha256_file(paths.as_dict()[role]) for role in PUBLICATION_ROLES}
+    calls = 0
+
+    def changing_source(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        value = {
+            "state": {"mode": "BOOTSTRAP_BASELINE", "published_watermark": None},
+            "schema": {"schema_fingerprint": "schema"},
+            "discovery": {"observed_source_max_lastupdated": "2026-09-20"},
+            "ticker_changes": [{
+                "ticker": "TEST", "classification": "HISTORICAL_REVISION",
+                "identity": {"company_id": 1, "security_id": 1, "provider_security_id": "100"},
+            }],
+            "histories": {"TEST": {"ARQ": object(), "MRQ": object()}},
+            "refresh_set_fingerprint": fingerprint if calls == 1 else "a" * 64,
+        }
+        return value
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.revalidate_bound_source", changing_source,
+    )
+    journal_path = tmp_path / "active-journal.json"
+    result = run_production_apply(
+        preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+        backup_root=tmp_path / "backups", journal_path=journal_path,
+        confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+    )
+    assert calls == 2
+    assert result["outcome"] == "FAILED"
+    assert result["failed_stage"] == "FINAL_SOURCE_RECHECK"
+    assert result["retry_authorization"]["preview_test_rerun_required"] is True
+    assert {role: sha256_file(paths.as_dict()[role]) for role in PUBLICATION_ROLES} == original
+    assert not journal_path.exists()
+    assert not (tmp_path / "backups" / result["run_id"]).exists()
+
+
+def test_start_source_recheck_rejects_stale_test_before_candidate_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    original = {role: sha256_file(paths.as_dict()[role]) for role in PUBLICATION_ROLES}
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.revalidate_bound_source",
+        lambda *_args, **_kwargs: {
+            "refresh_set_fingerprint": "a" * 64,
+            "schema": {"schema_fingerprint": "schema"},
+        },
+    )
+    journal_path = tmp_path / "active-journal.json"
+    result = run_production_apply(
+        preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+        backup_root=tmp_path / "backups", journal_path=journal_path,
+        confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+    )
+    assert result["outcome"] == "FAILED"
+    assert result["failed_stage"] == "SOURCE_REVALIDATION"
+    assert result["retry_authorization"]["preview_test_rerun_required"] is True
+    assert {role: sha256_file(paths.as_dict()[role]) for role in PUBLICATION_ROLES} == original
+    assert not journal_path.exists()
+    assert not (tmp_path / "temp" / result["run_id"]).exists()
+
+
+@pytest.mark.parametrize(
+    "crash_point",
+    [
+        "AFTER_PREPARED",
+        "AFTER_PROVIDER_REPLACEMENT",
+        "AFTER_CANONICAL_REPLACEMENT",
+        "AFTER_ANALYSIS_REPLACEMENT",
+        "AFTER_ALL_REPLACEMENTS_BEFORE_POSTFLIGHT",
+        "AFTER_POSTFLIGHT_BEFORE_COMPLETED",
+    ],
+)
+def test_process_crash_boundaries_recover_complete_old_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_point: str,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    journal_path = tmp_path / "active-journal.json"
+    with pytest.raises(SimulatedPublicationCrash, match=crash_point):
+        run_production_apply(
+            preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+            source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+            backup_root=tmp_path / "backups", journal_path=journal_path,
+            confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+            scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+            inject_crash_at=crash_point,
+        )
+    assert json.loads(journal_path.read_text(encoding="utf-8"))["state"] != "COMPLETED"
+    recovered = recover_if_required(journal_path)
+    assert recovered["status"] == "RECOVERED"
+    assert [_generation(paths.as_dict()[role]) for role in PUBLICATION_ROLES] == ["old"] * 3
+    assert set(json.loads(journal_path.read_text(encoding="utf-8"))["old_generation_verification"]) == set(PUBLICATION_ROLES)
+    assert not any((tmp_path / "temp").rglob("*.db"))
+
+
+def test_crash_before_prepared_never_requires_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    journal_path = tmp_path / "active-journal.json"
+    with pytest.raises(SimulatedPublicationCrash, match="AFTER_BACKUPS_BEFORE_PREPARED"):
+        run_production_apply(
+            preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+            source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+            backup_root=tmp_path / "backups", journal_path=journal_path,
+            confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+            scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+            inject_crash_at="AFTER_BACKUPS_BEFORE_PREPARED",
+        )
+    assert not journal_path.exists()
+    assert [_generation(paths.as_dict()[role]) for role in PUBLICATION_ROLES] == ["old"] * 3
+
+
+@pytest.mark.parametrize(
+    "failure_point",
+    ["AFTER_PROVIDER_REPLACEMENT", "AFTER_CANONICAL_REPLACEMENT", "AFTER_ANALYSIS_REPLACEMENT", "POSTFLIGHT"],
+)
+def test_ordinary_failures_roll_back_complete_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    journal_path = tmp_path / "active-journal.json"
+    result = run_production_apply(
+        preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+        backup_root=tmp_path / "backups", journal_path=journal_path,
+        confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+        inject_failure_at=failure_point,
+    )
+    assert result["outcome"] == "FAILED_ROLLED_BACK"
+    assert result["journal"]["state"] == "ROLLED_BACK"
+    assert [_generation(paths.as_dict()[role]) for role in PUBLICATION_ROLES] == ["old"] * 3
+    assert not any((tmp_path / "temp").rglob("*.db"))
+
+
+def test_production_report_separates_financial_and_first_public_changes() -> None:
+    report = render_report({
+        "outcome": "COMPLETED", "preview_fingerprint": "f" * 64,
+        "summary_counts": {"effective_changed_known": 1, "HISTORICAL_REVISION": 1},
+        "old_refresh_state": {"published_watermark": None},
+        "refresh_state": {
+            "published_source_watermark": "2026-09-20", "source_schema_fingerprint": "schema",
+        },
+        "provider_candidate": {"ticker_count": 1},
+        "canonical_candidate": {
+            "impact": {
+                "added_quarters": 1, "changed_quarters": 2, "removed_quarters": 3,
+                "source_availability_date_changes": 4, "bootstrap_only_date_changes": 5,
+                "first_public_result_date_preserved": 6,
+                "new_first_public_result_date_established": 1,
+            },
+            "publication_date_bootstrap": {
+                "bootstrap_eligible": 5, "preservation_map_applied": 6,
+                "preservation_map_applicable_existing_quarters": 6, "repair_required": 0,
+            },
+            "removed_quarter_publication_evidence": [{}, {}, {}],
+            "identity_contract": {"company_security_identity_mapping_unchanged": True},
+        },
+        "analysis_candidate": {"status": "READY"},
+        "backups": {role: {} for role in PUBLICATION_ROLES},
+        "journal": {"state": "COMPLETED"}, "postflight": {"status": "PASSED"},
+        "rollback": {"status": "NOT_REQUIRED"},
+    })
+    assert "Canonical source-driven added/changed/removed: 1 / 2 / 3" in report
+    assert "First-public bootstrap-only changes: 5" in report
+    assert "first_public_result_date preservation map applied: 6/6" in report
+    assert "first_public_result_date repair_required: 0" in report
+    assert "MRQ overlay intentionally deferred for a later impact study." in report

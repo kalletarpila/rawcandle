@@ -191,6 +191,66 @@ def test_source_availability_may_change_but_established_first_public_must_not(tm
     assert load_current_history(provider, "TEST", "MRQ")["rows"][0]["revenue"] == 999
 
 
+def test_second_generation_preserves_established_date_and_initializes_new_quarter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / "provider.db"
+    canonical = tmp_path / "canonical.db"
+    create_provider(provider)
+    create_canonical(canonical)
+    monkeypatch.setattr(refresh_copy_runtime, "_events", lambda: ())
+    identity = {"TEST": {"company_id": 1, "security_id": 1, "provider_security_id": "100"}}
+
+    first_q2 = source_row(date="2026-08-26", lastupdated="2026-08-26", revenue=100)
+    first_histories = {
+        "TEST": {
+            "ARQ": validate_complete_history([first_q2], ticker="TEST", dimension="ARQ"),
+            "MRQ": validate_complete_history([dict(first_q2, dimension="MRQ")], ticker="TEST", dimension="MRQ"),
+        }
+    }
+    replace_provider_histories(provider, first_histories, identity, applied_at=NOW)
+    first = fresh_rebuild_canonical(provider, canonical, applied_at=NOW, affected_company_ids=[1])
+    assert first["publication_date_bootstrap"]["bootstrap_eligible"] == 1
+    with sqlite3.connect(canonical) as connection:
+        assert connection.execute(
+            "SELECT source_availability_date,first_public_result_date FROM v4_quarter"
+        ).fetchone() == ("2026-08-26", "2026-08-26")
+
+    revised_q2 = source_row(date="2026-09-15", lastupdated="2026-09-15", revenue=120)
+    new_q3 = source_row(
+        date="2026-11-20", reportperiod="2026-10-31", fiscalperiod="2026-Q3",
+        lastupdated="2026-11-20", revenue=130,
+    )
+    second_histories = {
+        "TEST": {
+            "ARQ": validate_complete_history([revised_q2, new_q3], ticker="TEST", dimension="ARQ"),
+            "MRQ": validate_complete_history(
+                [dict(revised_q2, dimension="MRQ"), dict(new_q3, dimension="MRQ")],
+                ticker="TEST", dimension="MRQ",
+            ),
+        }
+    }
+    second_applied_at = "2026-11-21T12:00:00Z"
+    replace_provider_histories(provider, second_histories, identity, applied_at=second_applied_at)
+    second = fresh_rebuild_canonical(
+        provider, canonical, applied_at=second_applied_at, affected_company_ids=[1],
+    )
+    assert second["publication_date_bootstrap"].get("bootstrap_eligible", 0) == 0
+    assert second["publication_date_bootstrap"]["preservation_map_applied"] == 1
+    assert second["publication_date_bootstrap"]["preservation_map_applicable_existing_quarters"] == 1
+    assert second["impact"]["source_availability_date_changes"] == 1
+    assert second["impact"]["new_first_public_result_date_established"] == 1
+    with sqlite3.connect(canonical) as connection:
+        rows = connection.execute(
+            "SELECT fiscal_quarter,source_availability_date,first_public_result_date "
+            "FROM v4_quarter ORDER BY fiscal_quarter"
+        ).fetchall()
+    assert rows == [
+        ("Q2", "2026-09-15", "2026-08-26"),
+        ("Q3", "2026-11-20", "2026-11-20"),
+    ]
+
+
 def test_comparison_fails_closed_for_legacy_source_ambiguity() -> None:
     normalized = normalize_source_row(source_row())
     current = {

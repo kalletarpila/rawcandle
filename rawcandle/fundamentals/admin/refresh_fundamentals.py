@@ -1106,7 +1106,7 @@ def run_preview(
             "discovery": discovery,
             "ticker_changes": changes,
             "refresh_set_fingerprint": refresh_set_fingerprint,
-            "future_test_authorized": not review and discovery["status"] == "COMPLETE",
+            "future_test_authorized": bool(replacement) and not review and discovery["status"] == "COMPLETE",
             "published_watermark_advanced": False,
             "provider_key_diagnostics": legacy,
             "publish_date_bootstrap": {key: value for key, value in bootstrap.items() if key != "exceptions"},

@@ -184,6 +184,40 @@ def _validate_backup(role: str, record: Mapping[str, Any]) -> tuple[Path, str]:
     return backup, expected
 
 
+def _cleanup_terminal_candidates(journal: Mapping[str, Any]) -> dict[str, Any]:
+    """Remove only candidate files explicitly owned by this journal run."""
+    run_id = str(journal.get("production_run_id") or "")
+    removed: list[str] = []
+    missing: list[str] = []
+    for role in PUBLICATION_ROLES:
+        record = journal["roles"][role]
+        candidate = Path(str(record.get("candidate_path") or "")).resolve()
+        protected = {
+            Path(str(record.get("production_path") or "")).resolve(),
+            Path(str(record.get("backup_path") or "")).resolve(),
+        }
+        owned = candidate not in protected and (
+            run_id in candidate.parts or candidate.parent.name == "candidates"
+        )
+        if not owned:
+            raise PublicationRecoveryError(f"RECOVERY_CANDIDATE_PATH_NOT_OWNED:{role}")
+        if candidate.exists():
+            if candidate.is_symlink() or not candidate.is_file():
+                raise PublicationRecoveryError(f"RECOVERY_CANDIDATE_PATH_INVALID:{role}")
+            candidate.unlink()
+            removed.append(str(candidate))
+        else:
+            missing.append(str(candidate))
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(f"{candidate}{suffix}")
+            if sidecar.is_file() and not sidecar.is_symlink():
+                sidecar.unlink()
+                removed.append(str(sidecar))
+        if candidate.parent.exists():
+            fsync_directory(candidate.parent)
+    return {"status": "COMPLETED", "removed": removed, "already_missing": missing}
+
+
 def restore_old_generation(
     journal: Mapping[str, Any], *, journal_path: Path = ACTIVE_JOURNAL_PATH,
     role_order: Sequence[str] = PUBLICATION_ROLES,
@@ -240,19 +274,29 @@ def restore_old_generation(
             if verification["sha256"] != expected:
                 raise PublicationRecoveryError(f"RECOVERY_OLD_GENERATION_SET_MISMATCH:{role}")
             generation_verification[role] = verification
+        candidate_cleanup = _cleanup_terminal_candidates(current)
         current = update_journal(
             journal_path, current, state="RECOVERED",
             rollback_recovery_state="OLD_GENERATION_RESTORED_AND_VERIFIED",
             postflight_state="OLD_GENERATION_VERIFIED",
             old_generation_verification=generation_verification,
+            candidate_cleanup=candidate_cleanup,
             current_publication_step="OLD_GENERATION_VERIFIED",
         )
         return {"status": "RECOVERED", "roles": restored, "journal": current}
     except Exception as exc:
-        failed = update_journal(
+        try:
+            candidate_cleanup = _cleanup_terminal_candidates(current)
+        except Exception as cleanup_exc:
+            candidate_cleanup = {
+                "status": "FAILED",
+                "error": f"{type(cleanup_exc).__name__}: {cleanup_exc}",
+            }
+        update_journal(
             journal_path, current, state="RECOVERY_FAILED",
             rollback_recovery_state="RECOVERY_FAILED",
             recovery_error=f"{type(exc).__name__}: {exc}",
+            candidate_cleanup=candidate_cleanup,
         )
         raise PublicationRecoveryError("CRITICAL_RECOVERY_FAILED") from exc
 

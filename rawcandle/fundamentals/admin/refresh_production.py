@@ -302,6 +302,11 @@ def _postflight(
     identity = _identity_mapping(paths.canonical_db)
     if identity != canonical_result["identity_contract"]["after"]:
         raise RuntimeError("REFRESH_PUBLISHED_IDENTITY_MISMATCH")
+    bootstrap = canonical_result.get("publication_date_bootstrap") or {}
+    preserved = int(bootstrap.get("preservation_map_applied", -1))
+    applicable = int(bootstrap.get("preservation_map_applicable_existing_quarters", -1))
+    if bootstrap.get("repair_required") != 0 or preserved != applicable:
+        raise RuntimeError("REFRESH_PUBLISHED_FIRST_PUBLIC_PRESERVATION_MISMATCH")
     canonical = sqlite_verification(paths.canonical_db)
     with sqlite3.connect(f"file:{paths.canonical_db.resolve()}?mode=ro", uri=True) as connection:
         duplicates = int(connection.execute(
@@ -325,7 +330,14 @@ def _postflight(
         fingerprints[role] = actual
     return {
         "provider": provider,
-        "canonical": {**canonical, "duplicate_quarters": duplicates, "missing_first_public_dates": missing_first},
+        "canonical": {
+            **canonical,
+            "duplicate_quarters": duplicates,
+            "missing_first_public_dates": missing_first,
+            "first_public_preservation_map_applied": preserved,
+            "first_public_preservation_map_applicable": applicable,
+            "first_public_repair_required": 0,
+        },
         "analysis": analysis,
         "role_fingerprints": fingerprints,
         "cross_role_lineage": {
@@ -383,7 +395,7 @@ def render_report(result: Mapping[str, Any]) -> str:
         "", "## Analysis Outcome", "",
         f"- B1/full package status: {(result.get('analysis_candidate') or {}).get('status', 'NOT_RUN')}",
         "- Canonical/downstream financial values remain ARQ-based.",
-        "- MRQ overlay intentionally deferred for a separate later impact study.",
+        "- MRQ overlay intentionally deferred for a later impact study.",
         "", "## Publication Safety", "",
         f"- Backups verified: {len(result.get('backups') or {})}/3",
         f"- Journal state: {(result.get('journal') or {}).get('state', 'NOT_PREPARED')}",
@@ -683,9 +695,12 @@ def run_production_apply(
         result["failed_stage"] = stage
         stale = isinstance(exc, StaleRefreshTest)
         recovery_retry = isinstance(exc, PublicationRecoveredRetryRequired)
+        recovery_failed = isinstance(exc, PublicationRecoveryError) and not recovery_retry
         if recovery_retry:
             result["outcome"] = "RETRY_REQUIRED"
             result["publication_recovery"] = exc.recovery
+        elif recovery_failed:
+            result["outcome"] = "RECOVERY_FAILED"
         if journal is not None and write_boundary_crossed:
             try:
                 journal = update_journal(journal_path, journal, state="ROLLING_BACK", rollback_recovery_state="ROLLING_BACK_COMPLETE_SET")
@@ -719,8 +734,10 @@ def run_production_apply(
                 }
             )
             result["user_message"] = (
-                "An incomplete previous publication was recovered and verified. This operation stopped before mutation. Run Preview and Test on copies again before retrying."
+                "An incomplete previous publication was detected. RawCandle restored the previous verified Fundamentals generation before allowing new writes. This operation stopped before mutation; run Preview and Test on copies again."
                 if recovery_retry else
+                "RawCandle could not restore a complete verified Fundamentals generation. Production-writing Fundamentals operations are blocked until recovery is resolved."
+                if recovery_failed else
                 "Sharadar fundamentals changed after Test on copies. No production databases were modified. Run Preview and Test on copies again."
                 if stale else
                 "Production candidates did not pass validation. No production databases were modified."
