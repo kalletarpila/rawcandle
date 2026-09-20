@@ -921,6 +921,7 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         "",
         "## Executive Summary",
         "",
+        f"- Trigger: `{result.get('trigger_source', 'MANUAL')}`",
         f"- Sharadar discovery rows: `{discovery.get('returned_source_rows', 0)}`",
         f"- Changed source tickers: `{discovery.get('unique_changed_source_tickers', 0)}`",
         f"- Known tickers with effective changes: `{counts.get('effective_changed_known', 0)}`",
@@ -974,7 +975,10 @@ def run_preview(
     run_root: Path = ADMIN_RUN_ROOT,
     client: SharadarClient | None = None,
     progress_callback: ProgressCallback | None = None,
+    trigger_source: str = "MANUAL",
 ) -> dict[str, Any]:
+    if trigger_source not in {"MANUAL", "SCHEDULER"}:
+        raise ValueError("REFRESH_TRIGGER_SOURCE_INVALID")
     request = _request()
     state = resolve_refresh_state(source_paths.provider_db)
     request_fp = fingerprint({"request": request.as_dict(), "state": state.as_dict()})
@@ -991,7 +995,7 @@ def run_preview(
     started = utc_now()
     before = _production_file_state(source_paths)
     writer.checkpoint(RunStage.REQUEST_CREATED, message="Refresh Fundamentals Preview request recorded.")
-    writer.write_json("request.json", request.as_dict())
+    writer.write_json("request.json", request.as_dict() | {"trigger_source": trigger_source})
     writer.checkpoint(RunStage.PREVIEW_STARTED, message="Read-only Sharadar refresh discovery started.")
     failed_stage = ProgressStage.REFRESH_STATE
     try:
@@ -1166,6 +1170,7 @@ def run_preview(
             "preview_payload_path": str(preview_path),
             "refresh_preview": preview,
             "network_used": True,
+            "trigger_source": trigger_source,
             "database_safety": "NO_DATABASE_WRITES",
         }
         after = _production_file_state(source_paths)
@@ -1202,6 +1207,7 @@ def run_preview(
             errors=({"type": type(exc).__name__, "message": str(exc)},),
         ).as_dict() | {
             "artifact_dir": str(writer.run_dir),
+            "trigger_source": trigger_source,
             "failed_stage": failed_stage.value,
             "database_safety": "NO_DATABASE_WRITES",
             "production_file_state_unchanged": before == _production_file_state(source_paths),

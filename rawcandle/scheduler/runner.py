@@ -166,6 +166,23 @@ class ScheduledStockUpdateRunResult:
     datacenter_taxonomy_version: str = ""
     datacenter_failed_component: str = "NONE"
     datacenter_safe_next_action: str = "NONE"
+    fundamentals_refresh_preview_enabled: bool = False
+    fundamentals_refresh_preview_attempted: int = 0
+    fundamentals_refresh_preview_status: str = "DISABLED"
+    fundamentals_refresh_preview_timestamp_utc: str = "NONE"
+    fundamentals_refresh_published_baseline: str = "NONE"
+    fundamentals_refresh_discovered_source_ticker_count: int = 0
+    fundamentals_refresh_preview_run_id: str = "NONE"
+    fundamentals_refresh_preview_changed_tickers: int = 0
+    fundamentals_refresh_new_quarter_count: int = 0
+    fundamentals_refresh_historical_revision_count: int = 0
+    fundamentals_refresh_new_quarter_and_revision_count: int = 0
+    fundamentals_refresh_source_removal_count: int = 0
+    fundamentals_refresh_review_required_count: int = 0
+    fundamentals_refresh_unknown_ticker_count: int = 0
+    fundamentals_refresh_preview_report: str = "NONE"
+    fundamentals_refresh_preview_message: str = ""
+    fundamentals_refresh_unattended_production_available: bool = False
 class SchedulerAlreadyRunningError(RuntimeError):
     pass
 
@@ -2330,6 +2347,12 @@ def _run_one_market(
     )
 
 
+def _run_fundamentals_refresh_preview_post_step() -> dict[str, object]:
+    from rawcandle.fundamentals.admin.refresh_scheduler import run_scheduler_refresh_discovery
+
+    return run_scheduler_refresh_discovery()
+
+
 def run_scheduler_config(
     *,
     config_path: str,
@@ -2486,10 +2509,18 @@ def run_scheduler_config(
                     target_market=datacenter_result.market,
                     datacenter_result=datacenter_result,
                 )
+            refresh_discovery: dict[str, object] = {
+                "status": "DISABLED", "outcome": "DISABLED",
+                "run_id": None, "report": None, "summary_counts": {},
+                "message": "",
+            }
+            if config.fundamentals_refresh_preview_enabled:
+                refresh_discovery = _run_fundamentals_refresh_preview_post_step()
             overall_status = (
                 STATUS_FAILED
                 if technical_relevance_result.status == "FAILED"
                 or datacenter_result.status == "FAILED"
+                or refresh_discovery.get("scheduler_summary_result") == "FAILED"
                 else market_update_phase_status
             )
             if (
@@ -2675,6 +2706,25 @@ def run_scheduler_config(
                 ),
                 datacenter_failed_component=datacenter_failed_component,
                 datacenter_safe_next_action=datacenter_safe_next_action,
+                fundamentals_refresh_preview_enabled=config.fundamentals_refresh_preview_enabled,
+                fundamentals_refresh_preview_attempted=int(config.fundamentals_refresh_preview_enabled),
+                fundamentals_refresh_preview_status=str(refresh_discovery.get("scheduler_summary_result") or "UNKNOWN"),
+                fundamentals_refresh_preview_timestamp_utc=str(refresh_discovery.get("preview_timestamp_utc") or "NONE"),
+                fundamentals_refresh_published_baseline=str(refresh_discovery.get("published_baseline") or "NONE"),
+                fundamentals_refresh_discovered_source_ticker_count=int(refresh_discovery.get("discovered_source_ticker_count") or 0),
+                fundamentals_refresh_preview_run_id=str(refresh_discovery.get("run_id") or "NONE"),
+                fundamentals_refresh_preview_changed_tickers=int(
+                    (refresh_discovery.get("summary_counts") or {}).get("effective_changed_known") or 0
+                ),
+                fundamentals_refresh_preview_report=str(refresh_discovery.get("report") or "NONE"),
+                fundamentals_refresh_preview_message=str(refresh_discovery.get("message") or ""),
+                fundamentals_refresh_new_quarter_count=int((refresh_discovery.get("summary_counts") or {}).get("NEW_QUARTER") or 0),
+                fundamentals_refresh_historical_revision_count=int((refresh_discovery.get("summary_counts") or {}).get("HISTORICAL_REVISION") or 0),
+                fundamentals_refresh_new_quarter_and_revision_count=int((refresh_discovery.get("summary_counts") or {}).get("NEW_QUARTER_AND_REVISION") or 0),
+                fundamentals_refresh_source_removal_count=int((refresh_discovery.get("summary_counts") or {}).get("SOURCE_REMOVAL") or 0),
+                fundamentals_refresh_review_required_count=int((refresh_discovery.get("summary_counts") or {}).get("REVIEW_REQUIRED") or 0),
+                fundamentals_refresh_unknown_ticker_count=int((refresh_discovery.get("summary_counts") or {}).get("NOT_IN_CANONICAL_UNIVERSE") or 0),
+                fundamentals_refresh_unattended_production_available=False,
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

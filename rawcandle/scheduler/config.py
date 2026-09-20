@@ -23,7 +23,10 @@ _REQUIRED_CONFIG_KEYS = {
     "analysis_db_path",
     "log_dir",
 }
-_OPTIONAL_CONFIG_KEYS = {"timezone", "skip_next_run", "technical_relevance_enabled"}
+_OPTIONAL_CONFIG_KEYS = {
+    "timezone", "skip_next_run", "technical_relevance_enabled",
+    "fundamentals_refresh_preview_enabled",
+}
 _OPTIONAL_CONFIG_KEYS.update(
     {
         "datacenter_dashboard_fallback_to_reports",
@@ -66,6 +69,7 @@ class StockUpdateSchedulerConfig:
     timezone: str = DEFAULT_TIMEZONE
     skip_next_run: bool = False
     technical_relevance_enabled: bool = False
+    fundamentals_refresh_preview_enabled: bool = False
     datacenter_dashboard_fallback_to_reports: bool = True
     datacenter_dashboard_reports_reference_db: str | None = None
     datacenter_dashboard_reports_reference_enabled: bool = False
@@ -139,6 +143,8 @@ def validate_scheduler_config(
         raise ValueError("skip_next_run must be a bool")
     if type(config.technical_relevance_enabled) is not bool:
         raise ValueError("technical_relevance_enabled must be a bool")
+    if type(config.fundamentals_refresh_preview_enabled) is not bool:
+        raise ValueError("fundamentals_refresh_preview_enabled must be a bool")
     if type(config.datacenter_dashboard_fallback_to_reports) is not bool:
         raise ValueError("datacenter_dashboard_fallback_to_reports must be a bool")
     if type(config.datacenter_dashboard_reports_reference_enabled) is not bool:
@@ -201,6 +207,7 @@ def validate_scheduler_config(
         timezone=config.timezone,
         skip_next_run=config.skip_next_run,
         technical_relevance_enabled=config.technical_relevance_enabled,
+        fundamentals_refresh_preview_enabled=config.fundamentals_refresh_preview_enabled,
         datacenter_dashboard_fallback_to_reports=(
             config.datacenter_dashboard_fallback_to_reports
         ),
@@ -276,6 +283,7 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         timezone=data.get("timezone", DEFAULT_TIMEZONE),
         skip_next_run=data.get("skip_next_run", False),
         technical_relevance_enabled=data.get("technical_relevance_enabled", False),
+        fundamentals_refresh_preview_enabled=data.get("fundamentals_refresh_preview_enabled", False),
         datacenter_dashboard_fallback_to_reports=data.get(
             "datacenter_dashboard_fallback_to_reports", True
         ),
@@ -364,6 +372,7 @@ def create_default_scheduler_config(
         timezone=DEFAULT_TIMEZONE,
         skip_next_run=False,
         technical_relevance_enabled=False,
+        fundamentals_refresh_preview_enabled=False,
         datacenter_dashboard_fallback_to_reports=True,
         datacenter_dashboard_reports_reference_db=None,
         datacenter_dashboard_reports_reference_enabled=False,

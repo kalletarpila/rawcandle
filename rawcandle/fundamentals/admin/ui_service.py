@@ -11,7 +11,11 @@ from typing import Any, Callable, Mapping
 
 from rawcandle.fundamentals.admin import batch_add_tickers, refresh_copy_runtime, refresh_fundamentals, refresh_production, sector_industry, taxonomy_v2_sync
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, sha256_file
-from rawcandle.fundamentals.admin.full_workflow import WORKFLOW_REPORT_NAME, run_full_workflow as orchestrate_full_workflow
+from rawcandle.fundamentals.admin.full_workflow import (
+    WORKFLOW_REPORT_NAME,
+    run_full_workflow as orchestrate_full_workflow,
+    run_refresh_full_workflow,
+)
 from rawcandle.fundamentals.admin.history import AdminRunHistory, RunHistoryEntry, RunProgressSummary
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
@@ -79,6 +83,7 @@ class AdminUIHistoryEntry:
     duration_seconds: float | None = None
     count_label: str | None = None
     report_filename: str = OPERATION_REPORT_NAME
+    trigger_source: str = "MANUAL"
 
     @property
     def stage(self) -> str:
@@ -88,7 +93,7 @@ class AdminUIHistoryEntry:
 _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
     "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
-    "REFRESH_FUNDAMENTALS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
+    "REFRESH_FUNDAMENTALS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
 }
@@ -114,6 +119,7 @@ class FundamentalsAdminUIService:
         taxonomy_production_preview: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_preview,
         taxonomy_production_apply: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_production_apply,
         operation_lock_path: Path | None = None,
+        recover_publication_on_startup: bool = True,
     ) -> None:
         self.run_root = run_root.resolve()
         self.history = history or AdminRunHistory(self.run_root)
@@ -135,7 +141,7 @@ class FundamentalsAdminUIService:
             or (self.run_root.parent / ".fundamentals_admin_ui_operation.lock")
         ).resolve()
         self._publication_safety = {"status": "CLEAR", "production_writes_blocked": False}
-        if self.run_root == ADMIN_RUN_ROOT.resolve():
+        if recover_publication_on_startup and self.run_root == ADMIN_RUN_ROOT.resolve():
             self._initialize_publication_safety()
 
     def _initialize_publication_safety(self) -> None:
@@ -213,6 +219,7 @@ class FundamentalsAdminUIService:
         candidate_version: str | None = None,
         production_mode: bool = False,
         network_allowed: bool = False,
+        trigger_source: str = "MANUAL",
         progress_callback: AdminProgressCallback | None = None,
     ) -> AdminUIRunResult:
         operation = operation_type.strip().upper()
@@ -227,6 +234,7 @@ class FundamentalsAdminUIService:
         elif operation == "REFRESH_FUNDAMENTALS":
             result = self._refresh_preview(
                 run_root=self.run_root,
+                trigger_source=trigger_source,
                 progress_callback=progress_callback,
             )
         elif operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
@@ -368,38 +376,62 @@ class FundamentalsAdminUIService:
     def full_workflow(
         self,
         *,
+        operation_type: str = "ADD_TICKERS",
         raw_inputs: str,
         market: str = "usa",
         progress_callback: AdminProgressCallback | None = None,
     ) -> AdminUIRunResult:
         with self._operation_lock():
-            result = orchestrate_full_workflow(
-                raw_inputs,
-                market=market,
-                run_root=self.run_root,
-                preview_stage=lambda callback: self._preview_unlocked(
-                    "ADD_TICKERS",
-                    raw_inputs=raw_inputs,
+            operation = operation_type.strip().upper()
+            if operation == "REFRESH_FUNDAMENTALS":
+                result = run_refresh_full_workflow(
+                    run_root=self.run_root,
+                    preview_stage=lambda callback: self._preview_unlocked(
+                        operation, progress_callback=callback,
+                    ),
+                    test_stage=lambda preview, callback: self._copy_apply_unlocked(
+                        operation,
+                        preview_payload_path=preview.preview_payload_path or "",
+                        preview_fingerprint=preview.preview_fingerprint or "",
+                        progress_callback=callback,
+                    ),
+                    production_stage=lambda preview, test, callback: self._production_apply_unlocked(
+                        operation,
+                        preview_payload_path=preview.preview_payload_path or "",
+                        preview_fingerprint=preview.preview_fingerprint or "",
+                        confirmation="CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS",
+                        test_run_id=test.run_id or "",
+                        progress_callback=callback,
+                    ),
+                    progress_callback=progress_callback,
+                )
+            elif operation == "ADD_TICKERS":
+                result = orchestrate_full_workflow(
+                    raw_inputs,
                     market=market,
-                    network_allowed=True,
-                    progress_callback=callback,
-                ),
-                test_stage=lambda preview, callback: self._copy_apply_unlocked(
-                    "ADD_TICKERS",
-                    preview_payload_path=preview.preview_payload_path or "",
-                    preview_fingerprint=preview.preview_fingerprint or "",
-                    progress_callback=callback,
-                ),
-                production_stage=lambda preview, test, callback: self._production_apply_unlocked(
-                    "ADD_TICKERS",
-                    preview_payload_path=preview.preview_payload_path or "",
-                    preview_fingerprint=preview.preview_fingerprint or "",
-                    confirmation="CONFIRM_PRODUCTION_BATCH_ADD_TICKERS",
-                    test_run_id=test.run_id or "",
-                    progress_callback=callback,
-                ),
-                progress_callback=progress_callback,
-            )
+                    run_root=self.run_root,
+                    preview_stage=lambda callback: self._preview_unlocked(
+                        operation, raw_inputs=raw_inputs, market=market,
+                        network_allowed=True, progress_callback=callback,
+                    ),
+                    test_stage=lambda preview, callback: self._copy_apply_unlocked(
+                        operation,
+                        preview_payload_path=preview.preview_payload_path or "",
+                        preview_fingerprint=preview.preview_fingerprint or "",
+                        progress_callback=callback,
+                    ),
+                    production_stage=lambda preview, test, callback: self._production_apply_unlocked(
+                        operation,
+                        preview_payload_path=preview.preview_payload_path or "",
+                        preview_fingerprint=preview.preview_fingerprint or "",
+                        confirmation="CONFIRM_PRODUCTION_BATCH_ADD_TICKERS",
+                        test_run_id=test.run_id or "",
+                        progress_callback=callback,
+                    ),
+                    progress_callback=progress_callback,
+                )
+            else:
+                raise ValueError("FULL_WORKFLOW_UNSUPPORTED_ADMIN_OPERATION")
         return self._finalize(result, default_message="Full workflow completed.")
 
     def progress(self, run_id: str) -> RunProgressSummary:
@@ -513,6 +545,7 @@ class FundamentalsAdminUIService:
                 duration_seconds=self._duration_seconds(result or {}),
                 count_label=self._count_label(result or request or {}),
                 report_filename=WORKFLOW_REPORT_NAME if self._mode_for_entry(item) == "FULL_WORKFLOW" else OPERATION_REPORT_NAME,
+                trigger_source=str((result or {}).get("trigger_source") or "MANUAL"),
             )
         payload = result or request or status or {}
         return AdminUIHistoryEntry(
@@ -526,7 +559,42 @@ class FundamentalsAdminUIService:
             category=category,
             primary_count=self._primary_count(payload),
             duration_seconds=self._duration_seconds(payload),
+            trigger_source=str(payload.get("trigger_source") or "MANUAL"),
         )
+
+    def pending_refresh_status(self) -> Mapping[str, Any] | None:
+        candidates: list[tuple[str, Mapping[str, Any]]] = []
+        if not self.run_root.exists():
+            return None
+        for run_dir in self.run_root.iterdir():
+            if not run_dir.is_dir() or run_dir.is_symlink():
+                continue
+            payload = self._load_json_file(run_dir / "result.json")
+            if not payload:
+                continue
+            if (
+                payload.get("operation_type") == "REFRESH_FUNDAMENTALS"
+                and payload.get("mode") == "PREVIEW"
+                and payload.get("trigger_source") == "SCHEDULER"
+            ):
+                candidates.append((str(payload.get("completed_at_utc") or ""), payload))
+        if not candidates:
+            return None
+        _, payload = max(candidates, key=lambda item: item[0])
+        counts = dict(payload.get("summary_counts") or {})
+        if payload.get("outcome") != "COMPLETED" or not int(counts.get("effective_changed_known") or 0):
+            return None
+        return {
+            "detected_at_utc": payload.get("completed_at_utc"),
+            "effective_changed_known": int(counts.get("effective_changed_known") or 0),
+            "new_quarter": int(counts.get("NEW_QUARTER") or 0),
+            "historical_revision": int(counts.get("HISTORICAL_REVISION") or 0),
+            "source_removal": int(counts.get("SOURCE_REMOVAL") or 0),
+            "unknown_tickers": int(counts.get("NOT_IN_CANONICAL_UNIVERSE") or 0),
+            "run_id": payload.get("run_id"),
+            "report": str(Path(str(payload.get("artifact_dir") or "")) / OPERATION_REPORT_NAME),
+            "production_authorized": False,
+        }
 
     def _classify_run_dir(
         self,
@@ -663,7 +731,10 @@ class FundamentalsAdminUIService:
             exception_type=str(first_error.get("type")) if first_error.get("type") else None,
             technical_error=str(first_error.get("message")) if first_error.get("message") else None,
             direct_production_retry_available=bool((result.get("retry_authorization") or {}).get("direct_production_retry_available") or result.get("manual_production_retry_available") or result.get("manual_production_available")),
-            preview_test_rerun_required=bool((result.get("retry_authorization") or {}).get("preview_test_rerun_required")),
+            preview_test_rerun_required=bool(
+                (result.get("retry_authorization") or {}).get("preview_test_rerun_required")
+                or result.get("preview_test_rerun_required")
+            ),
             workflow_stage_run_ids=tuple(
                 str(stage.get("run_id"))
                 for stage in (result.get("stages") or [])

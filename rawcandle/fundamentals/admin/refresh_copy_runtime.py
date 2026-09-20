@@ -697,6 +697,7 @@ def run_apply(
         )
         result = result_obj.as_dict() | {
             "artifact_dir": str(writer.run_dir), "bound_preview_run_id": preview_run_id,
+            "trigger_source": "MANUAL",
             "production_writes": 0, "database_safety": "COPY_ONLY",
         }
         after_files = _production_file_state(source_paths)
@@ -731,6 +732,7 @@ def run_apply(
             errors=({"type": type(exc).__name__, "message": str(exc)},),
         ).as_dict() | {
             "artifact_dir": str(writer.run_dir), "failed_stage": failed_stage.value,
+            "trigger_source": "MANUAL",
             "production_writes": 0, "database_safety": "COPY_ONLY",
             "production_file_state_unchanged": before_files == _production_file_state(source_paths),
         }

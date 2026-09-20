@@ -374,6 +374,54 @@ def test_next_preview_after_published_generation_is_no_change(tmp_path: Path) ->
     assert output["refresh_preview"]["future_test_authorized"] is False
 
 
+def test_consecutive_scheduler_previews_keep_published_baseline_and_accumulate_pending_source(
+    tmp_path: Path,
+) -> None:
+    paths = _create_preview_databases(tmp_path / "dbs")
+    with sqlite3.connect(paths.provider_db) as connection:
+        ensure_refresh_state_schema(connection)
+        connection.execute(
+            "INSERT INTO sharadar_refresh_state VALUES(1,'SHARADAR','fundamentals',"
+            "'2026-08-26','provider','schema','published-run','2026-08-26T12:00:00Z')"
+        )
+    revised_q2 = row(lastupdated="2026-09-15", revenue=120)
+    first = run_preview(
+        source_paths=paths,
+        run_root=tmp_path / "runs-first",
+        client=PreviewClient([revised_q2], [row(dimension="MRQ", lastupdated="2026-09-15")]),
+        trigger_source="SCHEDULER",
+    )
+    new_q3 = row(
+        filing_date="2026-11-20", reportperiod="2026-10-31",
+        fiscalperiod="2026-Q3", lastupdated="2026-11-20", revenue=130,
+    )
+    second = run_preview(
+        source_paths=paths,
+        run_root=tmp_path / "runs-second",
+        client=PreviewClient(
+            [revised_q2, new_q3],
+            [
+                row(dimension="MRQ", lastupdated="2026-09-15"),
+                dict(new_q3, dimension="MRQ"),
+            ],
+        ),
+        trigger_source="SCHEDULER",
+    )
+    assert first["refresh_preview"]["state"]["published_watermark"] == "2026-08-26"
+    assert second["refresh_preview"]["state"]["published_watermark"] == "2026-08-26"
+    assert first["summary_counts"]["HISTORICAL_REVISION"] == 1
+    assert second["summary_counts"]["NEW_QUARTER_AND_REVISION"] == 1
+    second_change = second["refresh_preview"]["ticker_changes"][0]
+    assert second_change["changed_count"] >= 1
+    assert second_change["added_count"] >= 1
+    with sqlite3.connect(paths.provider_db) as connection:
+        state = connection.execute(
+            "SELECT published_source_watermark,successful_run_id FROM sharadar_refresh_state"
+        ).fetchone()
+    assert state == ("2026-08-26", "published-run")
+    assert first["trigger_source"] == second["trigger_source"] == "SCHEDULER"
+
+
 def test_routine_refresh_never_overrides_established_first_public_date(tmp_path: Path) -> None:
     paths = _create_preview_databases(tmp_path)
     with sqlite3.connect(paths.canonical_db) as connection:

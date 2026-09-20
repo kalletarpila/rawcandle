@@ -199,6 +199,19 @@ def build_fundamentals_admin_page(
         ),
         visible=bool(publication_safety.get("production_writes_blocked")),
     )
+    try:
+        pending_refresh = admin_service.pending_refresh_status()
+    except (AttributeError, OSError, RuntimeError):
+        pending_refresh = None
+    pending_refresh_field = ft.Text(
+        (
+            "Pending Sharadar fundamentals changes detected: "
+            f"{pending_refresh.get('effective_changed_known', 0)} known tickers; "
+            f"last scheduler Preview {pending_refresh.get('detected_at_utc') or 'time unavailable'}."
+            if pending_refresh else ""
+        ),
+        visible=bool(pending_refresh),
+    )
     progress_field = ft.ListView(
         height=230,
         spacing=4,
@@ -384,6 +397,8 @@ def build_fundamentals_admin_page(
                 "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
                 "CHECK_UPDATE_TAXONOMY": "Taxonomy",
             }.get(item.operation_type, item.operation_type.replace("_", " ").title())
+            if getattr(item, "trigger_source", "MANUAL") == "SCHEDULER":
+                operation_label += " [Scheduler]"
             weight = ft.FontWeight.BOLD if run_id == selected_history_run_id else ft.FontWeight.NORMAL
             rows.append(
                 ft.Row(
@@ -598,7 +613,9 @@ def build_fundamentals_admin_page(
         copy_apply_button.disabled = bool(operation_running or not copy_authorized or not copy_ready)
         production_apply_button.visible = bool(production_authorized and production_ready)
         production_apply_button.disabled = bool(operation_running or production_safety_blocked or not production_authorized or not production_ready)
-        full_workflow_button.visible = (operation_dropdown.value or "").strip().upper() == "ADD_TICKERS"
+        full_workflow_button.visible = (operation_dropdown.value or "").strip().upper() in {
+            "ADD_TICKERS", "REFRESH_FUNDAMENTALS",
+        }
         full_workflow_button.disabled = bool(
             operation_running
             or production_safety_blocked
@@ -780,6 +797,7 @@ def build_fundamentals_admin_page(
         run_guarded(
             full_workflow_button,
             lambda: admin_service.full_workflow(
+                operation_type=operation_dropdown.value or "ADD_TICKERS",
                 raw_inputs=tickers_field.value or "",
                 market=market_field.value or "usa",
                 progress_callback=progress_callback,
@@ -815,6 +833,7 @@ def build_fundamentals_admin_page(
             ft.Row([operation_dropdown, market_field, taxonomy_domain_dropdown], wrap=True, spacing=12),
             operation_guidance_field,
             publication_safety_field,
+            pending_refresh_field,
             ft.Text("Preview checks proposed changes. Test on copies runs them in isolated databases. Production update writes an approved change under the existing safeguards."),
             tickers_field,
             ft.Row([candidate_path_field, candidate_version_field], wrap=True, spacing=12),
