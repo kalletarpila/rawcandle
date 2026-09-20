@@ -301,6 +301,11 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
             f"Known tickers with effective changes: {counts.get('effective_changed_known', 0)}.",
             f"New quarter: {counts.get('NEW_QUARTER', 0)}; historical revision: {counts.get('HISTORICAL_REVISION', 0)}; both: {counts.get('NEW_QUARTER_AND_REVISION', 0)}.",
             f"Source removal: {counts.get('SOURCE_REMOVAL', 0)}; no effective change: {counts.get('NO_EFFECTIVE_CHANGE', 0)}.",
+            f"Source-window retention: {counts.get('newly_aged_out_source_rows', 0)} newly aged-out rows "
+            f"({counts.get('retained_arq', 0)} ARQ, {counts.get('retained_mrq', 0)} MRQ); "
+            f"{counts.get('already_retained_carry_forward', 0)} already retained; "
+            f"{counts.get('true_source_removals', 0)} true removals; "
+            f"{counts.get('ambiguous_removals', 0)} ambiguous.",
             f"Not in canonical universe: {counts.get('NOT_IN_CANONICAL_UNIVERSE', 0)}; review required: {counts.get('REVIEW_REQUIRED', 0)}.",
             f"First-public dates: {date_state.get('established_first_public_dates', 0)} established; "
             f"historical bootstrap eligible: {date_state.get('historical_bootstrap_eligible', 0)}; "

@@ -233,13 +233,15 @@ def test_comparison_metadata_revision_and_no_change(new_arq: dict[str, object], 
     assert compare_ticker_histories("TEST", current, source)["classification"] == expected
 
 
-def test_comparison_new_quarter_combined_revision_and_removal() -> None:
+def test_short_oldest_boundary_removal_fails_closed() -> None:
     old_q1 = row(filing_date="2026-05-20", reportperiod="2026-04-30", fiscalperiod="2026-Q1")
     new_q2 = row()
     current, source = histories(old_q1, new_q2)
-    assert compare_ticker_histories("TEST", current, source)["classification"] == "NEW_QUARTER_AND_REVISION"
+    result = compare_ticker_histories("TEST", current, source)
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["review_reason"] == "AMBIGUOUS_SOURCE_REMOVAL"
     current, source = histories(row(), row(filing_date="2026-08-27"))
-    assert compare_ticker_histories("TEST", current, source)["classification"] == "SOURCE_REMOVAL"
+    assert compare_ticker_histories("TEST", current, source)["classification"] == "REVIEW_REQUIRED"
 
 
 def _create_preview_databases(root: Path) -> BatchAddTickerPaths:

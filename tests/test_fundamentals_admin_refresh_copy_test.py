@@ -22,10 +22,13 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import CONTRACT_VERSION
 from rawcandle.fundamentals.admin.refresh_fundamentals import (
     FINANCIAL_FIELDS,
     REFRESH_REQUEST_FIELDS,
+    RETAINED_OUTSIDE_SOURCE_WINDOW,
+    build_source_history_merge,
     compare_ticker_histories,
     history_fingerprints,
     load_current_history,
     normalize_source_row,
+    source_key,
     validate_complete_history,
 )
 from rawcandle.fundamentals.schema.migrations import (
@@ -159,6 +162,178 @@ def test_complete_provider_replacement_uses_true_keys_and_preserves_unrelated_na
         keys = [row[0] for row in connection.execute("SELECT provider_record_key FROM provider_observation WHERE run_id=? ORDER BY provider_record_key", (result["run_id"],))]
         assert keys == ["TEST|ARQ|2026-09-15|2026-07-31", "TEST|MRQ|2026-09-15|2026-07-31"]
         assert connection.execute("SELECT COUNT(*) FROM sharadar_ticker_metadata").fetchone()[0] == 1
+
+
+def test_retention_merge_persists_provenance_rebuilds_canonical_and_stabilizes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / "provider.db"
+    canonical = tmp_path / "canonical.db"
+    create_provider(provider)
+    create_canonical(canonical)
+    old = source_row(
+        date="2016-08-15", reportperiod="2016-06-30", fiscalperiod="2016-Q2",
+        lastupdated="2026-05-20", revenue=100,
+    )
+    latest = source_row(
+        date="2026-08-15", reportperiod="2026-06-30", fiscalperiod="2026-Q2",
+        lastupdated="2026-09-20", revenue=200,
+    )
+    with sqlite3.connect(provider) as connection:
+        for observation_id, value in (
+            ("old-arq", old), ("new-arq", latest),
+            ("old-mrq", dict(old, dimension="MRQ", date="2016-06-30")),
+            ("new-mrq", dict(latest, dimension="MRQ", date="2026-06-30")),
+        ):
+            _insert_legacy_version(connection, value, observation_id)
+    with sqlite3.connect(canonical) as connection:
+        connection.execute(
+            "UPDATE v4_quarter SET fiscal_year=2016,fiscal_quarter='Q2',period_end='2016-06-30',"
+            "source_fiscalperiod='2016-Q2',source_reportperiod='2016-06-30',"
+            "source_availability_date='2016-08-15',first_public_result_date='2016-08-15'"
+        )
+
+    current = {dimension: load_current_history(provider, "TEST", dimension) for dimension in ("ARQ", "MRQ")}
+    histories = {
+        "TEST": {
+            "ARQ": validate_complete_history([latest], ticker="TEST", dimension="ARQ"),
+            "MRQ": validate_complete_history(
+                [dict(latest, dimension="MRQ", date="2026-06-30")], ticker="TEST", dimension="MRQ",
+            ),
+        }
+    }
+    plan = build_source_history_merge("TEST", current, histories["TEST"])
+    identity = {"TEST": {"company_id": 1, "security_id": 1, "provider_security_id": "100"}}
+    replacement = replace_provider_histories(
+        provider, histories, identity, applied_at=NOW, merge_plans={"TEST": plan},
+    )
+    assert replacement["verification"]["histories"][0]["retained_only_key_count"] == 1
+    retained = load_current_history(provider, "TEST", "ARQ")["rows"][0]
+    assert retained["_history_retention_status"] == RETAINED_OUTSIDE_SOURCE_WINDOW
+    assert retained["revenue"] == 100
+
+    monkeypatch.setattr(refresh_copy_runtime, "_events", lambda: ())
+    rebuilt = fresh_rebuild_canonical(provider, canonical, applied_at=NOW, affected_company_ids=[1])
+    assert rebuilt["identity_contract"]["company_security_identity_mapping_unchanged"] is True
+    with sqlite3.connect(canonical) as connection:
+        rows = connection.execute(
+            "SELECT q.fiscal_year,q.first_public_result_date,f.revenue FROM v4_quarter q "
+            "JOIN v4_quarter_financials f USING(quarter_id) ORDER BY q.fiscal_year"
+        ).fetchall()
+    assert rows == [(2016, "2016-08-15", 100), (2026, "2026-08-15", 200)]
+
+    second_current = {
+        dimension: load_current_history(provider, "TEST", dimension) for dimension in ("ARQ", "MRQ")
+    }
+    assert compare_ticker_histories("TEST", second_current, histories["TEST"])["classification"] == "NO_EFFECTIVE_CHANGE"
+
+    newer_key = dict(old, date="2016-09-01", revenue=777, lastupdated="2026-09-21")
+    newer_histories = {
+        "TEST": {
+            "ARQ": validate_complete_history([newer_key, latest], ticker="TEST", dimension="ARQ"),
+            "MRQ": histories["TEST"]["MRQ"],
+        }
+    }
+    newer_plan = build_source_history_merge("TEST", second_current, newer_histories["TEST"])
+    replace_provider_histories(
+        provider, newer_histories, identity, applied_at="2026-09-21T11:00:00Z",
+        merge_plans={"TEST": newer_plan},
+    )
+    fresh_rebuild_canonical(
+        provider, canonical, applied_at="2026-09-21T11:00:00Z", affected_company_ids=[1],
+    )
+    with sqlite3.connect(canonical) as connection:
+        assert connection.execute(
+            "SELECT q.first_public_result_date,f.revenue FROM v4_quarter q "
+            "JOIN v4_quarter_financials f USING(quarter_id) WHERE q.fiscal_year=2016"
+        ).fetchone() == ("2016-08-15", 777)
+
+    second_current = {
+        dimension: load_current_history(provider, "TEST", dimension) for dimension in ("ARQ", "MRQ")
+    }
+    reappeared = dict(old, revenue=999, lastupdated="2026-09-21")
+    reappeared_histories = {
+        "TEST": {
+            "ARQ": validate_complete_history(
+                [reappeared, newer_key, latest], ticker="TEST", dimension="ARQ",
+            ),
+            "MRQ": validate_complete_history(
+                [dict(reappeared, dimension="MRQ", date="2016-06-30"), dict(latest, dimension="MRQ", date="2026-06-30")],
+                ticker="TEST", dimension="MRQ",
+            ),
+        }
+    }
+    reappeared_plan = build_source_history_merge("TEST", second_current, reappeared_histories["TEST"])
+    replace_provider_histories(
+        provider, reappeared_histories, identity, applied_at="2026-09-21T12:00:00Z",
+        merge_plans={"TEST": reappeared_plan},
+    )
+    current_arq = {source_key(row): row for row in load_current_history(provider, "TEST", "ARQ")["rows"]}
+    assert current_arq[source_key(old)]["revenue"] == 999
+    assert current_arq[source_key(old)].get("_history_retention_status") is None
+    fresh_rebuild_canonical(
+        provider, canonical, applied_at="2026-09-21T12:00:00Z", affected_company_ids=[1],
+    )
+    with sqlite3.connect(canonical) as connection:
+        assert connection.execute(
+            "SELECT q.first_public_result_date,f.revenue FROM v4_quarter q "
+            "JOIN v4_quarter_financials f USING(quarter_id) WHERE q.fiscal_year=2016"
+        ).fetchone() == ("2016-08-15", 777)
+
+
+def test_true_interior_removal_deletes_key_but_preserves_alternate_canonical_quarter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / "provider.db"
+    canonical = tmp_path / "canonical.db"
+    create_provider(provider)
+    create_canonical(canonical)
+    oldest = source_row(date="2020-11-20", reportperiod="2020-10-07", fiscalperiod="2020-Q3")
+    alternate = source_row(date="2022-10-13", reportperiod="2022-06-30", fiscalperiod="2022-Q2", revenue=150)
+    obsolete = source_row(date="2022-11-28", reportperiod="2022-06-30", fiscalperiod="2022-Q2", revenue=151)
+    latest = source_row(date="2026-08-05", reportperiod="2026-06-30", fiscalperiod="2026-Q2", revenue=200)
+    mrq = [
+        dict(oldest, dimension="MRQ", date="2020-10-07"),
+        dict(alternate, dimension="MRQ", date="2022-06-30"),
+        dict(latest, dimension="MRQ", date="2026-06-30"),
+    ]
+    with sqlite3.connect(provider) as connection:
+        for index, value in enumerate([oldest, alternate, obsolete, latest, *mrq]):
+            _insert_legacy_version(connection, value, f"obs-{index}")
+    with sqlite3.connect(canonical) as connection:
+        connection.execute(
+            "UPDATE v4_quarter SET fiscal_year=2022,fiscal_quarter='Q2',period_end='2022-06-30',"
+            "source_fiscalperiod='2022-Q2',source_reportperiod='2022-06-30',"
+            "source_availability_date='2022-10-13',first_public_result_date='2022-10-13'"
+        )
+        connection.execute("UPDATE v4_quarter_financials SET revenue=150")
+
+    current = {dimension: load_current_history(provider, "TEST", dimension) for dimension in ("ARQ", "MRQ")}
+    histories = {
+        "TEST": {
+            "ARQ": validate_complete_history([oldest, alternate, latest], ticker="TEST", dimension="ARQ"),
+            "MRQ": validate_complete_history(mrq, ticker="TEST", dimension="MRQ"),
+        }
+    }
+    comparison = compare_ticker_histories("TEST", current, histories["TEST"])
+    assert comparison["classification"] == "SOURCE_REMOVAL"
+    plan = build_source_history_merge("TEST", current, histories["TEST"])
+    replace_provider_histories(
+        provider, histories,
+        {"TEST": {"company_id": 1, "security_id": 1, "provider_security_id": "100"}},
+        applied_at=NOW, merge_plans={"TEST": plan},
+    )
+    arq_keys = {source_key(row) for row in load_current_history(provider, "TEST", "ARQ")["rows"]}
+    assert source_key(obsolete) not in arq_keys
+    assert source_key(alternate) in arq_keys
+
+    monkeypatch.setattr(refresh_copy_runtime, "_events", lambda: ())
+    fresh_rebuild_canonical(provider, canonical, applied_at=NOW, affected_company_ids=[1])
+    with sqlite3.connect(canonical) as connection:
+        assert connection.execute(
+            "SELECT q.first_public_result_date,f.revenue FROM v4_quarter q "
+            "JOIN v4_quarter_financials f USING(quarter_id) WHERE q.fiscal_year=2022 AND q.fiscal_quarter='Q2'"
+        ).fetchone() == ("2022-10-13", 150)
 
 
 def test_source_availability_may_change_but_established_first_public_must_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

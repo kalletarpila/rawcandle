@@ -54,7 +54,7 @@ from rawcandle.fundamentals.phase13b_foundation import online_backup
 from rawcandle.fundamentals.providers.sharadar import SharadarClient
 
 
-PRODUCTION_CONTRACT_VERSION = "PHASE13G3_4_REFRESH_PRODUCTION_V1"
+PRODUCTION_CONTRACT_VERSION = "PHASE13G3_9_REFRESH_RETENTION_PRODUCTION_V1"
 PRODUCTION_STAGES = (
     "PRODUCTION_PREFLIGHT", "SOURCE_REVALIDATION", "PROVIDER_CANDIDATE",
     "CANONICAL_CANDIDATE", "ANALYSIS_CANDIDATE", "CANDIDATE_VALIDATION",
@@ -160,7 +160,7 @@ def _provider_semantic_fingerprint(path: Path) -> str:
     digest = hashlib.sha256()
     with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
         for row in connection.execute(
-            "SELECT po.provider,po.native_table,po.provider_record_key,po.company_id,po.security_id,po.content_hash,"
+            "SELECT po.provider,po.native_table,po.provider_record_key,po.company_id,po.security_id,po.content_hash,po.provenance_json,"
             "s.ticker,s.dimension,s.date,s.reportperiod,s.lastupdated "
             "FROM provider_observation po JOIN sharadar_fundamental_observation s USING(observation_id) "
             "WHERE po.provider='SHARADAR' AND po.native_table='fundamentals' "
@@ -286,11 +286,12 @@ def _replace_role(
 
 def _postflight(
     *, paths: BatchAddTickerPaths, histories: Mapping[str, Any],
+    merge_plans: Mapping[str, Any],
     canonical_result: Mapping[str, Any], analysis_result: Mapping[str, Any],
     expected_roles: Mapping[str, Mapping[str, Any]], refresh_state: Mapping[str, Any],
     as_of_date: str,
 ) -> dict[str, Any]:
-    provider = validate_provider_candidate(paths.provider_db, histories)
+    provider = validate_provider_candidate(paths.provider_db, histories, merge_plans=merge_plans)
     with sqlite3.connect(f"file:{paths.provider_db.resolve()}?mode=ro", uri=True) as connection:
         connection.row_factory = sqlite3.Row
         state = connection.execute("SELECT * FROM sharadar_refresh_state WHERE singleton_id=1").fetchone()
@@ -537,13 +538,17 @@ def run_production_apply(
             raise StaleRefreshTest("STALE_REFRESH_TEST") from exc
         if revalidated["refresh_set_fingerprint"] != preview_fingerprint:
             raise StaleRefreshTest("STALE_REFRESH_TEST")
-        writer.write_json("source_revalidation.json", {key: value for key, value in revalidated.items() if key != "histories"})
+        writer.write_json(
+            "source_revalidation.json",
+            {key: value for key, value in revalidated.items() if key not in {"histories", "merge_plans"}},
+        )
         progress(stage, "COMPLETED", "Sharadar source still matches the tested refresh set.")
 
         changed = [item for item in revalidated["ticker_changes"] if item["classification"] in REPLACEMENT_CLASSES]
         changed_tickers = [item["ticker"] for item in changed]
         identities = {item["ticker"]: item["identity"] for item in changed}
         histories = {ticker: revalidated["histories"][ticker] for ticker in changed_tickers}
+        merge_plans = {ticker: revalidated["merge_plans"][ticker] for ticker in changed_tickers}
         result["summary_counts"] = _summary_counts(revalidated["ticker_changes"])
         result["ticker_changes"] = changed
         result["old_refresh_state"] = revalidated["state"]
@@ -555,7 +560,10 @@ def run_production_apply(
         progress(stage, "RUNNING", "Building the provider candidate with complete ARQ/MRQ histories.")
         with _durable_heartbeat(writer, stage, "Provider candidate construction is still running."):
             online_backup(source_paths.provider_db, provider_candidate)
-            provider_result = replace_provider_histories(provider_candidate, histories, identities, applied_at=utc_now())
+            provider_result = replace_provider_histories(
+                provider_candidate, histories, identities,
+                applied_at=utc_now(), merge_plans=merge_plans,
+            )
         source_watermark = str(revalidated["discovery"].get("observed_source_max_lastupdated") or "")
         if not source_watermark:
             raise RuntimeError("REFRESH_SOURCE_WATERMARK_MISSING")
@@ -606,7 +614,7 @@ def run_production_apply(
             "provider": provider_candidate, "canonical": canonical_candidate, "analysis": analysis_candidate,
         }
         candidate_checks = {role: sqlite_verification(path) for role, path in candidate_paths_by_role.items()}
-        validate_provider_candidate(provider_candidate, histories)
+        validate_provider_candidate(provider_candidate, histories, merge_plans=merge_plans)
         if _identity_mapping(canonical_candidate) != canonical_result["identity_contract"]["after"]:
             raise RuntimeError("REFRESH_CANONICAL_IDENTITY_VALIDATION_FAILED")
         result["candidate_validation"] = candidate_checks
@@ -620,7 +628,10 @@ def run_production_apply(
             raise StaleRefreshTest("STALE_REFRESH_SOURCE_BEFORE_PUBLICATION") from exc
         if final_source["refresh_set_fingerprint"] != revalidated["refresh_set_fingerprint"]:
             raise StaleRefreshTest("STALE_REFRESH_SOURCE_BEFORE_PUBLICATION")
-        result["final_source_recheck"] = {key: value for key, value in final_source.items() if key != "histories"}
+        result["final_source_recheck"] = {
+            key: value for key, value in final_source.items()
+            if key not in {"histories", "merge_plans"}
+        }
         result["storage_preflight_before_publication"] = _storage_preflight(source_paths, temp_root=temp_root, backup_root=backup_root)
         if before_files != _production_file_state(source_paths):
             raise RuntimeError("REFRESH_PRODUCTION_DATABASE_CHANGED_DURING_CANDIDATE_BUILD")
@@ -669,7 +680,8 @@ def run_production_apply(
         if inject_failure_at == "POSTFLIGHT":
             raise RuntimeError("INJECTED_REFRESH_POSTFLIGHT_FAILURE")
         postflight = _postflight(
-            paths=source_paths, histories=histories, canonical_result=canonical_result,
+            paths=source_paths, histories=histories, merge_plans=merge_plans,
+            canonical_result=canonical_result,
             analysis_result=analysis_result, expected_roles=roles, refresh_state=refresh_state,
             as_of_date=as_of_date or date.today().isoformat(),
         )

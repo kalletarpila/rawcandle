@@ -507,6 +507,7 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
             "identity": {"company_id": 1, "security_id": 1, "provider_security_id": "100"},
         }],
         "histories": {"TEST": {"ARQ": object(), "MRQ": object()}},
+        "merge_plans": {"TEST": {}},
         "refresh_set_fingerprint": "f" * 64,
     }
     monkeypatch.setattr(
@@ -557,7 +558,10 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
         lambda *_args: {"fingerprint": "identity"},
     )
     monkeypatch.setattr("rawcandle.fundamentals.admin.refresh_production._analysis_state", lambda *_args: {})
-    monkeypatch.setattr("rawcandle.fundamentals.admin.refresh_production.validate_provider_candidate", lambda *_args: {"quick_check": "ok"})
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.validate_provider_candidate",
+        lambda *_args, **_kwargs: {"quick_check": "ok"},
+    )
 
     def rebuild_analysis(_sources, *, output, **_kwargs):
         output.mkdir(parents=True)
@@ -689,6 +693,7 @@ def test_final_source_recheck_rejects_stale_candidate_before_backup(
                 "identity": {"company_id": 1, "security_id": 1, "provider_security_id": "100"},
             }],
             "histories": {"TEST": {"ARQ": object(), "MRQ": object()}},
+            "merge_plans": {"TEST": {}},
             "refresh_set_fingerprint": fingerprint if calls == 1 else "a" * 64,
         }
         return value

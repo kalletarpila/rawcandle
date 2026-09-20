@@ -20,8 +20,10 @@ from rawcandle.fundamentals.admin.progress import ProgressCallback, ProgressStag
 from rawcandle.fundamentals.admin.refresh_fundamentals import (
     CONTRACT_VERSION,
     FINANCIAL_FIELDS,
+    REFRESH_REPLACEMENT_CLASSES,
     REFRESH_DIMENSIONS,
     REFRESH_REQUEST_FIELDS,
+    RETAINED_OUTSIDE_SOURCE_WINDOW,
     HistoryTrust,
     RefreshPreviewError,
     _production_file_state,
@@ -29,12 +31,15 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     _request,
     _summary_counts,
     audit_publish_date_bootstrap,
+    build_source_history_merge,
     compare_ticker_histories,
     discover_changed_tickers,
     fetch_complete_history,
+    history_fingerprints,
     load_current_history,
     normalize_source_row,
     provider_key_diagnostics,
+    refresh_binding_change,
     resolve_identity,
     resolve_refresh_state,
     source_key,
@@ -47,8 +52,8 @@ from rawcandle.fundamentals.providers.sharadar import SharadarClient
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 
 
-TEST_CONTRACT_VERSION = "PHASE13G3_3_SHARADAR_REFRESH_COPY_TEST_V1"
-REPLACEMENT_CLASSES = {"NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION", "SOURCE_REMOVAL"}
+TEST_CONTRACT_VERSION = "PHASE13G3_9_SHARADAR_REFRESH_RETENTION_COPY_TEST_V1"
+REPLACEMENT_CLASSES = REFRESH_REPLACEMENT_CLASSES
 
 
 class StaleRefreshPreview(RefreshPreviewError):
@@ -91,13 +96,7 @@ def _binding(
         "derived_watermark": state.derived_watermark,
         "query_start_date": state.query_start_date,
         "observed_source_max_lastupdated": discovery["observed_source_max_lastupdated"],
-        "ticker_changes": [
-            {key: item.get(key) for key in (
-                "ticker", "classification", "current_effective_fingerprint", "source_effective_fingerprint",
-                "source_raw_fingerprints", "added_count", "changed_count", "removed_count", "metadata_only_count",
-            )}
-            for item in changes
-        ],
+        "ticker_changes": [refresh_binding_change(item) for item in changes],
     }
 
 
@@ -115,6 +114,7 @@ def revalidate_bound_source(
     discovery = discover_changed_tickers(client, query_start_date=state.query_start_date)
     identities = {ticker: resolve_identity(paths, ticker) for ticker in discovery["changed_tickers"]}
     histories: dict[str, dict[str, HistoryTrust]] = {}
+    merge_plans: dict[str, dict[str, Any]] = {}
     changes: list[dict[str, Any]] = []
     for ticker in discovery["changed_tickers"]:
         identity = identities[ticker]
@@ -127,6 +127,8 @@ def revalidate_bound_source(
         histories[ticker] = {dimension: fetch_complete_history(client, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
         current = {dimension: load_current_history(paths.provider_db, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
         item = compare_ticker_histories(ticker, current, histories[ticker])
+        if all("rows" in current.get(dimension, {}) for dimension in REFRESH_DIMENSIONS):
+            merge_plans[ticker] = build_source_history_merge(ticker, current, histories[ticker])
         item["identity"] = identity
         changes.append(item)
     changes.sort(key=lambda item: str(item["ticker"]))
@@ -140,7 +142,7 @@ def revalidate_bound_source(
         raise StaleRefreshPreview("STALE_REFRESH_PREVIEW")
     return {
         "state": state.as_dict(), "schema": schema, "discovery": discovery,
-        "ticker_changes": changes, "histories": histories,
+        "ticker_changes": changes, "histories": histories, "merge_plans": merge_plans,
         "changed_tickers": [item["ticker"] for item in changed],
         "refresh_set_fingerprint": actual,
     }
@@ -171,6 +173,7 @@ def _observation_id(record_key: str, content_hash: str) -> str:
 def replace_provider_histories(
     provider_db: Path, histories: Mapping[str, Mapping[str, HistoryTrust]],
     identities: Mapping[str, Mapping[str, Any]], *, applied_at: str,
+    merge_plans: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     tickers = sorted(histories)
     unrelated_before = _provider_unrelated_fingerprint(provider_db, tickers)
@@ -203,22 +206,33 @@ def replace_provider_histories(
                 trust = histories[ticker][dimension]
                 if trust.status != "COMPLETE":
                     raise ValueError(f"COMPLETE_HISTORY_NOT_TRUSTED:{ticker}:{dimension}")
-                for row in trust.rows:
+                rows = (
+                    merge_plans[ticker]["dimensions"][dimension]["merged_rows"]
+                    if merge_plans is not None else trust.rows
+                )
+                for row in rows:
                     item = normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension)
                     key = source_key(item)
                     record_key = "|".join(key)
                     content_hash = fingerprint(_raw_row(item))
                     observation_id = _observation_id(record_key, content_hash)
                     payload = dict(item)
+                    retention_status = row.get("_history_retention_status")
+                    provenance = {}
+                    if retention_status == RETAINED_OUTSIDE_SOURCE_WINDOW:
+                        provenance = {
+                            "history_retention_status": RETAINED_OUTSIDE_SOURCE_WINDOW,
+                            "history_retention_evidence": row.get("_history_retention_evidence"),
+                        }
                     connection.execute(
                         "INSERT INTO provider_observation(observation_id,run_id,provider,provider_record_key,company_id,security_id,"
                         "provider_ticker,provider_security_id,native_table,dimension,calendardate,reportperiod,fiscalperiod,"
                         "source_availability_date,observed_at_utc,fetched_at_utc,content_hash,provider_status,payload_json,provenance_json) "
-                        "VALUES(?,?,'SHARADAR',?,?,?,?,?,'fundamentals',?,?,?,?,?,?,?,?,'SUCCESS',?,'{}')",
+                        "VALUES(?,?,'SHARADAR',?,?,?,?,?,'fundamentals',?,?,?,?,?,?,?,?,'SUCCESS',?,?)",
                         (observation_id, run_id, record_key, identity["company_id"], identity["security_id"], ticker,
                          identity["provider_security_id"], dimension, item["calendardate"], item["reportperiod"],
                          item["fiscalperiod"], item["date"], item["lastupdated"], applied_at, content_hash,
-                         json.dumps(payload, sort_keys=True)),
+                         json.dumps(payload, sort_keys=True), json.dumps(provenance, sort_keys=True)),
                     )
                     columns = ("observation_id", "ticker", "permaticker", *REFRESH_REQUEST_FIELDS[1:])
                     values = (observation_id, ticker, identity["provider_security_id"], *[item[field] for field in REFRESH_REQUEST_FIELDS[1:]])
@@ -227,32 +241,76 @@ def replace_provider_histories(
                         values,
                     )
                     inserted[dimension] += 1
-            replaced.append({"ticker": ticker, "before_counts": before_counts, "after_counts": dict(inserted), "removed_physical_rows": len(removed_ids)})
+            replaced.append({
+                "ticker": ticker, "before_counts": before_counts,
+                "after_counts": dict(inserted), "removed_physical_rows": len(removed_ids),
+                "source_history_action": (merge_plans or {}).get(ticker, {}).get("action", {}),
+            })
         connection.commit()
-    verification = validate_provider_candidate(provider_db, histories)
+    verification = validate_provider_candidate(provider_db, histories, merge_plans=merge_plans)
     unrelated_after = _provider_unrelated_fingerprint(provider_db, tickers)
     if unrelated_before != unrelated_after:
         raise RuntimeError("REFRESH_PROVIDER_UNRELATED_STATE_CHANGED")
     return {"run_id": run_id, "ticker_count": len(tickers), "tickers": replaced, "verification": verification, "unrelated_state_unchanged": True}
 
 
-def validate_provider_candidate(path: Path, histories: Mapping[str, Mapping[str, HistoryTrust]]) -> dict[str, Any]:
+def validate_provider_candidate(
+    path: Path,
+    histories: Mapping[str, Mapping[str, HistoryTrust]],
+    *,
+    merge_plans: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     evidence = []
     for ticker in sorted(histories):
         for dimension in REFRESH_DIMENSIONS:
             actual = load_current_history(path, ticker, dimension)
             expected = histories[ticker][dimension]
+            expected_rows = (
+                merge_plans[ticker]["dimensions"][dimension]["merged_rows"]
+                if merge_plans is not None else expected.rows
+            )
+            expected_keys = {source_key(row) for row in expected_rows}
             if actual["invalid_rows"] or actual["legacy_source_version_ambiguities"]:
                 raise RuntimeError(f"REFRESH_PROVIDER_CANDIDATE_AMBIGUOUS:{ticker}:{dimension}")
-            if actual["current_row_count"] != expected.row_count:
+            if actual["current_row_count"] != len(expected_rows):
                 raise RuntimeError(f"REFRESH_PROVIDER_CANDIDATE_COUNT_MISMATCH:{ticker}:{dimension}")
-            if {source_key(row) for row in actual["rows"]} != {source_key(row) for row in expected.rows}:
+            if {source_key(row) for row in actual["rows"]} != expected_keys:
                 raise RuntimeError(f"REFRESH_PROVIDER_CANDIDATE_KEY_MISMATCH:{ticker}:{dimension}")
-            if (actual["effective_content_fingerprint"], actual["raw_source_fingerprint"]) != (expected.effective_fingerprint, expected.raw_fingerprint):
+            expected_hashes = history_fingerprints(expected_rows)
+            if (
+                actual["effective_content_fingerprint"], actual["raw_source_fingerprint"]
+            ) != (
+                expected_hashes["effective_content_fingerprint"],
+                expected_hashes["raw_source_fingerprint"],
+            ):
                 raise RuntimeError(f"REFRESH_PROVIDER_CANDIDATE_FINGERPRINT_MISMATCH:{ticker}:{dimension}")
+            actual_map = {source_key(row): row for row in actual["rows"]}
+            source_keys = {source_key(row) for row in expected.rows}
+            retained_keys = {
+                source_key(row) for row in expected_rows
+                if row.get("_history_retention_status") == RETAINED_OUTSIDE_SOURCE_WINDOW
+            }
+            actual_retained = {
+                key for key, row in actual_map.items()
+                if row.get("_history_retention_status") == RETAINED_OUTSIDE_SOURCE_WINDOW
+            }
+            if actual_retained != retained_keys:
+                raise RuntimeError(f"REFRESH_PROVIDER_RETENTION_STATE_MISMATCH:{ticker}:{dimension}")
+            if any(actual_map[key].get("_history_retention_status") for key in source_keys):
+                raise RuntimeError(f"REFRESH_CURRENT_SOURCE_MARKED_RETAINED:{ticker}:{dimension}")
+            true_removed = {
+                tuple(item[field] for field in ("ticker", "dimension", "date", "reportperiod"))
+                for item in ((merge_plans or {}).get(ticker, {}).get("dimensions", {}).get(dimension, {}).get("true_removed_keys", []))
+            }
+            if true_removed & set(actual_map):
+                raise RuntimeError(f"REFRESH_TRUE_REMOVAL_RETAINED:{ticker}:{dimension}")
             evidence.append({
-                "ticker": ticker, "dimension": dimension, "row_count": expected.row_count,
-                "effective_fingerprint": expected.effective_fingerprint, "raw_fingerprint": expected.raw_fingerprint,
+                "ticker": ticker, "dimension": dimension, "row_count": len(expected_rows),
+                "effective_fingerprint": expected_hashes["effective_content_fingerprint"],
+                "raw_fingerprint": expected_hashes["raw_source_fingerprint"],
+                "current_source_key_count": len(source_keys),
+                "retained_only_key_count": len(retained_keys),
+                "true_removed_key_count": len(true_removed),
                 "duplicate_true_keys": 0,
             })
     with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
@@ -569,13 +627,17 @@ def run_apply(
         failed_stage = ProgressStage.SOURCE_REVALIDATION
         progress.running(failed_stage, "Revalidating complete Sharadar source state.")
         revalidated = revalidate_bound_source(preview, source_paths, api)
-        writer.write_json("source_revalidation.json", {key: value for key, value in revalidated.items() if key != "histories"})
+        writer.write_json(
+            "source_revalidation.json",
+            {key: value for key, value in revalidated.items() if key not in {"histories", "merge_plans"}},
+        )
         progress.completed(failed_stage, "Sharadar source still matches Preview.")
 
         changed = [item for item in revalidated["ticker_changes"] if item["classification"] in REPLACEMENT_CLASSES]
         changed_tickers = [item["ticker"] for item in changed]
         identities = {item["ticker"]: item["identity"] for item in changed}
         selected_histories = {ticker: revalidated["histories"][ticker] for ticker in changed_tickers}
+        selected_merge_plans = {ticker: revalidated["merge_plans"][ticker] for ticker in changed_tickers}
 
         failed_stage = ProgressStage.COPY_PROVIDER
         progress.running(failed_stage, "Copying provider and stable read-only authorities.")
@@ -598,7 +660,10 @@ def run_apply(
         failed_stage = ProgressStage.PROVIDER_REPLACEMENT
         progress.running(failed_stage, "Replacing complete ARQ/MRQ histories in provider candidate.", total_items=len(changed_tickers))
         with _background_heartbeat(progress, "Provider complete-history replacement is still running."):
-            provider_result = replace_provider_histories(provider_candidate, selected_histories, identities, applied_at=applied_at)
+            provider_result = replace_provider_histories(
+                provider_candidate, selected_histories, identities,
+                applied_at=applied_at, merge_plans=selected_merge_plans,
+            )
         writer.write_json("provider_replacement_summary.json", provider_result)
         progress.completed(failed_stage, "Provider candidate replacement completed.", processed_items=len(changed_tickers), total_items=len(changed_tickers))
 

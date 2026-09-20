@@ -35,9 +35,10 @@ from rawcandle.fundamentals.providers.sharadar import (
     SharadarResult,
     extract_schema_fields,
 )
+from rawcandle.fundamentals.schema.sharadar_history_policy import MINIMUM_HISTORY_YEARS
 
 
-CONTRACT_VERSION = "PHASE13G3_2_SHARADAR_REFRESH_PREVIEW_V1"
+CONTRACT_VERSION = "PHASE13G3_9_ROLLING_SOURCE_WINDOW_RETENTION_V1"
 SOURCE_DATASET = "SHARADAR"
 SOURCE_TABLE = "fundamentals"
 SOURCE_ENDPOINT = "/data/fundamentals"
@@ -80,6 +81,23 @@ REFRESH_REQUEST_FIELDS = (
 DISCOVERY_FIELDS = ("ticker", "dimension", "lastupdated")
 DATE_FIELDS = ("date", "reportperiod", "lastupdated", "calendardate")
 FISCAL_PERIOD_RE = re.compile(r"^(?P<year>[0-9]{4})-Q(?P<quarter>[1-4])$")
+RETAINED_OUTSIDE_SOURCE_WINDOW = "RETAINED_OUTSIDE_SOURCE_WINDOW"
+AGED_OUT_OF_SOURCE_WINDOW = "AGED_OUT_OF_SOURCE_WINDOW"
+TRUE_SOURCE_REMOVAL = "TRUE_SOURCE_REMOVAL"
+AMBIGUOUS_SOURCE_REMOVAL = "AMBIGUOUS_SOURCE_REMOVAL"
+SOURCE_HISTORY_CHANGE = "SOURCE_HISTORY_CHANGE"
+RETENTION_CONTRACT_VERSION = "SHARADAR_ROLLING_SOURCE_WINDOW_RETENTION_V1"
+REFRESH_REPLACEMENT_CLASSES = {
+    "NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION",
+    "SOURCE_REMOVAL", SOURCE_HISTORY_CHANGE,
+}
+REFRESH_BINDING_FIELDS = (
+    "ticker", "classification", "current_effective_fingerprint",
+    "source_effective_fingerprint", "source_raw_fingerprints", "added_count",
+    "changed_count", "removed_count", "metadata_only_count",
+    "current_generation_fingerprint", "merged_generation_fingerprint",
+    "retention_plan_fingerprint", "source_history_action",
+)
 
 REFRESH_STATE_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sharadar_refresh_state (
@@ -520,8 +538,12 @@ def fetch_complete_history(client: SharadarClient, ticker: str, dimension: str) 
 def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict[str, Any]:
     columns = ",".join(f"s.{field}" for field in REFRESH_REQUEST_FIELDS)
     with _readonly(provider_db) as connection:
+        provider_columns = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(provider_observation)")
+        }
+        provenance = "po.provenance_json" if "provenance_json" in provider_columns else "'{}' AS provenance_json"
         rows = [dict(row) for row in connection.execute(
-            f"SELECT po.observation_id,{columns} FROM sharadar_fundamental_observation s "
+            f"SELECT po.observation_id,{provenance},{columns} FROM sharadar_fundamental_observation s "
             "JOIN provider_observation po USING(observation_id) "
             "WHERE UPPER(s.ticker)=? AND s.dimension=? "
             "ORDER BY s.lastupdated,po.observation_id",
@@ -532,8 +554,17 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
     for row in rows:
         try:
             item = normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension)
+            parsed = json.loads(str(row.get("provenance_json") or "{}"))
+            if not isinstance(parsed, dict):
+                raise ValueError("not an object")
+            item["_provider_provenance"] = parsed
+            item["_history_retention_status"] = parsed.get("history_retention_status")
+            item["_history_retention_evidence"] = parsed.get("history_retention_evidence")
         except HistoryValidationError as exc:
             invalid.append(f"{row.get('observation_id')}:{exc}")
+            continue
+        except (json.JSONDecodeError, ValueError) as exc:
+            invalid.append(f"{row.get('observation_id')}:INVALID_PROVIDER_PROVENANCE:{exc}")
             continue
         grouped.setdefault(source_key(item), []).append(item)
     normalized: dict[tuple[str, str, str, str], dict[str, Any]] = {}
@@ -550,7 +581,13 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
                 "reason": "LEGACY_SOURCE_VERSION_AMBIGUITY",
             })
             continue
-        normalized[key] = min(latest, key=lambda item: fingerprint(_raw_row(item)))
+        normalized[key] = min(
+            latest,
+            key=lambda item: (
+                item.get("_history_retention_status") == RETAINED_OUTSIDE_SOURCE_WINDOW,
+                fingerprint(_raw_row(item)),
+            ),
+        )
     ordered = tuple(normalized[key] for key in sorted(normalized))
     hashes = history_fingerprints(ordered)
     return {
@@ -561,6 +598,198 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
         "legacy_source_version_ambiguities": ambiguities,
         "invalid_rows": invalid,
         **hashes,
+    }
+
+
+def _row_order(row: Mapping[str, Any]) -> tuple[str, str, tuple[str, str, str, str]]:
+    return str(row.get("reportperiod") or ""), str(row.get("date") or ""), source_key(row)
+
+
+def _minimum_window_elapsed(removed_reportperiod: str, current_max_reportperiod: str) -> bool:
+    removed = date.fromisoformat(removed_reportperiod)
+    try:
+        threshold = removed.replace(year=removed.year + MINIMUM_HISTORY_YEARS)
+    except ValueError:
+        threshold = removed.replace(month=2, day=28, year=removed.year + MINIMUM_HISTORY_YEARS)
+    return date.fromisoformat(current_max_reportperiod) >= threshold
+
+
+def _generation_fingerprint(rows: Iterable[Mapping[str, Any]]) -> str:
+    payload = [
+        {
+            "source": _effective_row(row),
+            "history_retention_status": row.get("_history_retention_status"),
+            "history_retention_evidence": row.get("_history_retention_evidence"),
+        }
+        for row in sorted(rows, key=source_key)
+    ]
+    return fingerprint(payload)
+
+
+def _retention_evidence(
+    row: Mapping[str, Any], *, prior_min: str, current_min: str, current_max: str,
+) -> dict[str, Any]:
+    year, quarter = fiscal_identity(row["fiscalperiod"])
+    return {
+        "classification": AGED_OUT_OF_SOURCE_WINDOW,
+        "source_identity": source_key_evidence(row),
+        "fiscal_identity": {"fiscal_year": year, "fiscal_quarter": quarter},
+        "source_window_boundary": {
+            "dimension": str(row["dimension"]),
+            "prior_min_reportperiod": prior_min,
+            "current_min_reportperiod": current_min,
+            "current_max_reportperiod": current_max,
+            "minimum_history_years": MINIMUM_HISTORY_YEARS,
+        },
+        "previously_accepted_source": "SHARADAR",
+    }
+
+
+def build_source_history_merge(
+    ticker: str,
+    current: Mapping[str, Mapping[str, Any]],
+    source: Mapping[str, HistoryTrust],
+) -> dict[str, Any]:
+    """Classify absent source keys and build the deterministic provider generation."""
+    dimensions: dict[str, dict[str, Any]] = {}
+    missing_events: list[dict[str, Any]] = []
+    for dimension in REFRESH_DIMENSIONS:
+        old_rows = tuple(current[dimension]["rows"])
+        source_rows = tuple(source[dimension].rows)
+        old_map = _row_maps(old_rows)
+        source_map = _row_maps(source_rows)
+        retained_map = {
+            key: row for key, row in old_map.items()
+            if row.get("_history_retention_status") == RETAINED_OUTSIDE_SOURCE_WINDOW
+        }
+        source_backed_map = {key: row for key, row in old_map.items() if key not in retained_map}
+        missing = set(source_backed_map) - set(source_map)
+        ordered_source_backed = sorted(source_backed_map.values(), key=_row_order)
+        prefix_keys: list[tuple[str, str, str, str]] = []
+        for row in ordered_source_backed:
+            key = source_key(row)
+            if key not in missing:
+                break
+            prefix_keys.append(key)
+        current_min = min((str(row["reportperiod"]) for row in source_rows), default="")
+        current_max = max((str(row["reportperiod"]) for row in source_rows), default="")
+        prior_min = min((str(row["reportperiod"]) for row in source_backed_map.values()), default="")
+        for key in sorted(missing):
+            row = source_backed_map[key]
+            boundary = key in prefix_keys
+            coherent = bool(current_min and current_max and current_min > str(row["reportperiod"]))
+            old_enough = bool(current_max) and _minimum_window_elapsed(str(row["reportperiod"]), current_max)
+            event = AGED_OUT_OF_SOURCE_WINDOW if boundary and coherent and old_enough else (
+                AMBIGUOUS_SOURCE_REMOVAL if boundary else TRUE_SOURCE_REMOVAL
+            )
+            missing_events.append({
+                "ticker": ticker,
+                "dimension": dimension,
+                "event": event,
+                "source_identity": source_key_evidence(row),
+                "fiscal_identity": dict(zip(("fiscal_year", "fiscal_quarter"), fiscal_identity(row["fiscalperiod"]), strict=True)),
+                "was_oldest_prefix": boundary,
+                "window_age_qualified": old_enough,
+                "chronology_coherent": coherent,
+                "prior_min_reportperiod": prior_min,
+                "current_min_reportperiod": current_min,
+                "current_max_reportperiod": current_max,
+            })
+        dimensions[dimension] = {
+            "old_map": old_map,
+            "source_map": source_map,
+            "retained_map": retained_map,
+            "already_retained_absent_keys": sorted(set(retained_map) - set(source_map)),
+            "reappeared_keys": sorted(set(retained_map) & set(source_map)),
+            "prior_min_reportperiod": prior_min,
+            "current_min_reportperiod": current_min,
+            "current_max_reportperiod": current_max,
+        }
+
+    by_fiscal: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    for event in missing_events:
+        fiscal = event["fiscal_identity"]
+        by_fiscal.setdefault((int(fiscal["fiscal_year"]), str(fiscal["fiscal_quarter"])), []).append(event)
+    for events in by_fiscal.values():
+        classes = {str(event["event"]) for event in events}
+        if len(events) > 1 and AMBIGUOUS_SOURCE_REMOVAL not in classes and len(classes) > 1:
+            for event in events:
+                event["event"] = AMBIGUOUS_SOURCE_REMOVAL
+                event["companion_dimension_conflict"] = True
+
+    event_by_key = {
+        tuple(event["source_identity"][field] for field in SOURCE_PRIMARY_KEY): event
+        for event in missing_events
+    }
+    merged_rows: dict[str, tuple[dict[str, Any], ...]] = {}
+    for dimension in REFRESH_DIMENSIONS:
+        detail = dimensions[dimension]
+        merged = {key: dict(row) for key, row in detail["source_map"].items()}
+        for key in detail["already_retained_absent_keys"]:
+            merged[key] = dict(detail["retained_map"][key])
+        for key, event in event_by_key.items():
+            if key[1] != dimension or event["event"] != AGED_OUT_OF_SOURCE_WINDOW:
+                continue
+            row = dict(detail["old_map"][key])
+            row["_history_retention_status"] = RETAINED_OUTSIDE_SOURCE_WINDOW
+            row["_history_retention_evidence"] = _retention_evidence(
+                row,
+                prior_min=detail["prior_min_reportperiod"],
+                current_min=detail["current_min_reportperiod"],
+                current_max=detail["current_max_reportperiod"],
+            )
+            merged[key] = row
+        merged_rows[dimension] = tuple(merged[key] for key in sorted(merged))
+
+    aged = [event for event in missing_events if event["event"] == AGED_OUT_OF_SOURCE_WINDOW]
+    true_removed = [event for event in missing_events if event["event"] == TRUE_SOURCE_REMOVAL]
+    ambiguous = [event for event in missing_events if event["event"] == AMBIGUOUS_SOURCE_REMOVAL]
+    carried = sum(len(dimensions[dimension]["already_retained_absent_keys"]) for dimension in REFRESH_DIMENSIONS)
+    reappeared = sum(len(dimensions[dimension]["reappeared_keys"]) for dimension in REFRESH_DIMENSIONS)
+    current_rows = tuple(row for dimension in REFRESH_DIMENSIONS for row in current[dimension]["rows"])
+    target_rows = tuple(row for dimension in REFRESH_DIMENSIONS for row in merged_rows[dimension])
+    if ambiguous:
+        label = "Review required"
+    elif aged:
+        label = "Retain outside source window"
+    elif true_removed:
+        label = "True source removal"
+    elif reappeared:
+        label = "Current source reappeared"
+    elif carried:
+        label = "Carry forward retained history"
+    else:
+        label = "No source-history action"
+    return {
+        "contract_version": RETENTION_CONTRACT_VERSION,
+        "ticker": ticker,
+        "dimensions": {
+            dimension: {
+                "merged_rows": merged_rows[dimension],
+                "current_source_keys": [source_key_evidence(row) for row in source[dimension].rows],
+                "retained_only_keys": [
+                    source_key_evidence(row) for row in merged_rows[dimension]
+                    if row.get("_history_retention_status") == RETAINED_OUTSIDE_SOURCE_WINDOW
+                ],
+                "true_removed_keys": [
+                    event["source_identity"] for event in true_removed if event["dimension"] == dimension
+                ],
+            }
+            for dimension in REFRESH_DIMENSIONS
+        },
+        "events": missing_events,
+        "action": {
+            "label": label,
+            "newly_aged_out_source_rows": len(aged),
+            "retained_arq": sum(event["dimension"] == "ARQ" for event in aged),
+            "retained_mrq": sum(event["dimension"] == "MRQ" for event in aged),
+            "already_retained_carry_forward": carried,
+            "true_source_removals": len(true_removed),
+            "ambiguous_removals": len(ambiguous),
+            "current_source_reappearances": reappeared,
+        },
+        "current_generation_fingerprint": _generation_fingerprint(current_rows),
+        "merged_generation_fingerprint": _generation_fingerprint(target_rows),
     }
 
 
@@ -607,13 +836,30 @@ def compare_ticker_histories(
             },
             "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
         }
+    merge = build_source_history_merge(ticker, current, source)
+    action = merge["action"]
+    if action["ambiguous_removals"]:
+        return {
+            "ticker": ticker,
+            "classification": "REVIEW_REQUIRED",
+            "review_reason": AMBIGUOUS_SOURCE_REMOVAL,
+            "source_history_action": action,
+            "source_history_events": merge["events"],
+            "retention_plan_fingerprint": fingerprint({
+                "events": merge["events"],
+                "merged_generation_fingerprint": merge["merged_generation_fingerprint"],
+            }),
+            "source_completeness": {
+                dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS
+            },
+        }
     added: list[tuple[str, str, str, str]] = []
     removed: list[tuple[str, str, str, str]] = []
     effective_changed: list[tuple[str, str, str, str]] = []
     metadata_changed: list[tuple[str, str, str, str]] = []
     for dimension in REFRESH_DIMENSIONS:
         old_map = _row_maps(current[dimension]["rows"])
-        new_map = _row_maps(source[dimension].rows)
+        new_map = _row_maps(merge["dimensions"][dimension]["merged_rows"])
         added.extend(sorted(new_map.keys() - old_map.keys()))
         removed.extend(sorted(old_map.keys() - new_map.keys()))
         for key in sorted(old_map.keys() & new_map.keys()):
@@ -622,13 +868,19 @@ def compare_ticker_histories(
             elif fingerprint(_raw_row(old_map[key])) != fingerprint(_raw_row(new_map[key])):
                 metadata_changed.append(key)
     current_rows = tuple(row for dimension in REFRESH_DIMENSIONS for row in current[dimension]["rows"])
-    source_rows = tuple(row for dimension in REFRESH_DIMENSIONS for row in source[dimension].rows)
+    source_rows = tuple(
+        row for dimension in REFRESH_DIMENSIONS
+        for row in merge["dimensions"][dimension]["merged_rows"]
+    )
     old_latest = _latest_fiscal(current_rows)
     new_latest = _latest_fiscal(source_rows)
     affected_fiscal = {
         fiscal_identity(old_map[key]["fiscalperiod"])
         for dimension in REFRESH_DIMENSIONS
-        for old_map, new_map in [(_row_maps(current[dimension]["rows"]), _row_maps(source[dimension].rows))]
+        for old_map, new_map in [(
+            _row_maps(current[dimension]["rows"]),
+            _row_maps(merge["dimensions"][dimension]["merged_rows"]),
+        )]
         for key in old_map
         if key not in new_map or (
             key in new_map
@@ -638,7 +890,10 @@ def compare_ticker_histories(
     affected_fiscal.update(
         fiscal_identity(new_map[key]["fiscalperiod"])
         for dimension in REFRESH_DIMENSIONS
-        for old_map, new_map in [(_row_maps(current[dimension]["rows"]), _row_maps(source[dimension].rows))]
+        for old_map, new_map in [(
+            _row_maps(current[dimension]["rows"]),
+            _row_maps(merge["dimensions"][dimension]["merged_rows"]),
+        )]
         for key in new_map
         if key not in old_map or (
             key in old_map
@@ -647,8 +902,15 @@ def compare_ticker_histories(
     )
     advanced = bool(new_latest and (old_latest is None or (new_latest[0], int(new_latest[1][1])) > (old_latest[0], int(old_latest[1][1]))))
     prior_change = bool(effective_changed or removed or (added and not advanced))
+    retention_transition = bool(
+        action["newly_aged_out_source_rows"] or action["current_source_reappearances"]
+    )
     if not added and not removed and not effective_changed:
-        classification = "SOURCE_ONLY_METADATA_CHANGE" if metadata_changed else "NO_EFFECTIVE_CHANGE"
+        classification = (
+            SOURCE_HISTORY_CHANGE if retention_transition
+            else "SOURCE_ONLY_METADATA_CHANGE" if metadata_changed
+            else "NO_EFFECTIVE_CHANGE"
+        )
     elif advanced and prior_change:
         classification = "NEW_QUARTER_AND_REVISION"
     elif advanced:
@@ -676,9 +938,21 @@ def compare_ticker_histories(
         ],
         "current_counts": {dimension: int(current[dimension]["current_row_count"]) for dimension in REFRESH_DIMENSIONS},
         "source_counts": {dimension: source[dimension].row_count for dimension in REFRESH_DIMENSIONS},
+        "merged_counts": {
+            dimension: len(merge["dimensions"][dimension]["merged_rows"])
+            for dimension in REFRESH_DIMENSIONS
+        },
         "current_effective_fingerprint": fingerprint({dimension: current[dimension]["effective_content_fingerprint"] for dimension in REFRESH_DIMENSIONS}),
         "source_effective_fingerprint": combined_effective_history_fingerprint(source),
         "source_raw_fingerprints": {dimension: source[dimension].raw_fingerprint for dimension in REFRESH_DIMENSIONS},
+        "source_history_action": action,
+        "source_history_events": merge["events"],
+        "current_generation_fingerprint": merge["current_generation_fingerprint"],
+        "merged_generation_fingerprint": merge["merged_generation_fingerprint"],
+        "retention_plan_fingerprint": fingerprint({
+            "events": merge["events"],
+            "merged_generation_fingerprint": merge["merged_generation_fingerprint"],
+        }),
         "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
         "legacy_versions_collapsed": sum(int(current[dimension]["legacy_versions_collapsed"]) for dimension in REFRESH_DIMENSIONS),
     }
@@ -988,9 +1262,20 @@ def _summary_counts(changes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     counts["discovered"] = len(changes)
     counts["effective_changed_known"] = sum(
         count for key, count in counts.items()
-        if key in {"NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION", "SOURCE_REMOVAL"}
+        if key in REFRESH_REPLACEMENT_CLASSES
     )
+    actions = [change.get("source_history_action") or {} for change in changes]
+    for key in (
+        "newly_aged_out_source_rows", "retained_arq", "retained_mrq",
+        "already_retained_carry_forward", "true_source_removals",
+        "ambiguous_removals", "current_source_reappearances",
+    ):
+        counts[key] = sum(int(action.get(key) or 0) for action in actions)
     return dict(counts)
+
+
+def refresh_binding_change(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: item.get(key) for key in REFRESH_BINDING_FIELDS}
 
 
 def _render_refresh_report(result: Mapping[str, Any]) -> str:
@@ -1018,13 +1303,46 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         f"- Observed source maximum: `{discovery.get('observed_source_max_lastupdated')}`",
         f"- Schema fingerprint: `{result.get('refresh_preview', {}).get('schema', {}).get('schema_fingerprint')}`",
         "",
+        "## Source-Window Retention",
+        "",
+        f"- Newly aged-out source rows: `{counts.get('newly_aged_out_source_rows', 0)}`",
+        f"- ARQ retained: `{counts.get('retained_arq', 0)}`",
+        f"- MRQ retained: `{counts.get('retained_mrq', 0)}`",
+        f"- Already-retained rows carried forward: `{counts.get('already_retained_carry_forward', 0)}`",
+        f"- True source removals: `{counts.get('true_source_removals', 0)}`",
+        f"- Ambiguous removals: `{counts.get('ambiguous_removals', 0)}`",
+        "",
+        "`RETAINED_OUTSIDE_SOURCE_WINDOW` means that RawCandle preserves the last authoritative "
+        "version it observed before the row aged outside the accessible source window. It is not "
+        "currently returned data, invented data, or a guarantee that the value is forever final.",
+        "",
+        "| Ticker | Missing source rows | Source-history action | Canonical impact |",
+        "| --- | ---: | --- | --- |",
+    ]
+    for item in result.get("refresh_preview", {}).get("ticker_changes", []):
+        action = item.get("source_history_action") or {}
+        missing = (
+            int(action.get("newly_aged_out_source_rows") or 0)
+            + int(action.get("true_source_removals") or 0)
+            + int(action.get("ambiguous_removals") or 0)
+        )
+        if not missing and not action.get("already_retained_carry_forward") and not action.get("current_source_reappearances"):
+            continue
+        canonical = (
+            "Historical quarter retained" if action.get("retained_arq")
+            else "Quarter evaluated from surviving ARQ" if action.get("true_source_removals")
+            else "No new canonical event"
+        )
+        lines.append(f"| {item.get('ticker')} | {missing} | {action.get('label')} | {canonical} |")
+    lines.extend([
+        "",
         "## Effective Known-Ticker Changes",
         "",
         "| Ticker | Current latest Q | Sharadar latest Q | Change | ARQ before/after | Added | Changed | Removed | Publication-date impact |",
         "| --- | --- | --- | --- | --- | ---: | ---: | ---: | --- |",
-    ]
+    ])
     for item in result.get("refresh_preview", {}).get("ticker_changes", []):
-        if item.get("classification") not in {"NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION", "SOURCE_REMOVAL"}:
+        if item.get("classification") not in REFRESH_REPLACEMENT_CLASSES:
             continue
         policy = (item.get("publication_date_status") or {}).get("label", "No date impact")
         lines.append(
@@ -1167,8 +1485,7 @@ def run_preview(
         bootstrap = audit_publish_date_bootstrap(source_paths)
         publication_state = _publication_date_state(bootstrap, changes)
         legacy = provider_key_diagnostics(source_paths.provider_db)
-        replacement_classes = {"NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION", "SOURCE_REMOVAL"}
-        replacement = [item for item in changes if item.get("classification") in replacement_classes]
+        replacement = [item for item in changes if item.get("classification") in REFRESH_REPLACEMENT_CLASSES]
         review = [item for item in changes if item.get("classification") == "REVIEW_REQUIRED"]
         unknown = [item for item in changes if item.get("classification") == "NOT_IN_CANONICAL_UNIVERSE"]
         binding = {
@@ -1181,17 +1498,7 @@ def run_preview(
             "derived_watermark": state.derived_watermark,
             "query_start_date": state.query_start_date,
             "observed_source_max_lastupdated": discovery["observed_source_max_lastupdated"],
-            "ticker_changes": [
-                {
-                    key: item.get(key)
-                    for key in (
-                        "ticker", "classification", "current_effective_fingerprint",
-                        "source_effective_fingerprint", "source_raw_fingerprints",
-                        "added_count", "changed_count", "removed_count", "metadata_only_count",
-                    )
-                }
-                for item in changes
-            ],
+            "ticker_changes": [refresh_binding_change(item) for item in changes],
         }
         refresh_set_fingerprint = fingerprint(binding)
         progress.completed(ProgressStage.CLASSIFICATION, "Classifications and deterministic binding evidence completed.")
@@ -1209,11 +1516,21 @@ def run_preview(
             "future_test_authorized": (
                 trigger_source == "MANUAL" and bool(replacement) and not review
                 and discovery["status"] == "COMPLETE"
+                and publication_state["historical_bootstrap_eligible"] == 0
+                and publication_state["repair_required"] == 0
+                and counts.get("ambiguous_removals", 0) == 0
             ),
             "published_watermark_advanced": False,
             "provider_key_diagnostics": legacy,
             "publish_date_bootstrap": {key: value for key, value in bootstrap.items() if key != "exceptions"},
             "publication_date_state": publication_state,
+            "source_window_retention": {
+                key: counts.get(key, 0) for key in (
+                    "newly_aged_out_source_rows", "retained_arq", "retained_mrq",
+                    "already_retained_carry_forward", "true_source_removals",
+                    "ambiguous_removals", "current_source_reappearances",
+                )
+            },
         }
         preview_path = writer.write_json("refresh_preview.json", preview)
         changes_path = writer.write_json("refresh_ticker_changes.json", changes)
