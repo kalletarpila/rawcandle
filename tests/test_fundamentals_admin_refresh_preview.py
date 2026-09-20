@@ -372,7 +372,7 @@ def test_routine_refresh_never_overrides_established_first_public_date(tmp_path:
     assert impact[0]["proposed_first_public_result_date_baseline"] == "2026-08-26"
 
 
-def test_ui_service_exposes_refresh_as_preview_and_copy_test_only(tmp_path: Path) -> None:
+def test_ui_service_exposes_refresh_preview_copy_test_and_production(tmp_path: Path) -> None:
     calls: list[dict[str, object]] = []
     apply_calls: list[dict[str, object]] = []
 
@@ -398,7 +398,8 @@ def test_ui_service_exposes_refresh_as_preview_and_copy_test_only(tmp_path: Path
     capability = next(item for item in service.capabilities() if item.operation_type == "REFRESH_FUNDAMENTALS")
     assert capability.preview_enabled is True
     assert capability.copy_apply_enabled is True
-    assert capability.production_apply_enabled is False
+    assert capability.production_apply_enabled is True
+    assert capability.production_confirmation_hint == "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS"
     response = service.preview("REFRESH_FUNDAMENTALS")
     assert response.outcome == "NO_CHANGE"
     assert len(calls) == 1

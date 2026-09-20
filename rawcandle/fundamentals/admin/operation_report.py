@@ -669,7 +669,11 @@ def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT) -> Opera
     result = _load_json(run_dir / "result.json") or {}
     request = _load_json(run_dir / "request.json")
     progress = _load_json(run_dir / "progress_status.json") or _load_json(run_dir / "status.json")
-    if result.get("operation_type") == "REFRESH_FUNDAMENTALS" and result.get("mode") == "COPY_ONLY_APPLY":
+    if result.get("operation_type") == "REFRESH_FUNDAMENTALS" and result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"}:
+        from rawcandle.fundamentals.admin.refresh_production import render_report
+
+        report = render_report(result)
+    elif result.get("operation_type") == "REFRESH_FUNDAMENTALS" and result.get("mode") == "COPY_ONLY_APPLY":
         from rawcandle.fundamentals.admin.refresh_copy_runtime import _render_report
 
         report = _render_report(result)

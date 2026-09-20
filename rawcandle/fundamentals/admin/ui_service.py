@@ -9,7 +9,7 @@ import re
 from contextlib import contextmanager
 from typing import Any, Callable, Mapping
 
-from rawcandle.fundamentals.admin import batch_add_tickers, refresh_copy_runtime, refresh_fundamentals, sector_industry, taxonomy_v2_sync
+from rawcandle.fundamentals.admin import batch_add_tickers, refresh_copy_runtime, refresh_fundamentals, refresh_production, sector_industry, taxonomy_v2_sync
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, sha256_file
 from rawcandle.fundamentals.admin.full_workflow import WORKFLOW_REPORT_NAME, run_full_workflow as orchestrate_full_workflow
 from rawcandle.fundamentals.admin.history import AdminRunHistory, RunHistoryEntry, RunProgressSummary
@@ -88,7 +88,7 @@ class AdminUIHistoryEntry:
 _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
     "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
-    "REFRESH_FUNDAMENTALS": {"PREVIEW", "COPY_ONLY_APPLY"},
+    "REFRESH_FUNDAMENTALS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
 }
@@ -105,6 +105,7 @@ class FundamentalsAdminUIService:
         add_production_apply: Callable[..., dict[str, Any]] = batch_add_tickers.run_production_apply,
         refresh_preview: Callable[..., dict[str, Any]] = refresh_fundamentals.run_preview,
         refresh_apply: Callable[..., dict[str, Any]] = refresh_copy_runtime.run_apply,
+        refresh_production_apply: Callable[..., dict[str, Any]] = refresh_production.run_production_apply,
         sector_preview: Callable[..., dict[str, Any]] = sector_industry.run_preview,
         sector_apply: Callable[..., dict[str, Any]] = sector_industry.run_apply,
         sector_production_apply: Callable[..., dict[str, Any]] = sector_industry.run_production_apply,
@@ -121,6 +122,7 @@ class FundamentalsAdminUIService:
         self._add_production_apply = add_production_apply
         self._refresh_preview = refresh_preview
         self._refresh_apply = refresh_apply
+        self._refresh_production_apply = refresh_production_apply
         self._sector_preview = sector_preview
         self._sector_apply = sector_apply
         self._sector_production_apply = sector_production_apply
@@ -132,6 +134,36 @@ class FundamentalsAdminUIService:
             operation_lock_path
             or (self.run_root.parent / ".fundamentals_admin_ui_operation.lock")
         ).resolve()
+        self._publication_safety = {"status": "CLEAR", "production_writes_blocked": False}
+        if self.run_root == ADMIN_RUN_ROOT.resolve():
+            self._initialize_publication_safety()
+
+    def _initialize_publication_safety(self) -> None:
+        from rawcandle.fundamentals.admin.production_transaction import production_lock
+        from rawcandle.fundamentals.admin.publication_journal import (
+            PublicationRecoveryError,
+            guard_production_writes,
+            safety_status,
+        )
+
+        current = safety_status()
+        if not current.get("production_writes_blocked") or current.get("status") == "RECOVERY_FAILED":
+            self._publication_safety = current
+            return
+        try:
+            with production_lock():
+                guard_production_writes()
+        except PublicationRecoveryError as exc:
+            if "RECOVERED_RETRY_REQUIRED" not in str(exc):
+                self._publication_safety = safety_status() | {"error": str(exc)}
+                return
+        except Exception as exc:
+            self._publication_safety = current | {"error": f"{type(exc).__name__}: {exc}"}
+            return
+        self._publication_safety = safety_status()
+
+    def publication_safety_status(self) -> Mapping[str, Any]:
+        return dict(self._publication_safety)
 
     @contextmanager
     def _operation_lock(self):
@@ -149,7 +181,10 @@ class FundamentalsAdminUIService:
     def capabilities(self) -> tuple[AdminOperationCapability, ...]:
         return (
             AdminOperationCapability("ADD_TICKERS", True, True, True),
-            AdminOperationCapability("REFRESH_FUNDAMENTALS", True, True, False),
+            AdminOperationCapability(
+                "REFRESH_FUNDAMENTALS", True, True, True,
+                "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS",
+            ),
             AdminOperationCapability("CHECK_UPDATE_SECTOR_INDUSTRY", True, True, True),
             AdminOperationCapability(
                 "CHECK_UPDATE_TAXONOMY",
@@ -187,11 +222,6 @@ class FundamentalsAdminUIService:
                 run_root=self.run_root,
                 market=market,
                 network_allowed=network_allowed,
-                progress_callback=progress_callback,
-            )
-        elif operation == "REFRESH_FUNDAMENTALS":
-            result = self._refresh_preview(
-                run_root=self.run_root,
                 progress_callback=progress_callback,
             )
         elif operation == "REFRESH_FUNDAMENTALS":
@@ -300,6 +330,16 @@ class FundamentalsAdminUIService:
                 preview_fingerprint=preview_fingerprint,
                 run_root=self.run_root,
                 confirm_production=confirmation == "CONFIRM_PRODUCTION_BATCH_ADD_TICKERS",
+                test_run_id=test_run_id,
+                progress_callback=progress_callback,
+            )
+        elif operation == "REFRESH_FUNDAMENTALS":
+            result = self._refresh_production_apply(
+                preview_payload_path=payload_path,
+                preview_fingerprint=preview_fingerprint,
+                run_root=self.run_root,
+                confirm_production=confirmation == "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS",
+                production_intent=True,
                 test_run_id=test_run_id,
                 progress_callback=progress_callback,
             )

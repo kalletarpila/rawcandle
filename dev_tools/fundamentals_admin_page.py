@@ -186,6 +186,19 @@ def build_fundamentals_admin_page(
         max_lines=5,
         visible=False,
     )
+    try:
+        publication_safety = admin_service.publication_safety_status()
+    except (AttributeError, OSError, RuntimeError):
+        publication_safety = {"status": "UNKNOWN", "production_writes_blocked": False}
+    publication_safety_field = ft.Text(
+        (
+            "Production safety block: RawCandle could not restore a complete verified Fundamentals generation. "
+            "Production-writing operations are disabled until recovery is resolved."
+            if publication_safety.get("production_writes_blocked")
+            else ""
+        ),
+        visible=bool(publication_safety.get("production_writes_blocked")),
+    )
     progress_field = ft.ListView(
         height=230,
         spacing=4,
@@ -297,7 +310,7 @@ def build_fundamentals_admin_page(
         if operation == "REFRESH_FUNDAMENTALS":
             return (
                 "Checks Sharadar for new quarterly results and historical revisions. Preview is read-only; "
-                "Test on copies performs complete source replacement and a fresh V2 rebuild. Production update is not yet enabled."
+                "Test on copies performs complete source replacement and a fresh V2 rebuild. Production update publishes a verified journaled generation."
             )
         return (
             "Enter 1 to 25 tickers. Commas, spaces, newlines and duplicates are accepted. "
@@ -560,6 +573,7 @@ def build_fundamentals_admin_page(
 
     def apply_capabilities() -> None:
         capability = capability_for_current_operation()
+        production_safety_blocked = bool(publication_safety.get("production_writes_blocked"))
         update_operation_visibility()
         preview_button.disabled = bool(operation_running or (capability and not capability.preview_enabled) or not can_preview())
         preview_ready = has_current_preview()
@@ -583,10 +597,11 @@ def build_fundamentals_admin_page(
         copy_apply_button.visible = bool(copy_authorized and copy_available)
         copy_apply_button.disabled = bool(operation_running or not copy_authorized or not copy_ready)
         production_apply_button.visible = bool(production_authorized and production_ready)
-        production_apply_button.disabled = bool(operation_running or not production_authorized or not production_ready)
+        production_apply_button.disabled = bool(operation_running or production_safety_blocked or not production_authorized or not production_ready)
         full_workflow_button.visible = (operation_dropdown.value or "").strip().upper() == "ADD_TICKERS"
         full_workflow_button.disabled = bool(
             operation_running
+            or production_safety_blocked
             or not can_preview()
             or current_preview_signature is not None
         )
@@ -687,6 +702,8 @@ def build_fundamentals_admin_page(
         operation = (operation_dropdown.value or "ADD_TICKERS").strip().upper()
         if operation == "ADD_TICKERS":
             return "CONFIRM_PRODUCTION_BATCH_ADD_TICKERS"
+        if operation == "REFRESH_FUNDAMENTALS":
+            return "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS"
         if operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
             return "CONFIRM_PRODUCTION_SECTOR_INDUSTRY"
         if operation == "CHECK_UPDATE_TAXONOMY":
@@ -797,6 +814,7 @@ def build_fundamentals_admin_page(
             ft.Text("Administration operation", size=18, weight=ft.FontWeight.BOLD),
             ft.Row([operation_dropdown, market_field, taxonomy_domain_dropdown], wrap=True, spacing=12),
             operation_guidance_field,
+            publication_safety_field,
             ft.Text("Preview checks proposed changes. Test on copies runs them in isolated databases. Production update writes an approved change under the existing safeguards."),
             tickers_field,
             ft.Row([candidate_path_field, candidate_version_field], wrap=True, spacing=12),

@@ -368,6 +368,7 @@ def run_transaction(
     production_intent: bool = False, rehearsal: bool = False,
     inject_failure_at: str | None = None,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    publication_journal_path: Path | None = None,
 ) -> dict[str, Any]:
     production_analysis = PRODUCTION["analysis"].resolve()
     actual_production = source_paths.analysis_db.resolve() == production_analysis
@@ -490,6 +491,15 @@ def run_transaction(
         writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Preview and Test are bound; no production write yet.", preview_fingerprint=preview_fingerprint)
         owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
         if owner:
+            if actual_production or publication_journal_path is not None:
+                from rawcandle.fundamentals.admin.publication_journal import (
+                    ACTIVE_JOURNAL_PATH,
+                    guard_production_writes,
+                )
+
+                result["publication_recovery_preflight"] = guard_production_writes(
+                    publication_journal_path or ACTIVE_JOURNAL_PATH
+                )
             progress(3, "LOCKS", "COMPLETED", "Production and scheduler locks acquired.")
             result["lock_owner"] = owner
             validate_preview(source_paths, payload, preview_fingerprint)
