@@ -13,6 +13,7 @@ from rawcandle.fundamentals.admin.batch_add_tickers import (
     build_generic_batch_plan,
     build_preview_from_copy,
     create_copy_lane,
+    fiscal_sequence_contradictions,
     parse_batch_tickers,
     reject_production_write_targets,
     run_apply,
@@ -27,6 +28,25 @@ from rawcandle.fundamentals.phase12d import write_json
 from rawcandle.fundamentals.schema.migrations import PROVIDER_SCHEMA_SQL
 from rawcandle.fundamentals.phase13d_backend import Phase13DPaths
 from tests.test_phase13d_backend import _analysis, _canonical, _market, _provider, _taxonomy
+
+
+def test_add_tickers_fiscal_sequence_validation_is_narrow() -> None:
+    clean = [
+        {"dimension": "ARQ", "reportperiod": "2026-04-30", "fiscalperiod": "2026-Q4"},
+        {"dimension": "MRQ", "reportperiod": "2026-04-30", "fiscalperiod": "2026-Q4"},
+    ]
+    assert fiscal_sequence_contradictions(clean) == []
+    duplicate_winner = clean + [
+        {"dimension": "ARQ", "reportperiod": "2026-01-31", "fiscalperiod": "2026-Q4"},
+    ]
+    assert fiscal_sequence_contradictions(duplicate_winner) == []
+    contradictory = duplicate_winner + [
+        {"dimension": "MRQ", "reportperiod": "2026-01-31", "fiscalperiod": "2026-Q3"},
+    ]
+    assert fiscal_sequence_contradictions(contradictory) == [{
+        "reportperiod": "2026-01-31", "arq_fiscalperiods": ["2026-Q4"],
+        "mrq_fiscalperiods": ["2026-Q3"],
+    }]
 
 
 def _paths(tmp_path: Path) -> BatchAddTickerPaths:

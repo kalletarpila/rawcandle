@@ -306,6 +306,8 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
             f"{counts.get('already_retained_carry_forward', 0)} already retained; "
             f"{counts.get('true_source_removals', 0)} true removals; "
             f"{counts.get('ambiguous_removals', 0)} ambiguous.",
+            f"Fiscal identity revisions: {counts.get('fiscal_identity_revisions', 0)}; "
+            f"requiring review: {counts.get('fiscal_identity_revisions_requiring_review', 0)}.",
             f"Not in canonical universe: {counts.get('NOT_IN_CANONICAL_UNIVERSE', 0)}; review required: {counts.get('REVIEW_REQUIRED', 0)}.",
             f"First-public dates: {date_state.get('established_first_public_dates', 0)} established; "
             f"historical bootstrap eligible: {date_state.get('historical_bootstrap_eligible', 0)}; "

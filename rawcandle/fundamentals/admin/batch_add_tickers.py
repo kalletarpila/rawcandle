@@ -708,6 +708,27 @@ def _network_rows(tickers: Sequence[str], *, network_allowed: bool, client: Shar
     return output, {"status": "ALLOWED", "request_count": client.request_count, "calls": calls}
 
 
+def fiscal_sequence_contradictions(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Find ARQ/MRQ disagreement for the same reportperiod without banning valid duplicate winners."""
+    by_period: dict[str, dict[str, set[str]]] = {}
+    for row in rows:
+        dimension = str(row.get("dimension") or "").upper()
+        reportperiod = str(row.get("reportperiod") or "")
+        fiscalperiod = str(row.get("fiscalperiod") or "").upper()
+        if dimension not in {"ARQ", "MRQ"} or not reportperiod or not re.fullmatch(r"[0-9]{4}-Q[1-4]", fiscalperiod):
+            continue
+        by_period.setdefault(reportperiod, {}).setdefault(dimension, set()).add(fiscalperiod)
+    contradictions = []
+    for reportperiod, dimensions in sorted(by_period.items()):
+        if "ARQ" in dimensions and "MRQ" in dimensions and dimensions["ARQ"] != dimensions["MRQ"]:
+            contradictions.append({
+                "reportperiod": reportperiod,
+                "arq_fiscalperiods": sorted(dimensions["ARQ"]),
+                "mrq_fiscalperiods": sorted(dimensions["MRQ"]),
+            })
+    return contradictions
+
+
 def build_generic_batch_plan(
     paths: BatchAddTickerPaths,
     request: AdminBatchRequest,
@@ -765,11 +786,14 @@ def build_generic_batch_plan(
             blockers.append("MISSING_CLASSIFICATION")
         if not rows:
             blockers.append("FUNDAMENTAL_SOURCE_ROWS_MISSING")
+        fiscal_contradictions = fiscal_sequence_contradictions(rows)
+        if fiscal_contradictions:
+            blockers.append("CONTRADICTORY_FISCAL_SEQUENCE")
         if canonical["exists"]:
             status = "ALREADY_PRESENT"
             reason = "Ticker is already present in canonical identities."
         elif blockers:
-            status = "REVIEW_REQUIRED" if any("AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "FUNDAMENTAL_SOURCE_ROWS_MISSING"} for blocker in blockers) else "REJECTED"
+            status = "REVIEW_REQUIRED" if any("AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "FUNDAMENTAL_SOURCE_ROWS_MISSING", "CONTRADICTORY_FISCAL_SEQUENCE"} for blocker in blockers) else "REJECTED"
             reason = ",".join(blockers)
         else:
             status = "ELIGIBLE"

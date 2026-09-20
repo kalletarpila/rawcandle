@@ -17,6 +17,7 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     HistoryValidationError,
     audit_publish_date_bootstrap,
     compare_ticker_histories,
+    detect_fiscal_identity_revisions,
     discover_changed_tickers,
     ensure_refresh_state_schema,
     fiscal_identity,
@@ -231,6 +232,57 @@ def histories(old_arq: dict[str, object], new_arq: dict[str, object], *, old_mrq
 def test_comparison_metadata_revision_and_no_change(new_arq: dict[str, object], expected: str) -> None:
     current, source = histories(row(), new_arq)
     assert compare_ticker_histories("TEST", current, source)["classification"] == expected
+
+
+def test_same_key_fiscal_identity_revision_is_explicit_and_fail_closed() -> None:
+    old = row(fiscalperiod="2026-Q1")
+    current, source = histories(old, dict(old, fiscalperiod="2026-Q4", lastupdated="2026-09-15"))
+    revisions = detect_fiscal_identity_revisions("TEST", current, source)
+    assert len(revisions) == 1
+    assert revisions[0]["event"] == "FISCAL_IDENTITY_REVISION"
+    assert revisions[0]["financial_payload_changed"] is False
+    result = compare_ticker_histories("TEST", current, source)
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["review_reason"] == "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION"
+
+
+def test_fiscal_and_financial_revision_are_both_reported() -> None:
+    old = row(fiscalperiod="2026-Q1", revenue=100)
+    current, source = histories(
+        old, dict(old, fiscalperiod="2026-Q4", lastupdated="2026-09-15", revenue=200),
+    )
+    event = compare_ticker_histories("TEST", current, source)["fiscal_identity_revisions"][0]
+    assert event["financial_payload_changed"] is True
+
+
+def test_fiscal_revision_reports_duplicate_target_but_still_reviews_coherent_case() -> None:
+    old = row(fiscalperiod="2026-Q1")
+    target = row(filing_date="2026-05-20", reportperiod="2026-04-30", fiscalperiod="2026-Q4")
+    revised = dict(old, fiscalperiod="2026-Q4", lastupdated="2026-09-15")
+    current, source = histories(old, revised)
+    source["ARQ"] = validate_complete_history([target, revised], ticker="TEST", dimension="ARQ")
+    result = compare_ticker_histories("TEST", current, source)
+    assert result["fiscal_identity_revisions"][0]["target_fiscal_identity_already_exists"] is True
+    assert result["classification"] == "REVIEW_REQUIRED"
+
+
+def test_fiscal_revision_preserves_independent_source_removal_evidence() -> None:
+    revised_old = row(fiscalperiod="2026-Q1")
+    removed_old = row(
+        filing_date="2025-05-20", reportperiod="2025-04-30", fiscalperiod="2025-Q1",
+    )
+    current, source = histories(
+        revised_old, dict(revised_old, fiscalperiod="2026-Q4", lastupdated="2026-09-15"),
+    )
+    current["ARQ"]["rows"] = [removed_old, revised_old]
+    result = compare_ticker_histories("TEST", current, source)
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["fiscal_identity_revisions"]
+    assert result["source_history_action"]["ambiguous_removals"] == 1
+    assert any(
+        event.get("event") == "AMBIGUOUS_SOURCE_REMOVAL"
+        for event in result["source_history_events"]
+    )
 
 
 def test_short_oldest_boundary_removal_fails_closed_but_same_fiscal_replacement_is_removed() -> None:

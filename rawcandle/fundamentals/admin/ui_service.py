@@ -596,6 +596,8 @@ class FundamentalsAdminUIService:
             "retained_mrq": int(counts.get("retained_mrq") or 0),
             "true_source_removals": int(counts.get("true_source_removals") or 0),
             "ambiguous_removals": int(counts.get("ambiguous_removals") or 0),
+            "fiscal_identity_revisions": int(counts.get("fiscal_identity_revisions") or 0),
+            "fiscal_identity_revisions_requiring_review": int(counts.get("fiscal_identity_revisions_requiring_review") or 0),
             "unknown_tickers": int(counts.get("NOT_IN_CANONICAL_UNIVERSE") or 0),
             "run_id": payload.get("run_id"),
             "report": str(Path(str(payload.get("artifact_dir") or "")) / OPERATION_REPORT_NAME),

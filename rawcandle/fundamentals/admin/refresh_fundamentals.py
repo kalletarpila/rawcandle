@@ -86,6 +86,8 @@ AGED_OUT_OF_SOURCE_WINDOW = "AGED_OUT_OF_SOURCE_WINDOW"
 TRUE_SOURCE_REMOVAL = "TRUE_SOURCE_REMOVAL"
 AMBIGUOUS_SOURCE_REMOVAL = "AMBIGUOUS_SOURCE_REMOVAL"
 SOURCE_HISTORY_CHANGE = "SOURCE_HISTORY_CHANGE"
+FISCAL_IDENTITY_REVISION = "FISCAL_IDENTITY_REVISION"
+REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION = "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION"
 RETENTION_CONTRACT_VERSION = "SHARADAR_ROLLING_SOURCE_WINDOW_RETENTION_V2"
 MINIMUM_QUARTER_BOUNDARY_SPAN = MINIMUM_HISTORY_YEARS * 4 + 1
 REFRESH_REPLACEMENT_CLASSES = {
@@ -98,6 +100,7 @@ REFRESH_BINDING_FIELDS = (
     "changed_count", "removed_count", "metadata_only_count",
     "current_generation_fingerprint", "merged_generation_fingerprint",
     "retention_plan_fingerprint", "source_history_action",
+    "fiscal_identity_revisions",
 )
 
 REFRESH_STATE_SCHEMA_SQL = """
@@ -458,12 +461,26 @@ def discover_changed_tickers(
 def resolve_identity(paths: BatchAddTickerPaths, ticker: str) -> dict[str, Any]:
     ticker = ticker.upper()
     with _readonly(paths.canonical_db) as canonical:
-        matches = canonical.execute(
-            "SELECT DISTINCT s.security_id,s.company_id,s.current_ticker "
-            "FROM security s LEFT JOIN ticker_alias a ON a.security_id=s.security_id "
-            "WHERE UPPER(s.current_ticker)=? OR UPPER(a.ticker)=?",
-            (ticker, ticker),
-        ).fetchall()
+        has_active_universe = canonical.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='fundamentals_operational_universe_active_version'"
+        ).fetchone() is not None
+        if has_active_universe:
+            matches = canonical.execute(
+                "SELECT DISTINCT s.security_id,s.company_id,s.current_ticker "
+                "FROM fundamentals_operational_universe_active_version av "
+                "JOIN fundamentals_operational_universe_member m USING(universe_version_id) "
+                "JOIN security s ON s.security_id=m.security_id "
+                "LEFT JOIN ticker_alias a ON a.security_id=s.security_id "
+                "WHERE av.singleton=1 AND (UPPER(s.current_ticker)=? OR UPPER(a.ticker)=?)",
+                (ticker, ticker),
+            ).fetchall()
+        else:
+            matches = canonical.execute(
+                "SELECT DISTINCT s.security_id,s.company_id,s.current_ticker "
+                "FROM security s LEFT JOIN ticker_alias a ON a.security_id=s.security_id "
+                "WHERE UPPER(s.current_ticker)=? OR UPPER(a.ticker)=?",
+                (ticker, ticker),
+            ).fetchall()
         if len(matches) != 1:
             return {
                 "status": "NOT_IN_CANONICAL_UNIVERSE" if not matches else "REVIEW_REQUIRED",
@@ -823,6 +840,47 @@ def _row_maps(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str, str, st
     return {source_key(row): row for row in rows}
 
 
+def detect_fiscal_identity_revisions(
+    ticker: str,
+    current: Mapping[str, Mapping[str, Any]],
+    source: Mapping[str, HistoryTrust],
+) -> list[dict[str, Any]]:
+    revisions: list[dict[str, Any]] = []
+    for dimension in REFRESH_DIMENSIONS:
+        old_map = _row_maps(current[dimension]["rows"])
+        new_map = _row_maps(source[dimension].rows)
+        source_fiscal_keys: dict[tuple[int, str], list[dict[str, str]]] = {}
+        for row in source[dimension].rows:
+            source_fiscal_keys.setdefault(fiscal_identity(row["fiscalperiod"]), []).append(source_key_evidence(row))
+        for key in sorted(old_map.keys() & new_map.keys()):
+            old_row, new_row = old_map[key], new_map[key]
+            old_fiscal = fiscal_identity(old_row["fiscalperiod"])
+            new_fiscal = fiscal_identity(new_row["fiscalperiod"])
+            if old_fiscal == new_fiscal:
+                continue
+            target_keys = source_fiscal_keys.get(new_fiscal, [])
+            revisions.append({
+                "event": FISCAL_IDENTITY_REVISION,
+                "review_status": REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION,
+                "ticker": ticker,
+                "dimension": dimension,
+                "source_identity": source_key_evidence(new_row),
+                "old_fiscal_identity": {"fiscal_year": old_fiscal[0], "fiscal_quarter": old_fiscal[1]},
+                "current_fiscal_identity": {"fiscal_year": new_fiscal[0], "fiscal_quarter": new_fiscal[1]},
+                "old_source_fingerprint": fingerprint(_raw_row(old_row)),
+                "current_source_fingerprint": fingerprint(_raw_row(new_row)),
+                "old_lastupdated": old_row.get("lastupdated"),
+                "current_lastupdated": new_row.get("lastupdated"),
+                "financial_payload_changed": fingerprint({field: old_row.get(field) for field in FINANCIAL_FIELDS})
+                != fingerprint({field: new_row.get(field) for field in FINANCIAL_FIELDS}),
+                "target_fiscal_identity_already_exists": len(target_keys) > 1,
+                "duplicate_target_source_keys": target_keys if len(target_keys) > 1 else [],
+                "canonical_old_identity": {"fiscal_year": old_fiscal[0], "fiscal_quarter": old_fiscal[1]},
+                "canonical_target_identity": {"fiscal_year": new_fiscal[0], "fiscal_quarter": new_fiscal[1]},
+            })
+    return revisions
+
+
 def _latest_fiscal(rows: Iterable[Mapping[str, Any]], dimension: str = "ARQ") -> tuple[int, str] | None:
     identities = [fiscal_identity(row["fiscalperiod"]) for row in rows if row.get("dimension") == dimension]
     return max(identities, key=lambda item: (item[0], int(item[1][1]))) if identities else None
@@ -862,7 +920,24 @@ def compare_ticker_histories(
             },
             "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
         }
+    fiscal_revisions = detect_fiscal_identity_revisions(ticker, current, source)
     merge = build_source_history_merge(ticker, current, source)
+    if fiscal_revisions:
+        return {
+            "ticker": ticker,
+            "classification": "REVIEW_REQUIRED",
+            "review_reason": REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION,
+            "fiscal_identity_revisions": fiscal_revisions,
+            "source_history_action": merge["action"],
+            "source_history_events": [*merge["events"], *fiscal_revisions],
+            "retention_plan_fingerprint": fingerprint({
+                "events": merge["events"],
+                "merged_generation_fingerprint": merge["merged_generation_fingerprint"],
+            }),
+            "source_completeness": {
+                dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS
+            },
+        }
     action = merge["action"]
     if action["ambiguous_removals"]:
         return {
@@ -1297,6 +1372,12 @@ def _summary_counts(changes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
         "ambiguous_removals", "current_source_reappearances",
     ):
         counts[key] = sum(int(action.get(key) or 0) for action in actions)
+    counts["fiscal_identity_revisions"] = sum(
+        len(change.get("fiscal_identity_revisions") or []) for change in changes
+    )
+    counts["fiscal_identity_revisions_requiring_review"] = sum(
+        1 for change in changes if change.get("review_reason") == REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION
+    )
     return dict(counts)
 
 
@@ -1321,6 +1402,8 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         f"- Known tickers with effective changes: `{counts.get('effective_changed_known', 0)}`",
         f"- Unknown tickers: `{counts.get('NOT_IN_CANONICAL_UNIVERSE', 0)}`",
         f"- Review required: `{counts.get('REVIEW_REQUIRED', 0)}`",
+        f"- Fiscal identity revisions: `{counts.get('fiscal_identity_revisions', 0)}`",
+        f"- Fiscal identity revisions requiring review: `{counts.get('fiscal_identity_revisions_requiring_review', 0)}`",
         "",
         "## Discovery",
         "",
@@ -1328,6 +1411,30 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         f"- Query start: `{discovery.get('query_start_date')}`",
         f"- Observed source maximum: `{discovery.get('observed_source_max_lastupdated')}`",
         f"- Schema fingerprint: `{result.get('refresh_preview', {}).get('schema', {}).get('schema_fingerprint')}`",
+        "",
+        "## Fiscal Identity Revisions",
+        "",
+        "| Ticker | Dimension | True source key | Reclassification | Financial revision | Review |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    fiscal_rows = [
+        event
+        for item in result.get("refresh_preview", {}).get("ticker_changes", [])
+        for event in item.get("fiscal_identity_revisions", [])
+    ]
+    lines.extend(
+        "| {ticker} | {dimension} | {date} / {reportperiod} | {old} -> {new} | {financial} | Required |".format(
+            ticker=event["ticker"], dimension=event["dimension"],
+            date=event["source_identity"]["date"], reportperiod=event["source_identity"]["reportperiod"],
+            old=f"{event['old_fiscal_identity']['fiscal_year']} {event['old_fiscal_identity']['fiscal_quarter']}",
+            new=f"{event['current_fiscal_identity']['fiscal_year']} {event['current_fiscal_identity']['fiscal_quarter']}",
+            financial="yes" if event["financial_payload_changed"] else "no",
+        )
+        for event in fiscal_rows
+    )
+    if not fiscal_rows:
+        lines.append("| - | - | - | - | - | None |")
+    lines.extend([
         "",
         "## Source-Window Retention",
         "",
@@ -1344,7 +1451,7 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         "",
         "| Ticker | Missing source rows | Source-history action | Reason | Canonical impact |",
         "| --- | ---: | --- | --- | --- |",
-    ]
+    ])
     for item in result.get("refresh_preview", {}).get("ticker_changes", []):
         action = item.get("source_history_action") or {}
         missing = (
