@@ -75,6 +75,10 @@ class SimulatedPublicationCrash(BaseException):
     """Fault-injection exception that intentionally bypasses ordinary rollback."""
 
 
+class RefreshPostflightValidationError(RuntimeError):
+    """A required Refresh analysis lineage contract is absent or inconsistent."""
+
+
 @contextmanager
 def _durable_heartbeat(writer: AdminRunWriter, stage: str, message: str):
     stop = threading.Event()
@@ -318,12 +322,66 @@ def _replace_role(
     if actual["sha256"] != record["candidate_fingerprint"]:
         raise RuntimeError(f"REFRESH_PUBLISHED_FINGERPRINT_MISMATCH:{role}")
     record["replacement_state"] = "REPLACED_AND_VERIFIED"
+    record["candidate_replacement_verified"] = True
     roles = dict(intended["roles"])
     roles[role] = record
     return update_journal(
         journal_path, intended, roles=roles,
         current_publication_step=f"PUBLISHED_{role.upper()}",
     )
+
+
+def _required_taxonomy_dependency(analysis_result: Mapping[str, Any]) -> dict[str, str]:
+    dependency = analysis_result.get("active_taxonomy")
+    required = ("domain", "version", "semantic_fingerprint")
+    if not isinstance(dependency, Mapping) or any(not str(dependency.get(key) or "") for key in required):
+        raise RefreshPostflightValidationError(
+            "REFRESH_ANALYSIS_TAXONOMY_DEPENDENCY_MISSING_OR_MALFORMED"
+        )
+    normalized = {key: str(dependency[key]) for key in required}
+    if normalized["domain"] != "dc_ecosystem":
+        raise RefreshPostflightValidationError(
+            "REFRESH_ANALYSIS_TAXONOMY_DEPENDENCY_WRONG_DOMAIN"
+        )
+    return normalized
+
+
+def _validate_analysis_generation(
+    analysis_path: Path, *, analysis_result: Mapping[str, Any], as_of_date: str,
+    sources: Mapping[str, Path],
+) -> dict[str, Any]:
+    dependency = _required_taxonomy_dependency(analysis_result)
+    try:
+        validation = validate_rebuild(
+            analysis_path, as_of_date=as_of_date,
+            taxonomy_dependency=dependency, sources=sources,
+        )
+    except KeyError as exc:
+        raise RefreshPostflightValidationError(
+            "REFRESH_ANALYSIS_TAXONOMY_DEPENDENCY_MALFORMED"
+        ) from exc
+    except RuntimeError as exc:
+        if "TAXONOMY" in str(exc):
+            raise RefreshPostflightValidationError(
+                f"REFRESH_ANALYSIS_TAXONOMY_DEPENDENCY_MISMATCH:{exc}"
+            ) from exc
+        raise
+    return {"taxonomy_dependency": dependency, "validation": validation}
+
+
+def _publication_activity(journal: Mapping[str, Any] | None) -> dict[str, list[str]]:
+    roles = (journal or {}).get("roles") or {}
+    replaced = [
+        role for role in PUBLICATION_ROLES
+        if isinstance(roles.get(role), Mapping)
+        and roles[role].get("candidate_replacement_verified") is True
+    ]
+    restored = [
+        role for role in PUBLICATION_ROLES
+        if isinstance(roles.get(role), Mapping)
+        and roles[role].get("rollback_restoration_verified") is True
+    ]
+    return {"live_replacements": replaced, "rollback_restorations": restored}
 
 
 def _postflight(
@@ -362,8 +420,12 @@ def _postflight(
         "provider": paths.provider_db, "canonical": paths.canonical_db,
         "market": paths.market_db, "taxonomy": paths.taxonomy_db,
     }
-    taxonomy = analysis_result["taxonomy_dependency"]
-    analysis = validate_rebuild(paths.analysis_db, as_of_date=as_of_date, taxonomy_dependency=taxonomy, sources=sources)
+    analysis_lineage = _validate_analysis_generation(
+        paths.analysis_db, analysis_result=analysis_result,
+        as_of_date=as_of_date, sources=sources,
+    )
+    taxonomy = analysis_lineage["taxonomy_dependency"]
+    analysis = analysis_lineage["validation"]
     fingerprints = {}
     for role in PUBLICATION_ROLES:
         actual = sha256_file(paths.as_dict()[role])
@@ -411,14 +473,18 @@ def render_report(result: Mapping[str, Any]) -> str:
     provider_candidate_count = provider.get("ticker_count", 0)
     provider_published_count = provider_candidate_count if published else 0
     canonical_heading = "Canonical Publication" if published else "Canonical Candidate Impact"
+    activity = result.get("publication_activity") or _publication_activity(result.get("journal"))
+    live_replacements = list(activity.get("live_replacements") or [])
+    rollback_restorations = list(activity.get("rollback_restorations") or [])
     lines = [
         "# Refresh Fundamentals Production Update", "", "## Executive Summary", "",
         "- Operation: Refresh Fundamentals", "- Stage: Production update",
         f"- Production result: {result.get('outcome', 'FAILED')}",
         f"- Duration: {result.get('duration_seconds', 0):.1f} seconds",
         f"- Publication boundary entered: {'YES' if boundary_crossed else 'NO'}",
-        f"- Production DB writes: {result.get('production_writes', 3 if published else 0)}",
-        f"- Production generation changed: {'YES' if published else 'NO'}",
+        f"- Live database replacements before completion/failure: {len(live_replacements)} ({', '.join(live_replacements) or 'none'})",
+        f"- Rollback restorations: {len(rollback_restorations)} ({', '.join(rollback_restorations) or 'none'})",
+        f"- Net published generation changed: {'YES' if published else 'NO'}",
         f"- Rollback required: {'YES' if (result.get('rollback') or {}).get('status') not in (None, 'NOT_REQUIRED') else 'NO'}",
         f"- Changed known tickers: {result.get('summary_counts', {}).get('effective_changed_known', 0)}",
         f"- Provider candidate replacements: {provider_candidate_count}",
@@ -697,7 +763,16 @@ def run_production_apply(
         validate_provider_candidate(provider_candidate, histories, merge_plans=merge_plans)
         if _identity_mapping(canonical_candidate) != canonical_result["identity_contract"]["after"]:
             raise RuntimeError("REFRESH_CANONICAL_IDENTITY_VALIDATION_FAILED")
+        candidate_sources = {
+            "provider": provider_candidate, "canonical": canonical_candidate,
+            "market": read_only_copies["market"], "taxonomy": read_only_copies["taxonomy"],
+        }
+        candidate_analysis_lineage = _validate_analysis_generation(
+            analysis_candidate, analysis_result=analysis_result,
+            as_of_date=as_of_date or date.today().isoformat(), sources=candidate_sources,
+        )
         result["candidate_validation"] = candidate_checks
+        result["candidate_analysis_lineage"] = candidate_analysis_lineage
         progress(stage, "COMPLETED", "Provider, canonical, and analysis candidates all passed validation.")
 
         stage = "FINAL_SOURCE_RECHECK"
@@ -842,7 +917,8 @@ def run_production_apply(
             result["production_file_state_unchanged"] = (
                 result["production_file_state_before"] == result["production_file_state_after"]
             )
-        result["production_writes"] = 3 if result.get("outcome") == "COMPLETED" else 0
+        result["publication_activity"] = _publication_activity(journal)
+        result["production_writes"] = len(result["publication_activity"]["live_replacements"])
         result["production_generation_changed"] = result.get("outcome") == "COMPLETED"
         completed = utc_now()
         result["completed_at_utc"] = completed

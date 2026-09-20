@@ -270,6 +270,7 @@ def restore_old_generation(
             restored[role] = verification
             role_record = dict(record)
             role_record["replacement_state"] = "OLD_GENERATION_RESTORED"
+            role_record["rollback_restoration_verified"] = True
             roles = dict(current["roles"])
             roles[role] = role_record
             current = update_journal(

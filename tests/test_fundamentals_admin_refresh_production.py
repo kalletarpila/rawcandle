@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from rawcandle.fundamentals.admin import full_v2_downstream, refresh_copy_runtime, refresh_production
 from rawcandle.fundamentals.admin.publication_journal import (
     PUBLICATION_ROLES,
     PublicationRecoveryError,
@@ -20,10 +21,18 @@ from rawcandle.fundamentals.admin.publication_journal import (
     sqlite_verification,
     update_journal,
 )
-from rawcandle.fundamentals.admin.refresh_fundamentals import CONTRACT_VERSION
+from rawcandle.fundamentals.admin.refresh_fundamentals import (
+    CONTRACT_VERSION,
+    FINANCIAL_FIELDS,
+    validate_complete_history,
+)
 from rawcandle.fundamentals.admin.refresh_production import (
+    RefreshPostflightValidationError,
     SimulatedPublicationCrash,
+    _required_taxonomy_dependency,
+    _validate_analysis_generation,
     _publish_refresh_state,
+    _postflight,
     _replace_role,
     load_production_authorization,
     render_report,
@@ -33,6 +42,11 @@ from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.contracts import AdminOperationType
 from rawcandle.fundamentals.admin.production_transaction import ProductionOperation, run_transaction
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+from rawcandle.fundamentals.schema.migrations import (
+    CANONICAL_SCHEMA_SQL,
+    PROVIDER_SCHEMA_SQL,
+    bootstrap_database,
+)
 
 
 def _database(path: Path, generation: str) -> None:
@@ -601,6 +615,10 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
         "rawcandle.fundamentals.admin.refresh_production.validate_provider_candidate",
         lambda *_args, **_kwargs: {"quick_check": "ok"},
     )
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.validate_rebuild",
+        lambda *_args, **_kwargs: {"status": "VALIDATED"},
+    )
 
     def rebuild_analysis(_sources, *, output, **_kwargs):
         output.mkdir(parents=True)
@@ -609,7 +627,7 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
         return {
             "candidate_analysis_db": str(candidate), "status": "READY",
             "invocation_counts": {"full_v2_rebuild": 1},
-            "taxonomy_dependency": {"domain": "dc_ecosystem", "version": "v", "semantic_fingerprint": "t"},
+            "active_taxonomy": {"domain": "dc_ecosystem", "version": "v", "semantic_fingerprint": "t"},
         }
 
     monkeypatch.setattr("rawcandle.fundamentals.admin.refresh_production.run_full_v2_downstream", rebuild_analysis)
@@ -652,6 +670,8 @@ def test_production_shaped_rehearsal_commits_only_after_postflight(
     assert all(_generation(Path(record["backup"])) == "old" for record in result["backups"].values())
     assert not (tmp_path / "temp" / result["run_id"]).exists()
     assert not any((tmp_path / "temp").rglob("*.db"))
+    assert result["publication_activity"]["live_replacements"] == list(PUBLICATION_ROLES)
+    assert result["publication_activity"]["rollback_restorations"] == []
 
 
 def test_production_analysis_candidate_uses_isolated_market_and_taxonomy_copies(
@@ -669,7 +689,7 @@ def test_production_analysis_candidate_uses_isolated_market_and_taxonomy_copies(
         return {
             "candidate_analysis_db": str(candidate), "status": "READY",
             "invocation_counts": {"full_v2_rebuild": 1},
-            "taxonomy_dependency": {"domain": "dc_ecosystem", "version": "v", "semantic_fingerprint": "t"},
+            "active_taxonomy": {"domain": "dc_ecosystem", "version": "v", "semantic_fingerprint": "t"},
         }
 
     monkeypatch.setattr(
@@ -712,6 +732,177 @@ def test_postflight_failure_rolls_back_complete_three_database_set(
     assert result["journal"]["state"] == "ROLLED_BACK"
     assert [_generation(paths.as_dict()[role]) for role in PUBLICATION_ROLES] == ["old"] * 3
     assert not any((tmp_path / "temp").rglob("*.db"))
+    assert result["publication_activity"]["live_replacements"] == list(PUBLICATION_ROLES)
+    assert result["publication_activity"]["rollback_restorations"] == list(PUBLICATION_ROLES)
+
+
+def test_missing_taxonomy_dependency_is_rejected_before_backup_or_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+
+    def malformed_rebuild(_sources, *, output, **_kwargs):
+        output.mkdir(parents=True)
+        candidate = output / "analysis_candidate.db"
+        _database(candidate, "new")
+        return {
+            "candidate_analysis_db": str(candidate), "status": "READY",
+            "invocation_counts": {"full_v2_rebuild": 1},
+        }
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.run_full_v2_downstream",
+        malformed_rebuild,
+    )
+    journal_path = tmp_path / "journal.json"
+    result = run_production_apply(
+        preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+        backup_root=tmp_path / "backups", journal_path=journal_path,
+        confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+    )
+    assert result["outcome"] == "FAILED"
+    assert result["failed_stage"] == "CANDIDATE_VALIDATION"
+    assert "REFRESH_ANALYSIS_TAXONOMY_DEPENDENCY_MISSING_OR_MALFORMED" in result["error"]
+    assert "KeyError" not in result["error"]
+    assert result["write_boundary_crossed"] is False
+    assert "backups" not in result
+    assert not journal_path.exists()
+    assert result["publication_activity"]["live_replacements"] == []
+
+
+def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    paths.provider_db.unlink()
+    paths.canonical_db.unlink()
+    bootstrap_database(paths.provider_db, "fundamentals_provider", PROVIDER_SCHEMA_SQL, "2026-09-20T00:00:00Z")
+    bootstrap_database(paths.canonical_db, "fundamentals_v4", CANONICAL_SCHEMA_SQL, "2026-09-20T00:00:00Z")
+    with sqlite3.connect(paths.provider_db) as connection:
+        connection.execute("CREATE TABLE generation(value TEXT NOT NULL)")
+        connection.execute("INSERT INTO generation VALUES('old')")
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute("CREATE TABLE generation(value TEXT NOT NULL)")
+        connection.execute("INSERT INTO generation VALUES('old')")
+        connection.execute(
+            "INSERT INTO company VALUES(1,'TEST','Test Corp','ACTIVE','2026-09-20T00:00:00Z','2026-09-20T00:00:00Z')"
+        )
+        connection.execute(
+            "INSERT INTO security VALUES(1,1,'TEST','NASDAQ',1,NULL,NULL,'2026-09-20T00:00:00Z','2026-09-20T00:00:00Z')"
+        )
+        connection.execute("INSERT INTO ticker_alias VALUES(1,1,'TEST','SHARADAR',NULL,NULL,'fixture')")
+        connection.execute(
+            "INSERT INTO provider_security_identity VALUES('SHARADAR','100',1,'TEST','fixture','2026-09-20T00:00:00Z')"
+        )
+        connection.execute(
+            "INSERT INTO provider_company_identity VALUES("
+            "'SHARADAR','PERMATICKER','100',1,'TEST','fixture','fixture','100','2026-09-20T00:00:00Z')"
+        )
+        connection.execute(
+            "INSERT INTO v4_quarter VALUES(1,1,2026,'Q2','2026-06-30','2026-Q2','2026-06-30',"
+            "'SHARADAR_ARQ','ACCEPTED','2026-08-15','2026-08-15','2026-09-20T00:00:00Z','2026-09-20T00:00:00Z')"
+        )
+        connection.execute(
+            "INSERT INTO v4_quarter_financials(quarter_id,revenue,net_income,shares_outstanding,"
+            "canonical_source_policy,created_at_utc,updated_at_utc) "
+            "VALUES(1,100,10,5,'SHARADAR_ARQ_PRIMARY','2026-09-20T00:00:00Z','2026-09-20T00:00:00Z')"
+        )
+
+    actual_postflight = refresh_production._postflight
+    _install_rehearsal_doubles(monkeypatch, paths)
+    dependency = {
+        "domain": "dc_ecosystem", "version": "DC_FIXTURE_V1",
+        "semantic_fingerprint": "fixture-semantic",
+    }
+    source_base = {
+        "ticker": "TEST", "date": "2026-08-15", "reportperiod": "2026-06-30",
+        "calendardate": "2026-06-30", "fiscalperiod": "2026-Q2",
+        "lastupdated": "2026-09-20", **{field: None for field in FINANCIAL_FIELDS},
+        "revenue": 120, "netinc": 10, "sharesbas": 5,
+    }
+    histories = {
+        "TEST": {
+            dimension: validate_complete_history(
+                [dict(source_base, dimension=dimension)], ticker="TEST", dimension=dimension,
+            )
+            for dimension in ("ARQ", "MRQ")
+        }
+    }
+    merge_plan = {
+        "action": {},
+        "dimensions": {
+            dimension: {"merged_rows": list(histories["TEST"][dimension].rows), "true_removed_keys": []}
+            for dimension in ("ARQ", "MRQ")
+        },
+    }
+    revalidated = {
+        "state": {"mode": "BOOTSTRAP_BASELINE", "published_watermark": None},
+        "schema": {"schema_fingerprint": "schema"},
+        "discovery": {"observed_source_max_lastupdated": "2026-09-20"},
+        "ticker_changes": [{
+            "ticker": "TEST", "classification": "HISTORICAL_REVISION",
+            "identity": {"company_id": 1, "security_id": 1, "provider_security_id": "100"},
+        }],
+        "histories": histories, "merge_plans": {"TEST": merge_plan},
+        "refresh_set_fingerprint": fingerprint,
+    }
+    validation_calls: list[dict[str, object]] = []
+
+    def raw_full_rebuild(target, _sources, **_kwargs):
+        _database(target, "new")
+        return {
+            "status": "READY", "package": {"outcome": "APPLIED"},
+            "validation": {"rp_snapshot_id": "rp-fixture"},
+            "rv": {"outcome": "APPLIED"}, "fingerprints": {"package": "fixture"},
+            "taxonomy_dependency": dependency,
+        }
+
+    def validate_analysis(path, **kwargs):
+        validation_calls.append({"path": Path(path), **kwargs})
+        assert kwargs["taxonomy_dependency"] == dependency
+        return {"status": "VALIDATED", "taxonomy_dependency": dict(kwargs["taxonomy_dependency"])}
+
+    monkeypatch.setattr(refresh_production, "revalidate_bound_source", lambda *_args, **_kwargs: revalidated)
+    monkeypatch.setattr(refresh_production, "replace_provider_histories", refresh_copy_runtime.replace_provider_histories)
+    monkeypatch.setattr(refresh_production, "validate_provider_candidate", refresh_copy_runtime.validate_provider_candidate)
+    monkeypatch.setattr(refresh_production, "fresh_rebuild_canonical", refresh_copy_runtime.fresh_rebuild_canonical)
+    monkeypatch.setattr(refresh_production, "_identity_mapping", refresh_copy_runtime._identity_mapping)
+    monkeypatch.setattr(refresh_production, "_publish_refresh_state", _publish_refresh_state)
+    monkeypatch.setattr(refresh_copy_runtime, "_events", lambda: ())
+    monkeypatch.setattr(full_v2_downstream, "rebuild_v2_analysis", raw_full_rebuild)
+    monkeypatch.setattr(refresh_production, "run_full_v2_downstream", full_v2_downstream.run_full_v2_downstream)
+    monkeypatch.setattr(refresh_production, "_postflight", actual_postflight)
+    monkeypatch.setattr(refresh_production, "validate_rebuild", validate_analysis)
+    monkeypatch.setattr(refresh_production, "_provider_semantic_fingerprint", lambda *_args: "provider-semantic")
+
+    result = run_production_apply(
+        preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+        backup_root=tmp_path / "backups", journal_path=tmp_path / "journal.json",
+        confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(), as_of_date="2026-09-20",
+    )
+    assert result["outcome"] == "COMPLETED"
+    assert result["analysis_candidate"]["active_taxonomy"] == dependency
+    assert result["candidate_analysis_lineage"]["taxonomy_dependency"] == dependency
+    assert result["postflight"]["cross_role_lineage"]["taxonomy_dependency"] == dependency
+    assert result["provider_candidate"]["ticker_count"] == 1
+    assert result["canonical_candidate"]["identity_contract"]["company_security_identity_mapping_unchanged"] is True
+    assert [call["path"] for call in validation_calls] == [
+        Path(result["analysis_candidate"]["candidate_analysis_db"]), paths.analysis_db,
+    ]
+    assert result["journal"]["state"] == "COMPLETED"
+    assert result["refresh_state"]["published_source_watermark"] == "2026-09-20"
+    with sqlite3.connect(paths.provider_db) as connection:
+        assert connection.execute(
+            "SELECT revenue FROM sharadar_fundamental_observation WHERE dimension='ARQ'"
+        ).fetchone()[0] == 120
+    with sqlite3.connect(paths.canonical_db) as connection:
+        assert connection.execute("SELECT revenue FROM v4_quarter_financials").fetchone()[0] == 120
+    assert _generation(paths.analysis_db) == "new"
 
 
 @pytest.mark.parametrize(
@@ -910,6 +1101,14 @@ def test_ordinary_failures_roll_back_complete_generation(
     assert result["journal"]["state"] == "ROLLED_BACK"
     assert [_generation(paths.as_dict()[role]) for role in PUBLICATION_ROLES] == ["old"] * 3
     assert not any((tmp_path / "temp").rglob("*.db"))
+    replaced_count = {
+        "AFTER_PROVIDER_REPLACEMENT": 1,
+        "AFTER_CANONICAL_REPLACEMENT": 2,
+        "AFTER_ANALYSIS_REPLACEMENT": 3,
+        "POSTFLIGHT": 3,
+    }[failure_point]
+    assert result["publication_activity"]["live_replacements"] == list(PUBLICATION_ROLES[:replaced_count])
+    assert result["publication_activity"]["rollback_restorations"] == list(PUBLICATION_ROLES)
 
 
 def test_production_report_separates_financial_and_first_public_changes() -> None:
@@ -939,11 +1138,16 @@ def test_production_report_separates_financial_and_first_public_changes() -> Non
         "backups": {role: {} for role in PUBLICATION_ROLES},
         "journal": {"state": "COMPLETED"}, "postflight": {"status": "PASSED"},
         "rollback": {"status": "NOT_REQUIRED"},
+        "publication_activity": {
+            "live_replacements": list(PUBLICATION_ROLES), "rollback_restorations": [],
+        },
     })
     assert "Canonical published source-driven added/changed/removed: 1 / 2 / 3" in report
     assert "Provider published replacements: 1" in report
     assert "## Canonical Publication" in report
     assert "Published watermark after: 2026-09-20" in report
+    assert "Live database replacements before completion/failure: 3 (provider, canonical, analysis)" in report
+    assert "Rollback restorations: 0 (none)" in report
     assert "First-public bootstrap-only changes: 5" in report
     assert "first_public_result_date preservation map applied: 6/6" in report
     assert "first_public_result_date repair_required: 0" in report
@@ -964,11 +1168,13 @@ def test_prepublication_failure_report_uses_candidate_not_published_semantics() 
         },
         "ticker_changes": [{"ticker": "TEST", "classification": "HISTORICAL_REVISION", "identity": {"company_id": 1}}],
         "cleanup": {"status": "COMPLETED"},
+        "publication_activity": {"live_replacements": [], "rollback_restorations": []},
     })
     assert "Production result: FAILED" in report
     assert "Publication boundary entered: NO" in report
-    assert "Production DB writes: 0" in report
-    assert "Production generation changed: NO" in report
+    assert "Live database replacements before completion/failure: 0 (none)" in report
+    assert "Rollback restorations: 0 (none)" in report
+    assert "Net published generation changed: NO" in report
     assert "Provider candidate replacements: 1" in report
     assert "Provider published replacements: 0" in report
     assert "## Canonical Candidate Impact" in report
@@ -977,3 +1183,131 @@ def test_prepublication_failure_report_uses_candidate_not_published_semantics() 
     assert "Full V2/RP/RV: NOT_RUN" in report
     assert "Candidate prepared; not published" in report
     assert "| Refreshed |" not in report
+
+
+def test_required_taxonomy_dependency_uses_admin_wrapper_active_taxonomy() -> None:
+    dependency = _required_taxonomy_dependency({
+        "active_taxonomy": {
+            "domain": "dc_ecosystem", "version": "DC_V2", "semantic_fingerprint": "semantic",
+        }
+    })
+    assert dependency == {
+        "domain": "dc_ecosystem", "version": "DC_V2", "semantic_fingerprint": "semantic",
+    }
+
+
+def test_postflight_accepts_full_v2_admin_active_taxonomy_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / "provider.db"
+    canonical = tmp_path / "canonical.db"
+    analysis = tmp_path / "analysis.db"
+    market = tmp_path / "market.db"
+    taxonomy = tmp_path / "taxonomy.db"
+    for path in (analysis, market, taxonomy):
+        _database(path, "new")
+    with sqlite3.connect(provider) as connection:
+        connection.execute(
+            "CREATE TABLE sharadar_refresh_state("
+            "singleton_id INTEGER,published_source_watermark TEXT,provider_semantic_fingerprint TEXT,"
+            "source_schema_fingerprint TEXT,successful_run_id TEXT,completed_at_utc TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO sharadar_refresh_state VALUES(1,'2026-09-20','provider','schema','run','completed')"
+        )
+    with sqlite3.connect(canonical) as connection:
+        connection.execute(
+            "CREATE TABLE v4_quarter(company_id INTEGER,fiscal_year INTEGER,fiscal_quarter TEXT,"
+            "first_public_result_date TEXT)"
+        )
+        connection.execute("INSERT INTO v4_quarter VALUES(1,2026,'Q1','2026-05-01')")
+    paths = BatchAddTickerPaths(provider, canonical, analysis, market, taxonomy)
+    dependency = {"domain": "dc_ecosystem", "version": "DC_V2", "semantic_fingerprint": "semantic"}
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.validate_provider_candidate",
+        lambda *_args, **_kwargs: {"status": "VALID"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production._identity_mapping",
+        lambda *_args: {"fingerprint": "identity"},
+    )
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.validate_rebuild",
+        lambda *_args, **kwargs: {"taxonomy_dependency": kwargs["taxonomy_dependency"]},
+    )
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production._provider_semantic_fingerprint",
+        lambda *_args: "provider",
+    )
+    expected = {
+        role: {"candidate_fingerprint": sha256_file(paths.as_dict()[role])}
+        for role in PUBLICATION_ROLES
+    }
+    result = _postflight(
+        paths=paths, histories={}, merge_plans={},
+        canonical_result={
+            "identity_contract": {"after": {"fingerprint": "identity"}},
+            "publication_date_bootstrap": {
+                "repair_required": 0, "preservation_map_applied": 1,
+                "preservation_map_applicable_existing_quarters": 1,
+            },
+        },
+        analysis_result={"status": "READY", "active_taxonomy": dependency},
+        expected_roles=expected,
+        refresh_state={
+            "published_source_watermark": "2026-09-20",
+            "provider_semantic_fingerprint": "provider", "source_schema_fingerprint": "schema",
+            "successful_run_id": "run", "completed_at_utc": "completed",
+        },
+        as_of_date="2026-09-20",
+    )
+    assert result["cross_role_lineage"]["taxonomy_dependency"] == dependency
+
+
+def test_missing_taxonomy_dependency_fails_with_controlled_error() -> None:
+    with pytest.raises(
+        RefreshPostflightValidationError,
+        match="REFRESH_ANALYSIS_TAXONOMY_DEPENDENCY_MISSING_OR_MALFORMED",
+    ):
+        _required_taxonomy_dependency({"status": "READY"})
+
+
+def test_mismatched_taxonomy_dependency_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.validate_rebuild",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("V2_REBUILD_TAXONOMY_MISMATCH")),
+    )
+    with pytest.raises(
+        RefreshPostflightValidationError,
+        match="REFRESH_ANALYSIS_TAXONOMY_DEPENDENCY_MISMATCH",
+    ):
+        _validate_analysis_generation(
+            tmp_path / "analysis.db",
+            analysis_result={"active_taxonomy": {
+                "domain": "dc_ecosystem", "version": "DC_V2", "semantic_fingerprint": "wrong",
+            }},
+            as_of_date="2026-09-20",
+            sources={role: tmp_path / f"{role}.db" for role in ("provider", "canonical", "market", "taxonomy")},
+        )
+
+
+def test_rolled_back_report_shows_replacements_restorations_and_no_net_publication() -> None:
+    report = render_report({
+        "outcome": "FAILED_ROLLED_BACK", "write_boundary_crossed": True,
+        "old_refresh_state": {"mode": "BOOTSTRAP_BASELINE", "published_watermark": None},
+        "refresh_state": {"mode": "ESTABLISHED_PUBLISHED_STATE", "published_source_watermark": "2026-09-20"},
+        "provider_candidate": {"ticker_count": 1}, "canonical_candidate": {},
+        "publication_activity": {
+            "live_replacements": ["provider", "canonical", "analysis"],
+            "rollback_restorations": ["provider", "canonical", "analysis"],
+        },
+        "rollback": {"status": "ROLLED_BACK"},
+    })
+    assert "Publication boundary entered: YES" in report
+    assert "Live database replacements before completion/failure: 3 (provider, canonical, analysis)" in report
+    assert "Rollback restorations: 3 (provider, canonical, analysis)" in report
+    assert "Net published generation changed: NO" in report
+    assert "Published watermark after: NONE" in report
+    assert "Production DB writes: 0" not in report
