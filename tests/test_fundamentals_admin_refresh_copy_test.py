@@ -15,6 +15,7 @@ from rawcandle.fundamentals.admin.refresh_copy_runtime import (
     replace_provider_histories,
     revalidate_bound_source,
     run_apply,
+    validate_provider_candidate,
 )
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.first_public_result_date_bootstrap import _apply_bootstrap
@@ -208,6 +209,15 @@ def test_retention_merge_persists_provenance_rebuilds_canonical_and_stabilizes(
         provider, histories, identity, applied_at=NOW, merge_plans={"TEST": plan},
     )
     assert replacement["verification"]["histories"][0]["retained_only_key_count"] == 1
+    validation = replacement["verification"]["retention_validation"]
+    assert validation["expected_retained_total"] == 2
+    assert validation["actual_retained_total"] == 2
+    assert validation["retained_arq"] == 1
+    assert validation["retained_mrq"] == 1
+    assert validation["retained_provenance_valid"] == 2
+    assert validation["retained_payload_mismatch_count"] == 0
+    assert validation["retained_duplicate_count"] == 0
+    assert validation["current_source_marked_retained_count"] == 0
     retained = load_current_history(provider, "TEST", "ARQ")["rows"][0]
     assert retained["_history_retention_status"] == RETAINED_OUTSIDE_SOURCE_WINDOW
     assert retained["revenue"] == 100
@@ -334,6 +344,50 @@ def test_true_interior_removal_deletes_key_but_preserves_alternate_canonical_qua
             "SELECT q.first_public_result_date,f.revenue FROM v4_quarter q "
             "JOIN v4_quarter_financials f USING(quarter_id) WHERE q.fiscal_year=2022 AND q.fiscal_quarter='Q2'"
         ).fetchone() == ("2022-10-13", 150)
+
+
+def test_retained_provider_provenance_is_a_fail_closed_candidate_gate(tmp_path: Path) -> None:
+    provider = tmp_path / "provider.db"
+    create_provider(provider)
+    old = source_row(
+        date="2016-08-15", reportperiod="2016-06-30", fiscalperiod="2016-Q2",
+        lastupdated="2026-05-20", revenue=100,
+    )
+    latest = source_row(
+        date="2026-08-15", reportperiod="2026-06-30", fiscalperiod="2026-Q2",
+        lastupdated="2026-09-20", revenue=200,
+    )
+    with sqlite3.connect(provider) as connection:
+        for observation_id, value in (
+            ("old-arq", old), ("new-arq", latest),
+            ("old-mrq", dict(old, dimension="MRQ", date="2016-06-30")),
+            ("new-mrq", dict(latest, dimension="MRQ", date="2026-06-30")),
+        ):
+            _insert_legacy_version(connection, value, observation_id)
+    current = {dimension: load_current_history(provider, "TEST", dimension) for dimension in ("ARQ", "MRQ")}
+    histories = {
+        "TEST": {
+            "ARQ": validate_complete_history([latest], ticker="TEST", dimension="ARQ"),
+            "MRQ": validate_complete_history(
+                [dict(latest, dimension="MRQ", date="2026-06-30")], ticker="TEST", dimension="MRQ",
+            ),
+        }
+    }
+    plan = build_source_history_merge("TEST", current, histories["TEST"])
+    replace_provider_histories(
+        provider, histories,
+        {"TEST": {"company_id": 1, "security_id": 1, "provider_security_id": "100"}},
+        applied_at=NOW, merge_plans={"TEST": plan},
+    )
+    with sqlite3.connect(provider) as connection:
+        connection.execute(
+            "UPDATE provider_observation SET provenance_json=? "
+            "WHERE observation_id IN (SELECT observation_id FROM sharadar_fundamental_observation "
+            "WHERE ticker='TEST' AND reportperiod='2016-06-30')",
+            (json.dumps({"history_retention_status": RETAINED_OUTSIDE_SOURCE_WINDOW}),),
+        )
+    with pytest.raises(RuntimeError, match="REFRESH_RETAINED_PROVENANCE_INVALID"):
+        validate_provider_candidate(provider, histories, merge_plans={"TEST": plan})
 
 
 def test_source_availability_may_change_but_established_first_public_must_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -625,3 +679,52 @@ def test_report_contains_explicit_identity_and_publish_date_invariants() -> None
     })
     assert "company/security identity mapping before candidate rebuild == after candidate rebuild`: true" in report
     assert "first_public_result_date preservation map applied: 10/10 existing quarters" in report
+
+
+def test_report_uses_exact_canonical_deltas_and_renders_retention_validation() -> None:
+    changes = []
+    company_impact = {}
+    expected = {
+        "BNC": (1, 2, 1), "NAMS": (0, 1, 0), "BNED": (0, 0, 0),
+        "AI": (1, 0, 0), "GOSS": (0, 32, 0), "LOVE": (1, 2, 0),
+    }
+    for company_id, (ticker, canonical) in enumerate(expected.items(), start=1):
+        changes.append({
+            "ticker": ticker, "classification": "HISTORICAL_REVISION",
+            "identity": {"company_id": company_id},
+            "current_counts": {"ARQ": 10}, "source_counts": {"ARQ": 11},
+            "added_count": 9, "changed_count": 8, "removed_count": 7,
+        })
+        company_impact[company_id] = {
+            "quarters_added": canonical[0], "quarters_changed": canonical[1],
+            "quarters_removed": canonical[2],
+        }
+    report = refresh_copy_runtime._render_report({
+        "run_id": "test", "bound_preview_run_id": "preview", "preview_fingerprint": "fingerprint",
+        "summary_counts": {"effective_changed_known": len(changes)},
+        "downstream": {
+            "provider": {"ticker_count": len(changes), "tickers": []},
+            "canonical": {
+                "company_impact": company_impact,
+                "identity_contract": {"company_security_identity_mapping_unchanged": True},
+                "publication_date_bootstrap": {
+                    "preservation_map_applied": 88_834,
+                    "preservation_map_applicable_existing_quarters": 88_834,
+                },
+            },
+            "analysis": {"status": "READY"}, "ticker_changes": changes,
+            "test_evidence": {"summary": {
+                "expected_retained_total": 98, "actual_retained_total": 98,
+                "retained_arq": 48, "retained_mrq": 50,
+                "retained_provenance_valid": 98, "true_removal_expected": 5,
+                "true_removal_absent": 5, "ambiguous_removal_count": 0,
+            }},
+        },
+    })
+    for ticker, canonical in expected.items():
+        assert f"| {ticker} |" in report
+        assert f"+{canonical[0]} / {canonical[1]} / -{canonical[2]}" in report
+    assert "+9 / ~8 / -7" not in report
+    assert "## Source-Window Retention Validation" in report
+    assert "Correct retained provenance: 98/98" in report
+    assert "True source removals absent from candidate: 5/5" in report

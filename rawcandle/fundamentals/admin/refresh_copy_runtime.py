@@ -261,6 +261,13 @@ def validate_provider_candidate(
     merge_plans: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     evidence = []
+    retained_rows: list[dict[str, Any]] = []
+    true_removal_rows: list[dict[str, Any]] = []
+    retained_payload_mismatch_count = 0
+    retained_provenance_valid = 0
+    retained_duplicate_count = 0
+    current_source_marked_retained_count = 0
+    true_removal_absent = 0
     for ticker in sorted(histories):
         for dimension in REFRESH_DIMENSIONS:
             actual = load_current_history(path, ticker, dimension)
@@ -296,7 +303,12 @@ def validate_provider_candidate(
             }
             if actual_retained != retained_keys:
                 raise RuntimeError(f"REFRESH_PROVIDER_RETENTION_STATE_MISMATCH:{ticker}:{dimension}")
-            if any(actual_map[key].get("_history_retention_status") for key in source_keys):
+            marked_source_keys = {
+                key for key in source_keys
+                if actual_map[key].get("_history_retention_status")
+            }
+            current_source_marked_retained_count += len(marked_source_keys)
+            if marked_source_keys:
                 raise RuntimeError(f"REFRESH_CURRENT_SOURCE_MARKED_RETAINED:{ticker}:{dimension}")
             true_removed = {
                 tuple(item[field] for field in ("ticker", "dimension", "date", "reportperiod"))
@@ -304,6 +316,41 @@ def validate_provider_candidate(
             }
             if true_removed & set(actual_map):
                 raise RuntimeError(f"REFRESH_TRUE_REMOVAL_RETAINED:{ticker}:{dimension}")
+            true_removal_absent += len(true_removed - set(actual_map))
+            true_removal_rows.extend({
+                "ticker": key[0], "dimension": key[1], "date": key[2],
+                "reportperiod": key[3], "absent_from_candidate": key not in actual_map,
+            } for key in sorted(true_removed))
+            expected_map = {source_key(row): row for row in expected_rows}
+            duplicate_count = max(0, actual["physical_row_count"] - actual["current_row_count"])
+            retained_duplicate_count += duplicate_count
+            if duplicate_count:
+                raise RuntimeError(f"REFRESH_PROVIDER_CANDIDATE_DUPLICATE_KEYS:{ticker}:{dimension}")
+            for key in sorted(retained_keys):
+                actual_row = actual_map[key]
+                expected_row = expected_map[key]
+                payload_matches = fingerprint(_raw_row(actual_row)) == fingerprint(_raw_row(expected_row))
+                provenance_valid = (
+                    actual_row.get("_history_retention_status") == RETAINED_OUTSIDE_SOURCE_WINDOW
+                    and actual_row.get("_history_retention_evidence")
+                    == expected_row.get("_history_retention_evidence")
+                )
+                retained_payload_mismatch_count += int(not payload_matches)
+                retained_provenance_valid += int(provenance_valid)
+                if not payload_matches:
+                    raise RuntimeError(f"REFRESH_RETAINED_PAYLOAD_MISMATCH:{ticker}:{dimension}")
+                if not provenance_valid:
+                    raise RuntimeError(f"REFRESH_RETAINED_PROVENANCE_INVALID:{ticker}:{dimension}")
+                fiscal_year, fiscal_quarter = str(actual_row["fiscalperiod"]).split("-")
+                retained_rows.append({
+                    "ticker": ticker, "dimension": dimension,
+                    "date": key[2], "reportperiod": key[3],
+                    "fiscal_year": int(fiscal_year), "fiscal_quarter": fiscal_quarter,
+                    "history_retention_status": actual_row.get("_history_retention_status"),
+                    "provenance_valid": provenance_valid,
+                    "payload_matches_previously_accepted": payload_matches,
+                    "source_identity_unchanged": source_key(actual_row) == key,
+                })
             evidence.append({
                 "ticker": ticker, "dimension": dimension, "row_count": len(expected_rows),
                 "effective_fingerprint": expected_hashes["effective_content_fingerprint"],
@@ -321,7 +368,26 @@ def validate_provider_candidate(
         ).fetchone()[0]
     if quick != "ok" or foreign or orphans:
         raise RuntimeError("REFRESH_PROVIDER_CANDIDATE_INTEGRITY_FAILED")
-    return {"histories": evidence, "quick_check": quick, "foreign_key_errors": len(foreign), "orphan_children": int(orphans)}
+    expected_retained_total = len(retained_rows)
+    true_removal_expected = len(true_removal_rows)
+    retention_validation = {
+        "expected_retained_total": expected_retained_total,
+        "actual_retained_total": sum(item["retained_only_key_count"] for item in evidence),
+        "retained_arq": sum(row["dimension"] == "ARQ" for row in retained_rows),
+        "retained_mrq": sum(row["dimension"] == "MRQ" for row in retained_rows),
+        "retained_provenance_valid": retained_provenance_valid,
+        "true_removal_expected": true_removal_expected,
+        "true_removal_absent": true_removal_absent,
+        "retained_payload_mismatch_count": retained_payload_mismatch_count,
+        "retained_duplicate_count": retained_duplicate_count,
+        "current_source_marked_retained_count": current_source_marked_retained_count,
+        "retained_rows": retained_rows,
+        "true_removal_rows": true_removal_rows,
+    }
+    return {
+        "histories": evidence, "retention_validation": retention_validation,
+        "quick_check": quick, "foreign_key_errors": len(foreign), "orphan_children": int(orphans),
+    }
 
 
 def _quarter_rows(path: Path) -> dict[tuple[int, int, str], dict[str, Any]]:
@@ -517,9 +583,110 @@ def _analysis_state(analysis_db: Path, canonical_db: Path, tickers: Sequence[str
     return output
 
 
+def _quarter_evidence(path: Path, company_id: int) -> list[dict[str, Any]]:
+    with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        return [dict(row) for row in connection.execute(
+            "SELECT fiscal_year,fiscal_quarter,period_end,source_fiscalperiod,source_reportperiod,"
+            "source_availability_date,first_public_result_date FROM v4_quarter "
+            "WHERE company_id=? ORDER BY fiscal_year,fiscal_quarter",
+            (company_id,),
+        )]
+
+
+def _source_fiscal_evidence(path: Path, ticker: str) -> list[dict[str, Any]]:
+    output = []
+    for dimension in REFRESH_DIMENSIONS:
+        for row in load_current_history(path, ticker, dimension)["rows"]:
+            output.append({
+                "ticker": ticker, "dimension": dimension, "date": row["date"],
+                "reportperiod": row["reportperiod"], "fiscalperiod": row["fiscalperiod"],
+                "history_retention_status": row.get("_history_retention_status"),
+            })
+    return output
+
+
+def build_test_evidence(
+    *, preview: Mapping[str, Any], changed: Sequence[Mapping[str, Any]],
+    provider_result: Mapping[str, Any], canonical_result: Mapping[str, Any],
+    production_provider: Path, provider_candidate: Path,
+    production_canonical: Path, canonical_candidate: Path,
+) -> dict[str, Any]:
+    validation = dict(provider_result["verification"]["retention_validation"])
+    bootstrap = canonical_result["publication_date_bootstrap"]
+    impact = canonical_result["impact"]
+    validation.update({
+        "ambiguous_removal_count": sum(
+            int(item.get("source_history_action", {}).get("ambiguous_removals", 0))
+            for item in changed
+        ),
+        "canonical_removed_quarter_count": int(impact["removed_quarters"]),
+        "first_public_preservation_applicable": int(bootstrap["preservation_map_applicable_existing_quarters"]),
+        "first_public_preservation_applied": int(bootstrap["preservation_map_applied"]),
+        "first_public_repair_required": int(bootstrap["repair_required"]),
+        "new_first_public_expected": int(
+            preview.get("publication_date_state", {}).get("expected_new_quarter_initializations", 0)
+        ),
+        "new_first_public_actual": int(impact["new_first_public_result_date_established"]),
+    })
+    representatives = {}
+    for item in changed:
+        events = item.get("source_history_events", [])
+        if not events:
+            continue
+        ticker = str(item["ticker"])
+        company_id = int(item["identity"]["company_id"])
+        canonical_before = _quarter_evidence(production_canonical, company_id)
+        canonical_after = _quarter_evidence(canonical_candidate, company_id)
+        before_keys = {(row["fiscal_year"], row["fiscal_quarter"]) for row in canonical_before}
+        after_keys = {(row["fiscal_year"], row["fiscal_quarter"]) for row in canonical_after}
+        relevant_fiscal = {
+            (event["fiscal_identity"]["fiscal_year"], event["fiscal_identity"]["fiscal_quarter"])
+            for event in events
+        } | (before_keys ^ after_keys)
+
+        def source_is_relevant(row: Mapping[str, Any]) -> bool:
+            year, quarter = str(row["fiscalperiod"]).split("-")
+            return (int(year), quarter) in relevant_fiscal
+
+        def quarter_is_relevant(row: Mapping[str, Any]) -> bool:
+            return (int(row["fiscal_year"]), str(row["fiscal_quarter"])) in relevant_fiscal
+
+        representatives[ticker] = {
+            "source_history_action": item.get("source_history_action", {}),
+            "source_history_events": events,
+            "retained_rows": [row for row in validation["retained_rows"] if row["ticker"] == ticker],
+            "true_removal_rows": [row for row in validation["true_removal_rows"] if row["ticker"] == ticker],
+            "provider_before": [
+                row for row in _source_fiscal_evidence(production_provider, ticker)
+                if source_is_relevant(row)
+            ],
+            "provider_candidate": [
+                row for row in _source_fiscal_evidence(provider_candidate, ticker)
+                if source_is_relevant(row)
+            ],
+            "canonical_before": [row for row in canonical_before if quarter_is_relevant(row)],
+            "canonical_candidate": [row for row in canonical_after if quarter_is_relevant(row)],
+            "canonical_impact": (
+                canonical_result["company_impact"].get(company_id)
+                or canonical_result["company_impact"].get(str(company_id))
+                or {}
+            ),
+        }
+    return {
+        "contract_version": TEST_CONTRACT_VERSION,
+        "summary": {key: value for key, value in validation.items() if key not in {"retained_rows", "true_removal_rows"}},
+        "retained_rows": validation["retained_rows"],
+        "true_removal_rows": validation["true_removal_rows"],
+        "representatives": representatives,
+    }
+
+
 def _render_report(result: Mapping[str, Any]) -> str:
     downstream = result.get("downstream") or {}
     bootstrap = downstream.get("canonical", {}).get("publication_date_bootstrap", {})
+    retention = downstream.get("test_evidence", {}).get("summary", {})
+    representative_evidence = downstream.get("test_evidence", {}).get("representatives", {})
     lines = [
         "# Refresh Fundamentals Test on Copies", "", "## Executive Summary", "",
         f"- Preview run: `{result.get('bound_preview_run_id')}`",
@@ -542,20 +709,64 @@ def _render_report(result: Mapping[str, Any]) -> str:
         + ("true" if downstream.get("canonical", {}).get("identity_contract", {}).get("company_security_identity_mapping_unchanged") else "false"),
         f"- `first_public_result_date preservation map applied: {bootstrap.get('preservation_map_applied', 0)}/{bootstrap.get('preservation_map_applicable_existing_quarters', 0)} existing quarters`",
         "",
+        "## Source-Window Retention Validation", "",
+        f"- Expected newly aged-out rows: {retention.get('expected_retained_total', 0)}",
+        f"- Retained in provider candidate: {retention.get('actual_retained_total', 0)}",
+        f"- Retained ARQ: {retention.get('retained_arq', 0)}",
+        f"- Retained MRQ: {retention.get('retained_mrq', 0)}",
+        f"- Correct retained provenance: {retention.get('retained_provenance_valid', 0)}/{retention.get('expected_retained_total', 0)}",
+        f"- True source removals expected: {retention.get('true_removal_expected', 0)}",
+        f"- True source removals absent from candidate: {retention.get('true_removal_absent', 0)}/{retention.get('true_removal_expected', 0)}",
+        f"- Ambiguous removals: {retention.get('ambiguous_removal_count', 0)}", "",
+        "| Ticker | Action | Provider candidate | Canonical result |",
+        "| --- | --- | --- | --- |",
+    ]
+    retained_examples = [
+        (ticker, evidence) for ticker, evidence in sorted(representative_evidence.items())
+        if evidence.get("retained_rows")
+    ][:3]
+    removal_examples = [
+        (ticker, evidence) for ticker, evidence in sorted(representative_evidence.items())
+        if evidence.get("true_removal_rows")
+    ]
+    for ticker, evidence in retained_examples + removal_examples:
+        retained = evidence.get("retained_rows", [])
+        removals = evidence.get("true_removal_rows", [])
+        impact = evidence.get("canonical_impact", {})
+        if retained:
+            dimensions = "/".join(sorted({str(row["dimension"]) for row in retained}))
+            action = "Retain outside source window"
+            provider = f"retained {dimensions}"
+        else:
+            action = "True source-key removal"
+            provider = f"{sum(bool(row.get('absent_from_candidate')) for row in removals)} keys absent"
+        canonical = (
+            f"+{impact.get('quarters_added', 0)} / {impact.get('quarters_changed', 0)} / "
+            f"-{impact.get('quarters_removed', 0)} quarters"
+        )
+        lines.append(f"| {ticker} | {action} | {provider} | {canonical} |")
+    lines.extend([
+        "",
         "## Ticker Summary", "",
         "| Ticker | Source change | Latest quarter | ARQ rows | Canonical impact | Score before/after | Final |",
         "| --- | --- | --- | ---: | --- | --- | --- |",
-    ]
+    ])
     before = downstream.get("analysis_before", {})
     after = downstream.get("analysis_after", {})
     for item in downstream.get("ticker_changes", []):
         ticker = item["ticker"]
+        company_id = item.get("identity", {}).get("company_id")
+        impact = (
+            downstream.get("canonical", {}).get("company_impact", {}).get(company_id)
+            or downstream.get("canonical", {}).get("company_impact", {}).get(str(company_id))
+            or {}
+        )
         score_before = (before.get(ticker, {}).get("score") or {}).get("total_score")
         score_after = (after.get(ticker, {}).get("score") or {}).get("total_score")
         lines.append(
             f"| {ticker} | {item['classification']} | {item.get('old_latest_fiscal_quarter')} -> {item.get('new_latest_fiscal_quarter')} | "
             f"{item.get('current_counts', {}).get('ARQ', 0)} -> {item.get('source_counts', {}).get('ARQ', 0)} | "
-            f"+{item.get('added_count', 0)} / ~{item.get('changed_count', 0)} / -{item.get('removed_count', 0)} | "
+            f"+{impact.get('quarters_added', 0)} / {impact.get('quarters_changed', 0)} / -{impact.get('quarters_removed', 0)} | "
             f"{score_before} -> {score_after} | Tested successfully |"
         )
     lines.extend(["", "## Detailed Ticker Results", ""])
@@ -714,9 +925,16 @@ def run_apply(
 
         failed_stage = ProgressStage.IMPACT_COMPARISON
         progress.running(failed_stage, "Comparing source, canonical and analytical outcomes.")
+        test_evidence = build_test_evidence(
+            preview=preview, changed=changed, provider_result=provider_result,
+            canonical_result=canonical_result,
+            production_provider=source_paths.provider_db, provider_candidate=provider_candidate,
+            production_canonical=source_paths.canonical_db, canonical_candidate=canonical_candidate,
+        )
         downstream = {
             "provider": provider_result, "canonical": canonical_result, "analysis": analysis_result,
             "analysis_before": analysis_before, "analysis_after": analysis_after, "ticker_changes": changed,
+            "test_evidence": test_evidence,
             "legacy_provider_compaction": provider_key_diagnostics(source_paths.provider_db),
         }
         deletion_evidence = []
@@ -742,6 +960,7 @@ def run_apply(
                 "unrelated_provider_state_unchanged": provider_result["unrelated_state_unchanged"],
             })
         downstream["source_deletion_evidence"] = deletion_evidence
+        writer.write_json("refresh_test_evidence.json", test_evidence)
         writer.write_json("source_deletion_evidence.json", deletion_evidence)
         writer.write_json("analysis_outcome_summary.json", {"before": analysis_before, "after": analysis_after, "rebuild": analysis_result})
         writer.write_json("ticker_impact_summary.json", changed)
@@ -757,7 +976,11 @@ def run_apply(
             completed_at_utc=utc_now(), preview_fingerprint=preview_fingerprint,
             request=request.as_dict(), summary_counts=counts,
             rollback={"status": "NOT_REQUIRED", "write_boundary_crossed": False}, downstream=downstream,
-            artifacts={"source_revalidation": str(writer.run_dir / "source_revalidation.json"), "operation_report": str(writer.run_dir / "operation_report.md")},
+            artifacts={
+                "source_revalidation": str(writer.run_dir / "source_revalidation.json"),
+                "refresh_test_evidence": str(writer.run_dir / "refresh_test_evidence.json"),
+                "operation_report": str(writer.run_dir / "operation_report.md"),
+            },
             recommended_next_action="Production update is not yet enabled for Refresh Fundamentals.",
         )
         result = result_obj.as_dict() | {
