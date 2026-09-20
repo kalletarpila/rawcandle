@@ -52,7 +52,7 @@ from rawcandle.fundamentals.providers.sharadar import SharadarClient
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 
 
-TEST_CONTRACT_VERSION = "PHASE13G3_9_SHARADAR_REFRESH_RETENTION_COPY_TEST_V1"
+TEST_CONTRACT_VERSION = "PHASE13G3_10_SHARADAR_REFRESH_RETENTION_COPY_TEST_V1"
 REPLACEMENT_CLASSES = REFRESH_REPLACEMENT_CLASSES
 
 

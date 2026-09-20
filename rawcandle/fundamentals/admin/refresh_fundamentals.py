@@ -38,7 +38,7 @@ from rawcandle.fundamentals.providers.sharadar import (
 from rawcandle.fundamentals.schema.sharadar_history_policy import MINIMUM_HISTORY_YEARS
 
 
-CONTRACT_VERSION = "PHASE13G3_9_ROLLING_SOURCE_WINDOW_RETENTION_V1"
+CONTRACT_VERSION = "PHASE13G3_10_RETENTION_BOUNDARY_SEMANTICS_V1"
 SOURCE_DATASET = "SHARADAR"
 SOURCE_TABLE = "fundamentals"
 SOURCE_ENDPOINT = "/data/fundamentals"
@@ -86,7 +86,8 @@ AGED_OUT_OF_SOURCE_WINDOW = "AGED_OUT_OF_SOURCE_WINDOW"
 TRUE_SOURCE_REMOVAL = "TRUE_SOURCE_REMOVAL"
 AMBIGUOUS_SOURCE_REMOVAL = "AMBIGUOUS_SOURCE_REMOVAL"
 SOURCE_HISTORY_CHANGE = "SOURCE_HISTORY_CHANGE"
-RETENTION_CONTRACT_VERSION = "SHARADAR_ROLLING_SOURCE_WINDOW_RETENTION_V1"
+RETENTION_CONTRACT_VERSION = "SHARADAR_ROLLING_SOURCE_WINDOW_RETENTION_V2"
+MINIMUM_QUARTER_BOUNDARY_SPAN = MINIMUM_HISTORY_YEARS * 4 + 1
 REFRESH_REPLACEMENT_CLASSES = {
     "NEW_QUARTER", "HISTORICAL_REVISION", "NEW_QUARTER_AND_REVISION",
     "SOURCE_REMOVAL", SOURCE_HISTORY_CHANGE,
@@ -605,13 +606,18 @@ def _row_order(row: Mapping[str, Any]) -> tuple[str, str, tuple[str, str, str, s
     return str(row.get("reportperiod") or ""), str(row.get("date") or ""), source_key(row)
 
 
-def _minimum_window_elapsed(removed_reportperiod: str, current_max_reportperiod: str) -> bool:
-    removed = date.fromisoformat(removed_reportperiod)
-    try:
-        threshold = removed.replace(year=removed.year + MINIMUM_HISTORY_YEARS)
-    except ValueError:
-        threshold = removed.replace(month=2, day=28, year=removed.year + MINIMUM_HISTORY_YEARS)
-    return date.fromisoformat(current_max_reportperiod) >= threshold
+def _fiscal_quarter_index(value: str) -> int:
+    year, quarter = fiscal_identity(value)
+    return year * 4 + int(quarter[1])
+
+
+def _quarter_boundary_span(row: Mapping[str, Any], source_rows: Sequence[Mapping[str, Any]]) -> int:
+    if not source_rows:
+        return 0
+    latest = max(source_rows, key=lambda item: _fiscal_quarter_index(str(item["fiscalperiod"])))
+    return _fiscal_quarter_index(str(latest["fiscalperiod"])) - _fiscal_quarter_index(
+        str(row["fiscalperiod"])
+    ) + 1
 
 
 def _generation_fingerprint(rows: Iterable[Mapping[str, Any]]) -> str:
@@ -627,19 +633,22 @@ def _generation_fingerprint(rows: Iterable[Mapping[str, Any]]) -> str:
 
 
 def _retention_evidence(
-    row: Mapping[str, Any], *, prior_min: str, current_min: str, current_max: str,
+    row: Mapping[str, Any], *, event: Mapping[str, Any],
 ) -> dict[str, Any]:
     year, quarter = fiscal_identity(row["fiscalperiod"])
     return {
         "classification": AGED_OUT_OF_SOURCE_WINDOW,
+        "classification_reason": event["classification_reason"],
         "source_identity": source_key_evidence(row),
         "fiscal_identity": {"fiscal_year": year, "fiscal_quarter": quarter},
         "source_window_boundary": {
             "dimension": str(row["dimension"]),
-            "prior_min_reportperiod": prior_min,
-            "current_min_reportperiod": current_min,
-            "current_max_reportperiod": current_max,
-            "minimum_history_years": MINIMUM_HISTORY_YEARS,
+            "prior_min_reportperiod": event["prior_min_reportperiod"],
+            "current_min_reportperiod": event["current_min_reportperiod"],
+            "current_max_reportperiod": event["current_max_reportperiod"],
+            "boundary_fiscal_quarter_span": event["boundary_fiscal_quarter_span"],
+            "minimum_quarter_boundary_span": MINIMUM_QUARTER_BOUNDARY_SPAN,
+            "minimum_requested_history_years": MINIMUM_HISTORY_YEARS,
         },
         "previously_accepted_source": "SHARADAR",
     }
@@ -678,19 +687,40 @@ def build_source_history_merge(
             row = source_backed_map[key]
             boundary = key in prefix_keys
             coherent = bool(current_min and current_max and current_min > str(row["reportperiod"]))
-            old_enough = bool(current_max) and _minimum_window_elapsed(str(row["reportperiod"]), current_max)
-            event = AGED_OUT_OF_SOURCE_WINDOW if boundary and coherent and old_enough else (
-                AMBIGUOUS_SOURCE_REMOVAL if boundary else TRUE_SOURCE_REMOVAL
-            )
+            same_fiscal_current = [
+                source_key_evidence(item) for item in source_rows
+                if fiscal_identity(str(item["fiscalperiod"])) == fiscal_identity(str(row["fiscalperiod"]))
+            ]
+            boundary_span = _quarter_boundary_span(row, source_rows)
+            expected_window = boundary_span >= MINIMUM_QUARTER_BOUNDARY_SPAN
+            if not boundary or same_fiscal_current:
+                event = TRUE_SOURCE_REMOVAL
+                reason = (
+                    "INTERIOR_SOURCE_KEY_REMOVAL" if not boundary
+                    else "SAME_FISCAL_SOURCE_KEY_REPLACEMENT"
+                )
+            elif coherent and expected_window:
+                event = AGED_OUT_OF_SOURCE_WINDOW
+                reason = "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW"
+            else:
+                event = AMBIGUOUS_SOURCE_REMOVAL
+                reason = (
+                    "BOUNDARY_CHRONOLOGY_INCONSISTENT" if not coherent
+                    else "BOUNDARY_FISCAL_WINDOW_TOO_SHORT"
+                )
             missing_events.append({
                 "ticker": ticker,
                 "dimension": dimension,
                 "event": event,
+                "classification_reason": reason,
                 "source_identity": source_key_evidence(row),
                 "fiscal_identity": dict(zip(("fiscal_year", "fiscal_quarter"), fiscal_identity(row["fiscalperiod"]), strict=True)),
                 "was_oldest_prefix": boundary,
-                "window_age_qualified": old_enough,
                 "chronology_coherent": coherent,
+                "same_fiscal_current_keys": same_fiscal_current,
+                "boundary_fiscal_quarter_span": boundary_span,
+                "minimum_quarter_boundary_span": MINIMUM_QUARTER_BOUNDARY_SPAN,
+                "expected_quarterly_window_covered": expected_window,
                 "prior_min_reportperiod": prior_min,
                 "current_min_reportperiod": current_min,
                 "current_max_reportperiod": current_max,
@@ -715,6 +745,7 @@ def build_source_history_merge(
         if len(events) > 1 and AMBIGUOUS_SOURCE_REMOVAL not in classes and len(classes) > 1:
             for event in events:
                 event["event"] = AMBIGUOUS_SOURCE_REMOVAL
+                event["classification_reason"] = "COMPANION_DIMENSION_CONTRADICTION"
                 event["companion_dimension_conflict"] = True
 
     event_by_key = {
@@ -732,12 +763,7 @@ def build_source_history_merge(
                 continue
             row = dict(detail["old_map"][key])
             row["_history_retention_status"] = RETAINED_OUTSIDE_SOURCE_WINDOW
-            row["_history_retention_evidence"] = _retention_evidence(
-                row,
-                prior_min=detail["prior_min_reportperiod"],
-                current_min=detail["current_min_reportperiod"],
-                current_max=detail["current_max_reportperiod"],
-            )
+            row["_history_retention_evidence"] = _retention_evidence(row, event=event)
             merged[key] = row
         merged_rows[dimension] = tuple(merged[key] for key in sorted(merged))
 
@@ -1316,8 +1342,8 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         "version it observed before the row aged outside the accessible source window. It is not "
         "currently returned data, invented data, or a guarantee that the value is forever final.",
         "",
-        "| Ticker | Missing source rows | Source-history action | Canonical impact |",
-        "| --- | ---: | --- | --- |",
+        "| Ticker | Missing source rows | Source-history action | Reason | Canonical impact |",
+        "| --- | ---: | --- | --- | --- |",
     ]
     for item in result.get("refresh_preview", {}).get("ticker_changes", []):
         action = item.get("source_history_action") or {}
@@ -1333,7 +1359,14 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
             else "Quarter evaluated from surviving ARQ" if action.get("true_source_removals")
             else "No new canonical event"
         )
-        lines.append(f"| {item.get('ticker')} | {missing} | {action.get('label')} | {canonical} |")
+        reasons = ", ".join(sorted({
+            str(event.get("classification_reason"))
+            for event in item.get("source_history_events", [])
+            if event.get("classification_reason")
+        })) or "None"
+        lines.append(
+            f"| {item.get('ticker')} | {missing} | {action.get('label')} | {reasons} | {canonical} |"
+        )
     lines.extend([
         "",
         "## Effective Known-Ticker Changes",

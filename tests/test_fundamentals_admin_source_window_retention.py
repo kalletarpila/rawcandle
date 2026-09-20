@@ -164,6 +164,55 @@ def test_recent_oldest_boundary_and_companion_conflict_are_ambiguous() -> None:
     assert all(event["event"] == AMBIGUOUS_SOURCE_REMOVAL for event in result["source_history_events"])
 
 
+def test_flws_like_week_based_boundary_uses_fiscal_span_not_calendar_days() -> None:
+    old = row(date="2016-09-16", reportperiod="2016-07-03", fiscalperiod="2016-Q4")
+    next_quarter = row(date="2016-11-14", reportperiod="2016-10-02", fiscalperiod="2017-Q1")
+    latest = row(date="2026-09-11", reportperiod="2026-06-28", fiscalperiod="2026-Q4")
+    current = current_history([old, next_quarter, latest], [paired(old), paired(next_quarter), paired(latest)])
+    source = source_history([next_quarter, latest], [paired(next_quarter), paired(latest)])
+
+    result = compare_ticker_histories("TEST", current, source)
+
+    assert result["classification"] == SOURCE_HISTORY_CHANGE
+    assert result["source_history_action"]["newly_aged_out_source_rows"] == 2
+    assert {event["boundary_fiscal_quarter_span"] for event in result["source_history_events"]} == {41}
+    assert all(event["expected_quarterly_window_covered"] for event in result["source_history_events"])
+    assert {event["classification_reason"] for event in result["source_history_events"]} == {
+        "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW"
+    }
+
+
+def test_love_like_same_fiscal_boundary_replacement_is_true_removal() -> None:
+    old = row(
+        dimension="MRQ", date="2017-01-29", reportperiod="2017-01-29",
+        fiscalperiod="2017-Q4",
+    )
+    replacement = row(
+        dimension="MRQ", date="2017-02-04", reportperiod="2017-02-04",
+        fiscalperiod="2017-Q4", revenue=101,
+    )
+    latest = row(
+        dimension="MRQ", date="2026-08-02", reportperiod="2026-08-02",
+        fiscalperiod="2027-Q2", revenue=200,
+    )
+    arq_latest = row(date="2026-09-10", reportperiod="2026-08-02", fiscalperiod="2027-Q2")
+    current = current_history([arq_latest], [old, latest])
+    source = source_history([arq_latest], [replacement, latest])
+
+    result = compare_ticker_histories("TEST", current, source)
+
+    assert result["classification"] == "SOURCE_REMOVAL"
+    assert result["source_history_action"]["true_source_removals"] == 1
+    event = result["source_history_events"][0]
+    assert event["event"] == TRUE_SOURCE_REMOVAL
+    assert event["classification_reason"] == "SAME_FISCAL_SOURCE_KEY_REPLACEMENT"
+    assert event["boundary_fiscal_quarter_span"] == 39
+    assert event["same_fiscal_current_keys"] == [{
+        "ticker": "TEST", "dimension": "MRQ", "date": "2017-02-04",
+        "reportperiod": "2017-02-04",
+    }]
+
+
 def test_arq_and_mrq_boundaries_are_independent_when_not_contradictory() -> None:
     old, latest = boundary_rows()
     older_mrq = row(
