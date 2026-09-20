@@ -124,7 +124,7 @@ def test_recovery_journal_intent_is_durable_before_each_restore_replace(
         for role, record in roles.items()
     }
     real_replace = os.replace
-    observed: list[tuple[str, str, str]] = []
+    observed: list[tuple[str, str, str, str]] = []
 
     def observing_replace(source, destination):
         destination_path = Path(destination).resolve()
@@ -132,16 +132,60 @@ def test_recovery_journal_intent_is_durable_before_each_restore_replace(
             durable = json.loads(journal_path.read_text(encoding="utf-8"))
             observed.append((
                 targets[destination_path], durable["state"], durable["current_publication_step"],
+                durable["rollback_recovery_state"],
             ))
         return real_replace(source, destination)
 
     monkeypatch.setattr("rawcandle.fundamentals.admin.publication_journal.os.replace", observing_replace)
     restore_old_generation(journal, journal_path=journal_path)
     assert observed == [
-        ("provider", "RECOVERING", "RESTORING_PROVIDER"),
-        ("canonical", "RECOVERING", "RESTORING_CANONICAL"),
-        ("analysis", "RECOVERING", "RESTORING_ANALYSIS"),
+        ("provider", "RECOVERING", "RESTORING_PROVIDER", "RESTORING_PROVIDER"),
+        ("canonical", "RECOVERING", "RESTORING_CANONICAL", "RESTORING_CANONICAL"),
+        ("analysis", "RECOVERING", "RESTORING_ANALYSIS", "RESTORING_ANALYSIS"),
     ]
+
+
+def test_crash_during_recovery_restarts_complete_old_generation_restore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    journal_path, roles = _publication_fixture(tmp_path)
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    for role in PUBLICATION_ROLES:
+        journal = _replace_role(role, journal, journal_path=journal_path)
+    assert [_generation(Path(str(roles[role]["production_path"]))) for role in PUBLICATION_ROLES] == ["new"] * 3
+
+    class RecoveryCrash(BaseException):
+        pass
+
+    real_replace = os.replace
+    provider_target = Path(str(roles["provider"]["production_path"])).resolve()
+    crashed = False
+
+    def crash_after_provider_restore(source, destination):
+        nonlocal crashed
+        result = real_replace(source, destination)
+        if Path(destination).resolve() == provider_target and not crashed:
+            crashed = True
+            raise RecoveryCrash("simulated process loss during recovery")
+        return result
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.publication_journal.os.replace",
+        crash_after_provider_restore,
+    )
+    with pytest.raises(RecoveryCrash):
+        recover_if_required(journal_path)
+    interrupted = json.loads(journal_path.read_text(encoding="utf-8"))
+    assert interrupted["state"] == "RECOVERING"
+    assert interrupted["rollback_recovery_state"] == "RESTORING_PROVIDER"
+    assert [_generation(Path(str(roles[role]["production_path"]))) for role in PUBLICATION_ROLES] == ["old", "new", "new"]
+
+    recovered = recover_if_required(journal_path)
+    assert recovered["status"] == "RECOVERED"
+    assert [_generation(Path(str(roles[role]["production_path"]))) for role in PUBLICATION_ROLES] == ["old"] * 3
+    terminal = json.loads(journal_path.read_text(encoding="utf-8"))
+    assert terminal["state"] == "RECOVERED"
+    assert set(terminal["old_generation_verification"]) == set(PUBLICATION_ROLES)
 
 
 def test_recovery_is_idempotent_after_recovered_state(tmp_path: Path) -> None:
@@ -151,6 +195,7 @@ def test_recovery_is_idempotent_after_recovered_state(tmp_path: Path) -> None:
     second = recover_if_required(journal_path)
     assert first["recovered"] is True
     assert second == {"status": "RECOVERED", "recovered": False}
+    assert guard_production_writes(journal_path) == {"status": "RECOVERED", "recovered": False}
     assert {role: Path(str(record["production_path"])).stat().st_mtime_ns for role, record in roles.items()} == mtimes
 
 
@@ -187,7 +232,7 @@ def test_missing_backup_fails_closed_and_blocks_writes(tmp_path: Path) -> None:
         recover_if_required(journal_path)
 
 
-def test_incomplete_refresh_journal_blocks_add_tickers_before_source_mutation(
+def test_incomplete_refresh_journal_recovers_then_requires_fresh_add_tickers_invocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     journal_path, roles = _publication_fixture(tmp_path)
@@ -208,8 +253,11 @@ def test_incomplete_refresh_journal_blocks_add_tickers_before_source_mutation(
     preview_path.write_text("{}", encoding="utf-8")
     taxonomy_identity = {"domain": "dc_ecosystem", "version": "v", "semantic_fingerprint": "t"}
     mutation_calls: list[bool] = []
+    validation_calls: list[bool] = []
+    test_validation_calls: list[bool] = []
 
     def validate_preview(_paths, _payload, _fingerprint):
+        validation_calls.append(True)
         return {"as_of_date": "2026-09-20", "taxonomy_dependency": taxonomy_identity}
 
     operation = ProductionOperation(
@@ -218,20 +266,49 @@ def test_incomplete_refresh_journal_blocks_add_tickers_before_source_mutation(
         validate_preview=validate_preview,
         mutate_sources=lambda *_args: mutation_calls.append(True) or {"outcome": "NO_CHANGE"},
     )
+    def verify_test(*_args, **_kwargs):
+        test_validation_calls.append(True)
+        return {"outcome": "COMPLETED", "downstream": {"active_taxonomy": taxonomy_identity}}
+
+    monkeypatch.setattr("rawcandle.fundamentals.admin.production_transaction._verify_test", verify_test)
+    monkeypatch.setattr("rawcandle.fundamentals.admin.production_transaction._source_fingerprints", lambda *_args: {"stable": True})
+    monkeypatch.setattr("rawcandle.fundamentals.admin.production_transaction._storage_preflight", lambda *_args, **_kwargs: {"ok": True})
     monkeypatch.setattr(
-        "rawcandle.fundamentals.admin.production_transaction._verify_test",
-        lambda *_args, **_kwargs: {"outcome": "COMPLETED", "downstream": {"active_taxonomy": taxonomy_identity}},
+        "rawcandle.fundamentals.admin.production_transaction._backup_write_set",
+        lambda *_args, **_kwargs: {"analysis": {
+            "backup": str(tmp_path / "analysis-backup.db"),
+            "verification": {"size": 0, "quick_check": "ok", "foreign_key_check": "ok", "sha256": "fixture"},
+        }},
     )
-    result = run_transaction(
+    first = run_transaction(
         operation, preview_payload_path=preview_path, preview_fingerprint="f" * 64,
         test_run_id="test", source_paths=paths, run_root=run_root,
         lock_path=tmp_path / "admin.lock", scheduler_log_dir=str(tmp_path / "scheduler"),
         rehearsal=True, publication_journal_path=journal_path,
     )
     assert mutation_calls == []
-    assert result["outcome"] == "FAILED"
-    assert "RECOVERED_RETRY_REQUIRED" in result["error"]
+    assert first["outcome"] == "RETRY_REQUIRED"
+    assert "RECOVERED_RETRY_REQUIRED" in first["error"]
+    assert first["retry_authorization"] == {
+        "direct_production_retry_available": False,
+        "preview_test_preserved": False,
+        "preview_test_rerun_required": True,
+        "reason": "RECOVERY_COMPLETED_FRESH_INVOCATION_REQUIRED",
+    }
+    assert first["publication_recovery"]["status"] == "RECOVERED"
+    assert json.loads(journal_path.read_text(encoding="utf-8"))["state"] == "RECOVERED"
     assert [_generation(paths.as_dict()[role]) for role in PUBLICATION_ROLES] == ["old"] * 3
+
+    second = run_transaction(
+        operation, preview_payload_path=preview_path, preview_fingerprint="f" * 64,
+        test_run_id="test", source_paths=paths, run_root=run_root,
+        lock_path=tmp_path / "admin.lock", scheduler_log_dir=str(tmp_path / "scheduler"),
+        rehearsal=True, publication_journal_path=journal_path,
+    )
+    assert second["outcome"] == "NO_CHANGE"
+    assert mutation_calls == [True]
+    assert len(validation_calls) == 3
+    assert len(test_validation_calls) == 2
 
 
 def test_completed_refresh_journal_allows_add_tickers_to_reach_mutation(
@@ -291,6 +368,7 @@ def test_ordinary_rollback_can_record_rolled_back_terminal_state(tmp_path: Path)
     recovered = restore_old_generation(journal, journal_path=journal_path)
     terminal = update_journal(journal_path, recovered["journal"], state="ROLLED_BACK")
     assert terminal["state"] == "ROLLED_BACK"
+    assert guard_production_writes(journal_path) == {"status": "ROLLED_BACK", "recovered": False}
     assert [_generation(Path(str(roles[role]["production_path"]))) for role in PUBLICATION_ROLES] == ["old"] * 3
 
 

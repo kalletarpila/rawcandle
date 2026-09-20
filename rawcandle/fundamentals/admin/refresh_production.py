@@ -22,6 +22,7 @@ from rawcandle.fundamentals.admin.publication_journal import (
     ACTIVE_JOURNAL_PATH,
     PUBLICATION_ROLES,
     PublicationRecoveryError,
+    PublicationRecoveredRetryRequired,
     fsync_directory,
     fsync_file,
     prepare_journal,
@@ -681,6 +682,10 @@ def run_production_apply(
         result["errors"] = [{"type": type(exc).__name__, "message": str(exc)}]
         result["failed_stage"] = stage
         stale = isinstance(exc, StaleRefreshTest)
+        recovery_retry = isinstance(exc, PublicationRecoveredRetryRequired)
+        if recovery_retry:
+            result["outcome"] = "RETRY_REQUIRED"
+            result["publication_recovery"] = exc.recovery
         if journal is not None and write_boundary_crossed:
             try:
                 journal = update_journal(journal_path, journal, state="ROLLING_BACK", rollback_recovery_state="ROLLING_BACK_COMPLETE_SET")
@@ -700,12 +705,22 @@ def run_production_apply(
         else:
             result["database_safety"] = "NO_PRODUCTION_DATABASES_MODIFIED"
             result["production_file_state_unchanged"] = result.get("production_file_state_before") == _production_file_state(source_paths) if result.get("production_file_state_before") else True
-            result["retry_authorization"] = {
-                "direct_production_retry_available": not stale,
-                "preview_test_preserved": not stale,
-                "preview_test_rerun_required": stale,
-            }
+            result["retry_authorization"] = (
+                {
+                    "direct_production_retry_available": False,
+                    "preview_test_preserved": False,
+                    "preview_test_rerun_required": True,
+                    "reason": "RECOVERY_COMPLETED_FRESH_INVOCATION_REQUIRED",
+                }
+                if recovery_retry else {
+                    "direct_production_retry_available": not stale,
+                    "preview_test_preserved": not stale,
+                    "preview_test_rerun_required": stale,
+                }
+            )
             result["user_message"] = (
+                "An incomplete previous publication was recovered and verified. This operation stopped before mutation. Run Preview and Test on copies again before retrying."
+                if recovery_retry else
                 "Sharadar fundamentals changed after Test on copies. No production databases were modified. Run Preview and Test on copies again."
                 if stale else
                 "Production candidates did not pass validation. No production databases were modified."

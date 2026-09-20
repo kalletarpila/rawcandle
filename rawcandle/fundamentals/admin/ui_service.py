@@ -643,7 +643,7 @@ class FundamentalsAdminUIService:
         errors = result.get("errors")
         first_error = errors[0] if isinstance(errors, (list, tuple)) and errors and isinstance(errors[0], Mapping) else {}
         return AdminUIRunResult(
-            status="FAILED" if result.get("outcome") in {"FAILED", "STOPPED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED",
+            status="RETRY_REQUIRED" if result.get("outcome") == "RETRY_REQUIRED" else ("FAILED" if result.get("outcome") in {"FAILED", "STOPPED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED"),
             message=final_status_message(result) if result.get("mode") else default_message,
             run_id=run_id or None,
             outcome=str(result.get("outcome")) if result.get("outcome") is not None else None,

@@ -27,6 +27,12 @@ class PublicationRecoveryError(RuntimeError):
     pass
 
 
+class PublicationRecoveredRetryRequired(PublicationRecoveryError):
+    def __init__(self, recovery: Mapping[str, Any]) -> None:
+        super().__init__("INCOMPLETE_PUBLICATION_RECOVERED_RETRY_REQUIRED")
+        self.recovery = dict(recovery)
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -199,7 +205,7 @@ def restore_old_generation(
             current = update_journal(
                 journal_path, current,
                 current_publication_step=f"RESTORING_{role.upper()}",
-                rollback_recovery_state="RESTORING_OLD_GENERATION",
+                rollback_recovery_state=f"RESTORING_{role.upper()}",
             )
             target = Path(str(record["production_path"]))
             backup, expected = validated[role]
@@ -225,10 +231,21 @@ def restore_old_generation(
                 journal_path, current, roles=roles,
                 current_publication_step=f"RESTORED_{role.upper()}",
             )
+        generation_verification: dict[str, Any] = {}
+        for role in role_order:
+            record = current["roles"][role]
+            target = Path(str(record["production_path"]))
+            expected = str(record["verified_backup_fingerprint"])
+            verification = sqlite_verification(target)
+            if verification["sha256"] != expected:
+                raise PublicationRecoveryError(f"RECOVERY_OLD_GENERATION_SET_MISMATCH:{role}")
+            generation_verification[role] = verification
         current = update_journal(
             journal_path, current, state="RECOVERED",
             rollback_recovery_state="OLD_GENERATION_RESTORED_AND_VERIFIED",
             postflight_state="OLD_GENERATION_VERIFIED",
+            old_generation_verification=generation_verification,
+            current_publication_step="OLD_GENERATION_VERIFIED",
         )
         return {"status": "RECOVERED", "roles": restored, "journal": current}
     except Exception as exc:
@@ -256,5 +273,5 @@ def guard_production_writes(path: Path = ACTIVE_JOURNAL_PATH) -> dict[str, Any]:
     """Recover an incomplete generation, then require a fresh production invocation."""
     result = recover_if_required(path)
     if result.get("recovered"):
-        raise PublicationRecoveryError("INCOMPLETE_PUBLICATION_RECOVERED_RETRY_REQUIRED")
+        raise PublicationRecoveredRetryRequired(result)
     return result

@@ -49,6 +49,7 @@ def _preflight_failure_reason(error: str) -> str:
         ("STALE", "The authoritative source state changed after the tested Preview."),
         ("MISMATCH", "The saved Preview or Test evidence no longer matches the production request."),
         ("SOURCE_CHANGED", "An authoritative source database changed during production preflight."),
+        ("RECOVERED_RETRY_REQUIRED", "An incomplete earlier publication was recovered. Run the operation again so all normal guards are evaluated from the recovered generation."),
     )
     for marker, reason in translations:
         if marker in error:
@@ -572,6 +573,12 @@ def run_transaction(
         result["error"] = f"{type(exc).__name__}: {exc}"
         result["errors"] = [{"type": type(exc).__name__, "message": str(exc)}]
         result["failed_stage"] = stage
+        from rawcandle.fundamentals.admin.publication_journal import PublicationRecoveredRetryRequired
+
+        recovery_retry = isinstance(exc, PublicationRecoveredRetryRequired)
+        if recovery_retry:
+            result["outcome"] = "RETRY_REQUIRED"
+            result["publication_recovery"] = exc.recovery
         if backups and (source_mutation_started or publication_started):
             try:
                 writer.checkpoint(RunStage.ROLLBACK_STARTED, message="Restoring pre-operation databases.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
@@ -584,10 +591,15 @@ def run_transaction(
         if not write_boundary_crossed:
             result["database_safety"] = "NO_DATABASE_WRITES"
             result["user_failure_reason"] = _preflight_failure_reason(result["error"])
-            result["retry_authorization"] = _retry_authorization(
-                result,
-                result["error"],
-                write_boundary_crossed=write_boundary_crossed,
+            result["retry_authorization"] = (
+                {
+                    "direct_production_retry_available": False,
+                    "preview_test_preserved": False,
+                    "preview_test_rerun_required": True,
+                    "reason": "RECOVERY_COMPLETED_FRESH_INVOCATION_REQUIRED",
+                }
+                if recovery_retry else
+                _retry_authorization(result, result["error"], write_boundary_crossed=write_boundary_crossed)
             )
         result["completed_at_utc"] = utc_now()
         progress(9, "COMPLETED", "FAILED", "Production update failed; see the final summary.")

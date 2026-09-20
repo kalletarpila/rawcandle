@@ -62,7 +62,9 @@ A catchable failure after the publication boundary restores all three roles, inc
 
 ## 15. Crash Recovery
 
-Any nonterminal journal restores the complete old generation. Recovery never attempts to finish the new generation. Fault tests cover no replacement, provider replaced, provider+canonical replaced, all three replaced, and postflight-before-commit states.
+Any nonterminal journal restores the complete old generation. Recovery never attempts to finish the new generation. Before every restore replacement it persists and fsyncs both `current_publication_step=RESTORING_<ROLE>` and the matching recovery state. After all roles are restored individually, it verifies provider, canonical, and analysis again as one journal-bound old-generation set before marking `RECOVERED`.
+
+A crash during recovery leaves a nonterminal journal. The next startup restores the entire old generation again from the journal's verified backup set, including roles that may already have been restored before the crash. It never trusts filesystem appearance to skip a role.
 
 ## 16. Recovery Failure
 
@@ -70,7 +72,7 @@ A missing, corrupt, or fingerprint-mismatched backup produces `RECOVERY_FAILED`.
 
 ## 17. Cross-Operation Guard
 
-The guard is shared with existing Administration production transactions. An incomplete Refresh journal is recovered before Add Tickers can mutate anything, and the attempted Add Tickers invocation is stopped with a retry requirement. A `COMPLETED` journal is audit evidence only and neither blocks nor invokes recovery for normal Add Tickers execution.
+The guard is shared with existing Administration production transactions. An incomplete Refresh journal is recovered before Add Tickers can mutate anything. That Add Tickers invocation returns `RETRY_REQUIRED`, preserves no direct-production authorization shortcut, and cannot continue into mutation. A subsequent invocation must run its ordinary Preview/Test/source/preflight validations again. `COMPLETED`, `ROLLED_BACK`, and `RECOVERED` journals are terminal audit evidence only and neither block nor invoke recovery for normal future writes.
 
 ## 18. Refresh State / Watermark
 
@@ -102,7 +104,7 @@ Pre-publication failures state that no production database was modified and whet
 
 ## 24. Fault Injection
 
-Tests assert durable intent before each publication and recovery replacement. Every replacement boundary retains enough journal evidence to restore the complete old set solely from recorded backup paths and fingerprints. Recovery is idempotent, completed journals are inert, and corrupt backup evidence fails closed.
+Tests assert durable intent before each publication and recovery replacement. Every replacement boundary retains enough journal evidence to restore the complete old set solely from recorded backup paths and fingerprints. A recovery-crash fixture interrupts after provider restoration and proves the next startup restores all three roles again. The cross-operation chain is also explicit: incomplete Refresh journal -> Add Tickers attempt -> automatic recovery -> `RETRY_REQUIRED` -> second Add Tickers invocation reruns normal guards and may proceed. Recovery is idempotent, terminal journals are inert, and corrupt backup evidence fails closed.
 
 ## 25. End-to-End Rehearsal
 
@@ -122,7 +124,7 @@ Phase-owned candidate directories are removed after success, pre-publication fai
 
 ## 29. Tests
 
-Focused Refresh Production, Preview, copy-Test, UI, progress, foundation, and shared transaction suites passed 132 tests. Adjacent Add Tickers, full workflow, full V2 downstream, canonical rebuild, Sharadar provider, and RV production suites passed 85 tests. Python compilation and `git diff --check` pass. Ruff is not installed in the environment.
+Focused Refresh Production, Preview, copy-Test, UI, progress, foundation, and shared transaction suites passed 133 tests. Adjacent Add Tickers, full workflow, full V2 downstream, canonical rebuild, Sharadar provider, and RV production suites passed 85 tests. Python compilation and `git diff --check` pass. Ruff is not installed in the environment.
 
 ## 30. Remaining Issues
 
