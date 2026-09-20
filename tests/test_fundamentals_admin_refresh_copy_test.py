@@ -17,6 +17,7 @@ from rawcandle.fundamentals.admin.refresh_copy_runtime import (
     run_apply,
 )
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
+from rawcandle.fundamentals.admin.first_public_result_date_bootstrap import _apply_bootstrap
 from rawcandle.fundamentals.admin.refresh_fundamentals import CONTRACT_VERSION
 from rawcandle.fundamentals.admin.refresh_fundamentals import (
     FINANCIAL_FIELDS,
@@ -240,6 +241,50 @@ def test_second_generation_preserves_established_date_and_initializes_new_quarte
     assert second["publication_date_bootstrap"]["preservation_map_applicable_existing_quarters"] == 1
     assert second["impact"]["source_availability_date_changes"] == 1
     assert second["impact"]["new_first_public_result_date_established"] == 1
+    with sqlite3.connect(canonical) as connection:
+        rows = connection.execute(
+            "SELECT fiscal_quarter,source_availability_date,first_public_result_date "
+            "FROM v4_quarter ORDER BY fiscal_quarter"
+        ).fetchall()
+    assert rows == [
+        ("Q2", "2026-09-15", "2026-08-26"),
+        ("Q3", "2026-11-20", "2026-11-20"),
+    ]
+
+
+def test_standalone_bootstrap_then_normal_refresh_has_zero_historical_bootstrap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / "provider.db"
+    canonical = tmp_path / "canonical.db"
+    create_provider(provider)
+    create_canonical(canonical)
+    with sqlite3.connect(canonical) as connection:
+        assert _apply_bootstrap(connection) == 1
+    monkeypatch.setattr(refresh_copy_runtime, "_events", lambda: ())
+    identity = {"TEST": {"company_id": 1, "security_id": 1, "provider_security_id": "100"}}
+    revised_q2 = source_row(date="2026-09-15", lastupdated="2026-09-15", revenue=120)
+    new_q3 = source_row(
+        date="2026-11-20", reportperiod="2026-10-31", fiscalperiod="2026-Q3",
+        lastupdated="2026-11-20", revenue=130,
+    )
+    histories = {
+        "TEST": {
+            "ARQ": validate_complete_history([revised_q2, new_q3], ticker="TEST", dimension="ARQ"),
+            "MRQ": validate_complete_history(
+                [dict(revised_q2, dimension="MRQ"), dict(new_q3, dimension="MRQ")],
+                ticker="TEST", dimension="MRQ",
+            ),
+        }
+    }
+    replace_provider_histories(provider, histories, identity, applied_at=NOW)
+    result = fresh_rebuild_canonical(
+        provider, canonical, applied_at=NOW, affected_company_ids=[1],
+    )
+    assert result["publication_date_bootstrap"].get("bootstrap_eligible", 0) == 0
+    assert result["publication_date_bootstrap"]["preservation_map_applied"] == 1
+    assert result["impact"]["source_availability_date_changes"] == 1
+    assert result["impact"]["new_first_public_result_date_established"] == 1
     with sqlite3.connect(canonical) as connection:
         rows = connection.execute(
             "SELECT fiscal_quarter,source_availability_date,first_public_result_date "
