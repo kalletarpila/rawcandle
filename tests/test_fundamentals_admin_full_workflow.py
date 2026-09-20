@@ -16,6 +16,7 @@ def _stage_result(
     *,
     mode: str,
     outcome: str = "COMPLETED",
+    status: str | None = None,
     ticker_reporting: list[dict] | None = None,
     extra: dict | None = None,
 ) -> SimpleNamespace:
@@ -32,7 +33,7 @@ def _stage_result(
     (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
     (run_dir / "operation_report.md").write_text(f"# {mode}\n", encoding="utf-8")
     return SimpleNamespace(
-        status="COMPLETED" if outcome in {"COMPLETED", "NO_CHANGE"} else "FAILED",
+        status=status or ("COMPLETED" if outcome in {"COMPLETED", "NO_CHANGE"} else "FAILED"),
         outcome=outcome,
         run_id=run_id,
         artifact_dir=str(run_dir),
@@ -64,6 +65,18 @@ def _report(ticker: str, *, availability: str | None = None, integrity: str = "R
         "acquisition": {},
         "taxonomy": {},
     }
+
+
+def _review_report(ticker: str, *codes: str) -> dict:
+    report = _report(ticker, integrity="REPORTING_INTEGRITY_ERROR", action="Review required")
+    report["eligibility"] = {
+        "status": "REVIEW_REQUIRED",
+        "reason": ",".join(codes),
+        "reason_codes": list(codes),
+        "user_reasons": [code.replace("_", " ").title() for code in codes],
+    }
+    report["after"]["analysis"]["integrity_reason"] = "Canonical ticker was not found in the after-state identity database"
+    return report
 
 
 def test_full_workflow_happy_path_keeps_three_stage_reports_and_workflow_artifacts(tmp_path: Path) -> None:
@@ -100,6 +113,10 @@ def test_full_workflow_happy_path_keeps_three_stage_reports_and_workflow_artifac
     assert (workflow_dir / "workflow_report.md").is_file()
     assert (workflow_dir / "workflow_result.json").is_file()
     assert "| Production update | COMPLETED |" in (workflow_dir / "workflow_report.md").read_text()
+    report = (workflow_dir / "workflow_report.md").read_text(encoding="utf-8")
+    assert "## Failure / Review Summary" not in report
+    assert "Published/added: 1" in report
+    assert "Production executed: Yes" in report
     service = FundamentalsAdminUIService(run_root=tmp_path, operation_lock_path=tmp_path / "history.lock")
     workflow_entry = next(entry for entry in service.history_entries(include_technical=False) if entry.run_id == result["run_id"])
     assert workflow_entry.stage == "Full workflow"
@@ -121,6 +138,84 @@ def test_full_workflow_stops_after_test_failure_and_preserves_preview_report(tmp
     assert production_calls == []
     assert (tmp_path / "preview-run" / "operation_report.md").is_file()
     assert (tmp_path / "test-run" / "operation_report.md").is_file()
+    assert result["terminal_summary"]["stop_kind"] == "TECHNICAL_FAILURE"
+    report = (Path(result["artifact_dir"]) / "workflow_report.md").read_text(encoding="utf-8")
+    assert "Classification: TECHNICAL_FAILURE" in report
+    assert "Production entered: No" in report
+
+
+def test_real_workflow_review_stop_propagates_structured_test_facts_without_markdown_scraping(
+    tmp_path: Path,
+) -> None:
+    production_calls: list[str] = []
+    reports = [
+        _report("ONE", action="Tested successfully - new ticker"),
+        _report("TWO", action="Tested successfully - new ticker"),
+        _report("THREE", action="Tested successfully - new ticker"),
+        _review_report("DRK", "PROVIDER_METADATA_MISSING", "INCOMPATIBLE_EXCHANGE"),
+        _review_report("KRSA", "PROVIDER_METADATA_MISSING", "INCOMPATIBLE_EXCHANGE"),
+    ]
+    result = run_full_workflow(
+        "ONE TWO THREE DRK KRSA", market="usa", run_root=tmp_path,
+        preview_stage=lambda callback: _stage_result(tmp_path, "preview-run", mode="PREVIEW"),
+        test_stage=lambda preview, callback: _stage_result(
+            tmp_path, "test-run", mode="COPY_ONLY_APPLY",
+            outcome="PARTIALLY_COMPLETED", status="COMPLETED", ticker_reporting=reports,
+            extra={"recommended_next_action": "Review identity evidence before rerunning the batch."},
+        ),
+        production_stage=lambda *args: production_calls.append("production"),
+    )
+
+    assert result["outcome"] == "STOPPED"
+    assert result["final_completed_stage"] == "Test on copies"
+    assert production_calls == []
+    assert result["final_batch_outcome"] == {
+        "requested": 5, "new": 5, "already_present": 0,
+        "tested_successfully": 3, "test_completed": 5,
+        "review_required": 2, "rejected": 0,
+        "published_added": 0, "added": 0, "existing_rebuilt": 0,
+        "no_usable_quarterly_history": 0, "reporting_integrity_errors": 2,
+    }
+    terminal = result["terminal_summary"]
+    assert terminal["source"] == "STRUCTURED_CHILD_RESULT"
+    assert terminal["authoritative_stage"] == "Test on copies"
+    assert terminal["production_entered"] is False
+    assert terminal["production_database_writes"] == 0
+    assert [item["ticker"] for item in terminal["problem_items"]] == ["DRK", "KRSA"]
+    report = (Path(result["artifact_dir"]) / "workflow_report.md").read_text(encoding="utf-8")
+    for expected in (
+        "## Failure / Review Summary", "Classification: REVIEW_REQUIRED",
+        "Workflow stopped after Test on copies because 2 tickers require review",
+        "### DRK - REVIEW_REQUIRED", "### KRSA - REVIEW_REQUIRED",
+        "Provider Metadata Missing", "Incompatible Exchange",
+        "Test completed for: 5", "Tested successfully: 3", "Review required: 2", "Rejected: 0",
+        "Reporting integrity errors: 2", "Published/added: 0", "Production executed: No",
+    ):
+        assert expected in report
+    ui_result = FundamentalsAdminUIService(
+        run_root=tmp_path, operation_lock_path=tmp_path / "ui.lock",
+    )._finalize(result, default_message="Full workflow completed.")
+    assert ui_result.status == "FAILED"
+    assert "2 tickers require review" in ui_result.message
+    assert "Tested successfully: 3; review required: 2; rejected: 0." in ui_result.summary_rows
+    assert "Affected tickers: DRK, KRSA." in ui_result.summary_rows
+    assert "Production ran: No." in ui_result.summary_rows
+
+
+def test_preview_review_stop_uses_preview_as_authoritative_terminal_stage(tmp_path: Path) -> None:
+    calls: list[str] = []
+    result = run_full_workflow(
+        "DRK", market="usa", run_root=tmp_path,
+        preview_stage=lambda callback: _stage_result(
+            tmp_path, "preview-run", mode="PREVIEW", outcome="REVIEW_REQUIRED",
+            status="FAILED", ticker_reporting=[_review_report("DRK", "PROVIDER_METADATA_MISSING")],
+        ),
+        test_stage=lambda *args: calls.append("test"),
+        production_stage=lambda *args: calls.append("production"),
+    )
+    assert calls == []
+    assert result["terminal_summary"]["authoritative_stage"] == "Preview"
+    assert result["terminal_summary"]["problem_items"][0]["ticker"] == "DRK"
 
 
 def test_integrity_error_stops_automatic_production_but_zero_arq_does_not(tmp_path: Path) -> None:
@@ -185,6 +280,12 @@ def test_retryable_production_failure_stops_without_loop_and_exposes_manual_retr
     assert result["outcome"] == "STOPPED"
     assert result["manual_production_retry_available"] is True
     assert len(result["stages"]) == 3
+    assert result["terminal_summary"]["authoritative_stage"] == "Production update"
+    assert result["terminal_summary"]["production_entered"] is True
+    assert "production lock" in result["terminal_summary"]["headline"]
+    report = (Path(result["artifact_dir"]) / "workflow_report.md").read_text(encoding="utf-8")
+    assert "Classification: TECHNICAL_FAILURE" in report
+    assert "Production entered: Yes" in report
 
 
 def test_dirty_git_warning_does_not_change_completed_workflow_outcome(tmp_path: Path) -> None:

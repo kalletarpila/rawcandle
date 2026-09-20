@@ -125,6 +125,11 @@ def test_refresh_full_workflow_preview_blocker_never_invokes_test(tmp_path: Path
     assert result["outcome"] == "STOPPED"
     assert result["current_stage"] == "Preview"
     assert calls == []
+    assert result["terminal_summary"]["authoritative_stage"] == "Preview"
+    assert result["terminal_summary"]["source"] == "STRUCTURED_CHILD_RESULT"
+    report = (Path(result["artifact_dir"]) / "workflow_report.md").read_text(encoding="utf-8")
+    assert "## Failure / Review Summary" in report
+    assert "Classification: TECHNICAL_FAILURE" in report
 
 
 @pytest.mark.parametrize(

@@ -15,6 +15,7 @@ from rawcandle.fundamentals.admin.full_workflow import (
     WORKFLOW_REPORT_NAME,
     run_full_workflow as orchestrate_full_workflow,
     run_refresh_full_workflow,
+    workflow_ui_summary,
 )
 from rawcandle.fundamentals.admin.history import AdminRunHistory, RunHistoryEntry, RunProgressSummary
 from rawcandle.fundamentals.admin.operation_report import (
@@ -695,16 +696,13 @@ class FundamentalsAdminUIService:
         if run_id and workflow_mode:
             report_path = self.run_root / run_id / WORKFLOW_REPORT_NAME
             if report_path.is_file() and not report_path.is_symlink():
+                workflow_rows = workflow_ui_summary(result)
                 report = OperationReportSummary(
                     run_id=run_id,
                     operation_type=str(result.get("operation_type") or "ADD_TICKERS"),
                     outcome=str(result.get("outcome") or "RECORDED"),
                     mode="FULL_WORKFLOW",
-                    summary_rows=(
-                        f"Full workflow: {str(result.get('outcome') or 'RECORDED').replace('_', ' ').title()}.",
-                        f"Current stage: {result.get('current_stage') or 'Not recorded'}.",
-                        f"Production completed: {'Yes' if result.get('production_completed') else 'No'}.",
-                    ),
+                    summary_rows=workflow_rows,
                     report_path=str(report_path),
                     report_sha256=sha256_file(report_path),
                 )
@@ -720,7 +718,11 @@ class FundamentalsAdminUIService:
         first_error = errors[0] if isinstance(errors, (list, tuple)) and errors and isinstance(errors[0], Mapping) else {}
         return AdminUIRunResult(
             status="RETRY_REQUIRED" if result.get("outcome") == "RETRY_REQUIRED" else ("FAILED" if result.get("outcome") in {"FAILED", "STOPPED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED"} else "COMPLETED"),
-            message=final_status_message(result) if result.get("mode") else default_message,
+            message=(
+                str((result.get("terminal_summary") or {}).get("headline"))
+                if workflow_mode and (result.get("terminal_summary") or {}).get("headline")
+                else final_status_message(result) if result.get("mode") else default_message
+            ),
             run_id=run_id or None,
             outcome=str(result.get("outcome")) if result.get("outcome") is not None else None,
             mode=str(result.get("mode")) if result.get("mode") is not None else None,
