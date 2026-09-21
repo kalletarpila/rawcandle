@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "2.0",
   "records": [
     {
       "subject_ticker": "DRK",
@@ -17,6 +17,21 @@
       "exchange": "NASDAQ",
       "review_status": "PROPOSED",
       "reason": "SEC evidence proves the intended issuer rename, but the September 14 filing still described DRK as reserved and subject to Nasdaq procedures; effective trading continuity is not yet proven by the local provider snapshot.",
+      "expected_state": {
+        "provider_status": "MISSING",
+        "predecessor_provider_status": "FOUND",
+        "predecessor_provider_cik": "0001591956",
+        "predecessor_provider_permaticker": "167235",
+        "predecessor_provider_exchange": "NASDAQ",
+        "subject_current_security_ids": [],
+        "subject_alias_security_ids": [],
+        "cik_company_ids": [],
+        "permaticker_security_ids": []
+      },
+      "unresolved_assumptions": [
+        "The exchange-effective DRK symbol-change date is not established.",
+        "Authoritative evidence does not yet prove whether ANY and DRK are the same listed security after effectiveness."
+      ],
       "evidence": [
         {
           "source_type": "SEC_FILING_EXHIBIT",
@@ -43,6 +58,27 @@
       "exchange": "NASDAQ",
       "review_status": "PROPOSED",
       "reason": "Cyclerion remained the legal registrant after the merger and changed to KRSA, but a reverse split and new CUSIP make exact security continuity an operator-reviewed successor decision.",
+      "expected_state": {
+        "provider_status": "MISSING",
+        "predecessor_provider_status": "FOUND",
+        "predecessor_provider_cik": "0001755237",
+        "predecessor_provider_permaticker": "111101",
+        "predecessor_provider_exchange": "NASDAQ",
+        "subject_current_security_ids": [],
+        "subject_alias_security_ids": [],
+        "cik_company_ids": [627],
+        "permaticker_security_ids": [],
+        "canonical_company_company_id": 627,
+        "canonical_company_company_key": "SEC_CIK:0001755237",
+        "canonical_company_status": "ACTIVE",
+        "canonical_company_ciks": ["0001755237"],
+        "canonical_security_security_id": 628,
+        "canonical_security_company_id": 627,
+        "canonical_security_current_ticker": "CYCN",
+        "canonical_security_exchange": "NASDAQ",
+        "canonical_security_active": 1
+      },
+      "unresolved_assumptions": [],
       "evidence": [
         {
           "source_type": "SEC_8_K",
@@ -76,6 +112,18 @@
       "exchange": "NASDAQ",
       "review_status": "PROPOSED",
       "reason": "Pasqal Holding SA is a new public issuer/security produced by a multi-step business combination; BBCQ must not be reused as the same company or security by ticker inference.",
+      "expected_state": {
+        "provider_status": "MISSING",
+        "predecessor_provider_status": "FOUND",
+        "predecessor_provider_cik": "0002088295",
+        "predecessor_provider_permaticker": "646033",
+        "predecessor_provider_exchange": "NASDAQ",
+        "subject_current_security_ids": [],
+        "subject_alias_security_ids": [],
+        "cik_company_ids": [],
+        "permaticker_security_ids": []
+      },
+      "unresolved_assumptions": [],
       "evidence": [
         {
           "source_type": "SEC_6_K",
@@ -109,6 +157,18 @@
       "exchange": "NASDAQ",
       "review_status": "PROPOSED",
       "reason": "The old parent equity was cancelled and a former subsidiary, CIK 0001254699, became the renamed public holding company and issued entirely new common stock.",
+      "expected_state": {
+        "provider_status": "MISSING",
+        "predecessor_provider_status": "FOUND",
+        "predecessor_provider_cik": "0001355096",
+        "predecessor_provider_permaticker": "194557",
+        "predecessor_provider_exchange": "NASDAQ",
+        "subject_current_security_ids": [],
+        "subject_alias_security_ids": [],
+        "cik_company_ids": [],
+        "permaticker_security_ids": []
+      },
+      "unresolved_assumptions": [],
       "evidence": [
         {
           "source_type": "SEC_REGISTRATION_STATEMENT",

@@ -10,7 +10,9 @@ from rawcandle.fundamentals.admin import batch_add_tickers as batch
 from rawcandle.fundamentals.admin.batch_add_tickers import _apply_identities, build_generic_batch_plan, parse_batch_tickers
 from rawcandle.fundamentals.admin.identity_resolution import (
     AuthorityClass,
+    ReviewReadiness,
     ResolutionClass,
+    approval_fingerprint,
     resolve_ticker_identity,
     run_preview,
 )
@@ -32,7 +34,7 @@ def _metadata(paths, ticker: str, permaticker: str, cik: str | None = "0000101")
 
 
 def _registry(path: Path, record: dict) -> Path:
-    path.write_text(json.dumps({"schema_version": "1.0", "records": [record]}), encoding="utf-8")
+    path.write_text(json.dumps({"schema_version": "2.0", "records": [record]}), encoding="utf-8")
     return path
 
 
@@ -55,8 +57,24 @@ def _review(ticker: str, status: str = "PROPOSED", **overrides) -> dict:
         "review_status": status,
         "reason": "Fixture reviewed identity decision.",
         "evidence": [{"source_type": "SEC_8_K", "source_authority": "SEC", "reference": "fixture", "research_date": "2026-09-21", "fact": "Fixture fact."}],
+        "expected_state": {
+            "provider_status": "MISSING",
+            "subject_current_security_ids": [],
+            "subject_alias_security_ids": [],
+            "cik_company_ids": [],
+            "permaticker_security_ids": [],
+        },
+        "unresolved_assumptions": [],
     }
     record.update(overrides)
+    if status == "APPROVED":
+        approved = {
+            key: value for key, value in record.items()
+            if key not in {"review_status", "approval_fingerprint", "approval_metadata", "approved_resolution"}
+        }
+        record["approved_resolution"] = approved
+        record["approval_fingerprint"] = approval_fingerprint(approved)
+        record["approval_metadata"] = {"approved_by": "operator_approved", "approved_at_utc": "2026-09-21T00:00:00Z"}
     return record
 
 
@@ -259,6 +277,221 @@ def test_admin_service_exposes_identity_preview_without_apply_capability(tmp_pat
     assert result.status == "COMPLETED"
     assert result.mode == "PREVIEW"
     assert result.preview_payload_path and result.preview_payload_path.endswith("identity_preview.json")
+    assert any("DRK: PROPOSED_NOT_READY" in row for row in result.summary_rows)
+    assert any("approval fingerprint=" in row for row in result.summary_rows)
     assert capability.preview_enabled is True
     assert capability.copy_apply_enabled is False
     assert capability.production_apply_enabled is False
+
+
+def _existing_identity_binding(paths, *, ticker: str = "NEWC") -> tuple[int, int, dict]:
+    with sqlite3.connect(paths.canonical_db) as conn:
+        company_id, security_id = conn.execute(
+            "SELECT company_id,security_id FROM security WHERE current_ticker=?", (ticker,)
+        ).fetchone()
+    expected = {
+        "provider_status": "MISSING",
+        "subject_current_security_ids": [],
+        "subject_alias_security_ids": [],
+        "cik_company_ids": [company_id],
+        "permaticker_security_ids": [security_id],
+        "canonical_company_company_id": company_id,
+        "canonical_company_company_key": "SEC_CIK:0000000101",
+        "canonical_company_status": "ACTIVE",
+        "canonical_company_ciks": ["0000000101"],
+        "canonical_security_security_id": security_id,
+        "canonical_security_company_id": company_id,
+        "canonical_security_current_ticker": ticker,
+        "canonical_security_exchange": "NASDAQ",
+        "canonical_security_active": 1,
+    }
+    return company_id, security_id, expected
+
+
+def test_review_fingerprint_ignores_noise_but_changes_for_material_identity() -> None:
+    first = _review("BOUND")
+    second = json.loads(json.dumps(first))
+    second["reason"] = "Different prose is not approval authority."
+    second["evidence"][0]["research_date"] = "2030-01-01"
+    second = dict(reversed(list(second.items())))
+
+    assert approval_fingerprint(first) == approval_fingerprint(second)
+
+    second["cik"] = "0000000999"
+    assert approval_fingerprint(first) != approval_fingerprint(second)
+
+
+def test_proposed_ready_and_rejected_reviews_never_authorize(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    proposed = resolve_ticker_identity(paths, "READY", registry_path=_registry(tmp_path / "p.json", _review("READY")))
+    rejected = resolve_ticker_identity(paths, "NOPE", registry_path=_registry(tmp_path / "r.json", _review("NOPE", "REJECTED")))
+
+    assert proposed.readiness_state == ReviewReadiness.PROPOSED_READY_FOR_OPERATOR_APPROVAL.value
+    assert proposed.proposed_mutation["action"] == "CREATE_COMPANY_AND_SECURITY"
+    assert proposed.automatic_mutation_permitted is False
+    assert rejected.readiness_state == ReviewReadiness.REJECTED.value
+    assert rejected.automatic_mutation_permitted is False
+    assert "REJECTED_REVIEW_NOT_AUTHORITY" in rejected.reason_codes
+
+
+def test_approved_same_security_plan_is_bound_and_stale_state_fails_closed(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    first = build_generic_batch_plan(paths, parse_batch_tickers("NEWC"), archive_path=_archive(tmp_path / "source.zip"))
+    _apply_identities(paths, [first.safe_dict(include_rows=True)["items"][0]], applied_at="2026-09-20T00:00:00Z")
+    company_id, security_id, expected = _existing_identity_binding(paths)
+    record = _review(
+        "RENAMED", "APPROVED",
+        resolution_class="TICKER_TRANSITION_SAME_SECURITY",
+        company_continuity="SAME_COMPANY",
+        security_continuity="SAME_SECURITY",
+        ticker_relationship="RENAMED",
+        provider_continuity="SAME_PERMATICKER",
+        predecessor_ticker="NEWC",
+        canonical_company_id=company_id,
+        canonical_security_id=security_id,
+        provider_permaticker="1001",
+        expected_state=expected,
+    )
+    registry = _registry(tmp_path / "approved.json", record)
+
+    valid = resolve_ticker_identity(paths, "RENAMED", registry_path=registry)
+    assert valid.readiness_state == ReviewReadiness.APPROVED_VALID.value
+    assert valid.reason_codes == ("APPROVED_REVIEW_VALID",)
+    assert valid.mutation["action"] == "UPDATE_CURRENT_TICKER"
+    assert {operation["operation"] for operation in valid.mutation["operations"]} >= {
+        "REUSE_COMPANY", "REUSE_SECURITY", "CLOSE_TICKER_ALIAS", "ADD_CURRENT_TICKER_ALIAS"
+    }
+
+    with sqlite3.connect(paths.canonical_db) as conn:
+        conn.execute("UPDATE security SET current_ticker='OTHER' WHERE security_id=?", (security_id,))
+    stale = resolve_ticker_identity(paths, "RENAMED", registry_path=registry)
+    assert stale.readiness_state == ReviewReadiness.APPROVED_INVALID.value
+    assert stale.automatic_mutation_permitted is False
+    assert "APPROVED_REVIEW_STALE" in stale.reason_codes
+    assert "APPROVED_REVIEW_CANONICAL_CONFLICT" in stale.reason_codes
+
+
+def test_approved_same_company_new_security_and_new_company_plans_are_explicit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    first = build_generic_batch_plan(paths, parse_batch_tickers("NEWC"), archive_path=_archive(tmp_path / "source.zip"))
+    _apply_identities(paths, [first.safe_dict(include_rows=True)["items"][0]], applied_at="2026-09-20T00:00:00Z")
+    company_id, security_id, expected = _existing_identity_binding(paths)
+    successor_record = _review(
+        "SUCCESSOR", "APPROVED",
+        company_continuity="SAME_LEGAL_ISSUER_AFTER_COMBINATION",
+        security_continuity="SUCCESSOR_SECURITY",
+        canonical_company_id=company_id,
+        canonical_security_id=security_id,
+        provider_permaticker="1001",
+        expected_state=expected,
+    )
+    successor_registry = _registry(tmp_path / "successor.json", successor_record)
+    successor = resolve_ticker_identity(paths, "SUCCESSOR", registry_path=successor_registry)
+    new_company_record = _review("NEWISSUER", "APPROVED", cik="0000000999")
+    new_company_registry = _registry(tmp_path / "new.json", new_company_record)
+    new_company = resolve_ticker_identity(
+        paths,
+        "NEWISSUER",
+        registry_path=new_company_registry,
+    )
+
+    assert successor.mutation["action"] == "CREATE_SECURITY"
+    assert successor.mutation["company_id"] == company_id
+    assert successor.mutation["predecessor_security_id"] == security_id
+    assert "PRESERVE_PREDECESSOR_SECURITY" in {item["operation"] for item in successor.mutation["operations"]}
+    assert new_company.mutation["action"] == "CREATE_COMPANY_AND_SECURITY"
+    assert {item["operation"] for item in new_company.mutation["operations"]} >= {"CREATE_COMPANY", "CREATE_SECURITY"}
+
+    with sqlite3.connect(paths.market_db) as conn:
+        for ticker in ("SUCCESSOR", "NEWISSUER"):
+            conn.execute("INSERT INTO ticker_meta VALUES(?,'usa','Technology','Software - Application')", (ticker,))
+            conn.execute("INSERT INTO osakedata VALUES(?,'usa','2026-09-20',10.0)", (ticker,))
+    monkeypatch.setattr(batch, "resolve_ticker_identity", lambda source_paths, ticker: resolve_ticker_identity(source_paths, ticker, registry_path=successor_registry))
+    successor_plan = build_generic_batch_plan(paths, parse_batch_tickers("SUCCESSOR"), archive_path=_archive(tmp_path / "successor.zip", ("SUCCESSOR",)))
+    _apply_identities(paths, [successor_plan.safe_dict(include_rows=True)["items"][0]], applied_at="2026-09-21T00:00:00Z")
+    monkeypatch.setattr(batch, "resolve_ticker_identity", lambda source_paths, ticker: resolve_ticker_identity(source_paths, ticker, registry_path=new_company_registry))
+    new_plan = build_generic_batch_plan(paths, parse_batch_tickers("NEWISSUER"), archive_path=_archive(tmp_path / "new.zip", ("NEWISSUER",)))
+    _apply_identities(paths, [new_plan.safe_dict(include_rows=True)["items"][0]], applied_at="2026-09-21T00:00:00Z")
+
+    with sqlite3.connect(paths.canonical_db) as conn:
+        successor_row = conn.execute("SELECT company_id,security_id FROM security WHERE current_ticker='SUCCESSOR'").fetchone()
+        predecessor = conn.execute("SELECT company_id,current_ticker FROM security WHERE security_id=?", (security_id,)).fetchone()
+        new_row = conn.execute("SELECT company_id,security_id FROM security WHERE current_ticker='NEWISSUER'").fetchone()
+    assert successor_row[0] == company_id and successor_row[1] != security_id
+    assert predecessor == (company_id, "NEWC")
+    assert new_row[0] != company_id and new_row[1] not in {security_id, successor_row[1]}
+
+
+def test_approved_review_fingerprint_mismatch_fails_closed(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    record = _review("TAMPERED", "APPROVED")
+    record["approved_resolution"]["cik"] = "0000000999"
+    resolution = resolve_ticker_identity(paths, "TAMPERED", registry_path=_registry(tmp_path / "tampered.json", record))
+
+    assert resolution.automatic_mutation_permitted is False
+    assert "APPROVED_REVIEW_EVIDENCE_MISMATCH" in resolution.reason_codes
+
+
+def test_new_compatible_provider_truth_supersedes_review_authority(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    first = build_generic_batch_plan(paths, parse_batch_tickers("NEWC"), archive_path=_archive(tmp_path / "source.zip"))
+    _apply_identities(paths, [first.safe_dict(include_rows=True)["items"][0]], applied_at="2026-09-20T00:00:00Z")
+    company_id, security_id, expected = _existing_identity_binding(paths)
+    record = _review(
+        "RENAMED", "APPROVED",
+        resolution_class="TICKER_TRANSITION_SAME_SECURITY",
+        company_continuity="SAME_COMPANY",
+        security_continuity="SAME_SECURITY",
+        ticker_relationship="RENAMED",
+        provider_continuity="SAME_PERMATICKER",
+        predecessor_ticker="NEWC",
+        canonical_company_id=company_id,
+        canonical_security_id=security_id,
+        provider_permaticker="1001",
+        expected_state=expected,
+    )
+    registry = _registry(tmp_path / "approved.json", record)
+    _metadata(paths, "RENAMED", "1001")
+
+    resolution = resolve_ticker_identity(paths, "RENAMED", registry_path=registry)
+
+    assert resolution.authority_class == AuthorityClass.LOCAL_DETERMINISTIC.value
+    assert resolution.readiness_state == ReviewReadiness.APPROVED_SUPERSEDED_BY_LOCAL_DETERMINISTIC.value
+    assert resolution.resolution_class == ResolutionClass.TICKER_TRANSITION_SAME_SECURITY.value
+    assert resolution.automatic_mutation_permitted is True
+    assert resolution.reason_codes == ("PERMATICKER_MATCH",)
+
+
+def test_real_add_tickers_candidate_path_applies_bound_same_security_review(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    first = build_generic_batch_plan(paths, parse_batch_tickers("NEWC"), archive_path=_archive(tmp_path / "source.zip"))
+    _apply_identities(paths, [first.safe_dict(include_rows=True)["items"][0]], applied_at="2026-09-20T00:00:00Z")
+    company_id, security_id, expected = _existing_identity_binding(paths)
+    record = _review(
+        "RENAMED", "APPROVED",
+        resolution_class="TICKER_TRANSITION_SAME_SECURITY",
+        company_continuity="SAME_COMPANY",
+        security_continuity="SAME_SECURITY",
+        ticker_relationship="RENAMED",
+        provider_continuity="SAME_PERMATICKER",
+        predecessor_ticker="NEWC",
+        canonical_company_id=company_id,
+        canonical_security_id=security_id,
+        provider_permaticker="1001",
+        expected_state=expected,
+    )
+    registry = _registry(tmp_path / "approved.json", record)
+    monkeypatch.setattr(batch, "resolve_ticker_identity", lambda source_paths, ticker: resolve_ticker_identity(source_paths, ticker, registry_path=registry))
+    with sqlite3.connect(paths.market_db) as conn:
+        conn.execute("INSERT INTO ticker_meta VALUES('RENAMED','usa','Technology','Software - Application')")
+        conn.execute("INSERT INTO osakedata VALUES('RENAMED','usa','2026-09-20',10.0)")
+    plan = build_generic_batch_plan(paths, parse_batch_tickers("RENAMED"), archive_path=_archive(tmp_path / "renamed.zip", ("RENAMED",)))
+    item = plan.safe_dict(include_rows=True)["items"][0]
+
+    assert item["status"] == "ELIGIBLE"
+    _apply_identities(paths, [item], applied_at="2026-09-21T00:00:00Z")
+    with sqlite3.connect(paths.canonical_db) as conn:
+        after = conn.execute("SELECT company_id,security_id FROM security WHERE current_ticker='RENAMED'").fetchone()
+        aliases = conn.execute("SELECT ticker FROM ticker_alias WHERE security_id=?", (security_id,)).fetchall()
+    assert after == (company_id, security_id)
+    assert {row[0] for row in aliases} >= {"NEWC", "RENAMED"}

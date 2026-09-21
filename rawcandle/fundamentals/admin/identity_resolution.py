@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import asdict, dataclass
@@ -12,7 +13,8 @@ from rawcandle.fundamentals.admin.contracts import AdminOperationType, RunStage,
 from rawcandle.fundamentals.admin.provider_cik import extract_sharadar_cik, normalize_cik
 
 
-CONTRACT_VERSION = "PHASE13G3_18_TICKER_IDENTITY_RESOLUTION_V1"
+CONTRACT_VERSION = "PHASE13G3_19_IDENTITY_REVIEW_APPROVAL_V2"
+REGISTRY_SCHEMA_VERSION = "2.0"
 DEFAULT_REGISTRY_PATH = Path(__file__).with_name("identity_resolutions.json")
 SUPPORTED_EXCHANGES = {"NASDAQ", "NYSE", "NYSEMKT"}
 
@@ -33,6 +35,16 @@ class AuthorityClass(str, Enum):
     INSUFFICIENT = "INSUFFICIENT"
 
 
+class ReviewReadiness(str, Enum):
+    NOT_REVIEWED = "NOT_REVIEWED"
+    PROPOSED_NOT_READY = "PROPOSED_NOT_READY"
+    PROPOSED_READY_FOR_OPERATOR_APPROVAL = "PROPOSED_READY_FOR_OPERATOR_APPROVAL"
+    APPROVED_VALID = "APPROVED_VALID"
+    APPROVED_INVALID = "APPROVED_INVALID"
+    APPROVED_SUPERSEDED_BY_LOCAL_DETERMINISTIC = "APPROVED_SUPERSEDED_BY_LOCAL_DETERMINISTIC"
+    REJECTED = "REJECTED"
+
+
 @dataclass(frozen=True)
 class IdentityResolution:
     requested_ticker: str
@@ -49,6 +61,12 @@ class IdentityResolution:
     provider_metadata: Mapping[str, Any]
     canonical_evidence: Mapping[str, Any]
     reviewed_resolution: Mapping[str, Any] | None
+    review_status: str | None
+    readiness_state: str
+    approval_fingerprint: str | None
+    current_state_validation: Mapping[str, Any]
+    unresolved_assumptions: tuple[str, ...]
+    proposed_mutation: Mapping[str, Any]
     mutation: Mapping[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
@@ -66,14 +84,64 @@ def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", (table,)).fetchone() is not None
 
 
+def _normalized_evidence(evidence: Any) -> list[dict[str, str]]:
+    if not isinstance(evidence, list):
+        return []
+    normalized = []
+    for item in evidence:
+        if not isinstance(item, Mapping):
+            continue
+        normalized.append({
+            key: str(item.get(key) or "").strip()
+            for key in ("source_type", "source_authority", "reference", "fact")
+        })
+    return sorted(normalized, key=lambda item: tuple(item.values()))
+
+
+def approval_material(record: Mapping[str, Any], *, schema_version: str = REGISTRY_SCHEMA_VERSION) -> dict[str, Any]:
+    approved = record.get("approved_resolution")
+    source = approved if isinstance(approved, Mapping) else record
+    expected = source.get("expected_state") if isinstance(source.get("expected_state"), Mapping) else {}
+    return {
+        "registry_schema_version": schema_version,
+        "subject_ticker": str(source.get("subject_ticker") or record.get("subject_ticker") or "").strip().upper(),
+        "resolution_class": source.get("resolution_class"),
+        "company_continuity": source.get("company_continuity"),
+        "security_continuity": source.get("security_continuity"),
+        "ticker_relationship": source.get("ticker_relationship"),
+        "provider_continuity": source.get("provider_continuity"),
+        "predecessor_ticker": str(source.get("predecessor_ticker") or "").strip().upper() or None,
+        "canonical_company_id": source.get("canonical_company_id"),
+        "canonical_security_id": source.get("canonical_security_id"),
+        "cik": normalize_cik(source.get("cik")),
+        "provider_permaticker": str(source.get("provider_permaticker") or "").strip() or None,
+        "exchange": str(source.get("exchange") or "").strip().upper() or None,
+        "effective_date": source.get("effective_date"),
+        "expected_state": {str(key): expected[key] for key in sorted(expected)},
+        "evidence": _normalized_evidence(source.get("evidence", record.get("evidence"))),
+    }
+
+
+def approval_fingerprint(record: Mapping[str, Any], *, schema_version: str = REGISTRY_SCHEMA_VERSION) -> str:
+    encoded = json.dumps(
+        approval_material(record, schema_version=schema_version),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def load_review_registry(path: Path = DEFAULT_REGISTRY_PATH) -> dict[str, Mapping[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != "1.0" or not isinstance(payload.get("records"), list):
+    schema_version = str(payload.get("schema_version") or "")
+    if schema_version != REGISTRY_SCHEMA_VERSION or not isinstance(payload.get("records"), list):
         raise ValueError("IDENTITY_REVIEW_REGISTRY_SCHEMA_INVALID")
     records: dict[str, Mapping[str, Any]] = {}
     required = {
         "subject_ticker", "resolution_class", "company_continuity", "security_continuity",
         "ticker_relationship", "provider_continuity", "review_status", "reason", "evidence",
+        "expected_state", "unresolved_assumptions",
     }
     for raw in payload["records"]:
         if not isinstance(raw, Mapping) or not required.issubset(raw):
@@ -86,6 +154,11 @@ def load_review_registry(path: Path = DEFAULT_REGISTRY_PATH) -> dict[str, Mappin
             raise ValueError("IDENTITY_REVIEW_STATUS_INVALID")
         if str(raw["resolution_class"]) not in {item.value for item in ResolutionClass}:
             raise ValueError("IDENTITY_REVIEW_CLASS_INVALID")
+        if not isinstance(raw.get("expected_state"), Mapping) or not isinstance(raw.get("unresolved_assumptions"), list):
+            raise ValueError("IDENTITY_REVIEW_BINDING_INVALID")
+        if status == "APPROVED":
+            if not isinstance(raw.get("approved_resolution"), Mapping) or not raw.get("approval_fingerprint"):
+                raise ValueError("IDENTITY_APPROVAL_CONTRACT_MISSING")
         records[ticker] = dict(raw)
     return records
 
@@ -158,6 +231,156 @@ def _canonical_evidence(canonical_db: Path, ticker: str, metadata: Mapping[str, 
     }
 
 
+def _review_current_state(
+    paths: Any,
+    ticker: str,
+    review: Mapping[str, Any],
+    provider: Mapping[str, Any],
+    canonical: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata = provider.get("identity") if isinstance(provider.get("identity"), Mapping) else {}
+    predecessor_ticker = str(review.get("predecessor_ticker") or "").strip().upper()
+    predecessor_provider = _provider_metadata(Path(paths.provider_db), predecessor_ticker) if predecessor_ticker else {}
+    predecessor_metadata = (
+        predecessor_provider.get("identity")
+        if isinstance(predecessor_provider.get("identity"), Mapping)
+        else {}
+    )
+    company_id = review.get("canonical_company_id")
+    security_id = review.get("canonical_security_id")
+    company_row = None
+    security_row = None
+    company_ciks: list[str] = []
+    with _readonly(Path(paths.canonical_db)) as conn:
+        if company_id is not None:
+            company_row = conn.execute(
+                "SELECT company_id,company_key,company_name,status FROM company WHERE company_id=?",
+                (company_id,),
+            ).fetchone()
+            if _table_exists(conn, "company_cik"):
+                company_ciks = sorted(
+                    filter(None, (normalize_cik(row[0]) for row in conn.execute(
+                        "SELECT cik_normalized FROM company_cik WHERE company_id=?", (company_id,)
+                    )))
+                )
+        if security_id is not None:
+            security_row = conn.execute(
+                "SELECT security_id,company_id,current_ticker,exchange,active,valid_from,valid_to "
+                "FROM security WHERE security_id=?",
+                (security_id,),
+            ).fetchone()
+    actual = {
+        "provider_status": provider.get("status"),
+        "provider_cik": normalize_cik(metadata.get("cik")),
+        "provider_permaticker": str(metadata.get("permaticker") or "") or None,
+        "provider_exchange": str(metadata.get("exchange") or "").upper() or None,
+        "predecessor_provider_status": predecessor_provider.get("status"),
+        "predecessor_provider_cik": normalize_cik(predecessor_metadata.get("cik")),
+        "predecessor_provider_permaticker": str(predecessor_metadata.get("permaticker") or "") or None,
+        "predecessor_provider_exchange": str(predecessor_metadata.get("exchange") or "").upper() or None,
+        "subject_current_security_ids": sorted(int(row["security_id"]) for row in canonical["current_ticker_matches"]),
+        "subject_alias_security_ids": sorted(set(int(row["security_id"]) for row in canonical["alias_matches"])),
+        "cik_company_ids": sorted(int(row["company_id"]) for row in canonical["company_cik_matches"]),
+        "permaticker_security_ids": sorted(int(row["security_id"]) for row in canonical["provider_security_matches"]),
+        "canonical_company": dict(company_row) if company_row else None,
+        "canonical_company_ciks": company_ciks,
+        "canonical_security": dict(security_row) if security_row else None,
+    }
+    expected = review.get("expected_state") if isinstance(review.get("expected_state"), Mapping) else {}
+    mismatches = []
+    for key, expected_value in expected.items():
+        if key.startswith("canonical_company_") and key != "canonical_company_ciks":
+            field = key.removeprefix("canonical_company_")
+            actual_value = actual["canonical_company"].get(field) if actual["canonical_company"] else None
+        elif key.startswith("canonical_security_"):
+            field = key.removeprefix("canonical_security_")
+            actual_value = actual["canonical_security"].get(field) if actual["canonical_security"] else None
+        else:
+            actual_value = actual.get(key)
+        if actual_value != expected_value:
+            mismatches.append({"field": key, "expected": expected_value, "actual": actual_value})
+    return {
+        "status": "MATCH" if not mismatches else "CONFLICT",
+        "expected": dict(expected),
+        "actual": actual,
+        "mismatches": mismatches,
+    }
+
+
+def _review_readiness(review: Mapping[str, Any], validation: Mapping[str, Any]) -> tuple[ReviewReadiness, tuple[str, ...]]:
+    unresolved = tuple(str(item) for item in review.get("unresolved_assumptions", []) if str(item).strip())
+    missing = []
+    if not _normalized_evidence(review.get("evidence")):
+        missing.append("AUTHORITATIVE_EVIDENCE_REQUIRED")
+    if not review.get("effective_date"):
+        missing.append("EFFECTIVE_DATE_REQUIRED")
+    if not review.get("exchange"):
+        missing.append("EXCHANGE_REQUIRED")
+    if str(review.get("security_continuity")) == "SAME_SECURITY" and (
+        review.get("canonical_company_id") is None or review.get("canonical_security_id") is None
+    ):
+        missing.append("SAME_SECURITY_CANONICAL_TARGET_REQUIRED")
+    if str(review.get("company_continuity")) in {"SAME_COMPANY", "SAME_LEGAL_ISSUER_AFTER_COMBINATION"} and review.get("canonical_company_id") is None:
+        missing.append("SAME_COMPANY_CANONICAL_TARGET_REQUIRED")
+    if validation.get("status") != "MATCH":
+        missing.append("EXPECTED_CURRENT_STATE_CONFLICT")
+    reasons = tuple(dict.fromkeys((*unresolved, *missing)))
+    if str(review.get("review_status")).upper() == "REJECTED":
+        return ReviewReadiness.REJECTED, reasons
+    if str(review.get("review_status")).upper() == "APPROVED":
+        return (ReviewReadiness.APPROVED_VALID if not reasons else ReviewReadiness.APPROVED_INVALID), reasons
+    return (
+        ReviewReadiness.PROPOSED_READY_FOR_OPERATOR_APPROVAL if not reasons else ReviewReadiness.PROPOSED_NOT_READY,
+        reasons,
+    )
+
+
+def _mutation_plan(ticker: str, review: Mapping[str, Any], *, approved: bool) -> dict[str, Any]:
+    company_id = review.get("canonical_company_id")
+    security_id = review.get("canonical_security_id")
+    same_security = str(review.get("security_continuity")) == "SAME_SECURITY"
+    action = "UPDATE_CURRENT_TICKER" if same_security else (
+        "CREATE_SECURITY" if company_id is not None else "CREATE_COMPANY_AND_SECURITY"
+    )
+    operations: list[dict[str, Any]] = []
+    if action == "UPDATE_CURRENT_TICKER":
+        operations.extend([
+            {"operation": "REUSE_COMPANY", "company_id": company_id},
+            {"operation": "REUSE_SECURITY", "security_id": security_id},
+            {"operation": "CLOSE_TICKER_ALIAS", "ticker": review.get("predecessor_ticker"), "valid_to": review.get("effective_date")},
+            {"operation": "ADD_CURRENT_TICKER_ALIAS", "ticker": ticker, "valid_from": review.get("effective_date")},
+            {"operation": "UPDATE_SECURITY_CURRENT_TICKER", "security_id": security_id, "before": review.get("predecessor_ticker"), "after": ticker},
+        ])
+    elif action == "CREATE_SECURITY":
+        operations.extend([
+            {"operation": "REUSE_COMPANY", "company_id": company_id},
+            {"operation": "PRESERVE_PREDECESSOR_SECURITY", "security_id": security_id, "ticker": review.get("predecessor_ticker")},
+            {"operation": "CREATE_SECURITY", "company_id": company_id, "candidate_security_id": "ALLOCATE_ON_CANDIDATE"},
+            {"operation": "ADD_CURRENT_TICKER_ALIAS", "ticker": ticker, "valid_from": review.get("effective_date")},
+        ])
+    else:
+        operations.extend([
+            {"operation": "CREATE_COMPANY", "candidate_company_id": "ALLOCATE_ON_CANDIDATE", "cik": normalize_cik(review.get("cik"))},
+            {"operation": "CREATE_SECURITY", "candidate_security_id": "ALLOCATE_ON_CANDIDATE"},
+            {"operation": "ADD_CURRENT_TICKER_ALIAS", "ticker": ticker, "valid_from": review.get("effective_date")},
+        ])
+    if review.get("provider_permaticker"):
+        operations.append({"operation": "UPSERT_PROVIDER_SECURITY_IDENTITY", "provider": "SHARADAR", "provider_security_id": str(review["provider_permaticker"])})
+    if review.get("cik"):
+        operations.append({"operation": "POPULATE_COMPANY_CIK", "cik": normalize_cik(review.get("cik"))})
+    return {
+        "status": "AUTHORIZED" if approved else "PROPOSED_ONLY",
+        "action": action,
+        "company_id": company_id,
+        "security_id": security_id if same_security else None,
+        "predecessor_security_id": security_id if not same_security else None,
+        "predecessor_ticker": review.get("predecessor_ticker"),
+        "effective_date": review.get("effective_date"),
+        "review_identity": {key: review.get(key) for key in ("cik", "provider_permaticker", "exchange")},
+        "operations": operations,
+    }
+
+
 def _exchange_status(metadata: Mapping[str, Any], reviewed: Mapping[str, Any] | None) -> str:
     exchange = str(metadata.get("exchange") or "").upper()
     if exchange:
@@ -175,7 +398,16 @@ def resolve_ticker_identity(
 ) -> IdentityResolution:
     ticker = ticker.strip().upper()
     registry = load_review_registry(registry_path)
-    reviewed = registry.get(ticker)
+    review_record = registry.get(ticker)
+    reviewed = review_record
+    if review_record and str(review_record.get("review_status")).upper() == "APPROVED":
+        approved_resolution = review_record.get("approved_resolution")
+        if isinstance(approved_resolution, Mapping):
+            reviewed = dict(approved_resolution)
+            reviewed.setdefault("subject_ticker", ticker)
+            reviewed.setdefault("evidence", review_record.get("evidence", []))
+            reviewed.setdefault("unresolved_assumptions", [])
+            reviewed["review_status"] = "APPROVED"
     provider = _provider_metadata(Path(paths.provider_db), ticker)
     metadata = dict(provider.get("identity") or {})
     evidence_identity = dict(metadata)
@@ -188,6 +420,20 @@ def resolve_ticker_identity(
     provider_matches = canonical["provider_security_matches"]
     company_matches = canonical["company_cik_matches"]
     exchange_status = _exchange_status(metadata, reviewed)
+    review_validation = (
+        _review_current_state(paths, ticker, reviewed, provider, canonical)
+        if reviewed else {"status": "NOT_APPLICABLE", "expected": {}, "actual": {}, "mismatches": []}
+    )
+    readiness, readiness_reasons = (
+        _review_readiness(reviewed, review_validation)
+        if reviewed else (ReviewReadiness.NOT_REVIEWED, ())
+    )
+    review_fingerprint = approval_fingerprint(reviewed) if reviewed else None
+    proposed_plan = (
+        _mutation_plan(ticker, reviewed, approved=False)
+        if reviewed and readiness in {ReviewReadiness.PROPOSED_READY_FOR_OPERATOR_APPROVAL, ReviewReadiness.APPROVED_VALID}
+        else {}
+    )
 
     def result(
         resolution_class: ResolutionClass,
@@ -215,9 +461,44 @@ def resolve_ticker_identity(
             explanation=explanation,
             provider_metadata=provider,
             canonical_evidence=canonical,
-            reviewed_resolution=dict(reviewed) if reviewed else None,
+            reviewed_resolution=dict(review_record) if review_record else None,
+            review_status=str(reviewed.get("review_status")) if reviewed else None,
+            readiness_state=readiness.value,
+            approval_fingerprint=review_fingerprint,
+            current_state_validation=review_validation,
+            unresolved_assumptions=readiness_reasons,
+            proposed_mutation=proposed_plan,
             mutation=dict(mutation or {}),
         )
+
+    if reviewed and str(reviewed.get("review_status")).upper() == "APPROVED":
+        stored_fingerprint = str(review_record.get("approval_fingerprint") or "") if review_record else ""
+        if stored_fingerprint != review_fingerprint:
+            return result(
+                ResolutionClass.IDENTITY_REVIEW_REQUIRED, "CONFLICTING", "CONFLICTING", "UNKNOWN",
+                "REVIEW_EVIDENCE_MISMATCH", AuthorityClass.INSUFFICIENT, False,
+                ("APPROVED_REVIEW_EVIDENCE_MISMATCH",),
+                "The approved material facts no longer reproduce the stored approval fingerprint; mutation is blocked.",
+            )
+        if review_validation["status"] != "MATCH":
+            mismatch_fields = {str(item.get("field") or "") for item in review_validation.get("mismatches", [])}
+            provider_now_available = provider.get("status") == "FOUND" and mismatch_fields == {"provider_status"}
+            if provider_now_available:
+                # A newly available, non-conflicting provider identity is re-resolved below
+                # through the stronger local deterministic path instead of replaying review authority.
+                readiness = ReviewReadiness.APPROVED_SUPERSEDED_BY_LOCAL_DETERMINISTIC
+            else:
+                conflict_code = (
+                    "APPROVED_REVIEW_PROVIDER_CONFLICT"
+                    if any(field.startswith("provider_") or field.startswith("permaticker_") for field in mismatch_fields)
+                    else "APPROVED_REVIEW_CANONICAL_CONFLICT"
+                )
+                return result(
+                    ResolutionClass.IDENTITY_REVIEW_REQUIRED, "CONFLICTING", "CONFLICTING", "UNKNOWN",
+                    "CURRENT_STATE_CONFLICT", AuthorityClass.INSUFFICIENT, False,
+                    ("APPROVED_REVIEW_STALE", conflict_code),
+                    "Current canonical/provider state no longer matches the state bound to the approval; mutation is blocked.",
+                )
 
     if reviewed and str(reviewed.get("review_status")).upper() == "APPROVED" and provider["status"] == "FOUND":
         reviewed_cik = normalize_cik(reviewed.get("cik"))
@@ -284,18 +565,17 @@ def resolve_ticker_identity(
             return result(ResolutionClass.IDENTITY_REVIEW_REQUIRED, "CONFLICTING", "UNKNOWN", "UNKNOWN", "CONFLICTING_PROVIDER_IDENTITY", AuthorityClass.INSUFFICIENT, False, ("APPROVED_REVIEW_PROVIDER_CONFLICT",), "The reviewed CIK maps to a different canonical company.")
         if company_matches and referenced_company is None:
             return result(ResolutionClass.IDENTITY_REVIEW_REQUIRED, "CONFLICTING", "UNKNOWN", "UNKNOWN", "CONFLICTING_PROVIDER_IDENTITY", AuthorityClass.INSUFFICIENT, False, ("APPROVED_REVIEW_PROVIDER_CONFLICT",), "The reviewed CIK is already bound to a canonical company, but the review proposes a new company.")
-        mutation = {
-            "company_id": referenced_company,
-            "security_id": referenced_security,
-            "predecessor_ticker": reviewed.get("predecessor_ticker"),
-            "effective_date": reviewed.get("effective_date"),
-            "action": "UPDATE_CURRENT_TICKER" if same_security else ("CREATE_SECURITY" if referenced_company is not None else "CREATE_COMPANY_AND_SECURITY"),
-            "review_identity": {key: reviewed.get(key) for key in ("cik", "provider_permaticker", "exchange")},
-        }
-        return result(ResolutionClass(str(reviewed["resolution_class"])), str(reviewed["company_continuity"]), str(reviewed["security_continuity"]), str(reviewed["ticker_relationship"]), str(reviewed["provider_continuity"]), AuthorityClass.APPROVED_REVIEW, exchange_status == "EXCHANGE_FROM_APPROVED_REVIEW", ("APPROVED_REVIEW_RESOLUTION",), str(reviewed["reason"]), mutation)
+        mutation = _mutation_plan(ticker, reviewed, approved=True)
+        return result(ResolutionClass(str(reviewed["resolution_class"])), str(reviewed["company_continuity"]), str(reviewed["security_continuity"]), str(reviewed["ticker_relationship"]), str(reviewed["provider_continuity"]), AuthorityClass.APPROVED_REVIEW, exchange_status == "EXCHANGE_FROM_APPROVED_REVIEW", ("APPROVED_REVIEW_VALID",), str(reviewed["reason"]), mutation)
 
     if reviewed and str(reviewed.get("review_status")).upper() == "PROPOSED":
-        return result(ResolutionClass.IDENTITY_REVIEW_REQUIRED, str(reviewed["company_continuity"]), str(reviewed["security_continuity"]), str(reviewed["ticker_relationship"]), str(reviewed["provider_continuity"]), AuthorityClass.PROPOSED_REVIEW, False, ("PROPOSED_REVIEW_NOT_AUTHORITY", "PROVIDER_METADATA_MISSING"), "A researched proposal exists, but only an operator-approved record may authorize mutation.")
+        reasons = ["PROPOSED_REVIEW_NOT_AUTHORITY", "PROVIDER_METADATA_MISSING"]
+        if readiness == ReviewReadiness.PROPOSED_NOT_READY:
+            reasons.append("PROPOSED_REVIEW_NOT_READY")
+        return result(ResolutionClass.IDENTITY_REVIEW_REQUIRED, str(reviewed["company_continuity"]), str(reviewed["security_continuity"]), str(reviewed["ticker_relationship"]), str(reviewed["provider_continuity"]), AuthorityClass.PROPOSED_REVIEW, False, reasons, "A researched proposal exists, but readiness is separate from explicit operator approval and cannot authorize mutation.")
+
+    if reviewed and str(reviewed.get("review_status")).upper() == "REJECTED":
+        return result(ResolutionClass.IDENTITY_REVIEW_REQUIRED, str(reviewed["company_continuity"]), str(reviewed["security_continuity"]), str(reviewed["ticker_relationship"]), str(reviewed["provider_continuity"]), AuthorityClass.INSUFFICIENT, False, ("REJECTED_REVIEW_NOT_AUTHORITY",), "The reviewed interpretation was rejected and cannot authorize mutation.")
 
     return result(ResolutionClass.IDENTITY_REVIEW_REQUIRED, "UNKNOWN", "UNKNOWN", "UNKNOWN", "PROVIDER_METADATA_ABSENT", AuthorityClass.INSUFFICIENT, False, ("PROVIDER_METADATA_MISSING", "NO_APPROVED_REVIEW"), "Provider metadata is absent and no approved reviewed resolution exists.")
 
@@ -307,7 +587,8 @@ def render_preview_report(payload: Mapping[str, Any]) -> str:
         f"- Run: `{payload['run_id']}`",
         f"- Contract: `{CONTRACT_VERSION}`",
         "- Database writes: `NO`",
-        "- Review registry authority: only `APPROVED` records may authorize mutation.",
+        "- Review registry authority: only a current-state-compatible `APPROVED_VALID` record may authorize mutation.",
+        "- `PROPOSED_READY_FOR_OPERATOR_APPROVAL` is not mutation authority.",
         "",
         "## Results",
         "",
@@ -315,23 +596,56 @@ def render_preview_report(payload: Mapping[str, Any]) -> str:
     for item in payload["resolutions"]:
         provider = item["provider_metadata"]
         canonical = item["canonical_evidence"]
+        review_record = item.get("reviewed_resolution") or {}
+        reviewed = (
+            review_record.get("approved_resolution")
+            if str(review_record.get("review_status")).upper() == "APPROVED"
+            and isinstance(review_record.get("approved_resolution"), Mapping)
+            else review_record
+        )
         lines.extend([
             f"### {item['requested_ticker']}",
             "",
             f"- Resolution: `{item['resolution_class']}`",
+            f"- Review status: `{item['review_status'] or 'NONE'}`",
+            f"- Approval readiness: `{item['readiness_state']}`",
             f"- Authority: `{item['authority_class']}`",
             f"- Automatic mutation permitted: `{'YES' if item['automatic_mutation_permitted'] else 'NO'}`",
             f"- Company continuity: `{item['company_continuity']}`",
             f"- Security continuity: `{item['security_continuity']}`",
             f"- Ticker relationship: `{item['ticker_relationship']}`",
             f"- Provider continuity: `{item['provider_continuity']}`",
+            f"- Expected canonical company_id: `{reviewed.get('canonical_company_id', 'NONE') if reviewed else 'NONE'}`",
+            f"- Expected canonical security_id: `{reviewed.get('canonical_security_id', 'NONE')}`",
+            f"- Expected predecessor ticker: `{reviewed.get('predecessor_ticker') or 'NONE'}`",
+            f"- Expected CIK: `{normalize_cik(reviewed.get('cik')) or 'NONE'}`",
+            f"- Expected provider permaticker: `{reviewed.get('provider_permaticker') or 'NONE'}`",
             f"- Provider metadata: `{provider.get('status')}` ({provider.get('candidate_rows', 0)} candidate rows)",
             f"- Exchange: `{item['exchange_status']}`",
             f"- Canonical current matches: `{len(canonical['current_ticker_matches'])}`; aliases: `{len(canonical['alias_matches'])}`; permaticker matches: `{len(canonical['provider_security_matches'])}`; CIK company matches: `{len(canonical['company_cik_matches'])}`",
             f"- Reason codes: `{', '.join(item['reason_codes'])}`",
+            f"- Approval fingerprint: `{item['approval_fingerprint'] or 'NOT_APPLICABLE'}`",
+            f"- Current-state validation: `{item['current_state_validation']['status']}`",
             f"- Explanation: {item['explanation']}",
-            "",
         ])
+        if item["unresolved_assumptions"]:
+            lines.append("- Unresolved assumptions: " + " | ".join(item["unresolved_assumptions"]))
+        evidence = reviewed.get("evidence") or []
+        lines.append("- Authoritative evidence:")
+        lines.extend(
+            f"  - {entry.get('source_authority', 'UNKNOWN')}: {entry.get('reference', 'NO_REFERENCE')} - {entry.get('fact', '')}"
+            for entry in evidence
+        )
+        plan = item.get("proposed_mutation") or item.get("mutation") or {}
+        lines.append(f"- Proposed canonical action: `{plan.get('action', 'NONE')}`")
+        for operation in plan.get("operations", []):
+            lines.append(f"  - `{operation.get('operation')}`: `{json.dumps(operation, sort_keys=True)}`")
+        mismatches = item["current_state_validation"].get("mismatches") or []
+        for mismatch in mismatches:
+            lines.append(
+                f"- State conflict `{mismatch['field']}`: expected `{mismatch['expected']}`, actual `{mismatch['actual']}`"
+            )
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -371,8 +685,11 @@ def run_preview(
             "requested": len(request.normalized_inputs),
             "automatic": sum(bool(item["automatic_mutation_permitted"]) for item in resolutions),
             "review_required": sum(item["resolution_class"] == ResolutionClass.IDENTITY_REVIEW_REQUIRED.value for item in resolutions),
+            "proposed_not_ready": sum(item["readiness_state"] == ReviewReadiness.PROPOSED_NOT_READY.value for item in resolutions),
+            "ready_for_operator_approval": sum(item["readiness_state"] == ReviewReadiness.PROPOSED_READY_FOR_OPERATOR_APPROVAL.value for item in resolutions),
+            "approved_valid": sum(item["readiness_state"] == ReviewReadiness.APPROVED_VALID.value for item in resolutions),
         },
-        "recommended_next_action": "Review proposed records; change review_status to APPROVED only after an explicit operator decision.",
+        "recommended_next_action": "Approve none, some, or all PROPOSED_READY_FOR_OPERATOR_APPROVAL records by a version-controlled registry change; never approve PROPOSED_NOT_READY records.",
     }
     payload["preview_fingerprint"] = fingerprint(payload)
     writer.write_json("identity_preview.json", payload)

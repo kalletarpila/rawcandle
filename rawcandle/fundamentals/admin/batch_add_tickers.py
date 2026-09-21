@@ -88,7 +88,7 @@ REPORT_DATE = "2026-09-12"
 
 
 PHASE = "PHASE13G2_BATCH_ADD_TICKERS"
-CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V3_IDENTITY_RESOLUTION"
+CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V4_BOUND_IDENTITY_APPROVAL"
 OUTCOME_B = "OUTCOME B — BATCH ADD TICKERS COPY-ONLY FOUNDATION READY; AUTHORITATIVE FULL DOWNSTREAM GAP REMAINS"
 OUTCOME_A = "OUTCOME A — GENERIC BATCH ADD TICKERS AUTHORITATIVE COPY-ONLY PIPELINE VERIFIED AND READY FOR SEPARATELY AUTHORIZED PRODUCTION DEPLOYMENT"
 PRODUCTION_OUTCOME_A = "OUTCOME A — BATCH ADD TICKERS ACTIVE AND STABLE IN PRODUCTION"
@@ -778,7 +778,7 @@ def build_generic_batch_plan(
             status = "REVIEW_REQUIRED"
             reason = "IDENTITY_MUTATION_NOT_AUTHORIZED"
         elif blockers:
-            status = "REVIEW_REQUIRED" if any("AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "NO_APPROVED_REVIEW", "PROPOSED_REVIEW_NOT_AUTHORITY", "NO_USABLE_QUARTERLY_HISTORY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN"} for blocker in blockers) else "REJECTED"
+            status = "REVIEW_REQUIRED" if any("REVIEW" in blocker or "AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "NO_USABLE_QUARTERLY_HISTORY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN"} for blocker in blockers) else "REJECTED"
             reason = ",".join(blockers)
         else:
             status = "ELIGIBLE"
@@ -1128,6 +1128,12 @@ def _apply_identities(paths: BatchAddTickerPaths, items: Sequence[Mapping[str, A
                 action = str(mutation.get("action") or "")
                 if not resolution.get("automatic_mutation_permitted") or action not in {"UPDATE_CURRENT_TICKER", "CREATE_SECURITY", "CREATE_COMPANY_AND_SECURITY"}:
                     raise RuntimeError(f"IDENTITY_MUTATION_NOT_AUTHORIZED:{ticker}")
+                if resolution.get("authority_class") == "APPROVED_REVIEW" and (
+                    resolution.get("readiness_state") != "APPROVED_VALID"
+                    or "APPROVED_REVIEW_VALID" not in resolution.get("reason_codes", [])
+                    or not resolution.get("approval_fingerprint")
+                ):
+                    raise RuntimeError(f"IDENTITY_APPROVAL_BINDING_INVALID:{ticker}")
                 if action == "UPDATE_CURRENT_TICKER":
                     company_id = int(mutation["company_id"])
                     security_id = int(mutation["security_id"])

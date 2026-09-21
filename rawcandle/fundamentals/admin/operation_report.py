@@ -363,6 +363,19 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
         from rawcandle.fundamentals.admin.ticker_reporting import summary_rows
 
         rows.extend(summary_rows(ticker_reporting))
+    elif result.get("operation_type") == "RESOLVE_TICKER_IDENTITY":
+        for item in _sequence(result.get("resolutions")):
+            if not isinstance(item, Mapping):
+                continue
+            proposed = _mapping(item.get("proposed_mutation"))
+            mutation = _mapping(item.get("mutation"))
+            action = proposed.get("action") or mutation.get("action") or "NONE"
+            fingerprint_value = str(item.get("approval_fingerprint") or "NOT_APPLICABLE")
+            rows.append(
+                f"{item.get('requested_ticker')}: {item.get('readiness_state')}; "
+                f"review={item.get('review_status') or 'NONE'}; action={action}; "
+                f"approval fingerprint={fingerprint_value}."
+            )
     elif counts:
         for key in ("requested", "eligible", "applied", "accepted", "changed", "already_present", "failed"):
             if key in counts:
