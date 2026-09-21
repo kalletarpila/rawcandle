@@ -136,6 +136,7 @@ def test_audit_classifies_eligible_matching_conflicts_dedupe_and_unavailable(tmp
     assert by_company[1]["classification"] == "SYNC_ELIGIBLE"
     assert by_company[2]["classification"] == "ALREADY_IN_SYNC"
     assert by_company[3]["classification"] == "REVIEW_REQUIRED_CIK_CONFLICT"
+    assert by_company[3]["representation_changes"] == []
     assert by_company[4]["classification"] == "SYNC_ELIGIBLE"
     assert by_company[4]["proposed_cik"] == "0000000321"
     assert by_company[5]["classification"] == "REVIEW_REQUIRED_CIK_CONFLICT"
@@ -150,19 +151,42 @@ def test_audit_classifies_eligible_matching_conflicts_dedupe_and_unavailable(tmp
 def test_format_normalization_updates_all_proven_equivalent_identity_representations(tmp_path: Path) -> None:
     paths = _paths(
         tmp_path,
-        rows=[("LEGACY", "101", "123")],
+        rows=[("LEGACY", "101", "1308648")],
         securities=[(1, 1, "LEGACY", "101")],
-        ciks=[(1, "123")],
+        ciks=[(1, "1308648")],
     )
     with sqlite3.connect(paths.canonical_db) as connection:
-        connection.execute("UPDATE company SET company_key='SEC_CIK:123' WHERE company_id=1")
+        connection.execute("UPDATE company SET company_key='SEC_CIK:1308648' WHERE company_id=1")
         connection.execute(
             "INSERT INTO provider_company_identity VALUES(?,?,?,?,?,?,?,?,?)",
-            ("SEC", "CIK", "123", 1, "LEGACY", "fixture", "fixture", "123", "2026-01-01"),
+            ("SEC", "CIK", "1308648", 1, "LEGACY", "fixture", "fixture", "1308648", "2026-01-01"),
         )
+    production_before = paths.canonical_db.read_bytes()
     preview = run_preview(paths=paths, run_root=tmp_path / "runs")
     assert preview["summary_counts"]["sync_eligible"] == 0
     assert preview["summary_counts"]["format_normalization_eligible"] == 1
+    assert paths.canonical_db.read_bytes() == production_before
+    item = preview["audit"]["items"][0]
+    assert item["classification"] == "FORMAT_NORMALIZATION_ELIGIBLE"
+    assert item["semantic_cik"] == "0001308648"
+    assert item["semantic_identity_change"] is False
+    assert [
+        (change["field_identifier"], change["before"], change["after"])
+        for change in item["representation_changes"]
+    ] == [
+        ("company_cik.cik_normalized", "1308648", "0001308648"),
+        ("company_cik.cik_display", "1308648", "0001308648"),
+        ("company_cik.source_value", "1308648", "0001308648"),
+        ("provider_company_identity.provider_identifier_value", "1308648", "0001308648"),
+        ("provider_company_identity.source_value", "1308648", "0001308648"),
+        ("company.company_key", "SEC_CIK:1308648", "SEC_CIK:0001308648"),
+    ]
+    proposed = preview["proposed_changes"][0]
+    assert proposed["representation_changes"] == item["representation_changes"]
+    report = (Path(preview["artifact_dir"]) / "operation_report.md").read_text(encoding="utf-8")
+    assert "semantic CIK: `0001308648`; semantic identity change: No" in report
+    assert "`company_cik.cik_normalized`: `1308648` -> `0001308648`" in report
+    assert "Provider CIK unavailable among canonical missing-CIK cases: 0" in report
 
     test = run_apply(
         preview_payload_path=Path(preview["preview_payload_path"]),
@@ -180,7 +204,32 @@ def test_format_normalization_updates_all_proven_equivalent_identity_representat
     assert after["counts"]["format_normalization_eligible"] == 0
     assert after["counts"]["noncanonical_existing_cik_rows"] == 0
     with sqlite3.connect(paths.canonical_db) as connection:
-        assert connection.execute("SELECT cik_normalized FROM company_cik").fetchone()[0] == "123"
+        assert connection.execute("SELECT cik_normalized FROM company_cik").fetchone()[0] == "1308648"
+
+
+def test_format_preview_reports_only_fields_that_actually_change(tmp_path: Path) -> None:
+    paths = _paths(
+        tmp_path,
+        rows=[("MIXED", "101", "1308648")],
+        securities=[(1, 1, "MIXED", "101")],
+        ciks=[(1, "0001308648")],
+    )
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute(
+            "UPDATE company_cik SET cik_display='1308648' WHERE company_id=1"
+        )
+
+    result = audit(paths)
+    item = result["items"][0]
+
+    assert item["classification"] == "FORMAT_NORMALIZATION_ELIGIBLE"
+    assert item["representation_changes"] == [{
+        "table": "company_cik",
+        "field": "cik_display",
+        "field_identifier": "company_cik.cik_display",
+        "before": "1308648",
+        "after": "0001308648",
+    }]
 
 
 def test_real_preview_test_production_path_publishes_only_company_cik(tmp_path: Path) -> None:
@@ -195,6 +244,9 @@ def test_real_preview_test_production_path_publishes_only_company_cik(tmp_path: 
     preview = run_preview(paths=paths, run_root=run_root)
     assert preview["outcome"] == "COMPLETED"
     assert preview["summary_counts"]["sync_eligible"] == 1
+    preview_report = (Path(preview["artifact_dir"]) / "operation_report.md").read_text(encoding="utf-8")
+    assert "ELIG / company_id=1: SYNC_ELIGIBLE" in preview_report
+    assert "provider CIK: 0000000123; canonical CIK: missing" in preview_report
     test = run_apply(
         preview_payload_path=Path(preview["preview_payload_path"]),
         preview_fingerprint=preview["preview_fingerprint"],
@@ -236,8 +288,9 @@ def test_real_preview_test_production_path_publishes_only_company_cik(tmp_path: 
 def test_ui_service_routes_cik_preview_and_preserves_self_contained_report(tmp_path: Path) -> None:
     paths = _paths(
         tmp_path / "dbs",
-        rows=[("ELIG", "101", "123")],
-        securities=[(1, 1, "ELIG", "101")],
+        rows=[("LEGACY", "101", "1308648")],
+        securities=[(1, 1, "LEGACY", "101")],
+        ciks=[(1, "1308648")],
     )
     run_root = tmp_path / "runs"
     service = FundamentalsAdminUIService(
@@ -249,9 +302,14 @@ def test_ui_service_routes_cik_preview_and_preserves_self_contained_report(tmp_p
 
     assert result.status == "COMPLETED"
     assert result.preview_payload_path is not None
-    assert any("Missing-CIK backfill candidates: 1" in row for row in result.summary_rows)
+    assert any("Formatting-only normalization candidates: 1" in row for row in result.summary_rows)
+    assert any(
+        "LEGACY / company_id=1: FORMAT_NORMALIZATION_ELIGIBLE" in row
+        and "company_cik.cik_normalized: 1308648 -> 0001308648" in row
+        for row in result.summary_rows
+    )
     report = (run_root / str(result.run_id) / "operation_report.md").read_text(encoding="utf-8")
-    assert "ELIG / company_id=1: SYNC_ELIGIBLE" in report
+    assert "LEGACY / company_id=1: FORMAT_NORMALIZATION_ELIGIBLE" in report
     assert "Zero-write Preview: Yes" in report
     capability = next(
         item for item in service.capabilities()

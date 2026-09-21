@@ -315,14 +315,33 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
         )
     if result.get("operation_type") == "SYNCHRONIZE_PROVIDER_CIK":
         counts = _mapping(result.get("summary_counts"))
-        return (
+        rows = [
             final_status_message(result),
             f"Missing-CIK backfill candidates: {counts.get('sync_eligible', 0)}.",
             f"Formatting-only normalization candidates: {counts.get('format_normalization_eligible', 0)}.",
             f"Already in sync: {counts.get('already_in_sync', 0)}.",
-            f"Provider CIK unavailable: {counts.get('provider_cik_unavailable', 0)}.",
+            f"Provider CIK unavailable among canonical missing-CIK cases: {counts.get('provider_cik_unavailable', 0)}.",
             f"Review or conflict: {counts.get('review_required', 0)}.",
-        )
+        ]
+        audit = _mapping(result.get("audit") or result.get("before_audit"))
+        formatting = [
+            item for item in _sequence(audit.get("items"))
+            if isinstance(item, Mapping) and item.get("classification") == "FORMAT_NORMALIZATION_ELIGIBLE"
+        ]
+        for item in formatting[:3]:
+            changes = _sequence(item.get("representation_changes"))
+            concise = "; ".join(
+                f"{change.get('field_identifier')}: {change.get('before')} -> {change.get('after')}"
+                for change in changes[:2] if isinstance(change, Mapping)
+            )
+            rows.append(
+                f"{', '.join(str(value) for value in _sequence(item.get('tickers')))} / "
+                f"company_id={item.get('company_id')}: FORMAT_NORMALIZATION_ELIGIBLE; "
+                f"semantic CIK {item.get('semantic_cik')}; {concise}."
+            )
+        if len(formatting) > 3:
+            rows.append(f"{len(formatting) - 3} additional formatting candidates are detailed in the report.")
+        return tuple(rows)
     counts = _mapping(result.get("summary_counts"))
     downstream = _mapping(result.get("downstream"))
     rollback = _mapping(result.get("rollback"))

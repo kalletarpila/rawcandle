@@ -41,7 +41,7 @@ from rawcandle.fundamentals.phase13b_foundation import online_backup
 
 
 OPERATION = AdminOperationType.SYNCHRONIZE_PROVIDER_CIK
-CONTRACT_VERSION = "PHASE13G3_17_PROVIDER_CANONICAL_CIK_SYNC_V1"
+CONTRACT_VERSION = "PHASE13G3_17_PROVIDER_CANONICAL_CIK_SYNC_V2"
 CONFIRMATION_TOKEN = "CONFIRM_PRODUCTION_PROVIDER_CIK_SYNC"
 TEMP_ROOT = ADMIN_TEMP_ROOT / "provider_cik_sync"
 BACKUP_ROOT = ADMIN_BACKUP_ROOT / "provider_cik_sync"
@@ -178,6 +178,51 @@ def _provider_metadata(path: Path) -> tuple[dict[str, list[dict[str, Any]]], dic
     return by_permaticker, counts
 
 
+def _representation_changes(item: Mapping[str, Any], semantic_cik: str) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+
+    def add(table: str, field: str, before: Any, after: Any, **identity: Any) -> None:
+        if before != after:
+            changes.append({
+                "table": table,
+                "field": field,
+                "field_identifier": f"{table}.{field}",
+                "before": before,
+                "after": after,
+                **identity,
+            })
+
+    canonical_rows = item.get("canonical_rows") or []
+    if len(canonical_rows) == 1:
+        row = canonical_rows[0]
+        add("company_cik", "cik_normalized", row.get("cik_normalized"), semantic_cik)
+        add("company_cik", "cik_display", row.get("cik_display"), semantic_cik)
+        source_value = row.get("source_value")
+        if normalize_cik(source_value) == semantic_cik:
+            add("company_cik", "source_value", source_value, semantic_cik)
+
+    for row in item.get("provider_company_identity_rows") or []:
+        identity = {
+            "provider": row.get("provider"),
+            "provider_identifier_type": row.get("provider_identifier_type"),
+        }
+        add(
+            "provider_company_identity", "provider_identifier_value",
+            row.get("provider_identifier_value"), semantic_cik, **identity,
+        )
+        source_value = row.get("source_value")
+        if normalize_cik(source_value) == semantic_cik:
+            add(
+                "provider_company_identity", "source_value",
+                source_value, semantic_cik, **identity,
+            )
+
+    company_key = item.get("company_key")
+    if str(company_key or "").startswith("SEC_CIK:"):
+        add("company", "company_key", company_key, f"SEC_CIK:{semantic_cik}")
+    return changes
+
+
 def audit(paths: BatchAddTickerPaths) -> dict[str, Any]:
     metadata, provider_counts = _provider_metadata(paths.provider_db)
     with _readonly(paths.canonical_db) as connection:
@@ -288,33 +333,13 @@ def audit(paths: BatchAddTickerPaths) -> dict[str, Any]:
                 or (company_key.startswith("SEC_CIK:") and company_key_cik != identity_reference)
             )
         )
+        representation_changes = (
+            _representation_changes(item, identity_reference)
+            if identity_reference and not identity_representation_conflict else []
+        )
         noncanonical_identity_representation = bool(
             identity_reference
-            and (
-                (
-                    canonical_item
-                    and (
-                        str(canonical_item["cik_normalized"]) != identity_reference
-                        or str(canonical_item["cik_display"]) != identity_reference
-                        or (
-                            normalize_cik(canonical_item.get("source_value")) == identity_reference
-                            and canonical_item.get("source_value") != identity_reference
-                        )
-                    )
-                )
-                or any(
-                    row["provider_identifier_value"] != identity_reference
-                    or (
-                        normalize_cik(row.get("source_value")) == identity_reference
-                        and row.get("source_value") != identity_reference
-                    )
-                    for row in provider_identity_rows
-                )
-                or (
-                    company_key.startswith("SEC_CIK:")
-                    and company_key != f"SEC_CIK:{identity_reference}"
-                )
-            )
+            and representation_changes
         )
         formatting_only = bool(
             canonical_item
@@ -345,6 +370,11 @@ def audit(paths: BatchAddTickerPaths) -> dict[str, Any]:
         item["proposed_cik"] = provider_ciks[0] if classification in {
             "SYNC_ELIGIBLE", "FORMAT_NORMALIZATION_ELIGIBLE",
         } else None
+        item["semantic_cik"] = provider_ciks[0] if provider_ciks else None
+        item["semantic_identity_change"] = False if classification == "FORMAT_NORMALIZATION_ELIGIBLE" else None
+        item["representation_changes"] = (
+            representation_changes if classification == "FORMAT_NORMALIZATION_ELIGIBLE" else []
+        )
         items.append(item)
 
     active_missing = [item for item in items if not item["canonical_ciks"] and not item["invalid_canonical_cik"]]
@@ -380,6 +410,9 @@ def audit(paths: BatchAddTickerPaths) -> dict[str, Any]:
         "security_ids": item["security_ids"],
         "tickers": item["tickers"],
         "provider_cik": item["proposed_cik"],
+        "semantic_cik": item["semantic_cik"],
+        "semantic_identity_change": item["semantic_identity_change"],
+        "representation_changes": item["representation_changes"],
         "provider_rows": item["provider_rows"],
         "canonical_rows": item["canonical_rows"],
         "provider_company_identity_rows": item["provider_company_identity_rows"],
@@ -452,7 +485,7 @@ def _render_report(result: Mapping[str, Any]) -> str:
         f"- Synchronization eligible: {counts.get('sync_eligible', 0)}",
         f"- Formatting-only normalization eligible: {counts.get('format_normalization_eligible', 0)}",
         f"- Already in sync: {counts.get('already_in_sync', 0)}",
-        f"- Provider CIK unavailable: {counts.get('provider_cik_unavailable', 0)}",
+        f"- Provider CIK unavailable among canonical missing-CIK cases: {counts.get('provider_cik_unavailable', 0)}",
         f"- Review/conflict: {counts.get('review_required', 0)}",
         f"- Existing noncanonical CIK representations (reported, not changed): {counts.get('noncanonical_existing_cik_rows', 0)}",
         "", "## Affected Companies", "",
@@ -465,10 +498,21 @@ def _render_report(result: Mapping[str, Any]) -> str:
     if not affected:
         lines.append("- None")
     for item in affected:
-        lines.extend([
-            f"- {', '.join(item.get('tickers') or [])} / company_id={item.get('company_id')}: {item.get('classification')}",
-            f"  provider CIK: {', '.join(item.get('provider_ciks') or []) or 'unavailable'}; canonical CIK: {', '.join(item.get('canonical_ciks') or []) or 'missing'}",
-        ])
+        lines.append(
+            f"- {', '.join(item.get('tickers') or [])} / company_id={item.get('company_id')}: {item.get('classification')}"
+        )
+        if item.get("classification") == "FORMAT_NORMALIZATION_ELIGIBLE":
+            lines.append(f"  semantic CIK: `{item.get('semantic_cik')}`; semantic identity change: No")
+            lines.append("  actual stored changes:")
+            for change in item.get("representation_changes") or []:
+                lines.append(
+                    f"    - `{change.get('field_identifier')}`: `{change.get('before')}` -> `{change.get('after')}`"
+                )
+        else:
+            lines.append(
+                f"  provider CIK: {', '.join(item.get('provider_ciks') or []) or 'unavailable'}; "
+                f"canonical CIK: {', '.join(item.get('canonical_ciks') or []) or 'missing'}"
+            )
     validation = result.get("validation") or {}
     lines.extend([
         "", "## Safety And Validation", "",
