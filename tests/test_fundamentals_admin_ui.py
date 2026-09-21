@@ -853,6 +853,116 @@ def test_history_defaults_to_admin_runs_and_filter_exposes_technical_evidence(tm
     assert any(entry.category == "Invalid or corrupt run" for entry in technical)
 
 
+def test_admin_history_cursor_pages_incrementally_without_rereading_results(tmp_path: Path) -> None:
+    for minute in range(24):
+        _write_run(
+            tmp_path,
+            f"20260916T12{minute:02d}00Z_add_tickers_page{minute:02d}",
+        )
+    for suffix in range(3):
+        (tmp_path / f"99999999_technical_{suffix}").mkdir()
+
+    class CountingService(FundamentalsAdminUIService):
+        def __init__(self) -> None:
+            super().__init__(run_root=tmp_path)
+            self.result_reads: list[Path] = []
+
+        def _load_json_file(self, path: Path):
+            if path.name == "result.json":
+                self.result_reads.append(path)
+            return super()._load_json_file(path)
+
+    service = CountingService()
+    cursor = service.history_cursor()
+
+    assert len(cursor.fill(8)) == 8
+    assert len(service.result_reads) == 11
+    assert len(cursor.fill(16)) == 16
+    assert len(service.result_reads) == 19
+    assert len(cursor.fill(24)) == 24
+    assert len(service.result_reads) == 27
+    assert max(service.result_reads.count(path) for path in service.result_reads) == 1
+
+
+def test_terminal_history_projection_does_not_read_progress_events(tmp_path: Path, monkeypatch) -> None:
+    _write_run(tmp_path)
+    original_read_text = Path.read_text
+    reads: list[str] = []
+
+    def tracked_read_text(path: Path, *args, **kwargs):
+        reads.append(path.name)
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", tracked_read_text)
+
+    service = FundamentalsAdminUIService(run_root=tmp_path)
+    cursor = service.history_cursor()
+    entries = cursor.fill(1)
+
+    assert len(entries) == 1
+    assert "progress_events.jsonl" not in reads
+
+    service.history_result_summary(entries[0].run_id, projection_cache=cursor.projections)
+    service.progress(entries[0].run_id, projection_cache=cursor.projections)
+    assert reads.count("result.json") == 1
+
+
+def _write_scheduler_refresh_preview(
+    root: Path,
+    run_id: str,
+    *,
+    effective_changed_known: int,
+) -> None:
+    run_dir = root / run_id
+    run_dir.mkdir()
+    (run_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "operation_type": "REFRESH_FUNDAMENTALS",
+                "mode": "PREVIEW",
+                "trigger_source": "SCHEDULER",
+                "outcome": "COMPLETED",
+                "completed_at_utc": run_id[:8] + "T00:00:00Z",
+                "summary_counts": {"effective_changed_known": effective_changed_known},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_newest_scheduler_no_change_preview_supersedes_older_pending_preview(tmp_path: Path) -> None:
+    _write_scheduler_refresh_preview(
+        tmp_path,
+        "20260920T120000Z_refresh_fundamentals_old",
+        effective_changed_known=4,
+    )
+    _write_scheduler_refresh_preview(
+        tmp_path,
+        "20260921T120000Z_refresh_fundamentals_new",
+        effective_changed_known=0,
+    )
+
+    assert FundamentalsAdminUIService(run_root=tmp_path).pending_refresh_status() is None
+
+
+def test_corrupt_newest_refresh_preview_fails_visibly_without_old_fallback(tmp_path: Path) -> None:
+    _write_scheduler_refresh_preview(
+        tmp_path,
+        "20260920T120000Z_refresh_fundamentals_old",
+        effective_changed_known=4,
+    )
+    newest = tmp_path / "20260921T120000Z_refresh_fundamentals_new"
+    newest.mkdir()
+    (newest / "result.json").write_text("{broken", encoding="utf-8")
+
+    status = FundamentalsAdminUIService(run_root=tmp_path).pending_refresh_status()
+
+    assert status is not None
+    assert status["status"] == "ERROR"
+    assert newest.name in status["error"]
+
+
 def _retained_taxonomy_result() -> dict:
     retained = Path(__file__).resolve().parents[1] / "fundamental_reports/admin_runs/20260918T085757Z_check_update_taxonomy_dcb015ad6e99_dc_ecosystem_preview/result.json"
     result = json.loads(retained.read_text(encoding="utf-8")) if retained.exists() else _taxonomy_preview_result()

@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 import flet as ft
 
+from dev_tools.deferred_ui import DeferredLoadController
 from rawcandle.fundamentals.admin.operation_report import OPERATION_REPORT_NAME, WORKFLOW_REPORT_NAME
 from rawcandle.fundamentals.admin.ui_service import (
     AdminUIRunResult,
@@ -52,6 +53,9 @@ class FundamentalsAdminPageControls:
     technical_details_column: Any
     progress_summary: Any
     progress_details: Any
+    history_show_more_button: Any
+    activate: Any
+    history_loader: Any
 
 
 def admin_report_download_url(run_id: str, filename: str = OPERATION_REPORT_NAME) -> str:
@@ -120,6 +124,7 @@ def build_fundamentals_admin_page(
     *,
     page: Any,
     service: FundamentalsAdminUIService | None = None,
+    defer_initial_load: bool = False,
 ) -> FundamentalsAdminPageControls:
     admin_service = service or FundamentalsAdminUIService()
     capabilities = {
@@ -201,10 +206,12 @@ def build_fundamentals_admin_page(
         ),
         visible=bool(publication_safety.get("production_writes_blocked")),
     )
-    try:
-        pending_refresh = admin_service.pending_refresh_status()
-    except (AttributeError, OSError, RuntimeError):
-        pending_refresh = None
+    pending_refresh = None
+    if not defer_initial_load:
+        try:
+            pending_refresh = admin_service.pending_refresh_status()
+        except (AttributeError, OSError, RuntimeError):
+            pending_refresh = None
     pending_refresh_field = ft.Text(
         (
             "Pending Sharadar fundamentals changes detected: "
@@ -268,6 +275,8 @@ def build_fundamentals_admin_page(
     current_test_run_id: str | None = None
     current_report_run_id: str | None = None
     selected_history_run_id: str | None = None
+    history_cursor: Any = None
+    history_limit = 8
     operation_running = False
     last_progress_count: tuple[object, object] | None = None
     progress_lines: list[str] = []
@@ -385,16 +394,8 @@ def build_fundamentals_admin_page(
             ft.Text("No summary rows recorded.")
         ]
 
-    def refresh_history() -> None:
+    def render_history(entries: Any) -> None:
         rows = []
-        try:
-            entries = admin_service.history_entries(
-                limit=12,
-                include_technical=bool(show_technical_history_checkbox.value),
-            )
-        except Exception:
-            LOGGER.exception("Administration history refresh failed")
-            return
         for item in entries:
             run_id = item.run_id
             title = _plain_status(item.outcome)
@@ -440,13 +441,123 @@ def build_fundamentals_admin_page(
                 )
             )
         history_column.controls = rows or [ft.Text("No administration runs found.")]
+        history_show_more_button.visible = bool(
+            history_cursor is not None and not getattr(history_cursor, "exhausted", True)
+        )
+
+    def load_history() -> dict[str, Any]:
+        nonlocal history_cursor
+        include_technical = bool(show_technical_history_checkbox.value)
+        if history_cursor is None or history_cursor.include_technical != include_technical:
+            cursor_factory = getattr(admin_service, "history_cursor", None)
+            if callable(cursor_factory):
+                history_cursor = cursor_factory(include_technical=include_technical)
+            else:
+                class _CompatibilityCursor:
+                    exhausted = True
+                    projections: dict[Any, Any] = {}
+
+                    def __init__(self) -> None:
+                        self.include_technical = include_technical
+                        self.entries: list[Any] = []
+
+                    def fill(self, limit: int) -> list[Any]:
+                        self.entries = list(admin_service.history_entries(
+                            limit=limit,
+                            include_technical=self.include_technical,
+                        ))
+                        return self.entries
+
+                history_cursor = _CompatibilityCursor()
+        entries = history_cursor.fill(history_limit)
+        pending_reader = getattr(admin_service, "pending_refresh_status", None)
+        pending = pending_reader(
+            projection_cache=getattr(history_cursor, "projections", None),
+        ) if callable(pending_reader) else None
+        return {"entries": entries, "pending": pending}
+
+    def apply_history(payload: dict[str, Any]) -> None:
+        pending = payload.get("pending")
+        if pending and pending.get("status") == "ERROR":
+            pending_refresh_field.value = str(pending.get("error") or "Refresh history is unavailable.")
+            pending_refresh_field.visible = True
+        elif pending:
+            pending_refresh_field.value = (
+                "Pending Sharadar fundamentals changes detected: "
+                f"{pending.get('effective_changed_known', 0)} known tickers; "
+                f"last scheduler Preview {pending.get('detected_at_utc') or 'time unavailable'}."
+            )
+            pending_refresh_field.visible = True
+        else:
+            pending_refresh_field.value = ""
+            pending_refresh_field.visible = False
+        render_history(payload.get("entries") or [])
+        history_show_more_button.disabled = False
+
+    def history_failed(_exc: Exception) -> None:
+        history_column.controls = [ft.Text("Administration history could not be loaded.")]
+        history_show_more_button.visible = False
+        history_show_more_button.disabled = False
+
+    def history_loading() -> None:
+        history_column.controls = [ft.Text("Loading administration history...")]
+        history_show_more_button.disabled = True
+
+    history_loader = DeferredLoadController(
+        page=page,
+        load=load_history,
+        apply=apply_history,
+        loading=history_loading,
+        failed=history_failed,
+    )
+
+    def refresh_history(*, force: bool = False) -> None:
+        nonlocal history_cursor, history_limit
+        if force:
+            history_cursor = None
+            history_limit = 8
+            history_loader.invalidate()
+        if defer_initial_load:
+            history_loader.start(force=force)
+            return
+        try:
+            apply_history(load_history())
+        except Exception:
+            LOGGER.exception("Administration history refresh failed")
+            history_failed(RuntimeError("history load failed"))
+
+    def show_more_history(_event: Any) -> None:
+        nonlocal history_limit
+        history_limit += 8
+        if defer_initial_load:
+            history_loader.start(force=True)
+        else:
+            refresh_history()
+
+    history_show_more_button = ft.TextButton(
+        "Show more",
+        icon=ft.Icons.EXPAND_MORE,
+        on_click=show_more_history,
+        visible=False,
+    )
 
     def select_history_run(run_id: str) -> None:
         nonlocal selected_history_run_id
         try:
-            progress = admin_service.progress(run_id)
+            projection_cache = getattr(history_cursor, "projections", None)
+            progress_reader = admin_service.progress
+            progress = (
+                progress_reader(run_id, projection_cache=projection_cache)
+                if "projection_cache" in inspect.signature(progress_reader).parameters
+                else progress_reader(run_id)
+            )
             summary_reader = getattr(admin_service, "history_result_summary", None)
-            summary = summary_reader(run_id) if callable(summary_reader) else ()
+            summary = (
+                summary_reader(run_id, projection_cache=projection_cache)
+                if callable(summary_reader)
+                and "projection_cache" in inspect.signature(summary_reader).parameters
+                else summary_reader(run_id) if callable(summary_reader) else ()
+            )
             report_text = "available" if OPERATION_REPORT_NAME in progress.artifacts else "not yet available"
             heartbeat = (
                 f"{progress.heartbeat_age_seconds:.0f}s ago"
@@ -471,7 +582,8 @@ def build_fundamentals_admin_page(
             ])
         except Exception:
             history_detail_field.value = f"Run: {run_id}\nStatus: unavailable or incomplete."
-        refresh_history()
+        if history_cursor is not None:
+            render_history(history_cursor.entries[:history_limit])
         if hasattr(page, "update"):
             page.update()
 
@@ -585,7 +697,7 @@ def build_fundamentals_admin_page(
             progress_summary.visible = True
             progress_details.visible = True
             progress_details.controls[0].expanded = True
-        refresh_history()
+        refresh_history(force=True)
         technical_details_column.controls = [
             ft.Text(f"Run id: {result.run_id or 'not recorded'}"),
             ft.Text(f"Operation: {(operation_dropdown.value or '').strip()}"),
@@ -835,11 +947,12 @@ def build_fundamentals_admin_page(
     ):
         control.on_change = invalidate_preview
     show_technical_history_checkbox.on_change = lambda _event: (
-        refresh_history(),
+        refresh_history(force=True),
         page.update() if hasattr(page, "update") else None,
     )
     apply_capabilities()
-    refresh_history()
+    if not defer_initial_load:
+        refresh_history()
 
     content = ft.Column(
         [
@@ -885,6 +998,7 @@ def build_fundamentals_admin_page(
                 ]
             ),
             history_column,
+            history_show_more_button,
             history_detail_field,
         ],
         spacing=12,
@@ -922,4 +1036,7 @@ def build_fundamentals_admin_page(
         technical_details_column=technical_details_column,
         progress_summary=progress_summary,
         progress_details=progress_details,
+        history_show_more_button=history_show_more_button,
+        activate=lambda: history_loader.start(),
+        history_loader=history_loader,
     )

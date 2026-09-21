@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import flet as ft
 
+from dev_tools.deferred_ui import DeferredLoadController
 from rawcandle.fundamentals.snapshot.ui_service import (
     FundamentalsBatchResult,
     FundamentalsSnapshotUIService,
@@ -33,6 +34,10 @@ class FundamentalsPageControls:
     status_field: Any
     batch_results_column: Any
     recent_reports_column: Any
+    reports_refresh_button: Any
+    reports_show_more_button: Any
+    activate: Any
+    reports_loader: Any
 
 
 def application_date(timezone_name: str) -> str:
@@ -72,6 +77,7 @@ def build_fundamentals_page(
     page: Any,
     timezone_name: str,
     service: FundamentalsSnapshotUIService | None = None,
+    defer_initial_load: bool = False,
 ) -> FundamentalsPageControls:
     report_service = service or FundamentalsSnapshotUIService()
     ticker_field = ft.TextField(
@@ -105,6 +111,8 @@ def build_fundamentals_page(
     )
     batch_results_column = ft.Column(spacing=6)
     recent_reports_column = ft.Column(spacing=6)
+    recent_reports: list[Any] | None = None
+    recent_reports_limit = 8
 
     def download_button(filename: str) -> Any:
         return ft.IconButton(
@@ -131,8 +139,14 @@ def build_fundamentals_page(
         controls.append(download_button(result.filename) if downloadable else ft.Container(width=48))
         return ft.Row(controls, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
-    def refresh_recent_reports() -> None:
-        reports = report_service.recent_reports(limit=10)
+    def load_recent_reports() -> list[Any]:
+        nonlocal recent_reports
+        if recent_reports is None:
+            requested = 1_000_000 if defer_initial_load else 10
+            recent_reports = list(report_service.recent_reports(limit=requested))
+        return recent_reports[:recent_reports_limit]
+
+    def apply_recent_reports(reports: list[Any]) -> None:
         recent_reports_column.controls = [
             ft.Row(
                 [
@@ -145,6 +159,64 @@ def build_fundamentals_page(
             )
             for report in reports
         ] or [ft.Text("No generated company reports found.")]
+        reports_show_more_button.visible = bool(
+            recent_reports is not None and recent_reports_limit < len(recent_reports)
+        )
+        reports_show_more_button.disabled = False
+
+    def reports_failed(_exc: Exception) -> None:
+        recent_reports_column.controls = [ft.Text("Recent reports could not be loaded.")]
+        reports_show_more_button.visible = False
+        reports_show_more_button.disabled = False
+
+    def reports_loading() -> None:
+        recent_reports_column.controls = [ft.Text("Loading recent reports...")]
+        reports_show_more_button.disabled = True
+
+    reports_loader = DeferredLoadController(
+        page=page,
+        load=load_recent_reports,
+        apply=apply_recent_reports,
+        loading=reports_loading,
+        failed=reports_failed,
+    )
+
+    def refresh_recent_reports(*, force: bool = False) -> None:
+        nonlocal recent_reports, recent_reports_limit
+        if force:
+            recent_reports = None
+            recent_reports_limit = 8
+            reports_loader.invalidate()
+        if defer_initial_load:
+            reports_loader.start(force=force)
+        else:
+            try:
+                apply_recent_reports(load_recent_reports())
+            except Exception as exc:
+                reports_failed(exc)
+
+    def show_more_reports(_event: Any) -> None:
+        nonlocal recent_reports_limit
+        recent_reports_limit += 8
+        if defer_initial_load and recent_reports is not None:
+            apply_recent_reports(recent_reports[:recent_reports_limit])
+            page.update()
+        elif defer_initial_load:
+            reports_loader.start()
+        else:
+            refresh_recent_reports()
+
+    reports_show_more_button = ft.TextButton(
+        "Show more",
+        icon=ft.Icons.EXPAND_MORE,
+        on_click=show_more_reports,
+        visible=False,
+    )
+    reports_refresh_button = ft.IconButton(
+        icon=ft.Icons.REFRESH,
+        tooltip="Refresh recent reports",
+        on_click=lambda _event: refresh_recent_reports(force=True),
+    )
 
     def on_generate(_event: Any) -> None:
         if generate_button.disabled:
@@ -164,7 +236,7 @@ def build_fundamentals_page(
                 result_display_status(result) in {"CREATED", "OVERWRITTEN", "NO_CHANGE"}
                 for result in batch.results
             ):
-                refresh_recent_reports()
+                refresh_recent_reports(force=True)
         except Exception:
             LOGGER.exception("Unexpected Fundamentals UI generation failure")
             status_field.value = (
@@ -182,7 +254,8 @@ def build_fundamentals_page(
         on_click=on_generate,
     )
     ticker_field.on_submit = on_generate
-    refresh_recent_reports()
+    if not defer_initial_load:
+        refresh_recent_reports()
 
     content = ft.Column(
         [
@@ -208,7 +281,12 @@ def build_fundamentals_page(
             ),
             batch_results_column,
             ft.Divider(),
-            ft.Text("Recent reports", size=18, weight=ft.FontWeight.BOLD),
+            ft.Row(
+                [
+                    ft.Text("Recent reports", size=18, weight=ft.FontWeight.BOLD),
+                    reports_refresh_button,
+                ]
+            ),
             ft.Row(
                 [
                     ft.Text("Ticker", width=90, weight=ft.FontWeight.BOLD),
@@ -219,6 +297,7 @@ def build_fundamentals_page(
                 ]
             ),
             recent_reports_column,
+            reports_show_more_button,
         ],
         spacing=12,
         expand=True,
@@ -233,4 +312,8 @@ def build_fundamentals_page(
         status_field=status_field,
         batch_results_column=batch_results_column,
         recent_reports_column=recent_reports_column,
+        reports_refresh_button=reports_refresh_button,
+        reports_show_more_button=reports_show_more_button,
+        activate=lambda: reports_loader.start(),
+        reports_loader=reports_loader,
     )

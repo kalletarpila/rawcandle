@@ -26,6 +26,8 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from starlette.responses import FileResponse
 
+from dev_tools.deferred_ui import DeferredLoadController
+
 from dev_tools.fundamentals_snapshot_page import (
     FUNDAMENTALS_ROUTE,
     build_fundamentals_page,
@@ -112,6 +114,7 @@ _EC_SOURCE_LAYER_LOG_FILENAME_RE = re.compile(
 _TIMER_PATH = Path.home() / ".config/systemd/user/stock-update-scheduler.timer"
 _TAXONOMY_EVIDENCE_ROOT = "temp/datacenter_taxonomy_changes"
 TOP_LEVEL_ROUTES = ("/scheduler", "/taxonomy", FUNDAMENTALS_ROUTE, FUNDAMENTALS_ADMIN_ROUTE)
+FUNDAMENTALS_ADMIN_ROUTE_ALIAS = "/fundamentals-admin"
 
 
 def top_level_route_index(route: str | None) -> int:
@@ -122,7 +125,7 @@ def top_level_route_index(route: str | None) -> int:
         return 1
     if normalized == FUNDAMENTALS_ROUTE:
         return 2
-    if normalized == FUNDAMENTALS_ADMIN_ROUTE:
+    if normalized in {FUNDAMENTALS_ADMIN_ROUTE, FUNDAMENTALS_ADMIN_ROUTE_ALIAS}:
         return 3
     return 0
 
@@ -662,9 +665,13 @@ def read_systemd_user_timer_status() -> dict[str, Any]:
             check=False,
             capture_output=True,
             text=True,
+            timeout=2.0,
         )
         status_summary = proc.stdout.strip() or proc.stderr.strip() or "unknown"
         error = None
+    except subprocess.TimeoutExpired:
+        status_summary = "unknown"
+        error = "systemctl status inspection timed out after 2 seconds"
     except Exception as exc:  # pragma: no cover - defensive UI helper
         status_summary = "unknown"
         error = str(exc)
@@ -672,7 +679,7 @@ def read_systemd_user_timer_status() -> dict[str, Any]:
         "timer_path": str(timer_path),
         "on_calendar": on_calendar,
         "installed": installed,
-        "status_summary": status_summary if installed else "missing",
+        "status_summary": status_summary if installed or error else "missing",
         "error": error,
     }
 
@@ -949,7 +956,12 @@ def _load_config_or_raise(config_path: str) -> StockUpdateSchedulerConfig:
     return read_scheduler_config(config_path)
 
 
-def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
+def run_app(
+    page: Any,
+    config_path: str = "scheduler_config.json",
+    *,
+    defer_initial_load: bool = False,
+) -> None:
     config = _load_config_or_raise(config_path)
     page.title = "RawCandle stock update scheduler"
     page.scroll = ft.ScrollMode.AUTO
@@ -972,6 +984,9 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     skip_next_run_text = ft.Text(scheduler_skip_next_run_label(config))
     running_status_text = ft.Text("Scheduler running: UNKNOWN")
     logs_column = ft.Column(spacing=8)
+    scheduler_log_cache: list[dict[str, Any]] | None = None
+    scheduler_view_cache: dict[str, Any] | None = None
+    scheduler_log_limit = 8
 
     def selected_markets_from_ui() -> list[str]:
         markets: list[str] = []
@@ -1023,9 +1038,23 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         launch_browser_url(page, build_text_log_browser_url(str(path)))
         status_field.value = f"Opened log: {path.name}"
 
-    def refresh_logs_view(log_dir: str) -> None:
-        log_entries = list_scheduler_log_files(log_dir)
-        latest = load_latest_scheduler_summary(log_dir)
+    def load_scheduler_view(log_dir: str) -> dict[str, Any]:
+        nonlocal scheduler_log_cache
+        if scheduler_log_cache is None:
+            scheduler_log_cache = list_scheduler_log_files(log_dir, limit=1_000_000)
+        return {
+            "log_entries": scheduler_log_cache[:scheduler_log_limit],
+            "latest": load_latest_scheduler_summary(log_dir),
+            "status": read_scheduler_status(log_dir),
+            "config": _load_config_or_raise(config_path),
+            "timer": read_systemd_user_timer_status(),
+        }
+
+    def apply_scheduler_view(payload: dict[str, Any]) -> None:
+        nonlocal scheduler_view_cache
+        scheduler_view_cache = payload
+        log_entries = payload["log_entries"]
+        latest = payload["latest"]
         if latest is None:
             summary_field.value = "No scheduler summary JSON found."
         else:
@@ -1064,7 +1093,75 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                         ]
                     )
                 )
-        refresh_running_state(log_dir)
+        state = scheduler_running_state(payload["status"])
+        running_status_text.value = (
+            "Scheduler status: running" if state["is_running"]
+            else "Scheduler status: not running"
+        )
+        button_state = scheduler_skip_button_state(
+            is_running=state["is_running"],
+            skip_next_run=payload["config"].skip_next_run,
+        )
+        skip_next_run_button.disabled = button_state["skip_disabled"]
+        cancel_skip_next_run_button.disabled = button_state["cancel_disabled"]
+        timer_status = payload["timer"]
+        timer_status_field.value = "\n".join([
+            f"installed={timer_status.get('installed', False)}",
+            f"status_summary={timer_status.get('status_summary', '')}",
+            f"on_calendar={timer_status.get('on_calendar', '')}",
+            f"timer_path={timer_status.get('timer_path', '')}",
+            f"error={timer_status.get('error', '')}",
+        ])
+        scheduler_show_more_button.visible = bool(
+            scheduler_log_cache is not None and scheduler_log_limit < len(scheduler_log_cache)
+        )
+        scheduler_show_more_button.disabled = False
+
+    def scheduler_load_failed(exc: Exception) -> None:
+        status_field.value = f"Scheduler status could not be loaded: {type(exc).__name__}"
+        scheduler_show_more_button.disabled = False
+
+    def scheduler_loading() -> None:
+        running_status_text.value = "Loading scheduler status..."
+        scheduler_show_more_button.disabled = True
+
+    scheduler_loader = DeferredLoadController(
+        page=page,
+        load=lambda: load_scheduler_view(log_dir_field.value),
+        apply=apply_scheduler_view,
+        loading=scheduler_loading,
+        failed=scheduler_load_failed,
+    )
+
+    def refresh_logs_view(log_dir: str, *, force: bool = False) -> None:
+        nonlocal scheduler_log_cache, scheduler_log_limit, scheduler_view_cache
+        if force:
+            scheduler_log_cache = None
+            scheduler_view_cache = None
+            scheduler_log_limit = 8
+            scheduler_loader.invalidate()
+        if defer_initial_load:
+            scheduler_loader.start(force=force)
+        else:
+            apply_scheduler_view(load_scheduler_view(log_dir))
+
+    def show_more_scheduler_logs(_event: Any) -> None:
+        nonlocal scheduler_log_limit
+        scheduler_log_limit += 8
+        if defer_initial_load and scheduler_view_cache is not None and scheduler_log_cache is not None:
+            payload = dict(scheduler_view_cache)
+            payload["log_entries"] = scheduler_log_cache[:scheduler_log_limit]
+            apply_scheduler_view(payload)
+            page.update()
+        elif defer_initial_load:
+            scheduler_loader.start()
+        else:
+            refresh_logs_view(log_dir_field.value)
+
+    scheduler_show_more_button = ft.TextButton(
+        "Show more", icon=ft.Icons.EXPAND_MORE,
+        on_click=show_more_scheduler_logs, visible=False,
+    )
 
     def update_ui_from_config(next_config: StockUpdateSchedulerConfig) -> None:
         osakedata_db_field.value = next_config.osakedata_db_path
@@ -1097,7 +1194,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                 config=next_config,
             )
             update_ui_from_config(next_config)
-            refresh_logs_view(next_config.log_dir)
+            refresh_logs_view(next_config.log_dir, force=True)
             status_field.value = result["message"]
         except Exception as exc:
             status_field.value = f"Save config failed: {exc}"
@@ -1108,7 +1205,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         try:
             next_config = _load_config_or_raise(config_path)
             update_ui_from_config(next_config)
-            refresh_logs_view(next_config.log_dir)
+            refresh_logs_view(next_config.log_dir, force=True)
             status_field.value = "Config reloaded."
         except Exception as exc:
             status_field.value = f"Reload config failed: {exc}"
@@ -1139,7 +1236,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             page.update()
 
     def on_refresh_logs(_e: Any) -> None:
-        refresh_logs_view(log_dir_field.value)
+        refresh_logs_view(log_dir_field.value, force=True)
         if hasattr(page, "update"):
             page.update()
 
@@ -1170,6 +1267,9 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     taxonomy_status_field = ft.TextField(label="Toteutuksen tila", read_only=True, multiline=True, min_lines=8)
     taxonomy_log_field = ft.TextField(label="Taxonomy loki", read_only=True, multiline=True, min_lines=10)
     taxonomy_operations_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+    taxonomy_state_cache: dict[str, Any] | None = None
+    taxonomy_operation_limit = 8
+    taxonomy_requested_deployment: int | None = None
     taxonomy_confirmation_state: dict[str, Any] = {
         "summary": None,
         "prepared_plan_key": None,
@@ -1207,12 +1307,16 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             "proposed_source_sha256": _sha256_if_file(taxonomy_proposed_csv_field.value),
         }
 
-    def refresh_taxonomy_state(deployment_id: int | None = None) -> dict[str, Any]:
-        state = inspect_scheduler_taxonomy_state(
+    def load_taxonomy_state(deployment_id: int | None) -> dict[str, Any]:
+        return inspect_scheduler_taxonomy_state(
             config_path=config_path,
             deployment_id=deployment_id,
             evidence_root=_TAXONOMY_EVIDENCE_ROOT,
         )
+
+    def apply_taxonomy_state(state: dict[str, Any]) -> None:
+        nonlocal taxonomy_state_cache
+        taxonomy_state_cache = state
         taxonomy_active_field.value = format_taxonomy_state_lines(state)
         inspection = state.get("inspect") or {}
         if inspection:
@@ -1254,9 +1358,51 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                 f"{operation.get('operation_type')} {operation.get('started_at_utc')} "
                 f"status={operation.get('status')} operation_id={operation.get('operation_id')}"
             )
-            for operation in state.get("operations", [])
+            for operation in state.get("operations", [])[:taxonomy_operation_limit]
         ]
+        taxonomy_show_more_button.visible = taxonomy_operation_limit < len(state.get("operations", []))
+
+    def taxonomy_load_failed(exc: Exception) -> None:
+        taxonomy_active_field.value = f"Taxonomy inspect failed: {exc}"
+
+    taxonomy_loader = DeferredLoadController(
+        page=page,
+        load=lambda: load_taxonomy_state(taxonomy_requested_deployment),
+        apply=apply_taxonomy_state,
+        loading=lambda: setattr(taxonomy_active_field, "value", "Loading taxonomy state..."),
+        failed=taxonomy_load_failed,
+    )
+
+    def refresh_taxonomy_state(
+        deployment_id: int | None = None,
+        *,
+        force: bool = False,
+    ) -> dict[str, Any] | None:
+        nonlocal taxonomy_requested_deployment, taxonomy_state_cache, taxonomy_operation_limit
+        taxonomy_requested_deployment = deployment_id
+        if force:
+            taxonomy_state_cache = None
+            taxonomy_operation_limit = 8
+            taxonomy_loader.invalidate()
+        if defer_initial_load:
+            taxonomy_loader.start(force=force)
+            return None
+        state = load_taxonomy_state(deployment_id)
+        apply_taxonomy_state(state)
         return state
+
+    def show_more_taxonomy_operations(_event: Any) -> None:
+        nonlocal taxonomy_operation_limit
+        taxonomy_operation_limit += 8
+        if taxonomy_state_cache is not None:
+            apply_taxonomy_state(taxonomy_state_cache)
+            if hasattr(page, "update"):
+                page.update()
+
+    taxonomy_show_more_button = ft.TextButton(
+        "Show more", icon=ft.Icons.EXPAND_MORE,
+        on_click=show_more_taxonomy_operations, visible=False,
+    )
 
     def on_taxonomy_prepare(_e: Any) -> None:
         try:
@@ -1295,7 +1441,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             taxonomy_plan_field.value = format_taxonomy_plan_lines(summary)
             if summary.get("deployment_id"):
                 taxonomy_deployment_id_field.value = str(summary["deployment_id"])
-                refresh_taxonomy_state(int(summary["deployment_id"]))
+                refresh_taxonomy_state(int(summary["deployment_id"]), force=True)
         except Exception as exc:
             taxonomy_status_field.value = f"Prepare failed: {exc}"
         if hasattr(page, "update"):
@@ -1303,7 +1449,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
 
     def on_taxonomy_refresh(_e: Any) -> None:
         try:
-            refresh_taxonomy_state(_selected_deployment_id())
+            refresh_taxonomy_state(_selected_deployment_id(), force=True)
         except Exception as exc:
             taxonomy_status_field.value = f"Refresh failed: {exc}"
         if hasattr(page, "update"):
@@ -1436,7 +1582,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                     resume_from_phase=run_summary.get("resume_from_phase"),
                 )
                 taxonomy_status_field.value = json.dumps(run_summary, indent=2, sort_keys=True, default=str)
-                refresh_taxonomy_state(int(summary["deployment_id"]))
+                refresh_taxonomy_state(int(summary["deployment_id"]), force=True)
         except Exception as exc:
             taxonomy_status_field.value = f"Rebuild failed: {exc}"
         if hasattr(page, "update"):
@@ -1515,7 +1661,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                     resume_from_phase=run_summary.get("resume_from_phase"),
                 )
                 taxonomy_status_field.value = json.dumps(run_summary, indent=2, sort_keys=True, default=str)
-                refresh_taxonomy_state(deployment_id)
+                refresh_taxonomy_state(deployment_id, force=True)
         except Exception as exc:
             taxonomy_status_field.value = f"Resume failed: {exc}"
         if hasattr(page, "update"):
@@ -1554,7 +1700,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                     failed_phase=None if finalize_summary.get("finalize_status") == "READY_TO_ACTIVATE" else "VALIDATING",
                 )
                 taxonomy_status_field.value = json.dumps(finalize_summary, indent=2, sort_keys=True, default=str)
-                refresh_taxonomy_state(deployment_id)
+                refresh_taxonomy_state(deployment_id, force=True)
         except Exception as exc:
             taxonomy_status_field.value = f"Validation failed: {exc}"
         if hasattr(page, "update"):
@@ -1690,7 +1836,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
                     taxonomy_confirmation_state["prepared_activation_key"] = None
                     taxonomy_confirmation_state["activation_key"] = None
                     taxonomy_activate_button.disabled = True
-                    refresh_taxonomy_state(int(summary["deployment_id"]))
+                    refresh_taxonomy_state(int(summary["deployment_id"]), force=True)
                     taxonomy_status_field.value = activation_status_text
         except Exception as exc:
             taxonomy_status_field.value = f"Activation failed: {exc}"
@@ -1735,6 +1881,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             summary_field,
             timer_status_field,
             logs_column,
+            scheduler_show_more_button,
         ],
         spacing=12,
         expand=True,
@@ -1766,6 +1913,7 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
             taxonomy_status_field,
             ft.Text("Operaatiot"),
             taxonomy_operations_column,
+            taxonomy_show_more_button,
             ft.Row([taxonomy_show_log_button, taxonomy_download_log_button, taxonomy_download_evidence_button]),
             taxonomy_log_field,
         ],
@@ -1776,17 +1924,20 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         page=page,
         timezone_name=config.timezone,
         service=getattr(page, "fundamentals_snapshot_service", None),
+        defer_initial_load=defer_initial_load,
     )
     fundamentals_admin_controls = build_fundamentals_admin_page(
         page=page,
         service=getattr(page, "fundamentals_admin_service", None),
+        defer_initial_load=defer_initial_load,
     )
 
-    refresh_logs_view(config.log_dir)
-    try:
-        refresh_taxonomy_state(None)
-    except Exception as exc:
-        taxonomy_active_field.value = f"Taxonomy inspect failed: {exc}"
+    if not defer_initial_load:
+        refresh_logs_view(config.log_dir)
+        try:
+            refresh_taxonomy_state(None)
+        except Exception as exc:
+            taxonomy_active_field.value = f"Taxonomy inspect failed: {exc}"
 
     page.osakedata_db_field = osakedata_db_field
     page.analysis_db_field = analysis_db_field
@@ -1803,6 +1954,8 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.skip_next_run_button = skip_next_run_button
     page.cancel_skip_next_run_button = cancel_skip_next_run_button
     page.refresh_logs_button = refresh_logs_button
+    page.scheduler_show_more_button = scheduler_show_more_button
+    page.scheduler_loader = scheduler_loader
     page.status_field = status_field
     page.summary_field = summary_field
     page.timer_status_field = timer_status_field
@@ -1833,6 +1986,8 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.taxonomy_download_log_button = taxonomy_download_log_button
     page.taxonomy_download_evidence_button = taxonomy_download_evidence_button
     page.taxonomy_confirmation_state = taxonomy_confirmation_state
+    page.taxonomy_show_more_button = taxonomy_show_more_button
+    page.taxonomy_loader = taxonomy_loader
     page.fundamentals_content = fundamentals_controls.content
     page.fundamentals_ticker_field = fundamentals_controls.ticker_field
     page.fundamentals_report_date_field = fundamentals_controls.report_date_field
@@ -1841,6 +1996,9 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.fundamentals_status_field = fundamentals_controls.status_field
     page.fundamentals_batch_results_column = fundamentals_controls.batch_results_column
     page.fundamentals_recent_reports_column = fundamentals_controls.recent_reports_column
+    page.fundamentals_reports_refresh_button = fundamentals_controls.reports_refresh_button
+    page.fundamentals_reports_show_more_button = fundamentals_controls.reports_show_more_button
+    page.fundamentals_reports_loader = fundamentals_controls.reports_loader
     page.fundamentals_admin_content = fundamentals_admin_controls.content
     page.fundamentals_admin_operation_dropdown = fundamentals_admin_controls.operation_dropdown
     page.fundamentals_admin_tickers_field = fundamentals_admin_controls.tickers_field
@@ -1860,6 +2018,8 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
     page.fundamentals_admin_summary_column = fundamentals_admin_controls.summary_column
     page.fundamentals_admin_progress_field = fundamentals_admin_controls.progress_field
     page.fundamentals_admin_history_column = fundamentals_admin_controls.history_column
+    page.fundamentals_admin_history_show_more_button = fundamentals_admin_controls.history_show_more_button
+    page.fundamentals_admin_history_loader = fundamentals_admin_controls.history_loader
 
     tabs = ft.Tabs(
         tabs=[
@@ -1871,6 +2031,20 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         selected_index=top_level_route_index(getattr(page, "route", "/")),
         expand=True,
     )
+
+    route_activators = {
+        "/scheduler": lambda: scheduler_loader.start(),
+        "/taxonomy": lambda: taxonomy_loader.start(),
+        FUNDAMENTALS_ROUTE: fundamentals_controls.activate,
+        FUNDAMENTALS_ADMIN_ROUTE: fundamentals_admin_controls.activate,
+        FUNDAMENTALS_ADMIN_ROUTE_ALIAS: fundamentals_admin_controls.activate,
+    }
+
+    def activate_route(route: str) -> None:
+        if not defer_initial_load:
+            return
+        normalized = str(route or "/scheduler").split("?", 1)[0].rstrip("/") or "/scheduler"
+        route_activators.get(normalized, route_activators["/scheduler"])()
 
     def on_top_level_tab_change(event: Any) -> None:
         selected = int(getattr(event.control, "selected_index", 0) or 0)
@@ -1886,19 +2060,29 @@ def run_app(page: Any, config_path: str = "scheduler_config.json") -> None:
         else:
             page.route = route
         tabs.selected_index = selected
+        activate_route(route)
         if hasattr(page, "update"):
             page.update()
 
     def on_top_level_route_change(event: Any) -> None:
         route = getattr(event, "route", None) or getattr(page, "route", "/")
         tabs.selected_index = top_level_route_index(route)
+        activate_route(route)
         if hasattr(page, "update"):
             page.update()
 
+    def on_session_disconnect(_event: Any) -> None:
+        scheduler_loader.close()
+        taxonomy_loader.close()
+        fundamentals_controls.reports_loader.close()
+        fundamentals_admin_controls.history_loader.close()
+
     tabs.on_change = on_top_level_tab_change
     page.on_route_change = on_top_level_route_change
+    page.on_disconnect = on_session_disconnect
     page.top_level_tabs = tabs
     page.add(tabs)
+    activate_route(getattr(page, "route", "/scheduler"))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -1921,7 +2105,7 @@ def create_scheduler_web_app(
     initial_config = read_scheduler_config(config_path)
 
     def _app(page: Any) -> None:
-        run_app(page, config_path)
+        run_app(page, config_path, defer_initial_load=True)
 
     application = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     add_fundamentals_download_route(application, report_dir=report_dir)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import fcntl
 import json
 from pathlib import Path
@@ -17,7 +16,7 @@ from rawcandle.fundamentals.admin.full_workflow import (
     run_refresh_full_workflow,
     workflow_ui_summary,
 )
-from rawcandle.fundamentals.admin.history import AdminRunHistory, RunHistoryEntry, RunProgressSummary
+from rawcandle.fundamentals.admin.history import AdminRunHistory, RunProgressSummary
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
     OperationReportSummary,
@@ -89,6 +88,60 @@ class AdminUIHistoryEntry:
     @property
     def stage(self) -> str:
         return operation_stage(self.mode)
+
+
+@dataclass(frozen=True)
+class _RunHistoryProjection:
+    run_dir: Path
+    result: Mapping[str, Any] | None
+    request: Mapping[str, Any] | None
+    status: Mapping[str, Any] | None
+    invalid_artifact: bool
+
+
+class AdminHistoryCursor:
+    """Session-local newest-first history scan with one projection per run."""
+
+    def __init__(self, service: "FundamentalsAdminUIService", *, include_technical: bool) -> None:
+        self.service = service
+        self.include_technical = include_technical
+        try:
+            self.candidates = sorted(
+                (
+                    path for path in service.run_root.iterdir()
+                    if path.is_dir() and not path.is_symlink()
+                ),
+                key=lambda path: path.name,
+                reverse=True,
+            ) if service.run_root.exists() else []
+        except OSError:
+            self.candidates = []
+        self.position = 0
+        self.entries: list[AdminUIHistoryEntry] = []
+        self.projections: dict[Path, _RunHistoryProjection] = {}
+        self.exhausted = False
+
+    def projection(self, run_dir: Path) -> _RunHistoryProjection:
+        cached = self.projections.get(run_dir)
+        if cached is None:
+            cached = self.service._history_projection(run_dir)
+            self.projections[run_dir] = cached
+        return cached
+
+    def fill(self, limit: int) -> list[AdminUIHistoryEntry]:
+        wanted = max(0, int(limit))
+        while len(self.entries) < wanted and self.position < len(self.candidates):
+            run_dir = self.candidates[self.position]
+            self.position += 1
+            try:
+                entry = self.service._history_entry_from_projection(self.projection(run_dir))
+            except (OSError, ValueError, TypeError):
+                continue
+            if entry is None or (not self.include_technical and entry.category != "Administration run"):
+                continue
+            self.entries.append(entry)
+        self.exhausted = self.position >= len(self.candidates)
+        return list(self.entries[:wanted])
 
 
 _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy|synchronize_provider_cik|resolve_ticker_identity)_[A-Za-z0-9_]+$")
@@ -481,46 +534,56 @@ class FundamentalsAdminUIService:
                 raise ValueError("FULL_WORKFLOW_UNSUPPORTED_ADMIN_OPERATION")
         return self._finalize(result, default_message="Full workflow completed.")
 
-    def progress(self, run_id: str) -> RunProgressSummary:
-        return self.history.progress(run_id)
+    def progress(
+        self,
+        run_id: str,
+        *,
+        projection_cache: Mapping[Path, _RunHistoryProjection] | None = None,
+    ) -> RunProgressSummary:
+        projection = self._cached_projection(run_id, projection_cache)
+        if projection is None:
+            return self.history.progress(run_id)
+        return self.history.progress(run_id, result_override=projection.result)
 
     def history_entries(self, *, limit: int = 20, include_technical: bool = False) -> list[AdminUIHistoryEntry]:
-        entries: list[AdminUIHistoryEntry] = []
-        try:
-            run_dirs = [
-                path for path in self.run_root.iterdir()
-                if path.is_dir() and not path.is_symlink()
-            ] if self.run_root.exists() else []
-        except Exception:
-            return []
-        for path in run_dirs:
-            try:
-                entry = self._history_entry_for_run_dir(path)
-            except (OSError, ValueError, TypeError):
-                continue
-            if entry is None:
-                continue
-            entries.append(entry)
-        def sort_key(entry: AdminUIHistoryEntry) -> tuple[datetime, str]:
-            timestamp = entry.completed_at_utc
-            try:
-                parsed = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
-                return (parsed.astimezone(timezone.utc), entry.run_id)
-            except (TypeError, ValueError):
-                return (datetime.min.replace(tzinfo=timezone.utc), entry.run_id)
-
-        administration = sorted((item for item in entries if item.category == "Administration run"), key=sort_key, reverse=True)
+        cursor = self.history_cursor(include_technical=include_technical)
         if not include_technical:
-            return administration[:limit]
-        technical = sorted((item for item in entries if item.category != "Administration run"), key=sort_key, reverse=True)
+            return cursor.fill(limit)
+        cursor.fill(len(cursor.candidates))
+        administration = [item for item in cursor.entries if item.category == "Administration run"]
+        technical = [item for item in cursor.entries if item.category != "Administration run"]
         return administration[:limit] + technical[:limit]
 
-    def history_result_summary(self, run_id: str) -> tuple[str, ...]:
-        result_path = self.history.artifact_path(run_id, "result.json")
-        result = self._load_json_file(result_path)
+    def history_cursor(self, *, include_technical: bool = False) -> AdminHistoryCursor:
+        return AdminHistoryCursor(self, include_technical=include_technical)
+
+    def history_result_summary(
+        self,
+        run_id: str,
+        *,
+        projection_cache: Mapping[Path, _RunHistoryProjection] | None = None,
+    ) -> tuple[str, ...]:
+        projection = self._cached_projection(run_id, projection_cache)
+        if projection is None:
+            result_path = self.history.artifact_path(run_id, "result.json")
+            result = self._load_json_file(result_path)
+        else:
+            result = projection.result
         if result is None:
             raise ValueError("invalid admin result")
         return build_operation_summary(result)
+
+    @staticmethod
+    def _cached_projection(
+        run_id: str,
+        projection_cache: Mapping[Path, _RunHistoryProjection] | None,
+    ) -> _RunHistoryProjection | None:
+        if projection_cache is None:
+            return None
+        return next(
+            (projection for path, projection in projection_cache.items() if path.name == run_id),
+            None,
+        )
 
     def resolve_report_download(self, run_id: str) -> Path:
         return resolve_operation_report_download(run_id, root=self.run_root)
@@ -528,23 +591,7 @@ class FundamentalsAdminUIService:
     def resolve_named_report_download(self, run_id: str, filename: str) -> Path:
         return resolve_operation_report_download(run_id, filename, root=self.run_root)
 
-    def _artifact_names(self, run_id: str) -> tuple[str, ...]:
-        try:
-            return self.history.progress(run_id).artifacts
-        except Exception:
-            return ()
-
-    def _mode_for_entry(self, entry: RunHistoryEntry) -> str:
-        try:
-            path = self.history.artifact_path(entry.run_id, "result.json")
-
-            result = json.loads(path.read_text(encoding="utf-8"))
-            return str(result.get("mode", "UNKNOWN"))
-        except Exception:
-            return "UNKNOWN"
-
-    def _history_entry_for_run_dir(self, run_dir: Path) -> AdminUIHistoryEntry | None:
-        run_id = run_dir.name
+    def _history_projection(self, run_dir: Path) -> _RunHistoryProjection:
         result = self._load_json_file(run_dir / "result.json")
         request = self._load_json_file(run_dir / "request.json")
         status = self._load_json_file(run_dir / "progress_status.json") or self._load_json_file(run_dir / "status.json")
@@ -552,6 +599,18 @@ class FundamentalsAdminUIService:
             (run_dir / name).is_symlink() or ((run_dir / name).exists() and parsed is None)
             for name, parsed in (("result.json", result), ("request.json", request))
         )
+        return _RunHistoryProjection(run_dir, result, request, status, invalid_artifact)
+
+    def _history_entry_for_run_dir(self, run_dir: Path) -> AdminUIHistoryEntry | None:
+        return self._history_entry_from_projection(self._history_projection(run_dir))
+
+    def _history_entry_from_projection(self, projection: _RunHistoryProjection) -> AdminUIHistoryEntry | None:
+        run_dir = projection.run_dir
+        run_id = run_dir.name
+        result = projection.result
+        request = projection.request
+        status = projection.status
+        invalid_artifact = projection.invalid_artifact
         category = "Invalid or corrupt run" if invalid_artifact else self._classify_run_dir(run_dir, result=result, request=request, status=status)
         if category == "Invalid or corrupt run":
             return AdminUIHistoryEntry(
@@ -561,38 +620,39 @@ class FundamentalsAdminUIService:
                 status="corrupt_or_incomplete",
                 mode="INVALID",
                 completed_at_utc=None,
-                report_available=OPERATION_REPORT_NAME in self._artifact_names(run_id),
+                report_available=(run_dir / OPERATION_REPORT_NAME).is_file(),
                 category="Invalid or corrupt run",
             )
         if category == "Administration run":
-            try:
-                item = self.history.summarize(run_id)
-            except Exception:
+            payload = result or {}
+            if not payload:
                 return AdminUIHistoryEntry(
                     run_id=run_id,
-                    operation_type=str((result or request or status or {}).get("operation_type", "Administration")),
+                    operation_type=str((request or status or {}).get("operation_type", "Administration")),
                     outcome="CORRUPT_OR_INCOMPLETE",
                     status="corrupt_or_incomplete",
-                    mode=str((result or {}).get("mode", "UNKNOWN")),
+                    mode="UNKNOWN",
                     completed_at_utc=None,
-                    report_available=OPERATION_REPORT_NAME in self._artifact_names(run_id),
+                    report_available=(run_dir / OPERATION_REPORT_NAME).is_file(),
                     category="Invalid or corrupt run",
-                    primary_count=self._primary_count(result or request or {}),
+                    primary_count=self._primary_count(request or {}),
                 )
+            outcome = str(payload.get("outcome", "UNKNOWN"))
+            mode = str(payload.get("mode", "UNKNOWN"))
             return AdminUIHistoryEntry(
-                run_id=item.run_id,
-                operation_type=item.operation_type,
-                outcome=(taxonomy_preview_presentation(result or {}) or {}).get("business_outcome", item.outcome),
-                status=item.status,
-                mode=self._mode_for_entry(item),
-                completed_at_utc=item.completed_at_utc,
-                report_available=OPERATION_REPORT_NAME in self._artifact_names(item.run_id),
+                run_id=run_id,
+                operation_type=str(payload.get("operation_type", (request or status or {}).get("operation_type", "UNKNOWN"))),
+                outcome=(taxonomy_preview_presentation(payload) or {}).get("business_outcome", outcome),
+                status="completed" if outcome == "COMPLETED" else outcome.lower(),
+                mode=mode,
+                completed_at_utc=payload.get("completed_at_utc") or (status or {}).get("timestamp_utc"),
+                report_available=(run_dir / OPERATION_REPORT_NAME).is_file(),
                 category=category,
-                primary_count=self._primary_count(result or request or {}),
-                duration_seconds=self._duration_seconds(result or {}),
-                count_label=self._count_label(result or request or {}),
-                report_filename=WORKFLOW_REPORT_NAME if self._mode_for_entry(item) == "FULL_WORKFLOW" else OPERATION_REPORT_NAME,
-                trigger_source=str((result or {}).get("trigger_source") or "MANUAL"),
+                primary_count=self._primary_count(payload or request or {}),
+                duration_seconds=self._duration_seconds(payload),
+                count_label=self._count_label(payload or request or {}),
+                report_filename=WORKFLOW_REPORT_NAME if mode == "FULL_WORKFLOW" else OPERATION_REPORT_NAME,
+                trigger_source=str(payload.get("trigger_source") or "MANUAL"),
             )
         payload = result or request or status or {}
         return AdminUIHistoryEntry(
@@ -602,54 +662,71 @@ class FundamentalsAdminUIService:
             status=category.lower().replace(" ", "_"),
             mode=str(payload.get("mode", "TECHNICAL")),
             completed_at_utc=payload.get("completed_at_utc") or payload.get("timestamp_utc"),
-            report_available=OPERATION_REPORT_NAME in self._artifact_names(run_id),
+            report_available=(run_dir / OPERATION_REPORT_NAME).is_file(),
             category=category,
             primary_count=self._primary_count(payload),
             duration_seconds=self._duration_seconds(payload),
             trigger_source=str(payload.get("trigger_source") or "MANUAL"),
         )
 
-    def pending_refresh_status(self) -> Mapping[str, Any] | None:
-        candidates: list[tuple[str, Mapping[str, Any]]] = []
+    def pending_refresh_status(
+        self,
+        *,
+        projection_cache: Mapping[Path, _RunHistoryProjection] | None = None,
+    ) -> Mapping[str, Any] | None:
         if not self.run_root.exists():
             return None
-        for run_dir in self.run_root.iterdir():
-            if not run_dir.is_dir() or run_dir.is_symlink():
-                continue
-            payload = self._load_json_file(run_dir / "result.json")
-            if not payload:
+        try:
+            candidates = sorted(
+                (
+                    run_dir for run_dir in self.run_root.iterdir()
+                    if run_dir.is_dir()
+                    and not run_dir.is_symlink()
+                    and "_refresh_fundamentals_" in run_dir.name
+                ),
+                key=lambda path: path.name,
+                reverse=True,
+            )
+        except OSError:
+            return {"status": "ERROR", "error": "Refresh history is unavailable."}
+        for run_dir in candidates:
+            cached = (projection_cache or {}).get(run_dir)
+            payload = cached.result if cached is not None else self._load_json_file(run_dir / "result.json")
+            if payload is None:
+                return {
+                    "status": "ERROR",
+                    "error": f"Newest Refresh evidence is incomplete or corrupt: {run_dir.name}",
+                }
+            if payload.get("operation_type") != "REFRESH_FUNDAMENTALS":
                 continue
             if (
-                payload.get("operation_type") == "REFRESH_FUNDAMENTALS"
-                and payload.get("mode") == "PREVIEW"
+                payload.get("mode") == "PREVIEW"
                 and payload.get("trigger_source") == "SCHEDULER"
             ):
-                candidates.append((str(payload.get("completed_at_utc") or ""), payload))
-        if not candidates:
-            return None
-        _, payload = max(candidates, key=lambda item: item[0])
-        counts = dict(payload.get("summary_counts") or {})
-        if payload.get("outcome") != "COMPLETED" or not int(counts.get("effective_changed_known") or 0):
-            return None
-        return {
-            "detected_at_utc": payload.get("completed_at_utc"),
-            "effective_changed_known": int(counts.get("effective_changed_known") or 0),
-            "new_quarter": int(counts.get("NEW_QUARTER") or 0),
-            "historical_revision": int(counts.get("HISTORICAL_REVISION") or 0),
-            "source_removal": int(counts.get("SOURCE_REMOVAL") or 0),
-            "source_history_change": int(counts.get("SOURCE_HISTORY_CHANGE") or 0),
-            "newly_aged_out_source_rows": int(counts.get("newly_aged_out_source_rows") or 0),
-            "retained_arq": int(counts.get("retained_arq") or 0),
-            "retained_mrq": int(counts.get("retained_mrq") or 0),
-            "true_source_removals": int(counts.get("true_source_removals") or 0),
-            "ambiguous_removals": int(counts.get("ambiguous_removals") or 0),
-            "fiscal_identity_revisions": int(counts.get("fiscal_identity_revisions") or 0),
-            "fiscal_identity_revisions_requiring_review": int(counts.get("fiscal_identity_revisions_requiring_review") or 0),
-            "unknown_tickers": int(counts.get("NOT_IN_CANONICAL_UNIVERSE") or 0),
-            "run_id": payload.get("run_id"),
-            "report": str(Path(str(payload.get("artifact_dir") or "")) / OPERATION_REPORT_NAME),
-            "production_authorized": False,
-        }
+                counts = dict(payload.get("summary_counts") or {})
+                if payload.get("outcome") != "COMPLETED" or not int(counts.get("effective_changed_known") or 0):
+                    return None
+                return {
+                    "status": "PENDING",
+                    "detected_at_utc": payload.get("completed_at_utc"),
+                    "effective_changed_known": int(counts.get("effective_changed_known") or 0),
+                    "new_quarter": int(counts.get("NEW_QUARTER") or 0),
+                    "historical_revision": int(counts.get("HISTORICAL_REVISION") or 0),
+                    "source_removal": int(counts.get("SOURCE_REMOVAL") or 0),
+                    "source_history_change": int(counts.get("SOURCE_HISTORY_CHANGE") or 0),
+                    "newly_aged_out_source_rows": int(counts.get("newly_aged_out_source_rows") or 0),
+                    "retained_arq": int(counts.get("retained_arq") or 0),
+                    "retained_mrq": int(counts.get("retained_mrq") or 0),
+                    "true_source_removals": int(counts.get("true_source_removals") or 0),
+                    "ambiguous_removals": int(counts.get("ambiguous_removals") or 0),
+                    "fiscal_identity_revisions": int(counts.get("fiscal_identity_revisions") or 0),
+                    "fiscal_identity_revisions_requiring_review": int(counts.get("fiscal_identity_revisions_requiring_review") or 0),
+                    "unknown_tickers": int(counts.get("NOT_IN_CANONICAL_UNIVERSE") or 0),
+                    "run_id": payload.get("run_id"),
+                    "report": str(Path(str(payload.get("artifact_dir") or "")) / OPERATION_REPORT_NAME),
+                    "production_authorized": False,
+                }
+        return None
 
     def _classify_run_dir(
         self,

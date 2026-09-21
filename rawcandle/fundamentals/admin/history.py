@@ -9,6 +9,9 @@ from typing import Any, Mapping
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT
 
 
+_RESULT_NOT_PROVIDED = object()
+
+
 @dataclass(frozen=True)
 class RunHistoryEntry:
     run_id: str
@@ -148,13 +151,22 @@ class AdminRunHistory:
             raise FileNotFoundError("admin artifact not found")
         return path
 
-    def progress(self, run_id: str) -> RunProgressSummary:
+    def progress(
+        self,
+        run_id: str,
+        *,
+        result_override: Mapping[str, Any] | None | object = _RESULT_NOT_PROVIDED,
+    ) -> RunProgressSummary:
         run_dir = self._resolve_run_dir(run_id)
         if not run_dir.exists() or not run_dir.is_dir():
             raise FileNotFoundError("admin run not found")
         status = self._load_json(run_dir / "progress_status.json") or self._load_json(run_dir / "status.json") or {}
         stages = self._load_json(run_dir / "progress_stages.json") or {}
-        result = self._load_json(run_dir / "result.json")
+        result = (
+            self._load_json(run_dir / "result.json")
+            if result_override is _RESULT_NOT_PROVIDED
+            else result_override
+        )
         heartbeat_path = run_dir / "progress_events.jsonl"
         if not heartbeat_path.exists():
             heartbeat_path = run_dir / "heartbeat.jsonl"

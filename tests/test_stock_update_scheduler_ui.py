@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -469,6 +470,218 @@ def test_read_systemd_user_timer_status_checks_stock_update_scheduler_unit(monke
     assert status["status_summary"] == "active"
 
 
+def test_read_systemd_user_timer_status_timeout_is_unknown_warning(monkeypatch):
+    calls = []
+
+    def timed_out(command, **kwargs):
+        calls.append((command, kwargs))
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr("dev_tools.stock_update_scheduler_ui.subprocess.run", timed_out)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: Path("/tmp/stock-update-scheduler.timer"),
+    )
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda self, encoding="utf-8": "[Timer]\nOnCalendar=*-*-* 05:30:00\n",
+    )
+
+    status = read_systemd_user_timer_status()
+
+    assert calls[0][1]["timeout"] == 2.0
+    assert status["status_summary"] == "unknown"
+    assert "timed out" in status["error"]
+
+
+def test_deferred_fundamentals_route_commits_shell_before_selected_loader(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    page = _FakePage()
+    page.route = "/fundamentals"
+    report_calls = []
+    loader_started = asyncio.Event()
+    release_loader = asyncio.Event()
+
+    class ReportService:
+        def recent_reports(self, *, limit):
+            report_calls.append(limit)
+            return [
+                SimpleNamespace(
+                    ticker=f"T{index}",
+                    report_date="2026-09-21",
+                    filename=f"T{index}_2026-09-21.md",
+                    modified_at_utc="2026-09-21T12:00:00Z",
+                )
+                for index in range(20)
+            ]
+
+    page.fundamentals_snapshot_service = ReportService()
+    async def controlled_to_thread(function):
+        loader_started.set()
+        await release_loader.wait()
+        return function()
+
+    monkeypatch.setattr("dev_tools.deferred_ui.asyncio.to_thread", controlled_to_thread)
+    scheduler_calls = []
+    taxonomy_calls = []
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
+        lambda *_args, **_kwargs: scheduler_calls.append(True) or [],
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_taxonomy_state",
+        lambda **_kwargs: taxonomy_calls.append(True) or {},
+    )
+
+    run_app(page, str(config_path), defer_initial_load=True)
+
+    assert len(page.controls) == 1
+    assert page.top_level_tabs.selected_index == 2
+    assert report_calls == []
+    assert scheduler_calls == []
+    assert taxonomy_calls == []
+    assert len(page.tasks) == 1
+
+    first_handler = page.tasks.pop()
+
+    async def complete_selected_load() -> None:
+        load_task = asyncio.create_task(first_handler())
+        await loader_started.wait()
+        assert len(page.controls) == 1
+        assert report_calls == []
+        release_loader.set()
+        await load_task
+
+    asyncio.run(complete_selected_load())
+
+    assert report_calls == [1_000_000]
+    assert len(page.fundamentals_recent_reports_column.controls) == 8
+    assert scheduler_calls == []
+    assert taxonomy_calls == []
+
+    page.fundamentals_reports_show_more_button.on_click(None)
+    assert len(page.fundamentals_recent_reports_column.controls) == 16
+    assert report_calls == [1_000_000]
+
+    page.fundamentals_reports_refresh_button.on_click(None)
+    assert len(page.tasks) == 1
+    asyncio.run(page.tasks.pop()())
+    assert report_calls == [1_000_000, 1_000_000]
+
+
+def test_fundamentals_admin_route_alias_selects_and_loads_only_admin(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    page = _FakePage()
+    page.route = "/fundamentals-admin"
+    scheduler_calls = []
+    taxonomy_calls = []
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
+        lambda *_args, **_kwargs: scheduler_calls.append(True) or [],
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_taxonomy_state",
+        lambda **_kwargs: taxonomy_calls.append(True) or {},
+    )
+
+    run_app(page, str(config_path), defer_initial_load=True)
+
+    assert page.top_level_tabs.selected_index == 3
+    assert len(page.tasks) == 1
+    assert scheduler_calls == []
+    assert taxonomy_calls == []
+
+
+def test_deferred_scheduler_history_pages_cached_rows_by_eight(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    page = _FakePage()
+    page.route = "/scheduler"
+    list_calls = []
+
+    async def inline_to_thread(function):
+        return function()
+
+    monkeypatch.setattr("dev_tools.deferred_ui.asyncio.to_thread", inline_to_thread)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.list_scheduler_log_files",
+        lambda *_args, **_kwargs: list_calls.append(True) or [
+            {
+                "filename": f"stock_update_usa_20260921T12{index:02d}Z.txt",
+                "path": str(tmp_path / f"log-{index}.txt"),
+                "size_bytes": index,
+                "modified_at": str(index),
+                "type": "market_log",
+            }
+            for index in range(20)
+        ],
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.load_latest_scheduler_summary",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_scheduler_status",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": True, "status_summary": "inactive"},
+    )
+
+    run_app(page, str(config_path), defer_initial_load=True)
+    asyncio.run(page.tasks.pop()())
+
+    assert len(page.logs_column.controls) == 8
+    page.scheduler_show_more_button.on_click(None)
+    assert len(page.logs_column.controls) == 16
+    assert list_calls == [True]
+
+
+def test_deferred_taxonomy_operations_page_cached_rows_by_eight(tmp_path, monkeypatch):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    page = _FakePage()
+    page.route = "/taxonomy"
+    inspect_calls = []
+
+    async def inline_to_thread(function):
+        return function()
+
+    monkeypatch.setattr("dev_tools.deferred_ui.asyncio.to_thread", inline_to_thread)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.inspect_scheduler_taxonomy_state",
+        lambda **_kwargs: inspect_calls.append(True) or {
+            "active_taxonomy": {},
+            "fact_heads": {},
+            "watermark_heads": {},
+            "blocking_errors": [],
+            "inspect": None,
+            "operations": [
+                {
+                    "operation_type": "TEST",
+                    "started_at_utc": f"2026-09-21T12:{index:02d}:00Z",
+                    "status": "COMPLETED",
+                    "operation_id": index,
+                }
+                for index in range(20)
+            ],
+        },
+    )
+
+    run_app(page, str(config_path), defer_initial_load=True)
+    asyncio.run(page.tasks.pop()())
+
+    assert len(page.taxonomy_operations_column.controls) == 8
+    page.taxonomy_show_more_button.on_click(None)
+    assert len(page.taxonomy_operations_column.controls) == 16
+    assert inspect_calls == [True]
+
+
 def test_save_config_and_sync_systemd_timer_reports_missing_timer(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     timer_path = tmp_path / "missing.timer"
@@ -685,6 +898,7 @@ def test_run_app_exposes_scheduler_taxonomy_and_fundamentals_top_level_tabs(tmp_
         ("/taxonomy", 1),
         ("/fundamentals", 2),
         ("/fundamentals/admin", 3),
+        ("/fundamentals-admin", 3),
         ("/unknown", 0),
     ),
 )
