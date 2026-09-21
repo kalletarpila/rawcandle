@@ -93,6 +93,23 @@ def summary_rows(reports: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
         if actions.count("Review required") or actions.count("Rejected"):
             rows.append(f"Review required: {actions.count('Review required')}. Rejected: {actions.count('Rejected')}.")
     rows.append(f"Network access required: {counts['network']}. Active taxonomy members: {counts['taxonomy']}.")
+    for report in reports:
+        identity = report.get("identity_resolution") if isinstance(report.get("identity_resolution"), Mapping) else {}
+        if identity.get("authority_class") != "APPROVED_REVIEW":
+            continue
+        consequences = identity.get("canonical_consequences") if isinstance(identity.get("canonical_consequences"), Mapping) else {}
+        action = (
+            "successor security"
+            if consequences.get("company_action") == "REUSE" and consequences.get("security_action") == "CREATE"
+            else "new company + security"
+            if consequences.get("company_action") == "CREATE" and consequences.get("security_action") == "CREATE"
+            else str(identity.get("resolution_class") or "reviewed identity").replace("_", " ").lower()
+        )
+        fingerprint = str(identity.get("approval_fingerprint") or "")
+        rows.append(
+            f"{report.get('ticker')} identity: {identity.get('readiness_state')}; approved review: {action}; "
+            f"state={identity.get('current_state_validation_status')}; fingerprint={fingerprint[:12] or 'unavailable'}."
+        )
     return tuple(rows)
 
 
@@ -162,6 +179,65 @@ def _coverage(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "arq_count": len(arq),
         "first_fiscal_quarter": _quarter_label(ordered[0]) if ordered else None,
         "latest_fiscal_quarter": _quarter_label(ordered[-1]) if ordered else None,
+    }
+
+
+def _identity_evidence(item: Mapping[str, Any]) -> dict[str, Any]:
+    resolution = item.get("identity_resolution") if isinstance(item.get("identity_resolution"), Mapping) else {}
+    if not resolution:
+        return {}
+    validation = resolution.get("current_state_validation") if isinstance(resolution.get("current_state_validation"), Mapping) else {}
+    mutation = resolution.get("mutation") if isinstance(resolution.get("mutation"), Mapping) else {}
+    operations = [dict(operation) for operation in mutation.get("operations", []) if isinstance(operation, Mapping)]
+
+    def operations_named(name: str) -> list[dict[str, Any]]:
+        return [operation for operation in operations if operation.get("operation") == name]
+
+    company_reuse = operations_named("REUSE_COMPANY")
+    company_create = operations_named("CREATE_COMPANY")
+    security_reuse = operations_named("REUSE_SECURITY")
+    security_preserve = operations_named("PRESERVE_PREDECESSOR_SECURITY")
+    security_create = operations_named("CREATE_SECURITY")
+    alias_add = operations_named("ADD_CURRENT_TICKER_ALIAS")
+    alias_close = operations_named("CLOSE_TICKER_ALIAS")
+    exchange_status = str(resolution.get("exchange_status") or "")
+    exchange_source = (
+        "approved_review" if exchange_status == "EXCHANGE_FROM_APPROVED_REVIEW"
+        else "provider_metadata" if exchange_status.startswith("EXCHANGE_CONFIRMED_")
+        else "unknown"
+    )
+    return {
+        "requested_ticker": resolution.get("requested_ticker") or item.get("requested_ticker") or item.get("ticker"),
+        "resolution_class": resolution.get("resolution_class"),
+        "authority_class": resolution.get("authority_class"),
+        "review_status": resolution.get("review_status"),
+        "readiness_state": resolution.get("readiness_state"),
+        "approval_fingerprint": resolution.get("approval_fingerprint"),
+        "current_state_validation": dict(validation),
+        "current_state_validation_status": validation.get("status"),
+        "company_continuity": resolution.get("company_continuity"),
+        "security_continuity": resolution.get("security_continuity"),
+        "ticker_relationship": resolution.get("ticker_relationship"),
+        "provider_continuity": resolution.get("provider_continuity"),
+        "exchange_status": exchange_status,
+        "exchange_source": exchange_source,
+        "reason_codes": list(resolution.get("reason_codes") or []),
+        "automatic_mutation_permitted": bool(resolution.get("automatic_mutation_permitted")),
+        "approved_mutation_plan": dict(mutation),
+        "canonical_consequences": {
+            "company_action": "REUSE" if company_reuse else "CREATE" if company_create else "NONE",
+            "company_id": company_reuse[0].get("company_id") if company_reuse else None,
+            "company_cik": (mutation.get("review_identity") or {}).get("cik"),
+            "security_action": "REUSE" if security_reuse else "CREATE" if security_create else "NONE",
+            "reused_security_id": security_reuse[0].get("security_id") if security_reuse else None,
+            "preserved_predecessor_security_id": security_preserve[0].get("security_id") if security_preserve else None,
+            "preserved_predecessor_ticker": security_preserve[0].get("ticker") if security_preserve else mutation.get("predecessor_ticker"),
+            "created_security_is_distinct": bool(security_create and not security_reuse),
+            "aliases_to_add": alias_add,
+            "aliases_to_close": alias_close,
+            "predecessor_aliases_attached_to_new_security": False if security_create and not security_reuse else None,
+            "operations": operations,
+        },
     }
 
 
@@ -380,6 +456,7 @@ def build_preview_reporting(paths: Any, plan: Mapping[str, Any]) -> list[dict[st
             "company_name": identity.get("name"),
             "market": markets[0] if markets else None,
             "exchange": identity.get("exchange"),
+            "identity_resolution": _identity_evidence(item),
             "before": {
                 "category": _before_label(provider_before, canonical_before, v2_before),
                 "provider_data": provider_before,
@@ -537,6 +614,59 @@ def _rp_presentation(item: Mapping[str, Any]) -> str:
     return "0 results" + (f" - {_reason_text(item.get('reason'))}" if item.get("reason") else "")
 
 
+def _reviewed_identity_lines(report: Mapping[str, Any]) -> list[str]:
+    identity = report.get("identity_resolution") if isinstance(report.get("identity_resolution"), Mapping) else {}
+    if identity.get("authority_class") != "APPROVED_REVIEW":
+        return []
+    consequences = identity.get("canonical_consequences") if isinstance(identity.get("canonical_consequences"), Mapping) else {}
+    mutation = identity.get("approved_mutation_plan") if isinstance(identity.get("approved_mutation_plan"), Mapping) else {}
+    ticker = str(report.get("ticker") or identity.get("requested_ticker") or "Ticker")
+    predecessor = str(consequences.get("preserved_predecessor_ticker") or mutation.get("predecessor_ticker") or "")
+    lines = [
+        "",
+        "##### Approved reviewed identity plan",
+        "",
+        f"- Authority: `{identity.get('authority_class')}`",
+        f"- Review status: `{identity.get('review_status')}`",
+        f"- Readiness: `{identity.get('readiness_state')}`",
+        f"- Resolution: `{identity.get('resolution_class')}`",
+        f"- Approval fingerprint: `{identity.get('approval_fingerprint') or 'Not available'}`",
+        f"- State validation: `{identity.get('current_state_validation_status') or 'Not available'}`",
+        f"- Company continuity: `{identity.get('company_continuity')}`",
+        f"- Security continuity: `{identity.get('security_continuity')}`",
+        f"- Ticker relationship: `{identity.get('ticker_relationship')}`",
+        f"- Provider continuity: `{identity.get('provider_continuity')}`",
+        f"- Exchange authority: `{identity.get('exchange_status')}` from `{identity.get('exchange_source')}`",
+        f"- Automatic identity mutation permitted: `{'Yes' if identity.get('automatic_mutation_permitted') else 'No'}`",
+    ]
+    if consequences.get("company_action") == "REUSE":
+        lines.append(f"- Company action: reuse company `{consequences.get('company_id')}`")
+    elif consequences.get("company_action") == "CREATE":
+        lines.append(f"- Company action: create new company with CIK `{consequences.get('company_cik') or 'Not available'}`")
+    if consequences.get("preserved_predecessor_security_id") is not None:
+        lines.append(
+            f"- Existing security action: preserve security `{consequences.get('preserved_predecessor_security_id')} / {predecessor}` unchanged"
+        )
+    if consequences.get("security_action") == "CREATE":
+        lines.append("- Successor security action: create a distinct new security")
+    elif consequences.get("security_action") == "REUSE":
+        lines.append(f"- Security action: reuse security `{consequences.get('reused_security_id')}`")
+    for alias in consequences.get("aliases_to_add") or []:
+        lines.append(f"- New ticker/alias: `{alias.get('ticker') or ticker}` from `{alias.get('valid_from') or 'Not available'}`")
+    if consequences.get("predecessor_aliases_attached_to_new_security") is False:
+        subject = predecessor or "Predecessor"
+        lines.extend([
+            f"- {subject} company reuse: `No`" if consequences.get("company_action") == "CREATE" else f"- {subject} company remains the reviewed continuing company context",
+            f"- {subject} security reuse: `No`",
+            f"- {subject} and other predecessor aliases attached to `{ticker}` security: `No`",
+            "- Copied predecessor aliases: `None`",
+        ])
+    if predecessor and consequences.get("preserved_predecessor_security_id") is not None:
+        lines.append(f"- {predecessor} renamed to {ticker}: `No`")
+    lines.append(f"- Reviewed reason codes: `{', '.join(identity.get('reason_codes') or []) or 'None'}`")
+    return lines
+
+
 def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
     if not reports:
         return ""
@@ -583,6 +713,7 @@ def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
         else:
             identity_text = "Canonical identity: " + ("Present" if before.get("canonical_identity") else "Created" if after.get("canonical_identity") == "Present" else "Not present")
         lines.extend(["", f"### {ticker} - {name}", "", "#### Identity", "", f"- Market / exchange: {report.get('market') or 'Not available'} / {report.get('exchange') or 'Not available'}", f"- {identity_text}", "", "#### Before the run", "", f"- State: {before.get('category', 'Not available')}", f"- Provider data: {'Yes' if before.get('provider_data') else 'No'}", f"- Canonical identity: {'Present' if before.get('canonical_identity') else 'Not present'}", f"- Existing V2 analysis: {'Yes' if before.get('v2_analysis') else 'No'}", "", "#### Data acquisition", "", f"- Source: {acquisition.get('source', 'Not available')}", f"- Network request: {'Yes' if acquisition.get('network_requested') else 'No'}", f"- Network result used: {'Yes' if acquisition.get('network_used') else 'No'}", f"- Provider rows: {coverage.get('provider_rows', 'Not available')}", f"- Quarterly coverage: {coverage.get('arq_count', 'Not available')} ARQ", f"- First fiscal quarter: {coverage.get('first_fiscal_quarter') or 'Not available'}", f"- Latest fiscal quarter: {coverage.get('latest_fiscal_quarter') or 'Not available'}"])
+        lines.extend(_reviewed_identity_lines(report))
         if coverage.get("provider_rows", 0) > 0 and coverage.get("arq_count") == 0:
             lines.append("- Provider data exists, but no usable quarterly ARQ history was identified.")
         lines.extend(["", "#### Classification", "", f"- Sector: {classification.get('sector') or 'Not available'}", f"- Industry: {classification.get('industry') or 'Not available'}", "", "#### Taxonomy", "", f"- Member: {'Yes' if taxonomy.get('member') else 'No'}", f"- Roles: {', '.join(taxonomy.get('roles') or []) or 'Not applicable'}"])

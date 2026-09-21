@@ -16,6 +16,7 @@ from rawcandle.fundamentals.admin.identity_resolution import (
     resolve_ticker_identity,
     run_preview,
 )
+from rawcandle.fundamentals.admin.ticker_reporting import render_ticker_sections, summary_rows
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 from tests.test_fundamentals_admin_batch_add_tickers import _archive, _archive_row, _generic_paths
 
@@ -505,3 +506,136 @@ def test_real_add_tickers_candidate_path_applies_bound_same_security_review(tmp_
         aliases = conn.execute("SELECT ticker FROM ticker_alias WHERE security_id=?", (security_id,)).fetchall()
     assert after == (company_id, security_id)
     assert {row[0] for row in aliases} >= {"NEWC", "RENAMED"}
+
+
+def test_real_approved_records_flow_through_add_tickers_reporting_and_candidate_boundary(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    created_at = "2026-09-21T00:00:00Z"
+    with sqlite3.connect(paths.canonical_db) as conn:
+        batch._ensure_identity_tables(conn)
+        conn.execute(
+            "INSERT INTO company(company_id,company_key,company_name,status,created_at_utc,updated_at_utc) "
+            "VALUES(627,'SEC_CIK:0001755237','Cyclerion Therapeutics, Inc.','ACTIVE',?,?)",
+            (created_at, created_at),
+        )
+        conn.execute(
+            "INSERT INTO security(security_id,company_id,current_ticker,exchange,active,valid_from,valid_to,created_at_utc,updated_at_utc) "
+            "VALUES(628,627,'CYCN','NASDAQ',1,'2019-04-02',NULL,?,?)",
+            (created_at, created_at),
+        )
+        conn.execute(
+            "INSERT INTO ticker_alias(security_id,ticker,provider,valid_from,valid_to,source) "
+            "VALUES(628,'CYCN','SHARADAR','2019-04-02',NULL,'fixture')"
+        )
+        conn.execute(
+            "INSERT INTO provider_security_identity(provider,provider_security_id,security_id,provider_ticker,source,created_at_utc) "
+            "VALUES('SHARADAR','111101',628,'CYCN','fixture',?)",
+            (created_at,),
+        )
+        conn.execute(
+            "INSERT INTO provider_company_identity(provider,provider_identifier_type,provider_identifier_value,company_id,provider_ticker,source,source_type,source_value,created_at_utc) "
+            "VALUES('SEC','CIK','0001755237',627,'CYCN','fixture','fixture','0001755237',?)",
+            (created_at,),
+        )
+        conn.execute(
+            "INSERT INTO company_cik(company_id,cik_normalized,cik_display,source,status,created_at_utc,source_type,confidence) "
+            "VALUES(627,'0001755237','0001755237','fixture','ACTIVE',?,'PROVIDER_METADATA','HIGH')",
+            (created_at,),
+        )
+
+        # These predecessor identities deliberately remain separate from the new
+        # reviewed securities. QVCBQ is included to prove that an unmentioned
+        # predecessor alias is not copied by the generic mutation path.
+        for company_id, security_id, ticker, cik in (
+            (700, 700, "BBCQ", "0002088295"),
+            (701, 701, "QVCAQ", "0001355096"),
+        ):
+            conn.execute(
+                "INSERT INTO company(company_id,company_key,company_name,status,created_at_utc,updated_at_utc) VALUES(?,?,?,?,?,?)",
+                (company_id, f"SEC_CIK:{cik}", ticker, "ACTIVE", created_at, created_at),
+            )
+            conn.execute(
+                "INSERT INTO security(security_id,company_id,current_ticker,exchange,active,valid_from,valid_to,created_at_utc,updated_at_utc) "
+                "VALUES(?,?,?,'NASDAQ',1,'2020-01-01',NULL,?,?)",
+                (security_id, company_id, ticker, created_at, created_at),
+            )
+            conn.execute(
+                "INSERT INTO ticker_alias(security_id,ticker,provider,valid_from,valid_to,source) VALUES(?,?,?,'2020-01-01',NULL,'fixture')",
+                (security_id, ticker, "SHARADAR"),
+            )
+        conn.execute(
+            "INSERT INTO ticker_alias(security_id,ticker,provider,valid_from,valid_to,source) "
+            "VALUES(701,'QVCBQ','SHARADAR','2020-01-01',NULL,'fixture')"
+        )
+
+    _metadata(paths, "CYCN", "111101", "0001755237")
+    _metadata(paths, "BBCQ", "646033", "0002088295")
+    _metadata(paths, "QVCAQ", "194557", "0001355096")
+    with sqlite3.connect(paths.market_db) as conn:
+        for ticker in ("KRSA", "PSQL", "QVCG"):
+            conn.execute("INSERT INTO ticker_meta VALUES(?,'usa','Technology','Software - Application')", (ticker,))
+            conn.execute("INSERT INTO osakedata VALUES(?,'usa','2026-09-20',10.0)", (ticker,))
+
+    plan = build_generic_batch_plan(
+        paths,
+        parse_batch_tickers("KRSA PSQL QVCG"),
+        archive_path=_archive(tmp_path / "reviewed.zip", ("KRSA", "PSQL", "QVCG")),
+    )
+    items = {item.ticker: item.safe_dict(include_rows=True) for item in plan.items}
+    reports = {item["ticker"]: item for item in plan.ticker_reporting}
+
+    assert all(item["status"] == "ELIGIBLE" for item in items.values())
+    assert reports["KRSA"]["identity_resolution"]["approval_fingerprint"] == (
+        "9440127ada42c4531eb4c2dd53c468efbe92810951bffcad64811488839ef7ee"
+    )
+    assert reports["KRSA"]["identity_resolution"]["canonical_consequences"] == {
+        "company_action": "REUSE",
+        "company_id": 627,
+        "company_cik": "0001755237",
+        "security_action": "CREATE",
+        "reused_security_id": None,
+        "preserved_predecessor_security_id": 628,
+        "preserved_predecessor_ticker": "CYCN",
+        "created_security_is_distinct": True,
+        "aliases_to_add": [{"operation": "ADD_CURRENT_TICKER_ALIAS", "ticker": "KRSA", "valid_from": "2026-09-09"}],
+        "aliases_to_close": [],
+        "predecessor_aliases_attached_to_new_security": False,
+        "operations": items["KRSA"]["identity_resolution"]["mutation"]["operations"],
+    }
+    for ticker in ("KRSA", "PSQL", "QVCG"):
+        identity = reports[ticker]["identity_resolution"]
+        assert identity["authority_class"] == "APPROVED_REVIEW"
+        assert identity["review_status"] == "APPROVED"
+        assert identity["readiness_state"] == "APPROVED_VALID"
+        assert identity["current_state_validation_status"] == "MATCH"
+        assert identity["automatic_mutation_permitted"] is True
+        assert identity["approved_mutation_plan"] == items[ticker]["identity_resolution"]["mutation"]
+        assert identity["exchange_source"] == "approved_review"
+
+    rendered = render_ticker_sections(plan.ticker_reporting)
+    assert "Company action: reuse company `627`" in rendered
+    assert "preserve security `628 / CYCN` unchanged" in rendered
+    assert "CYCN renamed to KRSA: `No`" in rendered
+    assert "create new company with CIK `0002119292`" in rendered
+    assert "BBCQ security reuse: `No`" in rendered
+    assert "create new company with CIK `0001254699`" in rendered
+    assert "QVCAQ and other predecessor aliases attached to `QVCG` security: `No`" in rendered
+    concise = summary_rows(plan.ticker_reporting)
+    assert any("KRSA identity: APPROVED_VALID; approved review: successor security; state=MATCH; fingerprint=9440127ada42" in row for row in concise)
+
+    _apply_identities(paths, list(items.values()), applied_at=created_at)
+    with sqlite3.connect(paths.canonical_db) as conn:
+        krsa = conn.execute("SELECT company_id,security_id FROM security WHERE current_ticker='KRSA'").fetchone()
+        assert krsa[0] == 627 and krsa[1] != 628
+        assert conn.execute("SELECT company_id,current_ticker FROM security WHERE security_id=628").fetchone() == (627, "CYCN")
+        assert conn.execute("SELECT ticker FROM ticker_alias WHERE security_id=?", (krsa[1],)).fetchall() == [("KRSA",)]
+
+        for ticker, predecessor, predecessor_security in (("PSQL", "BBCQ", 700), ("QVCG", "QVCAQ", 701)):
+            company_id, security_id = conn.execute(
+                "SELECT company_id,security_id FROM security WHERE current_ticker=?", (ticker,)
+            ).fetchone()
+            assert company_id not in {627, 700, 701}
+            assert security_id not in {628, 700, 701}
+            assert conn.execute("SELECT ticker FROM ticker_alias WHERE security_id=?", (security_id,)).fetchall() == [(ticker,)]
+            assert conn.execute("SELECT current_ticker FROM security WHERE security_id=?", (predecessor_security,)).fetchone() == (predecessor,)
+        assert conn.execute("SELECT ticker FROM ticker_alias WHERE security_id=701 ORDER BY ticker").fetchall() == [("QVCAQ",), ("QVCBQ",)]

@@ -118,6 +118,19 @@ def test_preview_contract_preserves_before_source_coverage_classification_and_ta
     assert report["after"]["analysis"] == "Not calculated during Preview"
 
 
+def test_ordinary_preview_reporting_remains_generic_without_review_authority(tmp_path: Path) -> None:
+    paths = _databases(tmp_path)
+    report = build_preview_reporting(paths, {
+        "items": [_item("NEW", source="verified_archive")],
+        "network": {"calls": []},
+    })[0]
+
+    assert report["identity_resolution"] == {}
+    rendered = render_ticker_sections([report])
+    assert "Canonical identity: Not present - will be created if applied" in rendered
+    assert "Approved reviewed identity plan" not in rendered
+
+
 def test_before_state_and_acquisition_categories_cover_new_local_canonical_and_complete(tmp_path: Path) -> None:
     paths = _databases(tmp_path)
     plan = {
