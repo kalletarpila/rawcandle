@@ -38,7 +38,8 @@ from rawcandle.fundamentals.admin.progress import (
     ProgressStage,
     ProgressTracker,
 )
-from rawcandle.fundamentals.admin.provider_cik import extract_sharadar_cik, normalize_cik
+from rawcandle.fundamentals.admin.provider_cik import normalize_cik
+from rawcandle.fundamentals.admin.identity_resolution import resolve_ticker_identity
 from rawcandle.fundamentals.admin.reporting import render_markdown_report
 from rawcandle.fundamentals.admin.structural_context import _events, _structural_evidence, _structural_package_fingerprint
 from rawcandle.fundamentals.admin.rv_identity import active_relative_valuation_identity
@@ -87,7 +88,7 @@ REPORT_DATE = "2026-09-12"
 
 
 PHASE = "PHASE13G2_BATCH_ADD_TICKERS"
-CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V2"
+CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V3_IDENTITY_RESOLUTION"
 OUTCOME_B = "OUTCOME B — BATCH ADD TICKERS COPY-ONLY FOUNDATION READY; AUTHORITATIVE FULL DOWNSTREAM GAP REMAINS"
 OUTCOME_A = "OUTCOME A — GENERIC BATCH ADD TICKERS AUTHORITATIVE COPY-ONLY PIPELINE VERIFIED AND READY FOR SEPARATELY AUTHORIZED PRODUCTION DEPLOYMENT"
 PRODUCTION_OUTCOME_A = "OUTCOME A — BATCH ADD TICKERS ACTIVE AND STABLE IN PRODUCTION"
@@ -172,6 +173,7 @@ class GenericBatchItemPlan:
     market: Mapping[str, Any]
     classification: Mapping[str, Any]
     canonical: Mapping[str, Any]
+    identity_resolution: Mapping[str, Any]
     provider_row_count: int
     provider_arq_row_count: int
     source_fingerprint: str
@@ -192,6 +194,7 @@ class GenericBatchItemPlan:
             "market": dict(self.market),
             "classification": dict(self.classification),
             "canonical": dict(self.canonical),
+            "identity_resolution": dict(self.identity_resolution),
             "provider_row_count": self.provider_row_count,
             "provider_arq_row_count": self.provider_arq_row_count,
             "source_fingerprint": self.source_fingerprint,
@@ -547,37 +550,6 @@ def _readonly(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def _extract_cik(value: Any) -> str | None:
-    return extract_sharadar_cik(value).cik_normalized
-
-
-def _provider_metadata(paths: BatchAddTickerPaths, ticker: str) -> dict[str, Any]:
-    with _readonly(paths.provider_db) as conn:
-        if not _table_exists(conn, "sharadar_ticker_metadata"):
-            return {"status": "MISSING", "source": None}
-        columns = _columns(conn, "sharadar_ticker_metadata")
-        rows = [dict(row) for row in conn.execute(
-            "SELECT * FROM sharadar_ticker_metadata WHERE UPPER(ticker)=UPPER(?) ORDER BY "
-            "CASE WHEN table_name='fundamentals' THEN 0 WHEN table_name='stocks' THEN 1 ELSE 2 END, lastupdated DESC",
-            (ticker,),
-        )] if "table_name" in columns else [dict(row) for row in conn.execute(
-            "SELECT * FROM sharadar_ticker_metadata WHERE UPPER(ticker)=UPPER(?)",
-            (ticker,),
-        )]
-    if not rows:
-        return {"status": "MISSING", "source": None}
-    fundamentals = [row for row in rows if str(row.get("table_name") or "fundamentals").lower() == "fundamentals"]
-    candidates = fundamentals or rows
-    identities = {(str(row.get("permaticker") or ""), str(_extract_cik(row.get("secfilings") or row.get("cik")) or "")) for row in candidates}
-    if len(identities) > 1:
-        return {"status": "AMBIGUOUS", "source": "sharadar_ticker_metadata", "rows": len(candidates)}
-    selected = dict(candidates[0])
-    cik = _extract_cik(selected.get("secfilings") or selected.get("cik"))
-    if cik:
-        selected["cik"] = cik
-    return {"status": "FOUND", "source": "sharadar_ticker_metadata", "identity": selected, "candidate_rows": len(candidates)}
-
-
 def _canonical_identity(paths: BatchAddTickerPaths, ticker: str, metadata: Mapping[str, Any]) -> dict[str, Any]:
     cik = metadata.get("cik")
     permaticker = metadata.get("permaticker")
@@ -752,7 +724,19 @@ def build_generic_batch_plan(
     fetched_rows, network = _network_rows(network_needed, network_allowed=network_allowed, client=network_client)
     items: list[GenericBatchItemPlan] = []
     for ticker in tickers:
-        metadata_state = _provider_metadata(paths, ticker)
+        identity_resolution = resolve_ticker_identity(paths, ticker).as_dict()
+        metadata_state = dict(identity_resolution["provider_metadata"])
+        reviewed = identity_resolution.get("reviewed_resolution") or {}
+        if metadata_state.get("status") == "MISSING" and identity_resolution.get("authority_class") == "APPROVED_REVIEW":
+            metadata_state["identity"] = {
+                "ticker": ticker,
+                "name": reviewed.get("company_name") or ticker,
+                "exchange": reviewed.get("exchange"),
+                "cik": normalize_cik(reviewed.get("cik")),
+                "permaticker": reviewed.get("provider_permaticker"),
+                "firstpricedate": reviewed.get("effective_date"),
+                "category": reviewed.get("security_category"),
+            }
         metadata = dict(metadata_state.get("identity") or {})
         canonical = _canonical_identity(paths, ticker, metadata)
         market = _market_evidence(paths, ticker)
@@ -767,41 +751,38 @@ def build_generic_batch_plan(
             rows = fetched_rows.get(ticker, ())
             source_category = "network" if rows else ("network_unavailable" if network_allowed else "network_required")
         blockers: list[str] = []
-        if canonical["ambiguous"]:
-            blockers.append("IDENTITY_AMBIGUOUS")
-        if canonical["cik_identity_conflict"]:
-            blockers.append("CIK_IDENTITY_CONFLICT")
-        if canonical["permaticker_identity_conflict"]:
-            blockers.append("PROVIDER_IDENTITY_CONFLICT")
-        if metadata_state["status"] == "AMBIGUOUS":
-            blockers.append("PROVIDER_IDENTITY_AMBIGUOUS")
-        if metadata_state["status"] == "MISSING":
-            blockers.append("PROVIDER_METADATA_MISSING")
+        if identity_resolution["resolution_class"] == "IDENTITY_REVIEW_REQUIRED":
+            blockers.extend(identity_resolution["reason_codes"])
         if str(metadata.get("isdelisted") or "").upper() == "Y":
             blockers.append("DELISTED_SECURITY")
         if metadata.get("category") and metadata.get("category") not in SUPPORTED_GENERIC_CATEGORIES:
             blockers.append("UNSUPPORTED_SECURITY_TYPE")
-        if str(metadata.get("exchange") or "").upper() not in SUPPORTED_EXCHANGES:
+        if identity_resolution["exchange_status"] == "EXCHANGE_UNKNOWN":
+            blockers.append("EXCHANGE_UNKNOWN")
+        elif identity_resolution["exchange_status"] == "EXCHANGE_CONFIRMED_UNSUPPORTED":
             blockers.append("INCOMPATIBLE_EXCHANGE")
         if market["status"] != "FOUND" or market.get("markets") != ["usa"]:
             blockers.append("MARKET_NOT_UNAMBIGUOUS_USA")
         if classification["status"] != "READY":
             blockers.append("MISSING_CLASSIFICATION")
-        if not rows:
-            blockers.append("FUNDAMENTAL_SOURCE_ROWS_MISSING")
+        arq_rows = [row for row in rows if str(row.get("dimension") or "").upper() == "ARQ"]
+        if not arq_rows:
+            blockers.append("NO_USABLE_QUARTERLY_HISTORY")
         fiscal_contradictions = fiscal_sequence_contradictions(rows)
         if fiscal_contradictions:
             blockers.append("CONTRADICTORY_FISCAL_SEQUENCE")
-        if canonical["exists"]:
+        if identity_resolution["resolution_class"] == "EXISTING_SECURITY":
             status = "ALREADY_PRESENT"
             reason = "Ticker is already present in canonical identities."
+        elif not identity_resolution["automatic_mutation_permitted"] and not blockers:
+            status = "REVIEW_REQUIRED"
+            reason = "IDENTITY_MUTATION_NOT_AUTHORIZED"
         elif blockers:
-            status = "REVIEW_REQUIRED" if any("AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "FUNDAMENTAL_SOURCE_ROWS_MISSING", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT"} for blocker in blockers) else "REJECTED"
+            status = "REVIEW_REQUIRED" if any("AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "NO_APPROVED_REVIEW", "PROPOSED_REVIEW_NOT_AUTHORITY", "NO_USABLE_QUARTERLY_HISTORY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN"} for blocker in blockers) else "REJECTED"
             reason = ",".join(blockers)
         else:
             status = "ELIGIBLE"
             reason = "Eligible from provider identity, price, classification and fundamentals evidence."
-        arq_rows = [row for row in rows if str(row.get("dimension") or "").upper() == "ARQ"]
         safe_rows = tuple(dict(row) for row in rows) if include_rows else ()
         items.append(GenericBatchItemPlan(
             requested_ticker=ticker,
@@ -813,6 +794,7 @@ def build_generic_batch_plan(
             market=market,
             classification=classification,
             canonical=canonical,
+            identity_resolution=identity_resolution,
             provider_row_count=len(rows),
             provider_arq_row_count=len(arq_rows),
             source_fingerprint=stable_hash({"ticker": ticker, "source_category": source_category, "rows": rows}),
@@ -1130,6 +1112,10 @@ def _apply_identities(paths: BatchAddTickerPaths, items: Sequence[Mapping[str, A
                 ticker = str(item["ticker"]).upper()
                 metadata_state = item.get("provider_metadata") if isinstance(item.get("provider_metadata"), Mapping) else {}
                 metadata = metadata_state.get("identity") if isinstance(metadata_state.get("identity"), Mapping) else {}
+                resolution = item.get("identity_resolution") if isinstance(item.get("identity_resolution"), Mapping) else {}
+                mutation = resolution.get("mutation") if isinstance(resolution.get("mutation"), Mapping) else {}
+                if not resolution:
+                    raise RuntimeError(f"IDENTITY_RESOLUTION_REQUIRED:{ticker}")
                 existing = conn.execute(
                     "SELECT c.company_id,s.security_id FROM security s JOIN company c USING(company_id) WHERE UPPER(s.current_ticker)=UPPER(?)",
                     (ticker,),
@@ -1139,16 +1125,68 @@ def _apply_identities(paths: BatchAddTickerPaths, items: Sequence[Mapping[str, A
                     continue
                 cik = str(metadata.get("cik") or "").strip()
                 permaticker = str(metadata.get("permaticker") or "").strip()
-                company_id = _next_id(conn, "company", "company_id")
+                action = str(mutation.get("action") or "")
+                if not resolution.get("automatic_mutation_permitted") or action not in {"UPDATE_CURRENT_TICKER", "CREATE_SECURITY", "CREATE_COMPANY_AND_SECURITY"}:
+                    raise RuntimeError(f"IDENTITY_MUTATION_NOT_AUTHORIZED:{ticker}")
+                if action == "UPDATE_CURRENT_TICKER":
+                    company_id = int(mutation["company_id"])
+                    security_id = int(mutation["security_id"])
+                    security = conn.execute(
+                        "SELECT company_id,current_ticker,exchange FROM security WHERE security_id=?",
+                        (security_id,),
+                    ).fetchone()
+                    if security is None or int(security["company_id"]) != company_id:
+                        raise RuntimeError(f"IDENTITY_TRANSITION_TARGET_MISMATCH:{ticker}")
+                    old_ticker = str(security["current_ticker"]).upper()
+                    effective_date = str(mutation.get("effective_date") or metadata.get("firstpricedate") or applied_at[:10])
+                    old_alias_exists = conn.execute(
+                        "SELECT 1 FROM ticker_alias WHERE security_id=? AND UPPER(ticker)=? LIMIT 1",
+                        (security_id, old_ticker),
+                    ).fetchone()
+                    if old_alias_exists is None:
+                        conn.execute(
+                            "INSERT INTO ticker_alias(security_id,ticker,provider,valid_from,valid_to,source) VALUES(?,?,?,?,?,?)",
+                            (security_id, old_ticker, "SHARADAR", None, effective_date, PHASE),
+                        )
+                    conn.execute(
+                        "UPDATE ticker_alias SET valid_to=COALESCE(valid_to,?) WHERE security_id=? AND UPPER(ticker)=? AND UPPER(ticker)<>?",
+                        (effective_date, security_id, old_ticker, ticker),
+                    )
+                    conn.execute(
+                        "INSERT OR IGNORE INTO ticker_alias(security_id,ticker,provider,valid_from,valid_to,source) VALUES(?,?,?,?,NULL,?)",
+                        (security_id, ticker, "SHARADAR", effective_date, PHASE),
+                    )
+                    conn.execute(
+                        "UPDATE security SET current_ticker=?,exchange=COALESCE(?,exchange),updated_at_utc=? WHERE security_id=?",
+                        (ticker, metadata.get("exchange"), applied_at, security_id),
+                    )
+                    if permaticker:
+                        linked = conn.execute(
+                            "SELECT security_id FROM provider_security_identity WHERE provider='SHARADAR' AND provider_security_id=?",
+                            (permaticker,),
+                        ).fetchone()
+                        if linked is None or int(linked["security_id"]) != security_id:
+                            raise RuntimeError(f"IDENTITY_TRANSITION_PERMATICKER_MISMATCH:{ticker}")
+                        conn.execute(
+                            "UPDATE provider_security_identity SET provider_ticker=?,source=? WHERE provider='SHARADAR' AND provider_security_id=?",
+                            (ticker, PHASE, permaticker),
+                        )
+                    rows.append({"ticker": ticker, "company_id": company_id, "security_id": security_id, "status": "TICKER_TRANSITION", "predecessor_ticker": old_ticker})
+                    continue
+                target_company_id = mutation.get("company_id")
+                company_id = int(target_company_id) if action == "CREATE_SECURITY" and target_company_id is not None else _next_id(conn, "company", "company_id")
                 security_id = _next_id(conn, "security", "security_id")
                 company_key = f"SEC_CIK:{cik}" if cik else f"SHARADAR_PERMATICKER:{permaticker}"
                 company_name = metadata.get("name") or ticker
                 exchange = metadata.get("exchange") or "usa"
                 valid_from = metadata.get("firstpricedate") or item.get("market", {}).get("first_date") or applied_at[:10]
-                conn.execute(
-                    "INSERT INTO company(company_id,company_key,company_name,status,created_at_utc,updated_at_utc) VALUES (?,?,?,?,?,?)",
-                    (company_id, company_key, company_name, "ACTIVE", applied_at, applied_at),
-                )
+                if action == "CREATE_COMPANY_AND_SECURITY":
+                    conn.execute(
+                        "INSERT INTO company(company_id,company_key,company_name,status,created_at_utc,updated_at_utc) VALUES (?,?,?,?,?,?)",
+                        (company_id, company_key, company_name, "ACTIVE", applied_at, applied_at),
+                    )
+                elif action != "CREATE_SECURITY" or conn.execute("SELECT 1 FROM company WHERE company_id=?", (company_id,)).fetchone() is None:
+                    raise RuntimeError(f"IDENTITY_COMPANY_TARGET_MISMATCH:{ticker}")
                 conn.execute(
                     "INSERT INTO security(security_id,company_id,current_ticker,exchange,active,valid_from,valid_to,created_at_utc,updated_at_utc) "
                     "VALUES (?,?,?,?,?,?,?,?,?)",
@@ -1174,12 +1212,12 @@ def _apply_identities(paths: BatchAddTickerPaths, items: Sequence[Mapping[str, A
                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (company_id, cik, cik, PHASE, "sharadar_ticker_metadata", ticker, "ACTIVE", applied_at, "PROVIDER_METADATA", "Sharadar ticker metadata", "secfilings", cik, "parsed SEC CIK query parameter", "HIGH"),
                     )
-                rows.append({"ticker": ticker, "company_id": company_id, "security_id": security_id, "status": "CREATED"})
+                rows.append({"ticker": ticker, "company_id": company_id, "security_id": security_id, "status": "CREATED_SECURITY" if action == "CREATE_SECURITY" else "CREATED"})
             conn.commit()
         except Exception:
             conn.rollback()
             raise
-    return {"rows": rows, "created": sum(1 for row in rows if row["status"] == "CREATED"), "fingerprint": stable_hash(rows)}
+    return {"rows": rows, "created": sum(1 for row in rows if row["status"] in {"CREATED", "CREATED_SECURITY", "TICKER_TRANSITION"}), "fingerprint": stable_hash(rows)}
 
 
 def _stage_generic_provider_rows(paths: BatchAddTickerPaths, items: Sequence[Mapping[str, Any]], *, applied_at: str, inject_failure: bool = False) -> dict[str, Any]:

@@ -345,7 +345,7 @@ def test_admin_ui_service_runs_preview_through_backend_boundary_and_finalizes_re
     assert service.history_entries(limit=1)[0].report_available is True
 
 
-def test_admin_page_exposes_five_operations_and_downloads_exact_report() -> None:
+def test_admin_page_exposes_six_operations_and_downloads_exact_report() -> None:
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -419,6 +419,7 @@ def test_admin_page_exposes_five_operations_and_downloads_exact_report() -> None
         "CHECK_UPDATE_SECTOR_INDUSTRY",
         "CHECK_UPDATE_TAXONOMY",
         "SYNCHRONIZE_PROVIDER_CIK",
+        "RESOLVE_TICKER_IDENTITY",
     ]
     assert controls.network_allowed_checkbox.visible is False
     assert controls.preview_payload_field.visible is False
@@ -488,6 +489,15 @@ def test_admin_page_conditional_fields_switch_by_operation() -> None:
     assert controls.taxonomy_domain_dropdown.visible is False
     assert controls.candidate_path_field.visible is False
     assert "dc_ecosystem" in controls.operation_guidance_field.value
+
+    controls.operation_dropdown.value = "RESOLVE_TICKER_IDENTITY"
+    controls.operation_dropdown.on_change(None)
+    assert controls.tickers_field.visible is True
+    assert controls.market_field.visible is False
+    assert controls.copy_apply_button.visible is False
+    assert controls.production_apply_button.visible is False
+    assert controls.full_workflow_button.visible is False
+    assert "read-only" in controls.operation_guidance_field.value
 
 
 def test_production_confirmation_uses_internal_token_and_waits_for_confirm() -> None:

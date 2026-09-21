@@ -726,6 +726,10 @@ def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT) -> Opera
         from rawcandle.fundamentals.admin.cik_sync import _render_report
 
         report = _render_report(result)
+    elif result.get("operation_type") == "RESOLVE_TICKER_IDENTITY":
+        from rawcandle.fundamentals.admin.identity_resolution import render_preview_report
+
+        report = render_preview_report(result)
     elif result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"} and "write_set" in result:
         from rawcandle.fundamentals.admin.production_transaction import render_production_report
         report = render_production_report(result)

@@ -1,0 +1,130 @@
+{
+  "schema_version": "1.0",
+  "records": [
+    {
+      "subject_ticker": "DRK",
+      "effective_date": null,
+      "resolution_class": "TICKER_TRANSITION_SAME_SECURITY",
+      "company_continuity": "SAME_COMPANY",
+      "security_continuity": "SAME_SECURITY",
+      "ticker_relationship": "RENAMED",
+      "provider_continuity": "PROVIDER_METADATA_ABSENT",
+      "predecessor_ticker": "ANY",
+      "canonical_company_id": null,
+      "canonical_security_id": null,
+      "cik": "0001591956",
+      "provider_permaticker": "167235",
+      "exchange": "NASDAQ",
+      "review_status": "PROPOSED",
+      "reason": "SEC evidence proves the intended issuer rename, but the September 14 filing still described DRK as reserved and subject to Nasdaq procedures; effective trading continuity is not yet proven by the local provider snapshot.",
+      "evidence": [
+        {
+          "source_type": "SEC_FILING_EXHIBIT",
+          "source_authority": "SEC",
+          "reference": "https://www.sec.gov/Archives/edgar/data/1591956/000121390026099458/ea030536701ex99-1.htm",
+          "research_date": "2026-09-21",
+          "fact": "Sphere 3D, CIK 0001591956, reserved DRK; ANY remained the trading symbol when filed."
+        }
+      ]
+    },
+    {
+      "subject_ticker": "KRSA",
+      "effective_date": "2026-09-09",
+      "resolution_class": "REORGANIZATION_SUCCESSOR",
+      "company_continuity": "SAME_LEGAL_ISSUER_AFTER_COMBINATION",
+      "security_continuity": "SUCCESSOR_SECURITY",
+      "ticker_relationship": "PREDECESSOR_TO_SUCCESSOR",
+      "provider_continuity": "PROVIDER_METADATA_ABSENT",
+      "predecessor_ticker": "CYCN",
+      "canonical_company_id": 627,
+      "canonical_security_id": 628,
+      "cik": "0001755237",
+      "provider_permaticker": null,
+      "exchange": "NASDAQ",
+      "review_status": "PROPOSED",
+      "reason": "Cyclerion remained the legal registrant after the merger and changed to KRSA, but a reverse split and new CUSIP make exact security continuity an operator-reviewed successor decision.",
+      "evidence": [
+        {
+          "source_type": "SEC_8_K",
+          "source_authority": "SEC",
+          "reference": "https://www.sec.gov/Archives/edgar/data/1755237/000119312526389318/d178159d8k.htm",
+          "research_date": "2026-09-21",
+          "fact": "The same Massachusetts registrant completed the merger; CYCN changed to KRSA on September 9 with a new CUSIP."
+        },
+        {
+          "source_type": "EXCHANGE_NOTICE",
+          "source_authority": "Nasdaq Trader",
+          "reference": "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-648",
+          "research_date": "2026-09-21",
+          "fact": "Nasdaq classified the event as a change of control, reverse split, name, symbol and CUSIP change."
+        }
+      ]
+    },
+    {
+      "subject_ticker": "PSQL",
+      "effective_date": "2026-08-28",
+      "resolution_class": "BUSINESS_COMBINATION_NEW_SECURITY",
+      "company_continuity": "NEW_PUBLIC_ISSUER",
+      "security_continuity": "NEW_SECURITY",
+      "ticker_relationship": "BUSINESS_COMBINATION_SUCCESSOR_TICKER",
+      "provider_continuity": "PROVIDER_METADATA_ABSENT",
+      "predecessor_ticker": "BBCQ",
+      "canonical_company_id": null,
+      "canonical_security_id": null,
+      "cik": "0002119292",
+      "provider_permaticker": null,
+      "exchange": "NASDAQ",
+      "review_status": "PROPOSED",
+      "reason": "Pasqal Holding SA is a new public issuer/security produced by a multi-step business combination; BBCQ must not be reused as the same company or security by ticker inference.",
+      "evidence": [
+        {
+          "source_type": "SEC_6_K",
+          "source_authority": "SEC",
+          "reference": "https://www.sec.gov/Archives/edgar/data/2119292/000121390026094393/ea0303667-6k_pasqal.htm",
+          "research_date": "2026-09-21",
+          "fact": "Pasqal Holding SA completed the combination and listed PSQL; its SEC registrant CIK is 0002119292."
+        },
+        {
+          "source_type": "SEC_REGISTRATION_STATEMENT",
+          "source_authority": "SEC",
+          "reference": "https://www.sec.gov/Archives/edgar/data/2119292/000121390026098421/ea0304681-01.htm",
+          "research_date": "2026-09-21",
+          "fact": "BBCQ merged into a French merger subsidiary and Legacy Pasqal then merged into the survivor renamed Pasqal Holding SA."
+        }
+      ]
+    },
+    {
+      "subject_ticker": "QVCG",
+      "effective_date": "2026-08-06",
+      "resolution_class": "REORGANIZATION_SUCCESSOR",
+      "company_continuity": "SUCCESSOR_COMPANY",
+      "security_continuity": "NEW_SECURITY",
+      "ticker_relationship": "REORGANIZATION_SUCCESSOR_TICKER",
+      "provider_continuity": "PROVIDER_METADATA_ABSENT",
+      "predecessor_ticker": "QVCAQ",
+      "canonical_company_id": null,
+      "canonical_security_id": null,
+      "cik": "0001254699",
+      "provider_permaticker": null,
+      "exchange": "NASDAQ",
+      "review_status": "PROPOSED",
+      "reason": "The old parent equity was cancelled and a former subsidiary, CIK 0001254699, became the renamed public holding company and issued entirely new common stock.",
+      "evidence": [
+        {
+          "source_type": "SEC_REGISTRATION_STATEMENT",
+          "source_authority": "SEC",
+          "reference": "https://www.sec.gov/Archives/edgar/data/1254699/000110465926107125/tm2625133-1_s1.htm",
+          "research_date": "2026-09-21",
+          "fact": "Old QVC Group equity was cancelled; QVC, Inc. became QVC Group, Inc. and issued new post-emergence common stock."
+        },
+        {
+          "source_type": "ISSUER_IR",
+          "source_authority": "QVC Group",
+          "reference": "https://investors.qvcgrp.com/investors/stock-data/faq",
+          "research_date": "2026-09-21",
+          "fact": "The reorganized company trades as QVCG and the former parent is Old QVC Group, Inc."
+        }
+      ]
+    }
+  ]
+}

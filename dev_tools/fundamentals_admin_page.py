@@ -87,7 +87,7 @@ def _material_preview_signature(
     operation = operation_type.strip().upper()
     return (
         operation,
-        raw_inputs.strip() if operation == "ADD_TICKERS" else "",
+        raw_inputs.strip() if operation in {"ADD_TICKERS", "RESOLVE_TICKER_IDENTITY"} else "",
         market.strip().lower(),
         taxonomy_domain.strip().lower() if operation == "CHECK_UPDATE_TAXONOMY" else "",
         "",
@@ -139,6 +139,7 @@ def build_fundamentals_admin_page(
             ft.dropdown.Option("CHECK_UPDATE_SECTOR_INDUSTRY", "Sector and Industry"),
             ft.dropdown.Option("CHECK_UPDATE_TAXONOMY", "Taxonomy"),
             ft.dropdown.Option("SYNCHRONIZE_PROVIDER_CIK", "Synchronize provider CIK"),
+            ft.dropdown.Option("RESOLVE_TICKER_IDENTITY", "Resolve ticker identity"),
         ],
         value="ADD_TICKERS",
     )
@@ -331,6 +332,8 @@ def build_fundamentals_admin_page(
                 "Synchronizes an available Sharadar provider CIK into the mapped canonical company. "
                 "Provider CIK absence is allowed and conflicts require review."
             )
+        if operation == "RESOLVE_TICKER_IDENTITY":
+            return "Inspect company, security, ticker and provider continuity for up to 25 tickers. This operation is read-only."
         return (
             "Enter 1 to 25 tickers. Commas, spaces, newlines and duplicates are accepted. "
             "Provider network access is enabled automatically when local data is insufficient."
@@ -343,7 +346,8 @@ def build_fundamentals_admin_page(
         is_sector = operation == "CHECK_UPDATE_SECTOR_INDUSTRY"
         is_taxonomy = operation == "CHECK_UPDATE_TAXONOMY"
         is_cik_sync = operation == "SYNCHRONIZE_PROVIDER_CIK"
-        tickers_field.visible = is_add
+        is_identity = operation == "RESOLVE_TICKER_IDENTITY"
+        tickers_field.visible = is_add or is_identity
         market_field.visible = is_add or is_sector
         taxonomy_domain_dropdown.visible = False
         candidate_path_field.visible = False
@@ -361,7 +365,7 @@ def build_fundamentals_admin_page(
 
     def can_preview() -> bool:
         operation = (operation_dropdown.value or "ADD_TICKERS").strip().upper()
-        if operation == "ADD_TICKERS":
+        if operation in {"ADD_TICKERS", "RESOLVE_TICKER_IDENTITY"}:
             return bool((tickers_field.value or "").strip())
         if operation == "CHECK_UPDATE_TAXONOMY":
             return bool(taxonomy_domain_dropdown.value)
@@ -404,6 +408,7 @@ def build_fundamentals_admin_page(
                 "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
                 "CHECK_UPDATE_TAXONOMY": "Taxonomy",
                 "SYNCHRONIZE_PROVIDER_CIK": "Synchronize provider CIK",
+                "RESOLVE_TICKER_IDENTITY": "Resolve ticker identity",
             }.get(item.operation_type, item.operation_type.replace("_", " ").title())
             if getattr(item, "trigger_source", "MANUAL") == "SCHEDULER":
                 operation_label += " [Scheduler]"

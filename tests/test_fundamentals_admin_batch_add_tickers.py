@@ -618,7 +618,7 @@ def test_add_tickers_real_identity_producer_persists_normalized_provider_cik(tmp
         ).fetchone()[0] == "0000000101"
 
 
-def test_add_tickers_provider_cik_conflict_is_review_required(tmp_path: Path) -> None:
+def test_add_tickers_same_cik_creates_new_security_under_existing_company(tmp_path: Path) -> None:
     paths = _generic_paths(tmp_path / "source")
     with sqlite3.connect(paths.canonical_db) as conn:
         company_id = conn.execute("SELECT MIN(company_id) FROM company").fetchone()[0]
@@ -638,8 +638,11 @@ def test_add_tickers_provider_cik_conflict_is_review_required(tmp_path: Path) ->
         archive_path=_archive(tmp_path / "source.zip"),
     )
 
-    assert plan.items[0].status == "REVIEW_REQUIRED"
-    assert "CIK_IDENTITY_CONFLICT" in plan.items[0].reason
+    assert plan.items[0].status == "ELIGIBLE"
+    resolution = plan.items[0].identity_resolution
+    assert resolution["resolution_class"] == "NEW_SECURITY"
+    assert resolution["company_continuity"] == "SAME_COMPANY"
+    assert resolution["security_continuity"] == "NEW_SECURITY"
 
 
 def test_add_tickers_missing_provider_cik_does_not_block_valid_ticker(tmp_path: Path) -> None:
@@ -764,7 +767,7 @@ def test_one_provider_not_found_is_per_ticker_result_and_batch_continues(tmp_pat
         ("NEWC", "ELIGIBLE"),
         ("ADR", "REVIEW_REQUIRED"),
     ]
-    assert "FUNDAMENTAL_SOURCE_ROWS_MISSING" in plan.items[1].reason
+    assert "NO_USABLE_QUARTERLY_HISTORY" in plan.items[1].reason
 
 
 def _archive_row(ticker: str) -> dict[str, str]:

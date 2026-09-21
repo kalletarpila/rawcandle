@@ -9,7 +9,7 @@ import re
 from contextlib import contextmanager
 from typing import Any, Callable, Mapping
 
-from rawcandle.fundamentals.admin import batch_add_tickers, cik_sync, refresh_copy_runtime, refresh_fundamentals, refresh_production, sector_industry, taxonomy_v2_sync
+from rawcandle.fundamentals.admin import batch_add_tickers, cik_sync, identity_resolution, refresh_copy_runtime, refresh_fundamentals, refresh_production, sector_industry, taxonomy_v2_sync
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, sha256_file
 from rawcandle.fundamentals.admin.full_workflow import (
     WORKFLOW_REPORT_NAME,
@@ -91,13 +91,14 @@ class AdminUIHistoryEntry:
         return operation_stage(self.mode)
 
 
-_ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy|synchronize_provider_cik)_[A-Za-z0-9_]+$")
+_ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy|synchronize_provider_cik|resolve_ticker_identity)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
     "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
     "REFRESH_FUNDAMENTALS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "SYNCHRONIZE_PROVIDER_CIK": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY"},
+    "RESOLVE_TICKER_IDENTITY": {"PREVIEW"},
 }
 
 
@@ -123,6 +124,8 @@ class FundamentalsAdminUIService:
         cik_preview: Callable[..., dict[str, Any]] = cik_sync.run_preview,
         cik_apply: Callable[..., dict[str, Any]] = cik_sync.run_apply,
         cik_production_apply: Callable[..., dict[str, Any]] = cik_sync.run_production_apply,
+        identity_preview: Callable[..., dict[str, Any]] = identity_resolution.run_preview,
+        identity_paths: batch_add_tickers.BatchAddTickerPaths = batch_add_tickers.BatchAddTickerPaths(),
         operation_lock_path: Path | None = None,
         recover_publication_on_startup: bool = True,
     ) -> None:
@@ -144,6 +147,8 @@ class FundamentalsAdminUIService:
         self._cik_preview = cik_preview
         self._cik_apply = cik_apply
         self._cik_production_apply = cik_production_apply
+        self._identity_preview = identity_preview
+        self._identity_paths = identity_paths
         self.operation_lock_path = (
             operation_lock_path
             or (self.run_root.parent / ".fundamentals_admin_ui_operation.lock")
@@ -210,6 +215,7 @@ class FundamentalsAdminUIService:
                 "SYNCHRONIZE_PROVIDER_CIK", True, True, True,
                 cik_sync.CONFIRMATION_TOKEN,
             ),
+            AdminOperationCapability("RESOLVE_TICKER_IDENTITY", True, False, False),
         )
 
     def preview(
@@ -266,6 +272,13 @@ class FundamentalsAdminUIService:
             )
         elif operation == "SYNCHRONIZE_PROVIDER_CIK":
             result = self._cik_preview(
+                run_root=self.run_root,
+                progress_callback=progress_callback,
+            )
+        elif operation == "RESOLVE_TICKER_IDENTITY":
+            result = self._identity_preview(
+                raw_inputs,
+                source_paths=self._identity_paths,
                 run_root=self.run_root,
                 progress_callback=progress_callback,
             )
@@ -743,6 +756,7 @@ class FundamentalsAdminUIService:
             report = write_operation_report(run_id, root=self.run_root)
         payload_path = (
             result.get("phase13d_preview_payload_path")
+            or result.get("identity_preview_path")
             or result.get("preview_payload_path")
             or result.get("payload_path")
             or ((result.get("preview") or {}).get("payload") if isinstance(result.get("preview"), Mapping) else None)
