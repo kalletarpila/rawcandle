@@ -258,9 +258,19 @@ def test_read_only_preview_is_self_contained_and_does_not_change_databases(tmp_p
 
     after = {role: path.stat().st_mtime_ns for role, path in paths.as_dict().items()}
     report = Path(result["artifact_dir"], "operation_report.md").read_text(encoding="utf-8")
+    resolutions = {item["requested_ticker"]: item for item in result["resolutions"]}
     assert before == after
     assert all(ticker in report for ticker in ("DRK", "KRSA", "PSQL", "QVCG"))
-    assert report.count("PROPOSED_REVIEW_NOT_AUTHORITY") == 4
+    assert report.count("PROPOSED_REVIEW_NOT_AUTHORITY") == 1
+    assert resolutions["DRK"]["readiness_state"] == "PROPOSED_NOT_READY"
+    assert resolutions["DRK"]["automatic_mutation_permitted"] is False
+    for ticker in ("KRSA", "PSQL", "QVCG"):
+        assert resolutions[ticker]["review_status"] == "APPROVED"
+        assert resolutions[ticker]["approval_fingerprint"]
+        assert resolutions[ticker]["readiness_state"] == "APPROVED_INVALID"
+        assert resolutions[ticker]["automatic_mutation_permitted"] is False
+        assert resolutions[ticker]["current_state_validation"]["status"] == "CONFLICT"
+        assert "APPROVED_REVIEW_STALE" in resolutions[ticker]["reason_codes"]
 
 
 def test_admin_service_exposes_identity_preview_without_apply_capability(tmp_path: Path) -> None:

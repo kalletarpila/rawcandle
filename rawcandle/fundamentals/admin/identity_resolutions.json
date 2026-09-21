@@ -56,7 +56,7 @@
       "cik": "0001755237",
       "provider_permaticker": null,
       "exchange": "NASDAQ",
-      "review_status": "PROPOSED",
+      "review_status": "APPROVED",
       "reason": "Cyclerion remained the legal registrant after the merger and changed to KRSA, but a reverse split and new CUSIP make exact security continuity an operator-reviewed successor decision.",
       "expected_state": {
         "provider_status": "MISSING",
@@ -79,6 +79,64 @@
         "canonical_security_active": 1
       },
       "unresolved_assumptions": [],
+      "approved_resolution": {
+        "subject_ticker": "KRSA",
+        "effective_date": "2026-09-09",
+        "resolution_class": "REORGANIZATION_SUCCESSOR",
+        "company_continuity": "SAME_LEGAL_ISSUER_AFTER_COMBINATION",
+        "security_continuity": "SUCCESSOR_SECURITY",
+        "ticker_relationship": "PREDECESSOR_TO_SUCCESSOR",
+        "provider_continuity": "PROVIDER_METADATA_ABSENT",
+        "predecessor_ticker": "CYCN",
+        "canonical_company_id": 627,
+        "canonical_security_id": 628,
+        "cik": "0001755237",
+        "provider_permaticker": null,
+        "exchange": "NASDAQ",
+        "reason": "Cyclerion remained the legal registrant after the merger and changed to KRSA, but a reverse split and new CUSIP make exact security continuity an operator-reviewed successor decision.",
+        "expected_state": {
+          "provider_status": "MISSING",
+          "predecessor_provider_status": "FOUND",
+          "predecessor_provider_cik": "0001755237",
+          "predecessor_provider_permaticker": "111101",
+          "predecessor_provider_exchange": "NASDAQ",
+          "subject_current_security_ids": [],
+          "subject_alias_security_ids": [],
+          "cik_company_ids": [627],
+          "permaticker_security_ids": [],
+          "canonical_company_company_id": 627,
+          "canonical_company_company_key": "SEC_CIK:0001755237",
+          "canonical_company_status": "ACTIVE",
+          "canonical_company_ciks": ["0001755237"],
+          "canonical_security_security_id": 628,
+          "canonical_security_company_id": 627,
+          "canonical_security_current_ticker": "CYCN",
+          "canonical_security_exchange": "NASDAQ",
+          "canonical_security_active": 1
+        },
+        "unresolved_assumptions": [],
+        "evidence": [
+          {
+            "source_type": "SEC_8_K",
+            "source_authority": "SEC",
+            "reference": "https://www.sec.gov/Archives/edgar/data/1755237/000119312526389318/d178159d8k.htm",
+            "research_date": "2026-09-21",
+            "fact": "The same Massachusetts registrant completed the merger; CYCN changed to KRSA on September 9 with a new CUSIP."
+          },
+          {
+            "source_type": "EXCHANGE_NOTICE",
+            "source_authority": "Nasdaq Trader",
+            "reference": "https://www.nasdaqtrader.com/TraderNews.aspx?id=ECA2026-648",
+            "research_date": "2026-09-21",
+            "fact": "Nasdaq classified the event as a change of control, reverse split, name, symbol and CUSIP change."
+          }
+        ]
+      },
+      "approval_fingerprint": "9440127ada42c4531eb4c2dd53c468efbe92810951bffcad64811488839ef7ee",
+      "approval_metadata": {
+        "approved_by": "operator_approved",
+        "approved_at_utc": "2026-09-21T15:50:20Z"
+      },
       "evidence": [
         {
           "source_type": "SEC_8_K",
@@ -110,7 +168,7 @@
       "cik": "0002119292",
       "provider_permaticker": null,
       "exchange": "NASDAQ",
-      "review_status": "PROPOSED",
+      "review_status": "APPROVED",
       "reason": "Pasqal Holding SA is a new public issuer/security produced by a multi-step business combination; BBCQ must not be reused as the same company or security by ticker inference.",
       "expected_state": {
         "provider_status": "MISSING",
@@ -124,6 +182,55 @@
         "permaticker_security_ids": []
       },
       "unresolved_assumptions": [],
+      "approved_resolution": {
+        "subject_ticker": "PSQL",
+        "effective_date": "2026-08-28",
+        "resolution_class": "BUSINESS_COMBINATION_NEW_SECURITY",
+        "company_continuity": "NEW_PUBLIC_ISSUER",
+        "security_continuity": "NEW_SECURITY",
+        "ticker_relationship": "BUSINESS_COMBINATION_SUCCESSOR_TICKER",
+        "provider_continuity": "PROVIDER_METADATA_ABSENT",
+        "predecessor_ticker": "BBCQ",
+        "canonical_company_id": null,
+        "canonical_security_id": null,
+        "cik": "0002119292",
+        "provider_permaticker": null,
+        "exchange": "NASDAQ",
+        "reason": "Pasqal Holding SA is a new public issuer/security produced by a multi-step business combination; BBCQ must not be reused as the same company or security by ticker inference.",
+        "expected_state": {
+          "provider_status": "MISSING",
+          "predecessor_provider_status": "FOUND",
+          "predecessor_provider_cik": "0002088295",
+          "predecessor_provider_permaticker": "646033",
+          "predecessor_provider_exchange": "NASDAQ",
+          "subject_current_security_ids": [],
+          "subject_alias_security_ids": [],
+          "cik_company_ids": [],
+          "permaticker_security_ids": []
+        },
+        "unresolved_assumptions": [],
+        "evidence": [
+          {
+            "source_type": "SEC_6_K",
+            "source_authority": "SEC",
+            "reference": "https://www.sec.gov/Archives/edgar/data/2119292/000121390026094393/ea0303667-6k_pasqal.htm",
+            "research_date": "2026-09-21",
+            "fact": "Pasqal Holding SA completed the combination and listed PSQL; its SEC registrant CIK is 0002119292."
+          },
+          {
+            "source_type": "SEC_REGISTRATION_STATEMENT",
+            "source_authority": "SEC",
+            "reference": "https://www.sec.gov/Archives/edgar/data/2119292/000121390026098421/ea0304681-01.htm",
+            "research_date": "2026-09-21",
+            "fact": "BBCQ merged into a French merger subsidiary and Legacy Pasqal then merged into the survivor renamed Pasqal Holding SA."
+          }
+        ]
+      },
+      "approval_fingerprint": "ef64506712560ac892323bcfa590b7e454fa22feb2619363b6aee61f9eec6b6c",
+      "approval_metadata": {
+        "approved_by": "operator_approved",
+        "approved_at_utc": "2026-09-21T15:50:20Z"
+      },
       "evidence": [
         {
           "source_type": "SEC_6_K",
@@ -155,7 +262,7 @@
       "cik": "0001254699",
       "provider_permaticker": null,
       "exchange": "NASDAQ",
-      "review_status": "PROPOSED",
+      "review_status": "APPROVED",
       "reason": "The old parent equity was cancelled and a former subsidiary, CIK 0001254699, became the renamed public holding company and issued entirely new common stock.",
       "expected_state": {
         "provider_status": "MISSING",
@@ -169,6 +276,55 @@
         "permaticker_security_ids": []
       },
       "unresolved_assumptions": [],
+      "approved_resolution": {
+        "subject_ticker": "QVCG",
+        "effective_date": "2026-08-06",
+        "resolution_class": "REORGANIZATION_SUCCESSOR",
+        "company_continuity": "SUCCESSOR_COMPANY",
+        "security_continuity": "NEW_SECURITY",
+        "ticker_relationship": "REORGANIZATION_SUCCESSOR_TICKER",
+        "provider_continuity": "PROVIDER_METADATA_ABSENT",
+        "predecessor_ticker": "QVCAQ",
+        "canonical_company_id": null,
+        "canonical_security_id": null,
+        "cik": "0001254699",
+        "provider_permaticker": null,
+        "exchange": "NASDAQ",
+        "reason": "The old parent equity was cancelled and a former subsidiary, CIK 0001254699, became the renamed public holding company and issued entirely new common stock.",
+        "expected_state": {
+          "provider_status": "MISSING",
+          "predecessor_provider_status": "FOUND",
+          "predecessor_provider_cik": "0001355096",
+          "predecessor_provider_permaticker": "194557",
+          "predecessor_provider_exchange": "NASDAQ",
+          "subject_current_security_ids": [],
+          "subject_alias_security_ids": [],
+          "cik_company_ids": [],
+          "permaticker_security_ids": []
+        },
+        "unresolved_assumptions": [],
+        "evidence": [
+          {
+            "source_type": "SEC_REGISTRATION_STATEMENT",
+            "source_authority": "SEC",
+            "reference": "https://www.sec.gov/Archives/edgar/data/1254699/000110465926107125/tm2625133-1_s1.htm",
+            "research_date": "2026-09-21",
+            "fact": "Old QVC Group equity was cancelled; QVC, Inc. became QVC Group, Inc. and issued new post-emergence common stock."
+          },
+          {
+            "source_type": "ISSUER_IR",
+            "source_authority": "QVC Group",
+            "reference": "https://investors.qvcgrp.com/investors/stock-data/faq",
+            "research_date": "2026-09-21",
+            "fact": "The reorganized company trades as QVCG and the former parent is Old QVC Group, Inc."
+          }
+        ]
+      },
+      "approval_fingerprint": "2f6ac6bb546181dfe7e228bbae25cfacebc488d820eb46b5e66a8e95d65591c4",
+      "approval_metadata": {
+        "approved_by": "operator_approved",
+        "approved_at_utc": "2026-09-21T15:50:20Z"
+      },
       "evidence": [
         {
           "source_type": "SEC_REGISTRATION_STATEMENT",
