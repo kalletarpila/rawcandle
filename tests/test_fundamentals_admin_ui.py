@@ -345,7 +345,7 @@ def test_admin_ui_service_runs_preview_through_backend_boundary_and_finalizes_re
     assert service.history_entries(limit=1)[0].report_available is True
 
 
-def test_admin_page_exposes_four_operations_and_downloads_exact_report() -> None:
+def test_admin_page_exposes_five_operations_and_downloads_exact_report() -> None:
     class Service:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -418,6 +418,7 @@ def test_admin_page_exposes_four_operations_and_downloads_exact_report() -> None
         "REFRESH_FUNDAMENTALS",
         "CHECK_UPDATE_SECTOR_INDUSTRY",
         "CHECK_UPDATE_TAXONOMY",
+        "SYNCHRONIZE_PROVIDER_CIK",
     ]
     assert controls.network_allowed_checkbox.visible is False
     assert controls.preview_payload_field.visible is False

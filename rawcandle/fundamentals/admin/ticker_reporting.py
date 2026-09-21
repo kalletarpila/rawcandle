@@ -16,6 +16,8 @@ REASON_TEXT = {
     "MARKET_NOT_UNAMBIGUOUS_USA": "USA market listing could not be confirmed unambiguously",
     "MISSING_CLASSIFICATION": "Sector/Industry classification is missing",
     "FUNDAMENTAL_SOURCE_ROWS_MISSING": "No usable fundamental observations were found",
+    "CIK_IDENTITY_CONFLICT": "The provider CIK is already bound to another canonical identity",
+    "PROVIDER_IDENTITY_CONFLICT": "The persistent provider security identity is already bound to another canonical identity",
 }
 
 

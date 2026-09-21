@@ -313,6 +313,16 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
             f"historical bootstrap eligible: {date_state.get('historical_bootstrap_eligible', 0)}; "
             f"repair required: {date_state.get('repair_required', 0)}.",
         )
+    if result.get("operation_type") == "SYNCHRONIZE_PROVIDER_CIK":
+        counts = _mapping(result.get("summary_counts"))
+        return (
+            final_status_message(result),
+            f"Missing-CIK backfill candidates: {counts.get('sync_eligible', 0)}.",
+            f"Formatting-only normalization candidates: {counts.get('format_normalization_eligible', 0)}.",
+            f"Already in sync: {counts.get('already_in_sync', 0)}.",
+            f"Provider CIK unavailable: {counts.get('provider_cik_unavailable', 0)}.",
+            f"Review or conflict: {counts.get('review_required', 0)}.",
+        )
     counts = _mapping(result.get("summary_counts"))
     downstream = _mapping(result.get("downstream"))
     rollback = _mapping(result.get("rollback"))
@@ -394,6 +404,7 @@ def render_operation_report(
         "REFRESH_FUNDAMENTALS": "Refresh Fundamentals",
         "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
         "CHECK_UPDATE_TAXONOMY": "Taxonomy",
+        "SYNCHRONIZE_PROVIDER_CIK": "Synchronize provider CIK",
     }.get(str(result.get("operation_type")), "Administration")
     mode = str(result.get("mode") or "")
     preview_only = mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "READ_ONLY_AUDIT"}
@@ -692,6 +703,10 @@ def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT) -> Opera
         from rawcandle.fundamentals.admin.refresh_fundamentals import _render_refresh_report
 
         report = _render_refresh_report(result)
+    elif result.get("operation_type") == "SYNCHRONIZE_PROVIDER_CIK":
+        from rawcandle.fundamentals.admin.cik_sync import _render_report
+
+        report = _render_report(result)
     elif result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"} and "write_set" in result:
         from rawcandle.fundamentals.admin.production_transaction import render_production_report
         report = render_production_report(result)

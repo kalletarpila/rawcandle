@@ -38,6 +38,7 @@ from rawcandle.fundamentals.admin.progress import (
     ProgressStage,
     ProgressTracker,
 )
+from rawcandle.fundamentals.admin.provider_cik import extract_sharadar_cik, normalize_cik
 from rawcandle.fundamentals.admin.reporting import render_markdown_report
 from rawcandle.fundamentals.admin.structural_context import _events, _structural_evidence, _structural_package_fingerprint
 from rawcandle.fundamentals.admin.rv_identity import active_relative_valuation_identity
@@ -120,7 +121,6 @@ SUPPORTED_GENERIC_CATEGORIES = {
     "Canadian Common Stock",
 }
 SUPPORTED_EXCHANGES = {"NASDAQ", "NYSE", "NYSEMKT"}
-CIK_RE = re.compile(r"CIK=0*([0-9]+)", re.IGNORECASE)
 EXPECTED_PREWRITE_ACTIVE_PACKAGE = "f9621556445ef7c85f5486ea170e2366cbd356fa9283cd8528436abeab0d0d40"
 EXPECTED_PREWRITE_RV_MODEL = "76c2974108b2c5085b7dfa102acd4bb04eea36a5267bbdb1930a2bc7dc8cb35e"
 EXPECTED_PREWRITE_RV_SNAPSHOT = "1f360f0b2dfd8e06eaffd3edcffaf87b604e59a63d0b0e272823b46fada02f6b"
@@ -548,12 +548,7 @@ def _readonly(path: Path) -> sqlite3.Connection:
 
 
 def _extract_cik(value: Any) -> str | None:
-    text = str(value or "")
-    match = CIK_RE.search(text)
-    if not match:
-        stripped = re.sub(r"\D", "", text)
-        return stripped.lstrip("0") or None
-    return match.group(1).lstrip("0") or None
+    return extract_sharadar_cik(value).cik_normalized
 
 
 def _provider_metadata(paths: BatchAddTickerPaths, ticker: str) -> dict[str, Any]:
@@ -598,10 +593,12 @@ def _canonical_identity(paths: BatchAddTickerPaths, ticker: str, metadata: Mappi
             "WHERE UPPER(a.ticker)=UPPER(?) ORDER BY s.active DESC,s.security_id",
             (ticker,),
         )] if _table_exists(conn, "ticker_alias") else []
-        cik_rows = [dict(row) for row in conn.execute(
-            "SELECT company_id,cik_normalized FROM company_cik WHERE cik_normalized=?",
-            (str(cik),),
-        )] if cik and _table_exists(conn, "company_cik") else []
+        cik_rows = [
+            dict(row) for row in conn.execute(
+                "SELECT company_id,cik_normalized FROM company_cik"
+            )
+            if normalize_cik(row["cik_normalized"]) == cik
+        ] if cik and _table_exists(conn, "company_cik") else []
         perm_rows = [dict(row) for row in conn.execute(
             "SELECT security_id,provider_security_id FROM provider_security_identity WHERE provider='SHARADAR' AND provider_security_id=?",
             (str(permaticker),),
@@ -616,6 +613,8 @@ def _canonical_identity(paths: BatchAddTickerPaths, ticker: str, metadata: Mappi
         "security_id": rows[0]["security_id"] if len(company_ids) == 1 and rows else None,
         "cik_conflicts": cik_rows,
         "permaticker_conflicts": perm_rows,
+        "cik_identity_conflict": bool(cik_rows) and not bool(rows),
+        "permaticker_identity_conflict": bool(perm_rows) and not bool(rows),
     }
 
 
@@ -770,6 +769,10 @@ def build_generic_batch_plan(
         blockers: list[str] = []
         if canonical["ambiguous"]:
             blockers.append("IDENTITY_AMBIGUOUS")
+        if canonical["cik_identity_conflict"]:
+            blockers.append("CIK_IDENTITY_CONFLICT")
+        if canonical["permaticker_identity_conflict"]:
+            blockers.append("PROVIDER_IDENTITY_CONFLICT")
         if metadata_state["status"] == "AMBIGUOUS":
             blockers.append("PROVIDER_IDENTITY_AMBIGUOUS")
         if metadata_state["status"] == "MISSING":
@@ -793,7 +796,7 @@ def build_generic_batch_plan(
             status = "ALREADY_PRESENT"
             reason = "Ticker is already present in canonical identities."
         elif blockers:
-            status = "REVIEW_REQUIRED" if any("AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "FUNDAMENTAL_SOURCE_ROWS_MISSING", "CONTRADICTORY_FISCAL_SEQUENCE"} for blocker in blockers) else "REJECTED"
+            status = "REVIEW_REQUIRED" if any("AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "FUNDAMENTAL_SOURCE_ROWS_MISSING", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT"} for blocker in blockers) else "REJECTED"
             reason = ",".join(blockers)
         else:
             status = "ELIGIBLE"

@@ -10,6 +10,7 @@ import pytest
 
 from rawcandle.fundamentals.admin.batch_add_tickers import (
     BatchAddTickerPaths,
+    _apply_identities,
     build_generic_batch_plan,
     build_preview_from_copy,
     create_copy_lane,
@@ -588,6 +589,75 @@ def test_generic_plan_uses_fundamentals_metadata_and_verified_archive(tmp_path: 
     assert item["provider_metadata"]["identity"]["table_name"] == "fundamentals"
     assert item["provider_arq_row_count"] == 1
     assert payload["accepted_tickers"] == ["NEWC"]
+
+
+def test_add_tickers_real_identity_producer_persists_normalized_provider_cik(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    plan = build_generic_batch_plan(
+        paths,
+        parse_batch_tickers("NEWC"),
+        now="2026-09-15T00:00:00Z",
+        archive_path=_archive(tmp_path / "source.zip"),
+    )
+    item = plan.safe_dict(include_rows=True)["items"][0]
+
+    result = _apply_identities(paths, [item], applied_at="2026-09-15T00:00:00Z")
+
+    assert result["created"] == 1
+    with sqlite3.connect(paths.canonical_db) as conn:
+        company_id = conn.execute(
+            "SELECT company_id FROM security WHERE current_ticker='NEWC'"
+        ).fetchone()[0]
+        assert conn.execute(
+            "SELECT cik_normalized,cik_display FROM company_cik WHERE company_id=?",
+            (company_id,),
+        ).fetchone() == ("0000000101", "0000000101")
+        assert conn.execute(
+            "SELECT provider_identifier_value FROM provider_company_identity WHERE company_id=?",
+            (company_id,),
+        ).fetchone()[0] == "0000000101"
+
+
+def test_add_tickers_provider_cik_conflict_is_review_required(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    with sqlite3.connect(paths.canonical_db) as conn:
+        company_id = conn.execute("SELECT MIN(company_id) FROM company").fetchone()[0]
+        conn.execute(
+            "CREATE TABLE company_cik(company_id INTEGER NOT NULL,cik_normalized TEXT NOT NULL,"
+            "PRIMARY KEY(company_id,cik_normalized))"
+        )
+        conn.execute(
+            "INSERT INTO company_cik(company_id,cik_normalized) VALUES(?,?)",
+            (company_id, "101"),
+        )
+
+    plan = build_generic_batch_plan(
+        paths,
+        parse_batch_tickers("NEWC"),
+        now="2026-09-15T00:00:00Z",
+        archive_path=_archive(tmp_path / "source.zip"),
+    )
+
+    assert plan.items[0].status == "REVIEW_REQUIRED"
+    assert "CIK_IDENTITY_CONFLICT" in plan.items[0].reason
+
+
+def test_add_tickers_missing_provider_cik_does_not_block_valid_ticker(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    with sqlite3.connect(paths.provider_db) as conn:
+        conn.execute(
+            "UPDATE sharadar_ticker_metadata SET secfilings=NULL WHERE ticker='NEWC'"
+        )
+
+    plan = build_generic_batch_plan(
+        paths,
+        parse_batch_tickers("NEWC"),
+        now="2026-09-15T00:00:00Z",
+        archive_path=_archive(tmp_path / "source.zip"),
+    )
+
+    assert plan.items[0].status == "ELIGIBLE"
+    assert plan.items[0].provider_metadata["identity"].get("cik") is None
 
 
 def test_generic_plan_network_requires_flag_and_redacts_url(tmp_path: Path) -> None:
