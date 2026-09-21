@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from csv import DictWriter
+from dataclasses import replace
+from io import StringIO
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -16,9 +20,42 @@ from rawcandle.fundamentals.admin.identity_resolution import (
     resolve_ticker_identity,
     run_preview,
 )
-from rawcandle.fundamentals.admin.ticker_reporting import render_ticker_sections, summary_rows
+from rawcandle.fundamentals.admin.ticker_reporting import enrich_after_state, render_ticker_sections, summary_rows
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+from rawcandle.fundamentals.schema.migrations import CANONICAL_SCHEMA_SQL
+from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 from tests.test_fundamentals_admin_batch_add_tickers import _archive, _archive_row, _generic_paths
+from tests.test_fundamentals_admin_taxonomy_acceptance import _create_db as _active_taxonomy_db
+
+
+def _reviewed_history_archive(path: Path) -> Path:
+    counts = {"KRSA": 34, "PSQL": 3, "QVCG": 40}
+    rows = []
+    for ticker, count in counts.items():
+        start_sequence = 2026 * 4 + 2 - count + 1
+        for offset in range(count):
+            sequence = start_sequence + offset
+            fiscal_year = (sequence - 1) // 4
+            fiscal_quarter = ((sequence - 1) % 4) + 1
+            month = fiscal_quarter * 3
+            day = 31 if month in {3, 12} else 30
+            row = dict(_archive_row(ticker))
+            row.update({
+                "calendardate": f"{fiscal_year:04d}-{month:02d}-{day:02d}",
+                "reportperiod": f"{fiscal_year:04d}-{month:02d}-{day:02d}",
+                "fiscalperiod": f"{fiscal_year:04d}-Q{fiscal_quarter}",
+                "date": f"{fiscal_year:04d}-{month:02d}-{day:02d}",
+                "lastupdated": f"{fiscal_year:04d}-{month:02d}-{day:02d}",
+                "permaticker": "",
+            })
+            rows.append(row)
+    output = StringIO()
+    writer = DictWriter(output, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    with ZipFile(path, "w") as archive:
+        archive.writestr("fundamentals.csv", output.getvalue())
+    return path
 
 
 def _metadata(paths, ticker: str, permaticker: str, cik: str | None = "0000101") -> None:
@@ -508,8 +545,22 @@ def test_real_add_tickers_candidate_path_applies_bound_same_security_review(tmp_
     assert {row[0] for row in aliases} >= {"NEWC", "RENAMED"}
 
 
-def test_real_approved_records_flow_through_add_tickers_reporting_and_candidate_boundary(tmp_path: Path) -> None:
+def test_real_approved_records_flow_through_add_tickers_reporting_and_candidate_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     paths = _generic_paths(tmp_path / "source")
+    paths.canonical_db.unlink()
+    with sqlite3.connect(paths.canonical_db) as conn:
+        conn.executescript(CANONICAL_SCHEMA_SQL)
+        ensure_ttm_schema(conn)
+        conn.execute("INSERT INTO schema_version VALUES('fundamentals_v4','fixture','now')")
+    taxonomy_root = tmp_path / "active_taxonomy"
+    taxonomy_root.mkdir()
+    paths = replace(paths, taxonomy_db=_active_taxonomy_db(taxonomy_root))
+    with sqlite3.connect(paths.taxonomy_db) as conn:
+        conn.execute("ALTER TABLE ec_entity ADD COLUMN entity_level TEXT")
+        conn.execute("UPDATE ec_entity SET entity_level=entity_type")
+    monkeypatch.setattr(batch, "_events", lambda: ())
     created_at = "2026-09-21T00:00:00Z"
     with sqlite3.connect(paths.canonical_db) as conn:
         batch._ensure_identity_tables(conn)
@@ -575,11 +626,17 @@ def test_real_approved_records_flow_through_add_tickers_reporting_and_candidate_
         for ticker in ("KRSA", "PSQL", "QVCG"):
             conn.execute("INSERT INTO ticker_meta VALUES(?,'usa','Technology','Software - Application')", (ticker,))
             conn.execute("INSERT INTO osakedata VALUES(?,'usa','2026-09-20',10.0)", (ticker,))
+        for column in ("open", "high", "low", "id"):
+            conn.execute(f"ALTER TABLE osakedata ADD COLUMN {column} REAL")
+        conn.execute("UPDATE osakedata SET open=close,high=close,low=close,id=rowid")
+        conn.execute(
+            "CREATE TABLE splits_data(osake TEXT,split_date TEXT,split_ratio REAL,is_price_data_corrected INTEGER)"
+        )
 
     plan = build_generic_batch_plan(
         paths,
         parse_batch_tickers("KRSA PSQL QVCG"),
-        archive_path=_archive(tmp_path / "reviewed.zip", ("KRSA", "PSQL", "QVCG")),
+        archive_path=_reviewed_history_archive(tmp_path / "reviewed.zip"),
     )
     items = {item.ticker: item.safe_dict(include_rows=True) for item in plan.items}
     reports = {item["ticker"]: item for item in plan.ticker_reporting}
@@ -623,7 +680,44 @@ def test_real_approved_records_flow_through_add_tickers_reporting_and_candidate_
     concise = summary_rows(plan.ticker_reporting)
     assert any("KRSA identity: APPROVED_VALID; approved review: successor security; state=MATCH; fingerprint=9440127ada42" in row for row in concise)
 
-    _apply_identities(paths, list(items.values()), applied_at=created_at)
+    applied = batch._apply_generic_plan(
+        paths,
+        plan.safe_dict(include_rows=True),
+        output=tmp_path / "reviewed_downstream",
+        as_of_date="2026-09-21",
+    )
+    lineage = applied["downstream"]["ticker_lineage"]
+    assert lineage["KRSA"]["source_arq_acceptance_invariant"] == "34/34"
+    assert lineage["KRSA"]["canonical_quarter_invariant"] == "34/34"
+    assert lineage["PSQL"]["source_arq_acceptance_invariant"] == "3/3"
+    assert lineage["PSQL"]["canonical_quarter_invariant"] == "3/3"
+    assert lineage["QVCG"]["source_arq_acceptance_invariant"] == "40/40"
+    assert lineage["QVCG"]["canonical_quarter_invariant"] == "40/40"
+    for ticker in ("KRSA", "PSQL", "QVCG"):
+        assert lineage[ticker]["analysis_input_ttm_rows"] > 0
+        assert all(count > 0 for count in lineage[ticker]["analysis_output_rows"].values())
+    candidate = Path(applied["downstream"]["candidate_analysis_db"])
+    after_reports = enrich_after_state(
+        plan.ticker_reporting,
+        replace(paths, analysis_db=candidate),
+        stage="COPY_ONLY_APPLY",
+        lineage=lineage,
+    )
+    for report in after_reports:
+        assert report["after"]["analysis"]["integrity_status"] == "READY"
+    analyses = {report["ticker"]: report["after"]["analysis"] for report in after_reports}
+    assert analyses["PSQL"]["score"]["status"] == "SCORE_NOT_READY"
+    assert analyses["PSQL"]["lifecycle"]["status"] == "LIFECYCLE_NOT_READY"
+    assert analyses["PSQL"]["valuation"]["status"] == "VALUATION_NOT_READY"
+    assert analyses["QVCG"]["score"]["status"] == "SCORE_FULL"
+    assert analyses["QVCG"]["lifecycle"]["status"] == "LIFECYCLE_READY"
+    assert analyses["QVCG"]["valuation"]["status"] == "VALUATION_NOT_READY"
+    assert analyses["KRSA"]["score"]["status"] == "SCORE_FULL"
+    assert analyses["KRSA"]["lifecycle"]["status"] == "LIFECYCLE_READY"
+    assert analyses["KRSA"]["valuation"]["status"] == "VALUATION_NOT_READY"
+    rendered_after = render_ticker_sections(after_reports)
+    assert "Source ARQ rows accepted for canonicalization: `34/34`" in rendered_after
+    assert "Network ARQ -> staging -> canonical quarters -> analysis input" in rendered_after
     with sqlite3.connect(paths.canonical_db) as conn:
         krsa = conn.execute("SELECT company_id,security_id FROM security WHERE current_ticker='KRSA'").fetchone()
         assert krsa[0] == 627 and krsa[1] != 628
@@ -639,3 +733,17 @@ def test_real_approved_records_flow_through_add_tickers_reporting_and_candidate_
             assert conn.execute("SELECT ticker FROM ticker_alias WHERE security_id=?", (security_id,)).fetchall() == [(ticker,)]
             assert conn.execute("SELECT current_ticker FROM security WHERE security_id=?", (predecessor_security,)).fetchone() == (predecessor,)
         assert conn.execute("SELECT ticker FROM ticker_alias WHERE security_id=701 ORDER BY ticker").fetchall() == [("QVCAQ",), ("QVCBQ",)]
+
+    assert candidate.stat().st_size > 0
+    with sqlite3.connect(candidate) as conn:
+        conn.execute("DELETE FROM score_result WHERE company_id=?", (lineage["QVCG"]["company_id"],))
+    with pytest.raises(RuntimeError, match="ADD_TICKERS_LINEAGE_ANALYSIS_OUTPUT_MISSING:QVCG"):
+        batch._ticker_lineage_evidence(
+            paths,
+            tickers=("QVCG",),
+            provider_run_id=applied["provider_staging"]["run_id"],
+            analysis_db=candidate,
+            expected_arq_rows={"QVCG": 40},
+        )
+    candidate.unlink()
+    assert not list((tmp_path / "reviewed_downstream").glob("*.db"))

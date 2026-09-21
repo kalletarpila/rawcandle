@@ -11,6 +11,7 @@ import pytest
 from rawcandle.fundamentals.admin.batch_add_tickers import (
     BatchAddTickerPaths,
     _apply_identities,
+    incomplete_fiscal_identity_rows,
     build_generic_batch_plan,
     build_preview_from_copy,
     create_copy_lane,
@@ -48,6 +49,20 @@ def test_add_tickers_fiscal_sequence_validation_is_narrow() -> None:
         "reportperiod": "2026-01-31", "arq_fiscalperiods": ["2026-Q4"],
         "mrq_fiscalperiods": ["2026-Q3"],
     }]
+
+
+def test_quarterly_rows_require_complete_canonical_fiscal_identity() -> None:
+    rows = [
+        {"dimension": "ARQ", "reportperiod": "2026-06-30", "fiscalperiod": None},
+        {"dimension": "MRQ", "reportperiod": "2026-06-30", "fiscalperiod": "Q2"},
+        {"dimension": "ART", "reportperiod": "2026-06-30", "fiscalperiod": None},
+        {"dimension": "ARQ", "reportperiod": "2026-03-31", "fiscalperiod": "2026-Q1"},
+    ]
+
+    assert incomplete_fiscal_identity_rows(rows) == [
+        {"dimension": "ARQ", "reportperiod": "2026-06-30", "fiscalperiod": None},
+        {"dimension": "MRQ", "reportperiod": "2026-06-30", "fiscalperiod": "Q2"},
+    ]
 
 
 def _paths(tmp_path: Path) -> BatchAddTickerPaths:
@@ -429,6 +444,18 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
             "relative_valuation": {"first_apply": {"outcome": "ACTIVATED"}},
             "active_taxonomy": active_taxonomy,
             "candidate_analysis_db": str(candidate_analysis),
+            "ticker_lineage": {
+                "NEWC": {
+                    "source_arq_rows": 1,
+                    "source_arq_rows_accepted_for_canonicalization": 1,
+                    "source_arq_acceptance_invariant": "1/1",
+                    "distinct_source_fiscal_quarters": 1,
+                    "canonical_source_fiscal_quarters": 1,
+                    "canonical_quarter_invariant": "1/1",
+                    "analysis_input_ttm_rows": 1,
+                    "analysis_output_rows": {"score": 1, "lifecycle": 1, "valuation": 1},
+                },
+            },
             "invocation_counts": {
                 "full_v2_rebuild": 1,
                 "package": 1,
@@ -452,6 +479,7 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
         confirm_apply=True,
     )
     tested_ticker = tested["ticker_reporting"][0]
+    assert tested_ticker["lineage"]["source_arq_acceptance_invariant"] == "1/1"
     tested_result_path = Path(tested["artifact_dir"]) / "result.json"
     tested_result = json.loads(tested_result_path.read_text(encoding="utf-8"))
     tested_result["downstream"]["active_taxonomy"] = active_taxonomy
@@ -733,6 +761,60 @@ def test_provider_timeout_and_malformed_response_remain_system_errors(tmp_path: 
                 network_allowed=True,
                 network_client=client,
             )
+
+
+def test_complete_network_history_is_unprojected_and_missing_fiscalperiod_fails_closed(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+    request = parse_batch_tickers("NEWC")
+
+    class ProjectionSensitiveClient:
+        request_count = 0
+        calls: list[dict[str, object]] = []
+
+        def fundamentals(self, **kwargs):
+            self.request_count += 1
+            self.calls.append(dict(kwargs))
+            row = dict(_archive_row("NEWC"))
+            if kwargs.get("fields") is not None:
+                row.pop("fiscalperiod")
+            return SimpleNamespace(
+                ok=True,
+                status="SUCCESS",
+                auth_status="AUTH_OK",
+                http_status=200,
+                endpoint="/data/fundamentals",
+                url="https://api.example.test/data/fundamentals?ticker=NEWC",
+                records=[row],
+            )
+
+    client = ProjectionSensitiveClient()
+    plan = build_generic_batch_plan(
+        paths,
+        request,
+        archive_path=tmp_path / "missing.zip",
+        network_allowed=True,
+        network_client=client,
+    )
+
+    assert client.calls == [{"ticker": "NEWC", "limit": 10000}]
+    assert plan.items[0].status == "ELIGIBLE"
+    assert plan.items[0].rows[0]["fiscalperiod"] == "2026-Q2"
+
+    class IncompleteClient(ProjectionSensitiveClient):
+        def fundamentals(self, **kwargs):
+            result = super().fundamentals(**kwargs)
+            result.records[0].pop("fiscalperiod")
+            return result
+
+    incomplete = build_generic_batch_plan(
+        paths,
+        request,
+        archive_path=tmp_path / "missing.zip",
+        network_allowed=True,
+        network_client=IncompleteClient(),
+    )
+    assert incomplete.items[0].status == "REVIEW_REQUIRED"
+    assert incomplete.items[0].reason == "INCOMPLETE_FISCAL_IDENTITY"
 
 
 def test_one_provider_not_found_is_per_ticker_result_and_batch_continues(tmp_path: Path) -> None:

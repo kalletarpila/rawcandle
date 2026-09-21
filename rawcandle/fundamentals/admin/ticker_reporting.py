@@ -495,9 +495,11 @@ def build_preview_reporting(paths: Any, plan: Mapping[str, Any]) -> list[dict[st
 def enrich_after_state(
     preview_reports: Sequence[Mapping[str, Any]], paths: Any, *, stage: str,
     final_actions: Mapping[str, str] | None = None,
+    lineage: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     actions = {str(key).upper(): value for key, value in (final_actions or {}).items()}
+    lineage_by_ticker = lineage or {}
     for saved in preview_reports:
         report = dict(saved)
         ticker = str(report.get("ticker") or "").upper()
@@ -519,6 +521,8 @@ def enrich_after_state(
             "identity": identity,
             "analysis": analysis,
         }
+        if ticker in lineage_by_ticker:
+            report["lineage"] = dict(lineage_by_ticker[ticker])
         report["final_action"] = actions.get(ticker) or ("Tested successfully" if stage == "COPY_ONLY_APPLY" else "Updated")
         output.append(report)
     return output
@@ -713,6 +717,18 @@ def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
         else:
             identity_text = "Canonical identity: " + ("Present" if before.get("canonical_identity") else "Created" if after.get("canonical_identity") == "Present" else "Not present")
         lines.extend(["", f"### {ticker} - {name}", "", "#### Identity", "", f"- Market / exchange: {report.get('market') or 'Not available'} / {report.get('exchange') or 'Not available'}", f"- {identity_text}", "", "#### Before the run", "", f"- State: {before.get('category', 'Not available')}", f"- Provider data: {'Yes' if before.get('provider_data') else 'No'}", f"- Canonical identity: {'Present' if before.get('canonical_identity') else 'Not present'}", f"- Existing V2 analysis: {'Yes' if before.get('v2_analysis') else 'No'}", "", "#### Data acquisition", "", f"- Source: {acquisition.get('source', 'Not available')}", f"- Network request: {'Yes' if acquisition.get('network_requested') else 'No'}", f"- Network result used: {'Yes' if acquisition.get('network_used') else 'No'}", f"- Provider rows: {coverage.get('provider_rows', 'Not available')}", f"- Quarterly coverage: {coverage.get('arq_count', 'Not available')} ARQ", f"- First fiscal quarter: {coverage.get('first_fiscal_quarter') or 'Not available'}", f"- Latest fiscal quarter: {coverage.get('latest_fiscal_quarter') or 'Not available'}"])
+        lineage_evidence = report.get("lineage") if isinstance(report.get("lineage"), Mapping) else None
+        if lineage_evidence:
+            outputs = lineage_evidence.get("analysis_output_rows") or {}
+            lines.extend([
+                f"- Source ARQ rows accepted for canonicalization: `{lineage_evidence.get('source_arq_acceptance_invariant')}`",
+                f"- Distinct source fiscal quarters materialized in canonical: `{lineage_evidence.get('canonical_quarter_invariant')}`",
+                f"- Network ARQ -> staging -> canonical quarters -> analysis input: "
+                f"`{lineage_evidence.get('source_arq_rows')} -> {lineage_evidence.get('source_arq_rows_accepted_for_canonicalization')} -> "
+                f"{lineage_evidence.get('canonical_source_fiscal_quarters')} -> {lineage_evidence.get('analysis_input_ttm_rows')}`",
+                f"- Analysis output rows (Score / Lifecycle / Valuation): "
+                f"`{outputs.get('score', 0)} / {outputs.get('lifecycle', 0)} / {outputs.get('valuation', 0)}`",
+            ])
         lines.extend(_reviewed_identity_lines(report))
         if coverage.get("provider_rows", 0) > 0 and coverage.get("arq_count") == 0:
             lines.append("- Provider data exists, but no usable quarterly ARQ history was identified.")

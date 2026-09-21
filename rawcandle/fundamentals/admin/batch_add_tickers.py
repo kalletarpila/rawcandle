@@ -66,7 +66,7 @@ from rawcandle.fundamentals.phase13d_backend import (
     build_ticker_preview,
     reject_production_or_alias,
 )
-from rawcandle.fundamentals.providers.sharadar import FUNDAMENTALS_REQUIRED_FIELDS, SharadarClient, redact_url
+from rawcandle.fundamentals.providers.sharadar import SharadarClient, redact_url
 from rawcandle.fundamentals.relative_valuation.engine import MODEL_FINGERPRINT as RV_MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_valuation.engine import calculate_relative_valuation
 from rawcandle.fundamentals.relative_valuation.persistence import (
@@ -88,7 +88,7 @@ REPORT_DATE = "2026-09-12"
 
 
 PHASE = "PHASE13G2_BATCH_ADD_TICKERS"
-CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V5_REVIEWED_IDENTITY_REPORTING"
+CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V6_COMPLETE_FISCAL_IDENTITY"
 OUTCOME_B = "OUTCOME B — BATCH ADD TICKERS COPY-ONLY FOUNDATION READY; AUTHORITATIVE FULL DOWNSTREAM GAP REMAINS"
 OUTCOME_A = "OUTCOME A — GENERIC BATCH ADD TICKERS AUTHORITATIVE COPY-ONLY PIPELINE VERIFIED AND READY FOR SEPARATELY AUTHORIZED PRODUCTION DEPLOYMENT"
 PRODUCTION_OUTCOME_A = "OUTCOME A — BATCH ADD TICKERS ACTIVE AND STABLE IN PRODUCTION"
@@ -665,7 +665,9 @@ def _network_rows(tickers: Sequence[str], *, network_allowed: bool, client: Shar
     output: dict[str, tuple[dict[str, Any], ...]] = {}
     calls: list[dict[str, Any]] = []
     for ticker in tickers:
-        result = client.fundamentals(ticker=ticker, fields=FUNDAMENTALS_REQUIRED_FIELDS, limit=10000)
+        # Replacement authority needs the provider's complete row. A fields
+        # projection has previously returned successful but incomplete rows.
+        result = client.fundamentals(ticker=ticker, limit=10000)
         calls.append({
             "ticker": ticker,
             "status": result.status,
@@ -698,6 +700,24 @@ def fiscal_sequence_contradictions(rows: Sequence[Mapping[str, Any]]) -> list[di
                 "mrq_fiscalperiods": sorted(dimensions["MRQ"]),
             })
     return contradictions
+
+
+def incomplete_fiscal_identity_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Return quarterly rows that canonicalization cannot identify safely."""
+    incomplete = []
+    for row in rows:
+        dimension = str(row.get("dimension") or "").upper()
+        if dimension not in {"ARQ", "MRQ"}:
+            continue
+        fiscalperiod = str(row.get("fiscalperiod") or "").upper()
+        if re.fullmatch(r"[0-9]{4}-Q[1-4]", fiscalperiod):
+            continue
+        incomplete.append({
+            "dimension": dimension,
+            "reportperiod": row.get("reportperiod"),
+            "fiscalperiod": row.get("fiscalperiod"),
+        })
+    return incomplete
 
 
 def build_generic_batch_plan(
@@ -768,6 +788,9 @@ def build_generic_batch_plan(
         arq_rows = [row for row in rows if str(row.get("dimension") or "").upper() == "ARQ"]
         if not arq_rows:
             blockers.append("NO_USABLE_QUARTERLY_HISTORY")
+        incomplete_fiscal_rows = incomplete_fiscal_identity_rows(rows)
+        if incomplete_fiscal_rows:
+            blockers.append("INCOMPLETE_FISCAL_IDENTITY")
         fiscal_contradictions = fiscal_sequence_contradictions(rows)
         if fiscal_contradictions:
             blockers.append("CONTRADICTORY_FISCAL_SEQUENCE")
@@ -778,7 +801,7 @@ def build_generic_batch_plan(
             status = "REVIEW_REQUIRED"
             reason = "IDENTITY_MUTATION_NOT_AUTHORIZED"
         elif blockers:
-            status = "REVIEW_REQUIRED" if any("REVIEW" in blocker or "AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "NO_USABLE_QUARTERLY_HISTORY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN"} for blocker in blockers) else "REJECTED"
+            status = "REVIEW_REQUIRED" if any("REVIEW" in blocker or "AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "NO_USABLE_QUARTERLY_HISTORY", "INCOMPLETE_FISCAL_IDENTITY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN"} for blocker in blockers) else "REJECTED"
             reason = ",".join(blockers)
         else:
             status = "ELIGIBLE"
@@ -1253,6 +1276,9 @@ def _stage_generic_provider_rows(paths: BatchAddTickerPaths, items: Sequence[Map
             seen = 0
             for item in items:
                 ticker = str(item["ticker"]).upper()
+                incomplete = incomplete_fiscal_identity_rows(item.get("rows") or ())
+                if incomplete:
+                    raise RuntimeError(f"ADD_TICKERS_INCOMPLETE_FISCAL_IDENTITY:{ticker}:{len(incomplete)}")
                 identity = identities.get(ticker)
                 if identity is None:
                     skipped["identity_not_found"] += len(item.get("rows") or ())
@@ -1285,6 +1311,92 @@ def _stage_generic_provider_rows(paths: BatchAddTickerPaths, items: Sequence[Map
         "logical_changes": sum(inserted.values()),
         "skipped": dict(sorted(skipped.items())),
     }
+
+
+def _ticker_lineage_evidence(
+    paths: BatchAddTickerPaths,
+    *,
+    tickers: Sequence[str],
+    provider_run_id: str,
+    analysis_db: Path,
+    expected_arq_rows: Mapping[str, int],
+) -> dict[str, Any]:
+    with _readonly(paths.canonical_db) as canonical, _readonly(paths.provider_db) as provider, _readonly(analysis_db) as analysis:
+        output: dict[str, Any] = {}
+        for ticker in tickers:
+            identity = canonical.execute(
+                "SELECT company_id,security_id FROM security WHERE UPPER(current_ticker)=UPPER(?)",
+                (ticker,),
+            ).fetchone()
+            if identity is None:
+                raise RuntimeError(f"ADD_TICKERS_LINEAGE_IDENTITY_MISSING:{ticker}")
+            company_id, security_id = int(identity["company_id"]), int(identity["security_id"])
+            source_rows = list(provider.execute(
+                "SELECT po.observation_id,s.fiscalperiod FROM provider_observation po "
+                "JOIN sharadar_fundamental_observation s USING(observation_id) "
+                "WHERE po.run_id=? AND UPPER(s.ticker)=UPPER(?) AND s.dimension='ARQ'",
+                (provider_run_id, ticker),
+            ))
+            parseable = [row for row in source_rows if re.fullmatch(r"[0-9]{4}-Q[1-4]", str(row["fiscalperiod"] or "").upper())]
+            fiscal_keys = {str(row["fiscalperiod"]).upper() for row in parseable}
+            canonical_keys = {
+                f"{int(row['fiscal_year'])}-{row['fiscal_quarter']}"
+                for row in canonical.execute(
+                    "SELECT fiscal_year,fiscal_quarter FROM v4_quarter WHERE company_id=?",
+                    (company_id,),
+                )
+            }
+            source_ids = {str(row["observation_id"]) for row in source_rows}
+            provenance_ids: set[str] = set()
+            for table in (
+                "v4_field_provenance",
+                "v4_common_earnings_provenance",
+                "v4_operating_working_capital_provenance",
+            ):
+                if not _table_exists(canonical, table):
+                    continue
+                provenance_ids.update(
+                    str(row[0]) for row in canonical.execute(
+                        f"SELECT DISTINCT p.provider_observation_id FROM {table} p "
+                        "JOIN v4_quarter q USING(quarter_id) WHERE q.company_id=?",
+                        (company_id,),
+                    )
+                    if str(row[0]) in source_ids
+                )
+            model_rows = {
+                name: int(analysis.execute(f"SELECT COUNT(*) FROM {table} WHERE company_id=?", (company_id,)).fetchone()[0])
+                if _table_exists(analysis, table) else 0
+                for name, table in (
+                    ("score", "score_result"),
+                    ("lifecycle", "lifecycle_revised_result"),
+                    ("valuation", "valuation_revised_result"),
+                )
+            }
+            output[ticker] = {
+                "company_id": company_id,
+                "security_id": security_id,
+                "source_arq_rows": len(source_rows),
+                "source_arq_rows_accepted_for_canonicalization": len(parseable),
+                "source_arq_acceptance_invariant": f"{len(parseable)}/{len(source_rows)}",
+                "distinct_source_fiscal_quarters": len(fiscal_keys),
+                "canonical_source_fiscal_quarters": len(fiscal_keys & canonical_keys),
+                "canonical_quarter_invariant": f"{len(fiscal_keys & canonical_keys)}/{len(fiscal_keys)}",
+                "source_observations_selected_by_canonical_provenance": len(provenance_ids),
+                "analysis_input_ttm_rows": int(canonical.execute(
+                    "SELECT COUNT(*) FROM v4_ttm_values WHERE company_id=?", (company_id,),
+                ).fetchone()[0]),
+                "analysis_output_rows": model_rows,
+            }
+            expected = int(expected_arq_rows.get(ticker, 0))
+            if len(source_rows) != expected:
+                raise RuntimeError(f"ADD_TICKERS_LINEAGE_PROVIDER_STAGING_MISMATCH:{ticker}:{len(source_rows)}/{expected}")
+            if len(parseable) != len(source_rows):
+                raise RuntimeError(f"ADD_TICKERS_LINEAGE_INCOMPLETE_FISCAL_IDENTITY:{ticker}")
+            if len(fiscal_keys & canonical_keys) != len(fiscal_keys):
+                raise RuntimeError(f"ADD_TICKERS_LINEAGE_CANONICAL_QUARTERS_MISSING:{ticker}")
+            if source_rows and (not model_rows or any(count == 0 for count in model_rows.values())):
+                raise RuntimeError(f"ADD_TICKERS_LINEAGE_ANALYSIS_OUTPUT_MISSING:{ticker}")
+        return output
 
 
 def _valuation_classification_update_generic(
@@ -1543,6 +1655,21 @@ def _apply_generic_plan(
             allow_production=allow_production,
             snapshot_control_tickers=snapshot_control_tickers,
         )
+        candidate_analysis = downstream.get("candidate_analysis_db")
+        if candidate_analysis and "ticker_lineage" not in downstream:
+            downstream["ticker_lineage"] = _ticker_lineage_evidence(
+                paths,
+                tickers=accepted,
+                provider_run_id=str(provider["run_id"]),
+                analysis_db=Path(candidate_analysis),
+                expected_arq_rows={
+                    str(item["ticker"]).upper(): sum(
+                        str(row.get("dimension") or "").upper() == "ARQ"
+                        for row in item.get("rows") or ()
+                    )
+                    for item in items
+                },
+            )
     else:
         if progress:
             _skip_authoritative_downstream_progress(progress, reason="No eligible accepted tickers; downstream rebuilds not required.")
@@ -1855,6 +1982,7 @@ def run_apply(
                 analysis_db=Path(downstream["candidate_analysis_db"]),
             ) if downstream.get("candidate_analysis_db") else lane.paths,
             stage="COPY_ONLY_APPLY", final_actions=action_labels,
+            lineage=downstream.get("ticker_lineage") if isinstance(downstream.get("ticker_lineage"), Mapping) else None,
         )
         result_dict["copy_apply"] = {
             "phase13d_result": applied,
