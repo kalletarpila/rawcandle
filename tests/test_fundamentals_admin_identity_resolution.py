@@ -285,7 +285,8 @@ def test_identity_and_quarterly_history_are_independent_and_exchange_unknown_is_
     plan = build_generic_batch_plan(paths, parse_batch_tickers("GHOST"), archive_path=tmp_path / "none.zip")
     assert "EXCHANGE_UNKNOWN" in plan.items[0].reason
     assert "INCOMPATIBLE_EXCHANGE" not in plan.items[0].reason
-    assert "NO_USABLE_QUARTERLY_HISTORY" in plan.items[0].reason
+    assert "INCOMPLETE_FISCAL_IDENTITY" in plan.items[0].reason
+    assert "NO_USABLE_QUARTERLY_HISTORY" not in plan.items[0].reason
 
 
 def test_read_only_preview_is_self_contained_and_does_not_change_databases(tmp_path: Path) -> None:

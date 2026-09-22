@@ -195,6 +195,38 @@ def test_invalid_backup_blocks_source_mutation(tmp_path, monkeypatch):
     assert all(_value(paths.as_dict()[role]) == "old" for role in ("provider", "canonical", "analysis"))
 
 
+@pytest.mark.parametrize("suffix", ("-journal", "-wal", "-shm"))
+def test_sqlite_sidecar_preflight_blocks_before_backup_or_write(tmp_path, monkeypatch, suffix):
+    op, paths, kwargs = _fixture(
+        tmp_path, monkeypatch, operation=AdminOperationType.ADD_TICKERS,
+        roles=("provider", "canonical", "analysis"), source_mutation=True,
+    )
+
+    def guarded_fingerprints(current):
+        for path in current.as_dict().values():
+            tx._no_sidecars(path)
+        return {
+            role: tx._sha256(current.as_dict()[role])
+            for role in ("provider", "canonical", "market", "taxonomy")
+        }
+
+    monkeypatch.setattr(tx, "_source_fingerprints", guarded_fingerprints)
+    sidecar = Path(str(paths.market_db) + suffix)
+    sidecar.write_bytes(b"fixture-sidecar")
+
+    result = tx.run_transaction(op, **kwargs)
+
+    assert result["outcome"] == "FAILED"
+    assert result["failed_stage"] == "PREFLIGHT"
+    assert "ADMIN_PRODUCTION_SQLITE_SIDECAR_PRESENT" in result["error"]
+    assert result["write_boundary_crossed"] is False
+    assert not (tmp_path / "backups").exists()
+    assert all(
+        _value(paths.as_dict()[role]) == "old"
+        for role in ("provider", "canonical", "analysis")
+    )
+
+
 def test_candidate_validation_failure_restores_add_sources(tmp_path, monkeypatch):
     op, paths, kwargs = _fixture(tmp_path, monkeypatch, operation=AdminOperationType.ADD_TICKERS,
                                  roles=("provider", "canonical", "analysis"), source_mutation=True)

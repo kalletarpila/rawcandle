@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from io import BytesIO
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -13,6 +14,7 @@ from rawcandle.fundamentals.providers.sharadar import (
     AUTH_OK,
     FREE_TIER_ACCESS_LIMIT,
     SHARADAR_DIRECT_BASE_URL,
+    SHARADAR_MIN_REQUEST_INTERVAL_SECONDS,
     STATUS_AUTH_FAILED,
     STATUS_AUTH_NOT_CONFIGURED,
     STATUS_FREE_TIER_LIMIT,
@@ -20,11 +22,25 @@ from rawcandle.fundamentals.providers.sharadar import (
     STATUS_SUCCESS,
     STATUS_TRANSIENT_FAILURE,
     SharadarClient,
+    SharadarRequestLimiter,
     extract_schema_fields,
     redact_secret,
     redact_url,
     validate_schema_fields,
 )
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.value = 100.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.value
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.value += seconds
 
 
 class FakeResponse:
@@ -175,6 +191,78 @@ def test_transient_5xx_retry() -> None:
     result = SharadarClient(api_key="key", opener=opener, retry_sleep_seconds=0, sleeper=lambda _: None).fundamentals(ticker="AAPL")
     assert result.status == STATUS_SUCCESS
     assert len(opener.requests) == 2
+
+
+def test_shared_limiter_spaces_sequential_requests_without_wall_clock_sleep() -> None:
+    clock = FakeClock()
+    limiter = SharadarRequestLimiter(clock=clock.monotonic, sleeper=clock.sleep)
+    observed: list[float] = []
+
+    def opener(request: Request, timeout: float) -> FakeResponse:
+        del request, timeout
+        observed.append(clock.monotonic())
+        return FakeResponse(200, [])
+
+    client = SharadarClient(api_key="key", opener=opener, request_limiter=limiter)
+    client.fundamentals(ticker="AAPL")
+    client.fundamentals(ticker="MSFT")
+
+    assert observed == [100.0, 100.0 + SHARADAR_MIN_REQUEST_INTERVAL_SECONDS]
+    assert clock.sleeps == [SHARADAR_MIN_REQUEST_INTERVAL_SECONDS]
+
+
+def test_retry_attempts_use_the_same_minimum_request_interval() -> None:
+    clock = FakeClock()
+    limiter = SharadarRequestLimiter(clock=clock.monotonic, sleeper=clock.sleep)
+    observed: list[float] = []
+    responses: list[Any] = [http_error(503, "try later"), FakeResponse(200, [])]
+
+    def opener(request: Request, timeout: float) -> Any:
+        del request, timeout
+        observed.append(clock.monotonic())
+        response = responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+    result = SharadarClient(
+        api_key="key", opener=opener, request_limiter=limiter,
+        retry_sleep_seconds=0.1, sleeper=clock.sleep,
+    ).fundamentals(ticker="AAPL")
+
+    assert result.status == STATUS_SUCCESS
+    assert observed[1] - observed[0] >= SHARADAR_MIN_REQUEST_INTERVAL_SECONDS
+    assert sum(clock.sleeps) == pytest.approx(SHARADAR_MIN_REQUEST_INTERVAL_SECONDS)
+
+
+def test_concurrent_clients_cannot_bypass_one_shared_limiter() -> None:
+    clock = FakeClock()
+    limiter = SharadarRequestLimiter(clock=clock.monotonic, sleeper=clock.sleep)
+    observed: list[float] = []
+    observed_lock = threading.Lock()
+
+    def opener(request: Request, timeout: float) -> FakeResponse:
+        del request, timeout
+        with observed_lock:
+            observed.append(clock.monotonic())
+        return FakeResponse(200, [])
+
+    clients = [
+        SharadarClient(api_key="key", opener=opener, request_limiter=limiter)
+        for _ in range(3)
+    ]
+    threads = [threading.Thread(target=client.fundamentals, kwargs={"ticker": f"T{index}"}) for index, client in enumerate(clients)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    ordered = sorted(observed)
+    assert len(ordered) == 3
+    assert all(
+        later - earlier >= SHARADAR_MIN_REQUEST_INTERVAL_SECONDS
+        for earlier, later in zip(ordered, ordered[1:])
+    )
 
 
 def test_no_retry_on_403() -> None:

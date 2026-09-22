@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping
@@ -19,6 +20,7 @@ from rawcandle.fundamentals.providers.base import ProviderObservation
 SHARADAR_DIRECT_BASE_URL = "https://api.sharadar.com/v1.0"
 SHARADAR_API_KEY_ENV = "SHARADAR_API_KEY"
 USER_AGENT = "rawcandle-v4-sharadar-smoke/0.1"
+SHARADAR_MIN_REQUEST_INTERVAL_SECONDS = 0.5
 
 STATUS_SUCCESS = "SUCCESS"
 STATUS_AUTH_NOT_CONFIGURED = "AUTH_NOT_CONFIGURED"
@@ -62,6 +64,36 @@ FUNDAMENTALS_REQUIRED_FIELDS = (
     "shareswa",
     "shareswadil",
 )
+
+
+class SharadarRequestLimiter:
+    """Serialize outbound requests and enforce one process-level pacing clock."""
+
+    def __init__(
+        self,
+        minimum_interval_seconds: float = SHARADAR_MIN_REQUEST_INTERVAL_SECONDS,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.minimum_interval_seconds = max(0.0, float(minimum_interval_seconds))
+        self._clock = clock
+        self._sleeper = sleeper
+        self._lock = threading.Lock()
+        self._last_request_at: float | None = None
+
+    def wait(self) -> None:
+        with self._lock:
+            now = self._clock()
+            if self._last_request_at is not None:
+                remaining = self.minimum_interval_seconds - (now - self._last_request_at)
+                if remaining > 0:
+                    self._sleeper(remaining)
+                    now = self._clock()
+            self._last_request_at = now
+
+
+_PROCESS_REQUEST_LIMITER = SharadarRequestLimiter()
 
 
 @dataclass(frozen=True)
@@ -165,6 +197,7 @@ class SharadarClient:
         retry_sleep_seconds: float = 1.0,
         opener: Callable[[Request, float], Any] | None = None,
         sleeper: Callable[[float], None] = time.sleep,
+        request_limiter: SharadarRequestLimiter | None = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
         self._api_key = api_key if api_key is not None else (env.get(SHARADAR_API_KEY_ENV) if env is not None else get_env(SHARADAR_API_KEY_ENV))
@@ -174,6 +207,11 @@ class SharadarClient:
         self._retry_sleep_seconds = retry_sleep_seconds
         self._opener = opener or self._default_open
         self._sleeper = sleeper
+        # Custom transports are fixture boundaries and should never incur real
+        # wall-clock delays unless a test explicitly injects a limiter.
+        self._request_limiter = request_limiter if request_limiter is not None else (
+            _PROCESS_REQUEST_LIMITER if opener is None else None
+        )
         self.request_count = 0
 
     @property
@@ -286,6 +324,8 @@ class SharadarClient:
         last_error = ""
         for attempt in range(attempts):
             try:
+                if self._request_limiter is not None:
+                    self._request_limiter.wait()
                 self.request_count += 1
                 response = self._opener(request, self._timeout_seconds)
                 status = int(getattr(response, "status", response.getcode()))
