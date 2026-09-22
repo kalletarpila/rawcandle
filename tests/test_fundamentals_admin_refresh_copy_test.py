@@ -774,10 +774,13 @@ def test_refresh_test_source_preparation_fails_closed(
         )
 
 
-def test_refresh_production_keeps_full_copy_source_policy() -> None:
+def test_refresh_production_uses_same_compact_source_policy_as_test() -> None:
     from rawcandle.fundamentals.admin import refresh_production
 
-    assert refresh_production.prepare_full_v2_read_only_copies is prepare_full_v2_read_only_copies
+    assert (
+        refresh_production.prepare_compact_read_only_sources
+        is refresh_copy_runtime.prepare_compact_read_only_sources
+    )
 
 
 def test_refresh_test_downstream_receives_compact_market_and_copied_taxonomy(

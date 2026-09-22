@@ -34,12 +34,11 @@ from rawcandle.fundamentals.admin.publication_journal import (
     INCOMPLETE_STATES,
 )
 from rawcandle.fundamentals.admin.refresh_copy_runtime import (
-    FULL_V2_READ_ONLY_SOURCE_ROLES,
     REPLACEMENT_CLASSES,
     _analysis_state,
     _identity_mapping,
     fresh_rebuild_canonical,
-    prepare_full_v2_read_only_copies,
+    prepare_compact_read_only_sources,
     replace_provider_histories,
     revalidate_bound_source,
     validate_provider_candidate,
@@ -51,13 +50,18 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     _summary_counts,
     ensure_refresh_state_schema,
 )
+from rawcandle.fundamentals.admin.source_bundle import (
+    ReadOnlySourceMode,
+    SOURCE_CONTRACT_VERSION,
+    TaxonomySourceMode,
+)
 from rawcandle.fundamentals.operating_income_v2.full_rebuild import validate_rebuild
 from rawcandle.fundamentals.phase12d import PRODUCTION
 from rawcandle.fundamentals.phase13b_foundation import online_backup
 from rawcandle.fundamentals.providers.sharadar import SharadarClient
 
 
-PRODUCTION_CONTRACT_VERSION = "PHASE13G3_10_REFRESH_RETENTION_PRODUCTION_V1"
+PRODUCTION_CONTRACT_VERSION = "PHASE13G3_28_REFRESH_PRODUCTION_COMPACT_SOURCE_V2"
 PRODUCTION_STAGES = (
     "PRODUCTION_PREFLIGHT", "SOURCE_REVALIDATION", "PROVIDER_CANDIDATE",
     "CANONICAL_CANDIDATE", "ANALYSIS_CANDIDATE", "CANDIDATE_VALIDATION",
@@ -158,7 +162,107 @@ def load_production_authorization(
         raise ValueError("REFRESH_PRODUCTION_TEST_REFRESH_SET_MISMATCH")
     if source_revalidation.get("schema", {}).get("schema_fingerprint") != preview.get("schema", {}).get("schema_fingerprint"):
         raise ValueError("REFRESH_PRODUCTION_TEST_SCHEMA_MISMATCH")
+    source_binding_path = test_dir / "read_only_source_binding.json"
+    source_binding = _load_json(source_binding_path)
+    if source_binding != downstream.get("read_only_source_binding"):
+        raise ValueError("REFRESH_PRODUCTION_TEST_SOURCE_BINDING_EVIDENCE_MISMATCH")
+    test_semantic_binding = _semantic_source_binding(source_binding)
+    if (
+        test_semantic_binding["market"]["mode"] != ReadOnlySourceMode.STABLE_SOURCE_BUNDLE.value
+        or test_semantic_binding["market"]["source_contract_version"] != SOURCE_CONTRACT_VERSION
+        or test_semantic_binding["taxonomy"]["mode"] != TaxonomySourceMode.FULL_SQLITE_BACKUP.value
+    ):
+        raise ValueError("REFRESH_PRODUCTION_TEST_SOURCE_BINDING_POLICY_UNSUPPORTED")
+    test["_authorized_source_binding"] = source_binding
+    test["_authorized_source_binding_path"] = str(source_binding_path)
     return preview, test
+
+
+def _semantic_source_binding(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    market_evidence = evidence.get("market")
+    taxonomy_evidence = evidence.get("taxonomy")
+    if not isinstance(market_evidence, Mapping) or not isinstance(taxonomy_evidence, Mapping):
+        raise ValueError("REFRESH_SOURCE_BINDING_MALFORMED")
+    manifest = market_evidence.get("bundle_manifest")
+    taxonomy = taxonomy_evidence.get("binding")
+    if not isinstance(manifest, Mapping) or not isinstance(taxonomy, Mapping):
+        raise ValueError("REFRESH_SOURCE_BINDING_MALFORMED")
+    market = manifest.get("market")
+    canonical = manifest.get("canonical_binding")
+    coverage = market.get("valuation_coverage") if isinstance(market, Mapping) else None
+    if not all(isinstance(value, Mapping) for value in (market, canonical, coverage)):
+        raise ValueError("REFRESH_SOURCE_BINDING_MALFORMED")
+    required = (
+        manifest.get("source_contract_version"), manifest.get("as_of_date"),
+        market.get("semantic_fingerprint"), canonical.get("semantic_fingerprint"),
+        taxonomy.get("version"), taxonomy.get("semantic_fingerprint"),
+    )
+    if any(not str(value or "") for value in required):
+        raise ValueError("REFRESH_SOURCE_BINDING_MALFORMED")
+    return {
+        "market": {
+            "mode": market_evidence.get("mode"),
+            "source_contract_version": manifest.get("source_contract_version"),
+            "as_of_date": manifest.get("as_of_date"),
+            "semantic_fingerprint": market.get("semantic_fingerprint"),
+            "schema_fingerprint": market.get("schema_fingerprint"),
+            "row_counts": market.get("row_counts"),
+            "canonical_binding": {
+                key: canonical.get(key)
+                for key in (
+                    "semantic_fingerprint", "valuation_requirement_count",
+                    "recent_ticker_count", "validation_sample_ticker",
+                )
+            },
+            "valuation_coverage": {
+                "requirements": coverage.get("requirements"),
+                "status_counts": coverage.get("status_counts"),
+                "status_identity_fingerprints": coverage.get("status_identity_fingerprints"),
+            },
+        },
+        "taxonomy": {
+            "mode": taxonomy_evidence.get("mode"),
+            "domain": taxonomy.get("domain"),
+            "version": taxonomy.get("version"),
+            "semantic_fingerprint": taxonomy.get("semantic_fingerprint"),
+            "membership_rows": taxonomy.get("membership_rows"),
+        },
+    }
+
+
+def compare_test_and_production_source_bindings(
+    test_evidence: Mapping[str, Any], production_evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    tested = _semantic_source_binding(test_evidence)
+    production = _semantic_source_binding(production_evidence)
+    differences = [
+        section for section in ("market", "taxonomy")
+        if tested[section] != production[section]
+    ]
+    return {
+        "status": "MATCH" if not differences else "STALE",
+        "differing_contract_sections": differences,
+        "test": tested,
+        "production": production,
+    }
+
+
+def run_refresh_production_full_v2_downstream(
+    *, provider_candidate: Path, canonical_candidate: Path,
+    read_only_sources: Mapping[str, Path], lane_dir: Path, as_of_date: str,
+) -> dict[str, Any]:
+    candidate_paths = BatchAddTickerPaths(
+        provider_candidate,
+        canonical_candidate,
+        lane_dir / "unused.db",
+        read_only_sources["market"],
+        read_only_sources["taxonomy"],
+    )
+    return run_full_v2_downstream(
+        candidate_paths.as_dict(),
+        output=lane_dir / "analysis_rebuild",
+        as_of_date=as_of_date,
+    )
 
 
 def _provider_semantic_fingerprint(path: Path) -> str:
@@ -209,9 +313,9 @@ def _storage_preflight(paths: BatchAddTickerPaths, *, temp_root: Path, backup_ro
     backup_root.mkdir(parents=True, exist_ok=True)
     sizes = {role: path.stat().st_size for role, path in paths.as_dict().items()}
     publication_total = sum(sizes[role] for role in PUBLICATION_ROLES)
-    read_only_total = sum(sizes[role] for role in FULL_V2_READ_ONLY_SOURCE_ROLES)
-    # Publication candidates/backups and rebuild scratch, plus the two required
-    # immutable read-only authority snapshots.
+    read_only_total = sizes["taxonomy"]
+    # Publication candidates/backups and rebuild scratch, plus the taxonomy
+    # snapshot. Compact market size is measured after construction.
     requirements: dict[int, dict[str, Any]] = {}
     location_requirements = (
         (temp_root, int(publication_total * 1.75) + read_only_total),
@@ -228,7 +332,8 @@ def _storage_preflight(paths: BatchAddTickerPaths, *, temp_root: Path, backup_ro
             raise RuntimeError("REFRESH_PRODUCTION_INSUFFICIENT_STORAGE")
     return {
         "source_sizes": sizes,
-        "required_read_only_copy_roles": list(FULL_V2_READ_ONLY_SOURCE_ROLES),
+        "required_read_only_copy_roles": ["taxonomy"],
+        "compact_market_bundle_built_during_candidate_preparation": True,
         "filesystems": {str(device): item for device, item in requirements.items()},
     }
 
@@ -389,7 +494,7 @@ def _postflight(
     merge_plans: Mapping[str, Any],
     canonical_result: Mapping[str, Any], analysis_result: Mapping[str, Any],
     expected_roles: Mapping[str, Mapping[str, Any]], refresh_state: Mapping[str, Any],
-    as_of_date: str,
+    as_of_date: str, read_only_sources: Mapping[str, Path] | None = None,
 ) -> dict[str, Any]:
     provider = validate_provider_candidate(paths.provider_db, histories, merge_plans=merge_plans)
     with sqlite3.connect(f"file:{paths.provider_db.resolve()}?mode=ro", uri=True) as connection:
@@ -418,7 +523,8 @@ def _postflight(
         raise RuntimeError("REFRESH_PUBLISHED_CANONICAL_CONTRACT_FAILED")
     sources = {
         "provider": paths.provider_db, "canonical": paths.canonical_db,
-        "market": paths.market_db, "taxonomy": paths.taxonomy_db,
+        "market": (read_only_sources or {}).get("market", paths.market_db),
+        "taxonomy": (read_only_sources or {}).get("taxonomy", paths.taxonomy_db),
     }
     analysis_lineage = _validate_analysis_generation(
         paths.analysis_db, analysis_result=analysis_result,
@@ -476,6 +582,13 @@ def render_report(result: Mapping[str, Any]) -> str:
     activity = result.get("publication_activity") or _publication_activity(result.get("journal"))
     live_replacements = list(activity.get("live_replacements") or [])
     rollback_restorations = list(activity.get("rollback_restorations") or [])
+    source_binding = result.get("production_source_binding") or {}
+    market_evidence = source_binding.get("market") or {}
+    market_manifest = market_evidence.get("bundle_manifest") or {}
+    market_binding = market_manifest.get("market") or {}
+    taxonomy_evidence = source_binding.get("taxonomy") or {}
+    taxonomy_binding = taxonomy_evidence.get("binding") or {}
+    binding_comparison = result.get("test_source_binding_comparison") or {}
     lines = [
         "# Refresh Fundamentals Production Update", "", "## Executive Summary", "",
         "- Operation: Refresh Fundamentals", "- Stage: Production update",
@@ -503,6 +616,20 @@ def render_report(result: Mapping[str, Any]) -> str:
         f"- Refresh-set fingerprint: `{result.get('preview_fingerprint')}`",
         f"- Source schema fingerprint: `{refresh_state.get('source_schema_fingerprint', 'not published')}`",
         f"- Source classifications: `{json.dumps(result.get('summary_counts') or {}, sort_keys=True)}`",
+        "", "## Read-Only Source Binding", "",
+        f"- Authorizing Test run: `{result.get('test_run_id', 'NOT_RECORDED')}`",
+        f"- Test evidence: `{(result.get('test_source_binding_reference') or {}).get('evidence_path', 'NOT_RECORDED')}`",
+        f"- Market mode: `{market_evidence.get('mode', 'NOT_PREPARED')}`",
+        f"- Source contract: `{market_manifest.get('source_contract_version', 'NOT_PREPARED')}`",
+        f"- Market semantic fingerprint: `{market_binding.get('semantic_fingerprint', 'NOT_PREPARED')}`",
+        f"- Canonical binding: `{(market_manifest.get('canonical_binding') or {}).get('semantic_fingerprint', 'NOT_PREPARED')}`",
+        f"- Coverage: `{json.dumps((market_binding.get('valuation_coverage') or {}).get('status_counts', {}), sort_keys=True)}`",
+        f"- Taxonomy mode: `{taxonomy_evidence.get('mode', 'NOT_PREPARED')}`",
+        f"- Taxonomy version/fingerprint: `{taxonomy_binding.get('version', 'NOT_PREPARED')}` / `{taxonomy_binding.get('semantic_fingerprint', 'NOT_PREPARED')}`",
+        f"- Test vs Production: `{binding_comparison.get('status', 'NOT_COMPARED')}`",
+        f"- Differing contract sections: `{json.dumps(binding_comparison.get('differing_contract_sections', []))}`",
+        f"- Full market-copy bytes avoided: {market_evidence.get('old_full_copy_bytes_avoided', 0)}",
+        f"- Compact market bytes/build seconds: {market_evidence.get('compact_bundle_bytes', 0)} / {market_evidence.get('bundle_build_seconds', 0)}",
         "", f"## Provider {'Publication' if published else 'Candidate'}", "",
         f"- Candidate ARQ/MRQ replacement tickers: {provider_candidate_count}",
         f"- Published ARQ/MRQ replacement tickers: {provider_published_count}",
@@ -653,6 +780,13 @@ def run_production_apply(
         )
         result["preview"] = {"run_id": preview_payload_path.resolve().parent.name, "payload": str(preview_payload_path.resolve())}
         result["test_on_copies"] = {"run_id": test_run_id, "outcome": test["outcome"]}
+        test_source_binding = test["_authorized_source_binding"]
+        result["test_source_binding_reference"] = {
+            "test_run_id": test_run_id,
+            "evidence_path": test["_authorized_source_binding_path"],
+            "semantic_contract": _semantic_source_binding(test_source_binding),
+        }
+        calculation_as_of_date = as_of_date or date.today().isoformat()
         owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
         result["lock_owner"] = owner
         result["recovery_preflight"] = guard_production_writes(journal_path)
@@ -693,14 +827,7 @@ def run_production_apply(
         canonical_candidate = lane_dir / "canonical_candidate.db"
 
         stage = "PROVIDER_CANDIDATE"
-        progress(stage, "RUNNING", "Preparing isolated source snapshots and the provider candidate.")
-        with _durable_heartbeat(writer, stage, "Read-only source snapshots are still being copied."):
-            read_only_copies, read_only_copy_evidence = prepare_full_v2_read_only_copies(
-                source_paths, lane_dir=lane_dir,
-            )
-        result["read_only_source_copies"] = read_only_copy_evidence
-        writer.write_json("read_only_source_copy_manifest.json", read_only_copy_evidence)
-
+        progress(stage, "RUNNING", "Preparing the isolated provider candidate.")
         with _durable_heartbeat(writer, stage, "Provider candidate construction is still running."):
             online_backup(source_paths.provider_db, provider_candidate)
             provider_result = replace_provider_histories(
@@ -735,16 +862,35 @@ def run_production_apply(
         progress(stage, "COMPLETED", "Canonical candidate passed identity and publication-date invariants.")
 
         stage = "ANALYSIS_CANDIDATE"
-        progress(stage, "RUNNING", "Building the full V2, RP V2, and RV candidate once.")
+        progress(stage, "RUNNING", "Binding compact read-only sources and building the full V2, RP V2, and RV candidate once.")
         before_analysis = _analysis_state(source_paths.analysis_db, source_paths.canonical_db, changed_tickers)
-        candidate_paths = BatchAddTickerPaths(
-            provider_candidate, canonical_candidate, lane_dir / "unused.db",
-            read_only_copies["market"], read_only_copies["taxonomy"],
+        with _durable_heartbeat(writer, stage, "Compact market bundle and taxonomy copy preparation is still running."):
+            read_only_copies, production_source_binding = prepare_compact_read_only_sources(
+                source_paths,
+                lane_dir=lane_dir,
+                canonical_candidate=canonical_candidate,
+                as_of_date=calculation_as_of_date,
+            )
+        binding_comparison = compare_test_and_production_source_bindings(
+            test_source_binding,
+            production_source_binding,
         )
+        result["production_source_binding"] = production_source_binding
+        result["test_source_binding_comparison"] = binding_comparison
+        writer.write_json("read_only_source_binding.json", production_source_binding)
+        writer.write_json("test_source_binding_comparison.json", binding_comparison)
+        if binding_comparison["status"] != "MATCH":
+            raise StaleRefreshTest(
+                "REFRESH_TEST_SOURCE_BINDING_STALE:"
+                + ",".join(binding_comparison["differing_contract_sections"])
+            )
         with _durable_heartbeat(writer, stage, "Full V2, RP V2, and RV rebuild is still running."):
-            analysis_result = run_full_v2_downstream(
-                candidate_paths.as_dict(), output=lane_dir / "analysis_rebuild",
-                as_of_date=as_of_date or date.today().isoformat(),
+            analysis_result = run_refresh_production_full_v2_downstream(
+                provider_candidate=provider_candidate,
+                canonical_candidate=canonical_candidate,
+                read_only_sources=read_only_copies,
+                lane_dir=lane_dir,
+                as_of_date=calculation_as_of_date,
             )
         analysis_candidate = Path(analysis_result["candidate_analysis_db"])
         if analysis_result.get("status") != "READY" or analysis_result.get("invocation_counts", {}).get("full_v2_rebuild") != 1:
@@ -769,7 +915,7 @@ def run_production_apply(
         }
         candidate_analysis_lineage = _validate_analysis_generation(
             analysis_candidate, analysis_result=analysis_result,
-            as_of_date=as_of_date or date.today().isoformat(), sources=candidate_sources,
+            as_of_date=calculation_as_of_date, sources=candidate_sources,
         )
         result["candidate_validation"] = candidate_checks
         result["candidate_analysis_lineage"] = candidate_analysis_lineage
@@ -838,7 +984,8 @@ def run_production_apply(
             paths=source_paths, histories=histories, merge_plans=merge_plans,
             canonical_result=canonical_result,
             analysis_result=analysis_result, expected_roles=roles, refresh_state=refresh_state,
-            as_of_date=as_of_date or date.today().isoformat(),
+            as_of_date=calculation_as_of_date,
+            read_only_sources=read_only_copies,
         )
         result["postflight"] = postflight
         journal = update_journal(journal_path, journal, postflight_state="PASSED", current_publication_step="POSTFLIGHT_PASSED")
@@ -905,7 +1052,7 @@ def run_production_apply(
                 if recovery_retry else
                 "RawCandle could not restore a complete verified Fundamentals generation. Production-writing Fundamentals operations are blocked until recovery is resolved."
                 if recovery_failed else
-                "Sharadar fundamentals changed after Test on copies. No production databases were modified. Run Preview and Test on copies again."
+                "The successful Test source binding is stale or source fundamentals changed. No production databases were modified. Run Preview and Test on copies again."
                 if stale else
                 "Production candidates did not pass validation. No production databases were modified."
             )

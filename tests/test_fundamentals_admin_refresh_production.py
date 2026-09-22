@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sqlite3
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,7 @@ from rawcandle.fundamentals.admin.refresh_production import (
     _publish_refresh_state,
     _postflight,
     _replace_role,
+    compare_test_and_production_source_bindings,
     load_production_authorization,
     render_report,
     run_production_apply,
@@ -59,6 +61,57 @@ def _database(path: Path, generation: str) -> None:
 def _generation(path: Path) -> str:
     with sqlite3.connect(path) as connection:
         return str(connection.execute("SELECT value FROM generation").fetchone()[0])
+
+
+def _source_binding(as_of_date: str = "2026-09-22") -> dict[str, object]:
+    return {
+        "market": {
+            "mode": "STABLE_SOURCE_BUNDLE",
+            "bundle_path": "/ephemeral/market.db",
+            "manifest_path": "/ephemeral/manifest.json",
+            "old_full_copy_bytes_avoided": 1_000,
+            "compact_bundle_bytes": 100,
+            "bundle_build_seconds": 0.1,
+            "bundle_manifest": {
+                "source_contract_version": "FUNDAMENTALS_READ_ONLY_SOURCE_V1",
+                "mode": "STABLE_SOURCE_BUNDLE",
+                "as_of_date": as_of_date,
+                "canonical_binding": {
+                    "semantic_fingerprint": "canonical-fp",
+                    "valuation_requirement_count": 2,
+                    "recent_ticker_count": 1,
+                    "validation_sample_ticker": "TEST",
+                },
+                "market": {
+                    "semantic_fingerprint": "market-fp",
+                    "physical_sha256": "physical-layout-may-differ",
+                    "schema_fingerprint": "market-schema",
+                    "row_counts": {"ticker_meta": 1, "osakedata": 2, "splits_data": 0},
+                    "valuation_coverage": {
+                        "requirements": 2,
+                        "status_counts": {
+                            "PRICE_FOUND": 1, "NO_MATCHING_VALID_PRICE": 0,
+                            "NO_CUTOFF": 1, "NO_TICKER": 0,
+                        },
+                        "status_identity_fingerprints": {
+                            "PRICE_FOUND": "price-found-fp",
+                            "NO_MATCHING_VALID_PRICE": "no-match-fp",
+                            "NO_CUTOFF": "no-cutoff-fp",
+                            "NO_TICKER": "no-ticker-fp",
+                        },
+                    },
+                },
+            },
+        },
+        "taxonomy": {
+            "mode": "FULL_SQLITE_BACKUP",
+            "copy_sha256": "physical-taxonomy-copy",
+            "binding": {
+                "domain": "dc_ecosystem", "version": "v",
+                "semantic_fingerprint": "t", "membership_rows": 1,
+            },
+        },
+    }
 
 
 def _publication_fixture(tmp_path: Path) -> tuple[Path, dict[str, dict[str, object]]]:
@@ -452,6 +505,7 @@ def _authorization_fixture(tmp_path: Path) -> tuple[Path, Path, str, str]:
         "schema": {"schema_fingerprint": "schema"},
         "ticker_changes": [{"ticker": "TEST", "classification": "HISTORICAL_REVISION"}],
     }), encoding="utf-8")
+    source_binding = _source_binding()
     (test_dir / "result.json").write_text(json.dumps({
         "operation_type": "REFRESH_FUNDAMENTALS", "mode": "COPY_ONLY_APPLY",
         "outcome": "COMPLETED", "preview_fingerprint": fingerprint,
@@ -462,8 +516,12 @@ def _authorization_fixture(tmp_path: Path) -> tuple[Path, Path, str, str]:
                 "identity_contract": {"company_security_identity_mapping_unchanged": True},
                 "publication_date_bootstrap": {"repair_required": 0},
             },
+            "read_only_source_binding": source_binding,
         },
     }), encoding="utf-8")
+    (test_dir / "read_only_source_binding.json").write_text(
+        json.dumps(source_binding), encoding="utf-8",
+    )
     (test_dir / "source_revalidation.json").write_text(json.dumps({
         "refresh_set_fingerprint": fingerprint, "schema": {"schema_fingerprint": "schema"},
     }), encoding="utf-8")
@@ -478,6 +536,22 @@ def test_production_authorization_requires_exact_bound_successful_test(tmp_path:
     )
     assert preview["refresh_set_fingerprint"] == fingerprint
     assert test["bound_preview_run_id"] == preview_path.parent.name
+    assert test["_authorized_source_binding"]["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
+    assert Path(test["_authorized_source_binding_path"]).name == "read_only_source_binding.json"
+
+
+def test_production_authorization_rejects_mismatched_binding_artifact(tmp_path: Path) -> None:
+    run_root, preview_path, fingerprint, test_id = _authorization_fixture(tmp_path)
+    binding_path = run_root / test_id / "read_only_source_binding.json"
+    binding = json.loads(binding_path.read_text(encoding="utf-8"))
+    binding["market"]["bundle_manifest"]["market"]["semantic_fingerprint"] = "tampered"
+    binding_path.write_text(json.dumps(binding), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="TEST_SOURCE_BINDING_EVIDENCE_MISMATCH"):
+        load_production_authorization(
+            preview_payload_path=preview_path, preview_fingerprint=fingerprint,
+            test_run_id=test_id, run_root=run_root,
+        )
 
 
 def test_production_authorization_rejects_test_refresh_set_mismatch(tmp_path: Path) -> None:
@@ -491,6 +565,85 @@ def test_production_authorization_rejects_test_refresh_set_mismatch(tmp_path: Pa
             preview_payload_path=preview_path, preview_fingerprint=fingerprint,
             test_run_id=test_id, run_root=run_root,
         )
+
+
+def test_source_binding_ignores_physical_layout_and_out_of_contract_fields() -> None:
+    tested = _source_binding()
+    production = deepcopy(tested)
+    production["market"]["bundle_manifest"]["market"]["physical_sha256"] = "different-layout"
+    production["market"]["bundle_manifest"]["market"]["source_identity_after"] = "later-irrelevant-row"
+    production["market"]["bundle_path"] = "/different/ephemeral/path.db"
+    production["taxonomy"]["copy_sha256"] = "different-copy-layout"
+
+    comparison = compare_test_and_production_source_bindings(tested, production)
+
+    assert comparison["status"] == "MATCH"
+    assert comparison["differing_contract_sections"] == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_section"),
+    [
+        (lambda value: value["market"]["bundle_manifest"]["market"].update(semantic_fingerprint="changed-price-value"), "market"),
+        (lambda value: value["market"]["bundle_manifest"]["market"]["valuation_coverage"]["status_identity_fingerprints"].update(NO_CUTOFF="changed-identity"), "market"),
+        (lambda value: value["market"]["bundle_manifest"]["canonical_binding"].update(semantic_fingerprint="changed-canonical"), "market"),
+        (lambda value: value["market"]["bundle_manifest"].update(source_contract_version="V2"), "market"),
+        (lambda value: value["market"]["bundle_manifest"].update(as_of_date="2026-09-23"), "market"),
+        (lambda value: value["taxonomy"]["binding"].update(version="v2"), "taxonomy"),
+        (lambda value: value["taxonomy"]["binding"].update(semantic_fingerprint="changed-taxonomy"), "taxonomy"),
+    ],
+)
+def test_material_source_binding_changes_are_stale(mutation, expected_section: str) -> None:
+    tested = _source_binding()
+    production = deepcopy(tested)
+    mutation(production)
+
+    comparison = compare_test_and_production_source_bindings(tested, production)
+
+    assert comparison["status"] == "STALE"
+    assert comparison["differing_contract_sections"] == [expected_section]
+
+
+def test_stale_source_binding_stops_before_downstream_backup_and_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    downstream_called = False
+    original_prepare = refresh_production.prepare_compact_read_only_sources
+
+    def stale_prepare(*args, **kwargs):
+        read_only, evidence = original_prepare(*args, **kwargs)
+        evidence = deepcopy(evidence)
+        evidence["market"]["bundle_manifest"]["market"]["semantic_fingerprint"] = "changed-price-value"
+        return read_only, evidence
+
+    def forbidden_downstream(*_args, **_kwargs):
+        nonlocal downstream_called
+        downstream_called = True
+        raise AssertionError("downstream must not run for stale Test binding")
+
+    monkeypatch.setattr(refresh_production, "prepare_compact_read_only_sources", stale_prepare)
+    monkeypatch.setattr(refresh_production, "run_refresh_production_full_v2_downstream", forbidden_downstream)
+    journal_path = tmp_path / "journal.json"
+    result = run_production_apply(
+        preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
+        backup_root=tmp_path / "backups", journal_path=journal_path,
+        confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(),
+    )
+
+    assert result["outcome"] == "FAILED"
+    assert result["failed_stage"] == "ANALYSIS_CANDIDATE"
+    assert "REFRESH_TEST_SOURCE_BINDING_STALE:market" in result["error"]
+    assert result["test_source_binding_comparison"]["status"] == "STALE"
+    assert result["retry_authorization"]["preview_test_rerun_required"] is True
+    assert downstream_called is False
+    assert "backups" not in result
+    assert not journal_path.exists()
+    assert result["publication_activity"]["live_replacements"] == []
+    assert result["cleanup"]["remaining_phase_owned_files"] == 0
 
 
 def test_refresh_state_is_written_to_candidate_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -566,6 +719,25 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
     monkeypatch.setattr(
         "rawcandle.fundamentals.admin.refresh_production.revalidate_bound_source",
         lambda *_args, **_kwargs: revalidated,
+    )
+
+    def prepare_sources(_paths, *, lane_dir, canonical_candidate, as_of_date):
+        del canonical_candidate
+        bundle_dir = lane_dir / "market_source_bundle"
+        bundle_dir.mkdir()
+        compact_market = bundle_dir / "market.db"
+        _database(compact_market, "authority")
+        taxonomy_copy = lane_dir / "taxonomy.db"
+        shutil.copy2(source_paths.taxonomy_db, taxonomy_copy)
+        evidence = _source_binding(as_of_date)
+        evidence["market"]["bundle_path"] = str(compact_market)
+        evidence["market"]["manifest_path"] = str(bundle_dir / "manifest.json")
+        evidence["taxonomy"]["destination"] = str(taxonomy_copy)
+        return {"market": compact_market, "taxonomy": taxonomy_copy}, evidence
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.prepare_compact_read_only_sources",
+        prepare_sources,
     )
 
     def replace_provider(path, *_args, **_kwargs):
@@ -674,12 +846,18 @@ def test_production_shaped_rehearsal_commits_only_after_postflight(
     assert result["publication_activity"]["rollback_restorations"] == []
 
 
-def test_production_analysis_candidate_uses_isolated_market_and_taxonomy_copies(
+def test_production_analysis_candidate_uses_compact_market_and_taxonomy_copy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
     _install_rehearsal_doubles(monkeypatch, paths)
     observed: dict[str, Path] = {}
+    copied_sources: list[Path] = []
+    actual_online_backup = refresh_production.online_backup
+
+    def recording_backup(source: Path, destination: Path):
+        copied_sources.append(source)
+        return actual_online_backup(source, destination)
 
     def rebuild_analysis(sources, *, output, **_kwargs):
         observed.update({role: Path(path) for role, path in sources.items()})
@@ -696,6 +874,7 @@ def test_production_analysis_candidate_uses_isolated_market_and_taxonomy_copies(
         "rawcandle.fundamentals.admin.refresh_production.run_full_v2_downstream",
         rebuild_analysis,
     )
+    monkeypatch.setattr(refresh_production, "online_backup", recording_backup)
     result = run_production_apply(
         preview_payload_path=preview_path, preview_fingerprint=fingerprint, test_run_id=test_id,
         source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
@@ -706,9 +885,15 @@ def test_production_analysis_candidate_uses_isolated_market_and_taxonomy_copies(
     assert result["outcome"] == "COMPLETED"
     assert observed["market"] != paths.market_db
     assert observed["taxonomy"] != paths.taxonomy_db
+    assert observed["market"].parent.name == "market_source_bundle"
     assert observed["market"].name == "market.db"
     assert observed["taxonomy"].name == "taxonomy.db"
-    assert result["read_only_source_copies"]["market"]["purpose"] == "FULL_V2_READ_ONLY_SOURCE"
+    assert paths.market_db not in copied_sources
+    assert paths.provider_db in copied_sources
+    assert paths.canonical_db in copied_sources
+    assert result["production_source_binding"]["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
+    assert result["production_source_binding"]["taxonomy"]["mode"] == "FULL_SQLITE_BACKUP"
+    assert result["test_source_binding_comparison"]["status"] == "MATCH"
     assert result["cleanup"]["status"] == "COMPLETED"
     assert result["cleanup"]["remaining_phase_owned_files"] == 0
 
@@ -813,6 +998,15 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
 
     actual_postflight = refresh_production._postflight
     _install_rehearsal_doubles(monkeypatch, paths)
+    installed_prepare = refresh_production.prepare_compact_read_only_sources
+    prepared_source_pairs: list[dict[str, Path]] = []
+
+    def recording_prepare(*args, **kwargs):
+        prepared, evidence = installed_prepare(*args, **kwargs)
+        prepared_source_pairs.append(dict(prepared))
+        return prepared, evidence
+
+    monkeypatch.setattr(refresh_production, "prepare_compact_read_only_sources", recording_prepare)
     dependency = {
         "domain": "dc_ecosystem", "version": "DC_FIXTURE_V1",
         "semantic_fingerprint": "fixture-semantic",
@@ -883,7 +1077,7 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
         source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
         backup_root=tmp_path / "backups", journal_path=tmp_path / "journal.json",
         confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
-        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(), as_of_date="2026-09-20",
+        scheduler_log_dir=str(tmp_path / "scheduler"), client=object(), as_of_date="2026-09-22",
     )
     assert result["outcome"] == "COMPLETED"
     assert result["analysis_candidate"]["active_taxonomy"] == dependency
@@ -894,6 +1088,16 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
     assert [call["path"] for call in validation_calls] == [
         Path(result["analysis_candidate"]["candidate_analysis_db"]), paths.analysis_db,
     ]
+    assert all(
+        call["sources"]["market"].parent.name == "market_source_bundle"
+        and call["sources"]["taxonomy"].name == "taxonomy.db"
+        for call in validation_calls
+    )
+    assert len(prepared_source_pairs) == 1
+    assert validation_calls[0]["sources"]["market"] == prepared_source_pairs[0]["market"]
+    assert validation_calls[0]["sources"]["taxonomy"] == prepared_source_pairs[0]["taxonomy"]
+    assert validation_calls[1]["sources"]["market"] == prepared_source_pairs[0]["market"]
+    assert validation_calls[1]["sources"]["taxonomy"] == prepared_source_pairs[0]["taxonomy"]
     assert result["journal"]["state"] == "COMPLETED"
     assert result["refresh_state"]["published_source_watermark"] == "2026-09-20"
     with sqlite3.connect(paths.provider_db) as connection:
@@ -1138,6 +1342,9 @@ def test_production_report_separates_financial_and_first_public_changes() -> Non
         "backups": {role: {} for role in PUBLICATION_ROLES},
         "journal": {"state": "COMPLETED"}, "postflight": {"status": "PASSED"},
         "rollback": {"status": "NOT_REQUIRED"},
+        "test_run_id": "test-run",
+        "production_source_binding": _source_binding(),
+        "test_source_binding_comparison": {"status": "MATCH", "differing_contract_sections": []},
         "publication_activity": {
             "live_replacements": list(PUBLICATION_ROLES), "rollback_restorations": [],
         },
@@ -1152,6 +1359,9 @@ def test_production_report_separates_financial_and_first_public_changes() -> Non
     assert "first_public_result_date preservation map applied: 6/6" in report
     assert "first_public_result_date repair_required: 0" in report
     assert "MRQ overlay intentionally deferred for a later impact study." in report
+    assert "Market mode: `STABLE_SOURCE_BUNDLE`" in report
+    assert "Taxonomy mode: `FULL_SQLITE_BACKUP`" in report
+    assert "Test vs Production: `MATCH`" in report
 
 
 def test_prepublication_failure_report_uses_candidate_not_published_semantics() -> None:

@@ -93,11 +93,11 @@ def prepare_full_v2_read_only_copies(
     return copies, evidence
 
 
-def prepare_refresh_test_read_only_sources(
+def prepare_compact_read_only_sources(
     source_paths: BatchAddTickerPaths, *, lane_dir: Path,
     canonical_candidate: Path, as_of_date: str,
 ) -> tuple[dict[str, Path], dict[str, Any]]:
-    """Bind Refresh Test to a compact market bundle and copied taxonomy."""
+    """Bind a rebuild to a compact market bundle and copied taxonomy."""
     taxonomy_source = source_paths.taxonomy_db
     taxonomy_copy = lane_dir / "taxonomy.db"
     taxonomy_stat = taxonomy_source.stat()
@@ -144,6 +144,18 @@ def prepare_refresh_test_read_only_sources(
         },
     }
     return {"market": bundle.market_db, "taxonomy": taxonomy_copy}, evidence
+
+
+def prepare_refresh_test_read_only_sources(
+    source_paths: BatchAddTickerPaths, *, lane_dir: Path,
+    canonical_candidate: Path, as_of_date: str,
+) -> tuple[dict[str, Path], dict[str, Any]]:
+    return prepare_compact_read_only_sources(
+        source_paths,
+        lane_dir=lane_dir,
+        canonical_candidate=canonical_candidate,
+        as_of_date=as_of_date,
+    )
 
 
 def run_refresh_test_full_v2_downstream(
