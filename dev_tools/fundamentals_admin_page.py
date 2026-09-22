@@ -54,6 +54,8 @@ class FundamentalsAdminPageControls:
     progress_summary: Any
     progress_details: Any
     history_show_more_button: Any
+    cleanup_status_field: Any
+    cleanup_button: Any
     activate: Any
     history_loader: Any
 
@@ -239,6 +241,13 @@ def build_fundamentals_admin_page(
         multiline=True,
         min_lines=4,
         max_lines=7,
+    )
+    cleanup_status_field = ft.Text("", visible=False)
+    cleanup_button = ft.ElevatedButton(
+        "Accept run and cleanup backups",
+        icon=ft.Icons.DELETE_SWEEP,
+        visible=False,
+        disabled=True,
     )
     summary_column = ft.Column(spacing=4)
     history_column = ft.Column(spacing=6)
@@ -566,6 +575,24 @@ def build_fundamentals_admin_page(
         visible=False,
     )
 
+    def apply_cleanup_eligibility(run_id: str) -> dict[str, Any]:
+        reader = getattr(admin_service, "cleanup_eligibility", None)
+        if not callable(reader):
+            cleanup_button.visible = False
+            cleanup_status_field.visible = False
+            return {}
+        state = dict(reader(run_id))
+        eligible = bool(state.get("eligible"))
+        cleanup_button.visible = eligible
+        cleanup_button.disabled = not eligible
+        cleanup_status_field.value = (
+            "Deletes only this accepted run's verified rollback backups. Production data is not changed."
+            if eligible
+            else str(state.get("reason") or "Backup cleanup is not available for this run.")
+        )
+        cleanup_status_field.visible = True
+        return state
+
     def select_history_run(run_id: str) -> None:
         nonlocal selected_history_run_id
         try:
@@ -601,12 +628,16 @@ def build_fundamentals_admin_page(
                 f"Operation report: {report_text}"
             )
             selected_history_run_id = run_id
+            apply_cleanup_eligibility(run_id)
             render_progress(replace=[
                 "Still working." if progress.status == "running" else "Selected run progress loaded.",
                 f"{progress.current_stage} ({progress.current_stage_number or '?'}/{progress.total_declared_stages or '?'})",
             ])
         except Exception:
             history_detail_field.value = f"Run: {run_id}\nStatus: unavailable or incomplete."
+            cleanup_button.visible = False
+            cleanup_status_field.value = "Backup cleanup eligibility is unavailable."
+            cleanup_status_field.visible = True
         if history_cursor is not None:
             render_history(history_cursor.entries[:history_limit])
         if hasattr(page, "update"):
@@ -661,6 +692,69 @@ def build_fundamentals_admin_page(
             dialog.open = True
         if hasattr(page, "update"):
             page.update()
+
+    def confirm_backup_cleanup(run_id: str) -> None:
+        close_dialog()
+        cleanup_button.disabled = True
+        cleanup_status_field.value = "Verifying this run's rollback backups..."
+        cleanup_status_field.visible = True
+        if hasattr(page, "update"):
+            page.update()
+        try:
+            result = admin_service.accept_run_and_cleanup_backups(run_id)
+            status = str(result.get("status") or result.get("cleanup_outcome") or "COMPLETED")
+            if status == "ALREADY_CLEANED":
+                cleanup_status_field.value = "Accepted / backups cleaned"
+            else:
+                freed = int(result.get("bytes_freed") or 0)
+                cleanup_status_field.value = f"Accepted / backups cleaned ({freed / (1024 ** 3):.3f} GiB freed)"
+            cleanup_button.visible = False
+            select_history_run(run_id)
+        except Exception as exc:
+            LOGGER.exception("Administration backup cleanup failed")
+            cleanup_status_field.value = f"Backup cleanup stopped: {exc}"
+            cleanup_button.visible = False
+            cleanup_button.disabled = True
+        if hasattr(page, "update"):
+            page.update()
+
+    def open_backup_cleanup_confirmation(_event: Any) -> None:
+        run_id = selected_history_run_id
+        if not run_id:
+            return
+        state = apply_cleanup_eligibility(run_id)
+        if not state.get("eligible"):
+            if hasattr(page, "update"):
+                page.update()
+            return
+        count = int(state.get("backup_count") or 0)
+        gib = int(state.get("bytes_freed") or 0) / (1024 ** 3)
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Accept Production run and cleanup backups?"),
+            content=ft.Text(
+                f"Run: {run_id}\n\n"
+                f"This removes {count} verified rollback backup file(s), approximately {gib:.3f} GiB.\n"
+                "Live Production databases will not be modified."
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda _event: close_dialog()),
+                ft.ElevatedButton(
+                    "Accept and cleanup",
+                    icon=ft.Icons.DELETE_SWEEP,
+                    on_click=lambda _event: confirm_backup_cleanup(run_id),
+                ),
+            ],
+        )
+        setattr(page, "dialog", dialog)
+        if hasattr(page, "open"):
+            page.open(dialog)
+        else:
+            dialog.open = True
+        if hasattr(page, "update"):
+            page.update()
+
+    cleanup_button.on_click = open_backup_cleanup_confirmation
 
     def progress_callback(event: Any) -> None:
         nonlocal last_progress_count
@@ -1076,6 +1170,8 @@ def build_fundamentals_admin_page(
             history_column,
             history_show_more_button,
             history_detail_field,
+            cleanup_status_field,
+            cleanup_button,
         ],
         spacing=12,
         expand=True,
@@ -1129,6 +1225,8 @@ def build_fundamentals_admin_page(
         progress_summary=progress_summary,
         progress_details=progress_details,
         history_show_more_button=history_show_more_button,
+        cleanup_status_field=cleanup_status_field,
+        cleanup_button=cleanup_button,
         activate=activate,
         history_loader=history_loader,
     )

@@ -199,6 +199,8 @@ class FundamentalsAdminUIService:
         cik_production_apply: Callable[..., dict[str, Any]] | None = None,
         identity_preview: Callable[..., dict[str, Any]] | None = None,
         identity_paths: Any | None = None,
+        cleanup_inspect: Callable[[str], Mapping[str, Any]] | None = None,
+        cleanup_apply: Callable[[str], Mapping[str, Any]] | None = None,
         operation_lock_path: Path | None = None,
         recover_publication_on_startup: bool = True,
     ) -> None:
@@ -222,6 +224,8 @@ class FundamentalsAdminUIService:
         self._cik_production_apply = cik_production_apply or _admin_callable("cik_sync", "run_production_apply")
         self._identity_preview = identity_preview or _admin_callable("identity_resolution", "run_preview")
         self._identity_paths = identity_paths
+        self._cleanup_inspect = cleanup_inspect
+        self._cleanup_apply = cleanup_apply
         self.operation_lock_path = (
             operation_lock_path
             or (self.run_root.parent / ".fundamentals_admin_ui_operation.lock")
@@ -598,6 +602,19 @@ class FundamentalsAdminUIService:
             "audit_evidence_retained": True,
             "retained_path": str(retained_path),
         }
+
+    def cleanup_eligibility(self, run_id: str) -> Mapping[str, Any]:
+        if self._cleanup_inspect is not None:
+            return self._cleanup_inspect(run_id)
+        module = import_module("rawcandle.fundamentals.admin.run_acceptance_cleanup")
+        return module.inspect_cleanup_eligibility(run_id, run_root=self.run_root)
+
+    def accept_run_and_cleanup_backups(self, run_id: str) -> Mapping[str, Any]:
+        with self._operation_lock():
+            if self._cleanup_apply is not None:
+                return self._cleanup_apply(run_id)
+            module = import_module("rawcandle.fundamentals.admin.run_acceptance_cleanup")
+            return module.accept_run_and_cleanup_backups(run_id, run_root=self.run_root)
 
     def history_result_summary(
         self,
