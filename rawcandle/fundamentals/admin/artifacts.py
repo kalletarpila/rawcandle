@@ -17,10 +17,11 @@ from rawcandle.fundamentals.admin.contracts import (
     validate_transition,
 )
 from rawcandle.fundamentals.admin.redaction import redact, redact_text
-from rawcandle.fundamentals.phase12d import REPORT_ROOT, ROOT
 from rawcandle.io_atomic import write_text_atomic
 
 
+ROOT = Path(__file__).resolve().parents[3]
+REPORT_ROOT = ROOT / "fundamental_reports"
 ADMIN_RUN_ROOT = REPORT_ROOT / "admin_runs"
 ADMIN_TEMP_ROOT = ROOT / "temp" / "fundamentals_admin_phase13g1"
 

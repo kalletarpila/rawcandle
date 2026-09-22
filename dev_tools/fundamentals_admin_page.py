@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import flet as ft
 
-from dev_tools.deferred_ui import DeferredLoadController
+from dev_tools.deferred_ui import DeferredLoadController, LoadState
 from rawcandle.fundamentals.admin.operation_report import OPERATION_REPORT_NAME, WORKFLOW_REPORT_NAME
 from rawcandle.fundamentals.admin.ui_service import (
     AdminUIRunResult,
@@ -126,7 +126,10 @@ def build_fundamentals_admin_page(
     service: FundamentalsAdminUIService | None = None,
     defer_initial_load: bool = False,
 ) -> FundamentalsAdminPageControls:
-    admin_service = service or FundamentalsAdminUIService()
+    owns_service = service is None
+    admin_service = service or FundamentalsAdminUIService(
+        recover_publication_on_startup=not defer_initial_load
+    )
     capabilities = {
         item.operation_type: item
         for item in getattr(admin_service, "capabilities", lambda: ())()
@@ -454,6 +457,8 @@ def build_fundamentals_admin_page(
 
     def load_history() -> dict[str, Any]:
         nonlocal history_cursor
+        safety_initializer = getattr(admin_service, "initialize_publication_safety", None)
+        safety = safety_initializer() if owns_service and callable(safety_initializer) else None
         include_technical = bool(show_technical_history_checkbox.value)
         if history_cursor is None or history_cursor.include_technical != include_technical:
             cursor_factory = getattr(admin_service, "history_cursor", None)
@@ -481,9 +486,22 @@ def build_fundamentals_admin_page(
         pending = pending_reader(
             projection_cache=getattr(history_cursor, "projections", None),
         ) if callable(pending_reader) else None
-        return {"entries": entries, "pending": pending}
+        return {"entries": entries, "pending": pending, "publication_safety": safety}
 
     def apply_history(payload: dict[str, Any]) -> None:
+        nonlocal publication_safety
+        loaded_safety = payload.get("publication_safety")
+        if loaded_safety is not None:
+            publication_safety = loaded_safety
+            blocked = bool(publication_safety.get("production_writes_blocked"))
+            publication_safety_field.value = (
+                "Production safety block: RawCandle could not restore a complete verified "
+                "Fundamentals generation. Production-writing operations are disabled until "
+                "recovery is resolved."
+                if blocked else ""
+            )
+            publication_safety_field.visible = blocked
+            apply_capabilities()
         pending = payload.get("pending")
         if pending and pending.get("status") == "ERROR":
             pending_refresh_field.value = str(pending.get("error") or "Refresh history is unavailable.")
@@ -1063,6 +1081,22 @@ def build_fundamentals_admin_page(
         expand=True,
         scroll=ft.ScrollMode.AUTO,
     )
+    def activate() -> None:
+        nonlocal publication_safety
+        if (
+            owns_service
+            and defer_initial_load
+            and history_loader.state not in {LoadState.LOADING, LoadState.LOADED}
+        ):
+            publication_safety = {
+                "status": "CHECKING",
+                "production_writes_blocked": True,
+            }
+            publication_safety_field.value = "Checking production publication safety..."
+            publication_safety_field.visible = True
+            apply_capabilities()
+        history_loader.start()
+
     return FundamentalsAdminPageControls(
         content=content,
         operation_dropdown=operation_dropdown,
@@ -1095,6 +1129,6 @@ def build_fundamentals_admin_page(
         progress_summary=progress_summary,
         progress_details=progress_details,
         history_show_more_button=history_show_more_button,
-        activate=lambda: history_loader.start(),
+        activate=activate,
         history_loader=history_loader,
     )

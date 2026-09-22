@@ -5,10 +5,10 @@ import re
 import stat
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable
 
-from rawcandle.fundamentals.snapshot.active import generate_active_company_snapshot
 from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.writer import report_filename
 
@@ -29,6 +29,11 @@ REPORT_NAME_RE = re.compile(
 )
 MAX_BATCH_TICKERS = 25
 TICKER_SEPARATOR_RE = re.compile(r"[,\s]+")
+
+
+def _generate_active_company_snapshot(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    module = import_module("rawcandle.fundamentals.snapshot.active")
+    return module.generate_active_company_snapshot(*args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -182,7 +187,7 @@ class FundamentalsSnapshotUIService:
         *,
         paths: SnapshotPaths = PRODUCTION_SNAPSHOT_PATHS,
         output_dir: Path = FUNDAMENTAL_REPORTS_DIR,
-        generator: Callable[..., dict[str, Any]] = generate_active_company_snapshot,
+        generator: Callable[..., dict[str, Any]] = _generate_active_company_snapshot,
     ) -> None:
         self.paths = paths
         self.output_dir = output_dir.resolve()

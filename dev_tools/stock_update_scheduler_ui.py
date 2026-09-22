@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from importlib import import_module
 import inspect
 import json
 import os
@@ -44,11 +45,6 @@ from rawcandle.scheduler.config import (
     validate_scheduler_config,
     write_scheduler_config,
 )
-from rawcandle.scheduler.runner import (
-    SchedulerAlreadyRunningError,
-    read_scheduler_status,
-    run_scheduler_config,
-)
 from rawcandle.fundamentals.snapshot.ui_service import (
     FUNDAMENTAL_REPORTS_DIR,
     resolve_report_download,
@@ -58,34 +54,6 @@ from rawcandle.fundamentals.admin.operation_report import (
     WORKFLOW_REPORT_NAME,
     resolve_operation_report_download,
 )
-from rawcandle.datacenter_taxonomy_change_orchestrator import (
-    DATACENTER_ECOSYSTEM_CODE,
-    REBUILD_MODE_AUTO,
-    REBUILD_MODE_DELTA,
-    REBUILD_MODE_FULL,
-    activate_taxonomy_change,
-    build_production_taxonomy_change_services,
-    execute_taxonomy_rebuild,
-    inspect_taxonomy_change,
-    plan_taxonomy_activation,
-    prepare_taxonomy_change,
-    resume_taxonomy_rebuild,
-    validate_and_finalize_taxonomy_rebuild,
-)
-from rawcandle.datacenter_taxonomy_operation_log import (
-    complete_taxonomy_change_operation,
-    create_taxonomy_change_operation,
-    inspect_taxonomy_change_artifacts,
-    inspect_taxonomy_operation_lock,
-    list_taxonomy_change_operations,
-    prepare_taxonomy_change_evidence_package,
-    prepare_taxonomy_change_log_download,
-    read_taxonomy_change_log,
-    taxonomy_operation_lock_context,
-    write_taxonomy_operation_artifact,
-)
-
-
 SCHEDULER_UI_PORT = 8555
 DEFAULT_DATACENTER_PRICE_DB = "data/osakedata.db"
 DEFAULT_DATACENTER_ANALYSIS_DB = "data/analysis.db"
@@ -115,6 +83,91 @@ _TIMER_PATH = Path.home() / ".config/systemd/user/stock-update-scheduler.timer"
 _TAXONOMY_EVIDENCE_ROOT = "temp/datacenter_taxonomy_changes"
 TOP_LEVEL_ROUTES = ("/scheduler", "/taxonomy", FUNDAMENTALS_ROUTE, FUNDAMENTALS_ADMIN_ROUTE)
 FUNDAMENTALS_ADMIN_ROUTE_ALIAS = "/fundamentals-admin"
+DATACENTER_ECOSYSTEM_CODE = "DATACENTER"
+REBUILD_MODE_AUTO = "AUTO"
+REBUILD_MODE_DELTA = "DELTA_REBUILD"
+REBUILD_MODE_FULL = "FULL_REBUILD"
+
+
+def _lazy_runtime_call(module_name: str, function_name: str, *args: Any, **kwargs: Any) -> Any:
+    module = import_module(module_name)
+    return getattr(module, function_name)(*args, **kwargs)
+
+
+def read_scheduler_status(*args: Any, **kwargs: Any) -> Any:
+    return _lazy_runtime_call("rawcandle.scheduler.runner", "read_scheduler_status", *args, **kwargs)
+
+
+def run_scheduler_config(*args: Any, **kwargs: Any) -> Any:
+    return _lazy_runtime_call("rawcandle.scheduler.runner", "run_scheduler_config", *args, **kwargs)
+
+
+def _taxonomy_call(function_name: str, *args: Any, **kwargs: Any) -> Any:
+    return _lazy_runtime_call(
+        "rawcandle.datacenter_taxonomy_change_orchestrator",
+        function_name,
+        *args,
+        **kwargs,
+    )
+
+
+def _taxonomy_log_call(function_name: str, *args: Any, **kwargs: Any) -> Any:
+    return _lazy_runtime_call(
+        "rawcandle.datacenter_taxonomy_operation_log",
+        function_name,
+        *args,
+        **kwargs,
+    )
+
+
+def _lazy_taxonomy_function(function_name: str) -> Any:
+    return lambda *args, **kwargs: _taxonomy_call(function_name, *args, **kwargs)
+
+
+def _lazy_taxonomy_log_function(function_name: str) -> Any:
+    return lambda *args, **kwargs: _taxonomy_log_call(function_name, *args, **kwargs)
+
+
+activate_taxonomy_change = _lazy_taxonomy_function("activate_taxonomy_change")
+build_production_taxonomy_change_services = _lazy_taxonomy_function(
+    "build_production_taxonomy_change_services"
+)
+execute_taxonomy_rebuild = _lazy_taxonomy_function("execute_taxonomy_rebuild")
+inspect_taxonomy_change = _lazy_taxonomy_function("inspect_taxonomy_change")
+plan_taxonomy_activation = _lazy_taxonomy_function("plan_taxonomy_activation")
+prepare_taxonomy_change = _lazy_taxonomy_function("prepare_taxonomy_change")
+resume_taxonomy_rebuild = _lazy_taxonomy_function("resume_taxonomy_rebuild")
+validate_and_finalize_taxonomy_rebuild = _lazy_taxonomy_function(
+    "validate_and_finalize_taxonomy_rebuild"
+)
+complete_taxonomy_change_operation = _lazy_taxonomy_log_function(
+    "complete_taxonomy_change_operation"
+)
+create_taxonomy_change_operation = _lazy_taxonomy_log_function(
+    "create_taxonomy_change_operation"
+)
+inspect_taxonomy_change_artifacts = _lazy_taxonomy_log_function(
+    "inspect_taxonomy_change_artifacts"
+)
+inspect_taxonomy_operation_lock = _lazy_taxonomy_log_function(
+    "inspect_taxonomy_operation_lock"
+)
+list_taxonomy_change_operations = _lazy_taxonomy_log_function(
+    "list_taxonomy_change_operations"
+)
+prepare_taxonomy_change_evidence_package = _lazy_taxonomy_log_function(
+    "prepare_taxonomy_change_evidence_package"
+)
+prepare_taxonomy_change_log_download = _lazy_taxonomy_log_function(
+    "prepare_taxonomy_change_log_download"
+)
+read_taxonomy_change_log = _lazy_taxonomy_log_function("read_taxonomy_change_log")
+taxonomy_operation_lock_context = _lazy_taxonomy_log_function(
+    "taxonomy_operation_lock_context"
+)
+write_taxonomy_operation_artifact = _lazy_taxonomy_log_function(
+    "write_taxonomy_operation_artifact"
+)
 
 
 def top_level_route_index(route: str | None) -> int:
@@ -614,7 +667,8 @@ def launch_browser_url(page: Any, url: str) -> None:
 
 
 def format_run_now_error_message(exc: Exception) -> str:
-    if isinstance(exc, SchedulerAlreadyRunningError):
+    runner_module = import_module("rawcandle.scheduler.runner")
+    if isinstance(exc, runner_module.SchedulerAlreadyRunningError):
         return "Run now blocked: scheduler run is already active."
     return f"Run now failed: {exc}"
 

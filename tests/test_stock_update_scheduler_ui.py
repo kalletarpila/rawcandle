@@ -596,6 +596,36 @@ def test_fundamentals_admin_route_alias_selects_and_loads_only_admin(tmp_path, m
     assert taxonomy_calls == []
 
 
+def test_publication_safety_recovery_is_deferred_until_admin_route_activation(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    page = _FakePage()
+    page.route = "/fundamentals"
+    recovery_calls = []
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.ui_service."
+        "FundamentalsAdminUIService._initialize_publication_safety",
+        lambda _service: recovery_calls.append(True),
+    )
+
+    async def inline_to_thread(function):
+        return function()
+
+    monkeypatch.setattr("dev_tools.deferred_ui.asyncio.to_thread", inline_to_thread)
+
+    run_app(page, str(config_path), defer_initial_load=True)
+
+    assert recovery_calls == []
+    asyncio.run(page.tasks.pop(0)())
+    page.on_route_change(SimpleNamespace(route="/fundamentals/admin"))
+    assert recovery_calls == []
+    asyncio.run(page.tasks.pop(0)())
+    assert recovery_calls == [True]
+
+
 def test_deferred_scheduler_history_pages_cached_rows_by_eight(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     _write_config(config_path)
@@ -1030,6 +1060,34 @@ def test_scheduler_ui_script_can_be_invoked_directly_for_help():
 
     assert result.returncode == 0
     assert "Standalone stock update scheduler control panel." in result.stdout
+
+
+def test_scheduler_ui_import_does_not_eagerly_load_heavy_runtime_modules():
+    heavy_modules = [
+        "rawcandle.scheduler.runner",
+        "rawcandle.datacenter_taxonomy_change_orchestrator",
+        "rawcandle.fundamentals.admin.batch_add_tickers",
+        "rawcandle.fundamentals.admin.full_workflow",
+        "rawcandle.fundamentals.snapshot.active",
+        "rawcandle.fundamentals.phase12d",
+        "sklearn",
+    ]
+    code = (
+        "import json, sys; "
+        "import dev_tools.stock_update_scheduler_ui; "
+        f"print(json.dumps([name for name in {heavy_modules!r} if name in sys.modules]))"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == []
 
 
 def test_run_app_without_summary_or_logs_shows_clear_messages(tmp_path, monkeypatch):

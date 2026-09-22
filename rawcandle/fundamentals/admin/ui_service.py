@@ -2,20 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import fcntl
+from importlib import import_module
 import json
 from pathlib import Path
 import re
 from contextlib import contextmanager
 from typing import Any, Callable, Mapping
 
-from rawcandle.fundamentals.admin import batch_add_tickers, cik_sync, identity_resolution, refresh_copy_runtime, refresh_fundamentals, refresh_production, sector_industry, taxonomy_v2_sync
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, sha256_file
-from rawcandle.fundamentals.admin.full_workflow import (
-    WORKFLOW_REPORT_NAME,
-    run_full_workflow as orchestrate_full_workflow,
-    run_refresh_full_workflow,
-    workflow_ui_summary,
-)
 from rawcandle.fundamentals.admin.history import AdminRunHistory, RunProgressSummary
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
@@ -30,6 +24,16 @@ from rawcandle.fundamentals.admin.operation_report import (
 
 
 AdminProgressCallback = Callable[[Mapping[str, Any]], None]
+WORKFLOW_REPORT_NAME = "workflow_report.md"
+CIK_CONFIRMATION_TOKEN = "CONFIRM_PRODUCTION_PROVIDER_CIK_SYNC"
+
+
+def _admin_callable(module_name: str, function_name: str) -> Callable[..., dict[str, Any]]:
+    def call(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        module = import_module(f"rawcandle.fundamentals.admin.{module_name}")
+        return getattr(module, function_name)(*args, **kwargs)
+
+    return call
 
 
 @dataclass(frozen=True)
@@ -177,54 +181,63 @@ class FundamentalsAdminUIService:
         *,
         run_root: Path = ADMIN_RUN_ROOT,
         history: AdminRunHistory | None = None,
-        add_preview: Callable[..., dict[str, Any]] = batch_add_tickers.run_preview,
-        add_apply: Callable[..., dict[str, Any]] = batch_add_tickers.run_apply,
-        add_production_apply: Callable[..., dict[str, Any]] = batch_add_tickers.run_production_apply,
-        refresh_preview: Callable[..., dict[str, Any]] = refresh_fundamentals.run_preview,
-        refresh_apply: Callable[..., dict[str, Any]] = refresh_copy_runtime.run_apply,
-        refresh_production_apply: Callable[..., dict[str, Any]] = refresh_production.run_production_apply,
-        sector_preview: Callable[..., dict[str, Any]] = sector_industry.run_preview,
-        sector_apply: Callable[..., dict[str, Any]] = sector_industry.run_apply,
-        sector_production_apply: Callable[..., dict[str, Any]] = sector_industry.run_production_apply,
-        taxonomy_preview: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_preview,
-        taxonomy_apply: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_apply,
-        taxonomy_production_preview: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_preview,
-        taxonomy_production_apply: Callable[..., dict[str, Any]] = taxonomy_v2_sync.run_production_apply,
-        cik_preview: Callable[..., dict[str, Any]] = cik_sync.run_preview,
-        cik_apply: Callable[..., dict[str, Any]] = cik_sync.run_apply,
-        cik_production_apply: Callable[..., dict[str, Any]] = cik_sync.run_production_apply,
-        identity_preview: Callable[..., dict[str, Any]] = identity_resolution.run_preview,
-        identity_paths: batch_add_tickers.BatchAddTickerPaths = batch_add_tickers.BatchAddTickerPaths(),
+        add_preview: Callable[..., dict[str, Any]] | None = None,
+        add_apply: Callable[..., dict[str, Any]] | None = None,
+        add_production_apply: Callable[..., dict[str, Any]] | None = None,
+        refresh_preview: Callable[..., dict[str, Any]] | None = None,
+        refresh_apply: Callable[..., dict[str, Any]] | None = None,
+        refresh_production_apply: Callable[..., dict[str, Any]] | None = None,
+        sector_preview: Callable[..., dict[str, Any]] | None = None,
+        sector_apply: Callable[..., dict[str, Any]] | None = None,
+        sector_production_apply: Callable[..., dict[str, Any]] | None = None,
+        taxonomy_preview: Callable[..., dict[str, Any]] | None = None,
+        taxonomy_apply: Callable[..., dict[str, Any]] | None = None,
+        taxonomy_production_preview: Callable[..., dict[str, Any]] | None = None,
+        taxonomy_production_apply: Callable[..., dict[str, Any]] | None = None,
+        cik_preview: Callable[..., dict[str, Any]] | None = None,
+        cik_apply: Callable[..., dict[str, Any]] | None = None,
+        cik_production_apply: Callable[..., dict[str, Any]] | None = None,
+        identity_preview: Callable[..., dict[str, Any]] | None = None,
+        identity_paths: Any | None = None,
         operation_lock_path: Path | None = None,
         recover_publication_on_startup: bool = True,
     ) -> None:
         self.run_root = run_root.resolve()
         self.history = history or AdminRunHistory(self.run_root)
-        self._add_preview = add_preview
-        self._add_apply = add_apply
-        self._add_production_apply = add_production_apply
-        self._refresh_preview = refresh_preview
-        self._refresh_apply = refresh_apply
-        self._refresh_production_apply = refresh_production_apply
-        self._sector_preview = sector_preview
-        self._sector_apply = sector_apply
-        self._sector_production_apply = sector_production_apply
-        self._taxonomy_preview = taxonomy_preview
-        self._taxonomy_apply = taxonomy_apply
-        self._taxonomy_production_preview = taxonomy_production_preview
-        self._taxonomy_production_apply = taxonomy_production_apply
-        self._cik_preview = cik_preview
-        self._cik_apply = cik_apply
-        self._cik_production_apply = cik_production_apply
-        self._identity_preview = identity_preview
+        self._add_preview = add_preview or _admin_callable("batch_add_tickers", "run_preview")
+        self._add_apply = add_apply or _admin_callable("batch_add_tickers", "run_apply")
+        self._add_production_apply = add_production_apply or _admin_callable("batch_add_tickers", "run_production_apply")
+        self._refresh_preview = refresh_preview or _admin_callable("refresh_fundamentals", "run_preview")
+        self._refresh_apply = refresh_apply or _admin_callable("refresh_copy_runtime", "run_apply")
+        self._refresh_production_apply = refresh_production_apply or _admin_callable("refresh_production", "run_production_apply")
+        self._sector_preview = sector_preview or _admin_callable("sector_industry", "run_preview")
+        self._sector_apply = sector_apply or _admin_callable("sector_industry", "run_apply")
+        self._sector_production_apply = sector_production_apply or _admin_callable("sector_industry", "run_production_apply")
+        self._taxonomy_preview = taxonomy_preview or _admin_callable("taxonomy_v2_sync", "run_preview")
+        self._taxonomy_apply = taxonomy_apply or _admin_callable("taxonomy_v2_sync", "run_apply")
+        self._taxonomy_production_preview = taxonomy_production_preview or _admin_callable("taxonomy_v2_sync", "run_preview")
+        self._taxonomy_production_apply = taxonomy_production_apply or _admin_callable("taxonomy_v2_sync", "run_production_apply")
+        self._cik_preview = cik_preview or _admin_callable("cik_sync", "run_preview")
+        self._cik_apply = cik_apply or _admin_callable("cik_sync", "run_apply")
+        self._cik_production_apply = cik_production_apply or _admin_callable("cik_sync", "run_production_apply")
+        self._identity_preview = identity_preview or _admin_callable("identity_resolution", "run_preview")
         self._identity_paths = identity_paths
         self.operation_lock_path = (
             operation_lock_path
             or (self.run_root.parent / ".fundamentals_admin_ui_operation.lock")
         ).resolve()
         self._publication_safety = {"status": "CLEAR", "production_writes_blocked": False}
+        self._publication_safety_initialized = False
         if recover_publication_on_startup and self.run_root == ADMIN_RUN_ROOT.resolve():
+            self.initialize_publication_safety()
+
+    def initialize_publication_safety(self) -> Mapping[str, Any]:
+        if self._publication_safety_initialized:
+            return self.publication_safety_status()
+        if self.run_root == ADMIN_RUN_ROOT.resolve():
             self._initialize_publication_safety()
+        self._publication_safety_initialized = True
+        return self.publication_safety_status()
 
     def _initialize_publication_safety(self) -> None:
         from rawcandle.fundamentals.admin.production_transaction import production_lock
@@ -282,7 +295,7 @@ class FundamentalsAdminUIService:
             ),
             AdminOperationCapability(
                 "SYNCHRONIZE_PROVIDER_CIK", True, True, True,
-                cik_sync.CONFIRMATION_TOKEN,
+                CIK_CONFIRMATION_TOKEN,
             ),
             AdminOperationCapability("RESOLVE_TICKER_IDENTITY", True, False, False),
         )
@@ -345,6 +358,11 @@ class FundamentalsAdminUIService:
                 progress_callback=progress_callback,
             )
         elif operation == "RESOLVE_TICKER_IDENTITY":
+            if self._identity_paths is None:
+                batch_module = import_module(
+                    "rawcandle.fundamentals.admin.batch_add_tickers"
+                )
+                self._identity_paths = batch_module.BatchAddTickerPaths()
             result = self._identity_preview(
                 raw_inputs,
                 source_paths=self._identity_paths,
@@ -481,7 +499,7 @@ class FundamentalsAdminUIService:
                 preview_payload_path=payload_path,
                 preview_fingerprint=preview_fingerprint,
                 run_root=self.run_root,
-                confirm_production=confirmation == cik_sync.CONFIRMATION_TOKEN,
+                confirm_production=confirmation == CIK_CONFIRMATION_TOKEN,
                 test_run_id=test_run_id,
                 progress_callback=progress_callback,
             )
@@ -499,8 +517,11 @@ class FundamentalsAdminUIService:
     ) -> AdminUIRunResult:
         with self._operation_lock():
             operation = operation_type.strip().upper()
+            workflow_module = import_module(
+                "rawcandle.fundamentals.admin.full_workflow"
+            )
             if operation == "REFRESH_FUNDAMENTALS":
-                result = run_refresh_full_workflow(
+                result = workflow_module.run_refresh_full_workflow(
                     run_root=self.run_root,
                     preview_stage=lambda callback: self._preview_unlocked(
                         operation, progress_callback=callback,
@@ -522,7 +543,7 @@ class FundamentalsAdminUIService:
                     progress_callback=progress_callback,
                 )
             elif operation == "ADD_TICKERS":
-                result = orchestrate_full_workflow(
+                result = workflow_module.run_full_workflow(
                     raw_inputs,
                     market=market,
                     run_root=self.run_root,
@@ -850,7 +871,10 @@ class FundamentalsAdminUIService:
         if run_id and workflow_mode:
             report_path = self.run_root / run_id / WORKFLOW_REPORT_NAME
             if report_path.is_file() and not report_path.is_symlink():
-                workflow_rows = workflow_ui_summary(result)
+                workflow_module = import_module(
+                    "rawcandle.fundamentals.admin.full_workflow"
+                )
+                workflow_rows = workflow_module.workflow_ui_summary(result)
                 report = OperationReportSummary(
                     run_id=run_id,
                     operation_type=str(result.get("operation_type") or "ADD_TICKERS"),
