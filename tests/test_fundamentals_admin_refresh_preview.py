@@ -32,8 +32,20 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     source_key,
     validate_complete_history,
 )
+from rawcandle.fundamentals.admin.refresh_scheduler import (
+    run_scheduler_refresh_discovery,
+)
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 from rawcandle.fundamentals.providers.sharadar import AUTH_OK, STATUS_SUCCESS, SharadarResult
+from rawcandle.scheduler.config import (
+    create_default_scheduler_config,
+    write_scheduler_config,
+)
+from rawcandle.scheduler.runner import (
+    STATUS_OK,
+    ScheduledMarketRunResult,
+    run_scheduler_config,
+)
 
 
 def row(
@@ -495,6 +507,107 @@ def test_realistic_preview_writes_artifacts_but_not_databases(tmp_path: Path) ->
         assert (run_dir / name).is_file()
     preview = json.loads((run_dir / "refresh_preview.json").read_text(encoding="utf-8"))
     assert preview["refresh_set_fingerprint"] == output["preview_fingerprint"]
+
+
+def test_scheduler_dispatch_uses_real_read_only_preview_with_fake_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _create_preview_databases(tmp_path / "dbs")
+    run_root = tmp_path / "runs"
+    with sqlite3.connect(paths.provider_db) as connection:
+        ensure_refresh_state_schema(connection)
+        connection.execute(
+            "INSERT INTO sharadar_refresh_state VALUES(1,'SHARADAR','fundamentals',"
+            "'2026-08-26','provider','schema','published-run','2026-08-26T12:00:00Z')"
+        )
+    with sqlite3.connect(paths.provider_db) as connection:
+        baseline_state = connection.execute(
+            "SELECT published_source_watermark,successful_run_id FROM sharadar_refresh_state"
+        ).fetchone()
+    before = {
+        name: (path.stat().st_size, path.stat().st_mtime_ns)
+        for name, path in paths.as_dict().items()
+    }
+    client = PreviewClient(
+        [row(lastupdated="2026-09-15", revenue=120)],
+        [row(dimension="MRQ", lastupdated="2026-09-15")],
+    )
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_scheduler.safety_status",
+        lambda: {"status": "CLEAR", "production_writes_blocked": False},
+    )
+
+    def real_preview(**kwargs):
+        return run_preview(source_paths=paths, client=client, **kwargs)
+
+    discoveries = []
+    original_discovery = run_scheduler_refresh_discovery
+
+    def fixture_discovery():
+        output = original_discovery(
+            run_root=run_root,
+            operation_lock_path=tmp_path / "operation.lock",
+            preview_backend=real_preview,
+        )
+        discoveries.append(output)
+        return output
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_scheduler."
+        "run_scheduler_refresh_discovery",
+        fixture_discovery,
+    )
+    config = create_default_scheduler_config(
+        osakedata_db_path=str(paths.market_db),
+        analysis_db_path=str(paths.taxonomy_db),
+        log_dir=str(tmp_path / "logs"),
+    )
+    config.enabled_markets = ["omxh"]
+    config.fundamentals_refresh_preview_enabled = True
+    config_path = tmp_path / "scheduler.json"
+    write_scheduler_config(str(config_path), config)
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_one_market",
+        lambda **_kwargs: ScheduledMarketRunResult(
+            market="omxh",
+            started_at_utc="2026-09-22T01:00:00Z",
+            finished_at_utc="2026-09-22T01:00:01Z",
+            exit_code=0,
+            summary_status=STATUS_OK,
+            log_path=str(tmp_path / "logs" / "market.log"),
+            summary_lines=[],
+        ),
+    )
+
+    scheduler_result = run_scheduler_config(config_path=str(config_path))
+    output = discoveries[0]
+
+    after = {
+        name: (path.stat().st_size, path.stat().st_mtime_ns)
+        for name, path in paths.as_dict().items()
+    }
+    with sqlite3.connect(paths.provider_db) as connection:
+        final_state = connection.execute(
+            "SELECT published_source_watermark,successful_run_id FROM sharadar_refresh_state"
+        ).fetchone()
+    assert output["scheduler_summary_result"] == "CHANGES_FOUND"
+    assert output["pending_changes"] is True
+    assert output["review_required"] is False
+    assert output["test_invoked"] is False
+    assert output["production_invoked"] is False
+    assert output["full_workflow_invoked"] is False
+    assert output["published_baseline"] == "2026-08-26"
+    assert scheduler_result.fundamentals_refresh_preview_status == "CHANGES_FOUND"
+    assert scheduler_result.fundamentals_refresh_pending_changes is True
+    summary = json.loads(
+        Path(scheduler_result.summary_json_path).read_text(encoding="utf-8")
+    )
+    assert summary["fundamentals_refresh_preview_run_id"] == output["run_id"]
+    assert summary["fundamentals_refresh_preview_report"] == output["report"]
+    assert baseline_state == final_state == ("2026-08-26", "published-run")
+    assert before == after
+    assert Path(str(output["report"])).is_file()
+    assert not list(tmp_path.rglob("*_candidate.db"))
 
 
 def test_established_revision_report_is_preserved_and_has_current_contract_wording(

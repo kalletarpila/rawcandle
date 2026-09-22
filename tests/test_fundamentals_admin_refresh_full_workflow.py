@@ -35,7 +35,7 @@ def _stage(
     (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
     (run_dir / "operation_report.md").write_text(f"# {mode}\n", encoding="utf-8")
     return SimpleNamespace(
-        status="COMPLETED" if outcome in {"COMPLETED", "NO_CHANGE"} else (
+        status="COMPLETED" if outcome in {"COMPLETED", "NO_CHANGE", "REVIEW_REQUIRED"} else (
             "RETRY_REQUIRED" if outcome == "RETRY_REQUIRED" else "FAILED"
         ),
         outcome=outcome,
@@ -174,6 +174,13 @@ def test_refresh_full_workflow_stops_without_automatic_retry(
 def test_scheduler_preview_no_change_and_pending_never_run_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    forbidden_calls: list[str] = []
+    for method_name in ("copy_apply", "production_apply", "full_workflow"):
+        monkeypatch.setattr(
+            FundamentalsAdminUIService,
+            method_name,
+            lambda _self, *_args, _name=method_name, **_kwargs: forbidden_calls.append(_name),
+        )
     monkeypatch.setattr(
         "rawcandle.fundamentals.admin.refresh_scheduler.safety_status",
         lambda: {"status": "CLEAR", "production_writes_blocked": False},
@@ -182,7 +189,7 @@ def test_scheduler_preview_no_change_and_pending_never_run_writes(
     def backend(*, run_root, trigger_source, **_kwargs):
         assert trigger_source == "SCHEDULER"
         return vars(_stage(
-            run_root, "scheduler-no-change", mode="PREVIEW", outcome="NO_CHANGE",
+            run_root, "20260920T010000Z_refresh_fundamentals_nochange", mode="PREVIEW", outcome="NO_CHANGE",
             extra={
                 "trigger_source": trigger_source,
                 "summary_counts": {"effective_changed_known": 0},
@@ -204,6 +211,7 @@ def test_scheduler_preview_no_change_and_pending_never_run_writes(
     assert no_change["outcome"] == "NO_CHANGE"
     assert no_change["test_invoked"] is False
     assert no_change["production_invoked"] is False
+    assert no_change["full_workflow_invoked"] is False
     assert no_change["unattended_production_available"] is False
     assert no_change["scheduler_summary_result"] == "NO_CHANGE"
     assert no_change["published_baseline"] == "2026-09-01"
@@ -211,7 +219,7 @@ def test_scheduler_preview_no_change_and_pending_never_run_writes(
 
     def pending_backend(*, run_root, trigger_source, **_kwargs):
         stage = _stage(
-            run_root, "scheduler-pending", mode="PREVIEW",
+            run_root, "20260920T020000Z_refresh_fundamentals_pending", mode="PREVIEW",
             extra={
                 "trigger_source": trigger_source,
                 "summary_counts": {"effective_changed_known": 3, "NEW_QUARTER": 1},
@@ -235,6 +243,9 @@ def test_scheduler_preview_no_change_and_pending_never_run_writes(
     assert pending["scheduler_summary_result"] == "CHANGES_FOUND"
     assert pending["discovered_source_ticker_count"] == 4
     assert pending["summary_counts"]["effective_changed_known"] == 3
+    assert pending["pending_changes"] is True
+    assert pending["review_required"] is False
+    assert forbidden_calls == []
     status = FundamentalsAdminUIService(
         run_root=tmp_path, operation_lock_path=tmp_path / "history.lock",
     ).pending_refresh_status()
@@ -266,11 +277,76 @@ def test_scheduler_discovery_respects_publication_safety_and_shared_lock(
         run_root=tmp_path, operation_lock_path=tmp_path / "operation.lock",
     )
     with service._operation_lock():
-        with pytest.raises(RuntimeError, match="ADMIN_OPERATION_ALREADY_RUNNING"):
-            run_scheduler_refresh_discovery(
+        blocked_by_lock = run_scheduler_refresh_discovery(
                 run_root=tmp_path, operation_lock_path=tmp_path / "operation.lock",
                 preview_backend=lambda **_kwargs: calls.append("preview"),
             )
+    assert blocked_by_lock["scheduler_summary_result"] == "FAILED"
+    assert blocked_by_lock["technical_failure"].endswith("ADMIN_OPERATION_ALREADY_RUNNING")
+    assert blocked_by_lock["test_invoked"] is False
+    assert blocked_by_lock["production_invoked"] is False
+    assert blocked_by_lock["full_workflow_invoked"] is False
+
+
+@pytest.mark.parametrize(
+    ("outcome", "counts", "summary_status", "review_required", "technical_failure"),
+    [
+        ("REVIEW_REQUIRED", {"REVIEW_REQUIRED": 2, "effective_changed_known": 1}, "REVIEW_REQUIRED", True, None),
+        ("FAILED", {"failed": 1}, "FAILED", False, "ProviderUnavailable: temporary outage"),
+    ],
+)
+def test_scheduler_preview_preserves_review_and_technical_failure_states(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+    counts: dict[str, int],
+    summary_status: str,
+    review_required: bool,
+    technical_failure: str | None,
+) -> None:
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_scheduler.safety_status",
+        lambda: {"status": "CLEAR", "production_writes_blocked": False},
+    )
+
+    def backend(*, run_root, trigger_source, **_kwargs):
+        extra = {
+            "trigger_source": trigger_source,
+            "summary_counts": counts,
+            "refresh_preview": {
+                "state": {"published_watermark": "2026-09-01"},
+                "discovery": {"unique_changed_source_tickers": 2},
+            },
+        }
+        if technical_failure:
+            error_type, message = technical_failure.split(": ", 1)
+            extra["errors"] = [{"type": error_type, "message": message}]
+        stage = _stage(
+            run_root,
+            f"20260920T030000Z_refresh_fundamentals_{outcome.lower()}",
+            mode="PREVIEW",
+            outcome=outcome,
+            extra=extra,
+        )
+        return vars(stage) | {
+            "operation_type": "REFRESH_FUNDAMENTALS",
+            "mode": "PREVIEW",
+            "outcome": outcome,
+            **extra,
+        }
+
+    result = run_scheduler_refresh_discovery(
+        run_root=tmp_path,
+        operation_lock_path=tmp_path / "operation.lock",
+        preview_backend=backend,
+    )
+
+    assert result["scheduler_summary_result"] == summary_status
+    assert result["review_required"] is review_required
+    assert result["technical_failure"] == technical_failure
+    assert result["test_invoked"] is False
+    assert result["production_invoked"] is False
+    assert result["full_workflow_invoked"] is False
 
 
 def test_scheduler_config_is_disabled_by_default_and_has_no_production_switch() -> None:
@@ -296,6 +372,9 @@ def test_refresh_uses_existing_scheduler_summary_json_contract(tmp_path: Path) -
         fundamentals_refresh_preview_status="CHANGES_FOUND",
         fundamentals_refresh_preview_timestamp_utc="2026-09-20T01:00:30Z",
         fundamentals_refresh_published_baseline="2026-09-01",
+        fundamentals_refresh_pending_changes=True,
+        fundamentals_refresh_review_required=False,
+        fundamentals_refresh_technical_failure="NONE",
         fundamentals_refresh_discovered_source_ticker_count=25,
         fundamentals_refresh_preview_changed_tickers=23,
         fundamentals_refresh_new_quarter_count=17,
@@ -324,4 +403,6 @@ def test_refresh_uses_existing_scheduler_summary_json_contract(tmp_path: Path) -
     assert payload["fundamentals_refresh_preview_status"] == "CHANGES_FOUND"
     assert payload["fundamentals_refresh_published_baseline"] == "2026-09-01"
     assert payload["fundamentals_refresh_preview_changed_tickers"] == 23
+    assert payload["fundamentals_refresh_pending_changes"] is True
+    assert payload["fundamentals_refresh_review_required"] is False
     assert not list(tmp_path.glob("*fundamentals*summary*.json"))

@@ -1120,7 +1120,23 @@ def run_app(
                 f"{latest.get('technical_relevance_status', '')}",
                 "ec_source_layer_status="
                 f"{latest.get('ec_source_layer_status', '')}",
+                "fundamentals_refresh_preview_status="
+                f"{latest.get('fundamentals_refresh_preview_status', 'DISABLED')}",
+                "fundamentals_refresh_preview_timestamp_utc="
+                f"{latest.get('fundamentals_refresh_preview_timestamp_utc', 'NONE')}",
+                "fundamentals_refresh_pending_changes="
+                f"{latest.get('fundamentals_refresh_pending_changes', False)}",
+                "fundamentals_refresh_review_required="
+                f"{latest.get('fundamentals_refresh_review_required', False)}",
+                "fundamentals_refresh_preview_report="
+                f"{latest.get('fundamentals_refresh_preview_report', 'NONE')}",
             ]
+            refresh_failure = latest.get("fundamentals_refresh_technical_failure")
+            if refresh_failure and refresh_failure != "NONE":
+                lines.append(f"fundamentals_refresh_technical_failure={refresh_failure}")
+            refresh_message = latest.get("fundamentals_refresh_preview_message")
+            if refresh_message:
+                lines.append(f"fundamentals_refresh_preview_message={refresh_message}")
             for market_result in latest.get("market_results", []):
                 lines.append(_market_row_text(market_result))
             summary_field.value = "\n".join(lines)

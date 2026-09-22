@@ -1118,6 +1118,17 @@ def test_run_app_formats_summary_lines_from_latest_summary(tmp_path, monkeypatch
                 "summary_json_path": "/tmp/summary.json",
                 "technical_relevance_status": "OK",
                 "ec_source_layer_status": "SKIPPED",
+                "fundamentals_refresh_preview_status": "REVIEW_REQUIRED",
+                "fundamentals_refresh_preview_timestamp_utc": "2026-06-17T08:00:30Z",
+                "fundamentals_refresh_pending_changes": True,
+                "fundamentals_refresh_review_required": True,
+                "fundamentals_refresh_preview_report": (
+                    "fundamental_reports/admin_runs/preview/operation_report.md"
+                ),
+                "fundamentals_refresh_technical_failure": "NONE",
+                "fundamentals_refresh_preview_message": (
+                    "Refresh Fundamentals: 2 ticker(s) require review."
+                ),
                 "market_results": [
                     {
                         "market": "omxh",
@@ -1139,6 +1150,10 @@ def test_run_app_formats_summary_lines_from_latest_summary(tmp_path, monkeypatch
 
     assert "overall_status=OK" in page.summary_field.value
     assert "enabled_markets=omxh,usa" in page.summary_field.value
+    assert "fundamentals_refresh_preview_status=REVIEW_REQUIRED" in page.summary_field.value
+    assert "fundamentals_refresh_pending_changes=True" in page.summary_field.value
+    assert "fundamentals_refresh_review_required=True" in page.summary_field.value
+    assert "fundamentals_refresh_preview_report=" in page.summary_field.value
     assert "market=omxh status=OK log=/tmp/omxh.txt" in page.summary_field.value
 
 

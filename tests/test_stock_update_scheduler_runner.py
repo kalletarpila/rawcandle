@@ -390,6 +390,7 @@ def _write_config(
     log_dir=None,
     skip_next_run=False,
     technical_relevance_enabled=False,
+    fundamentals_refresh_preview_enabled=None,
     ec_source_layer_enabled=None,
     ec_source_layer_ecosystem=None,
     ec_source_layer_taxonomy_version=None,
@@ -414,6 +415,10 @@ def _write_config(
         config.enabled_markets = enabled_markets
     config.skip_next_run = skip_next_run
     config.technical_relevance_enabled = technical_relevance_enabled
+    if fundamentals_refresh_preview_enabled is not None:
+        config.fundamentals_refresh_preview_enabled = (
+            fundamentals_refresh_preview_enabled
+        )
     if ec_source_layer_enabled is not None:
         config.ec_source_layer_enabled = ec_source_layer_enabled
     if ec_source_layer_ecosystem is not None:
@@ -731,6 +736,105 @@ def test_scheduler_runner_writes_summary_json(tmp_path, monkeypatch):
     assert payload["overall_status"] == STATUS_OK
     assert payload["market_results"][0]["market"] == "omxh"
     assert payload["summary_json_path"] == str(summary_json_path)
+
+
+def test_scheduler_runner_dispatches_enabled_refresh_preview_into_summary(
+    tmp_path, monkeypatch,
+):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["omxh"],
+        fundamentals_refresh_preview_enabled=True,
+    )
+    calls = []
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(
+            market=kwargs["market"], status=STATUS_OK
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_fundamentals_refresh_preview_post_step",
+        lambda: calls.append("preview") or {
+            "scheduler_summary_result": "REVIEW_REQUIRED",
+            "preview_timestamp_utc": "2026-09-22T01:00:00Z",
+            "published_baseline": "2026-09-01",
+            "discovered_source_ticker_count": 3,
+            "run_id": "scheduler-preview",
+            "report": "runs/scheduler-preview/operation_report.md",
+            "summary_counts": {
+                "effective_changed_known": 1,
+                "REVIEW_REQUIRED": 2,
+            },
+            "pending_changes": True,
+            "review_required": True,
+            "technical_failure": None,
+            "message": "Refresh Fundamentals: 2 ticker(s) require review.",
+        },
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+    payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
+
+    assert calls == ["preview"]
+    assert result.fundamentals_refresh_preview_attempted == 1
+    assert result.fundamentals_refresh_preview_status == "REVIEW_REQUIRED"
+    assert result.fundamentals_refresh_pending_changes is True
+    assert result.fundamentals_refresh_review_required is True
+    assert result.fundamentals_refresh_unattended_production_available is False
+    assert payload["fundamentals_refresh_preview_run_id"] == "scheduler-preview"
+    assert payload["fundamentals_refresh_preview_report"].endswith(
+        "operation_report.md"
+    )
+
+
+def test_scheduler_runner_skips_refresh_preview_when_disabled(tmp_path, monkeypatch):
+    osakedata_db = tmp_path / "osakedata.db"
+    analysis_db = tmp_path / "analysis.db"
+    _touch(osakedata_db)
+    _touch(analysis_db)
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["omxh"],
+        fundamentals_refresh_preview_enabled=False,
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(
+            market=kwargs["market"], status=STATUS_OK
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_fundamentals_refresh_preview_post_step",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("disabled Refresh Preview must not run")
+        ),
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert result.fundamentals_refresh_preview_attempted == 0
+    assert result.fundamentals_refresh_preview_status == "DISABLED"
 
 
 @pytest.mark.parametrize(

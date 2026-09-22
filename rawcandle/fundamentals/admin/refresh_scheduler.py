@@ -32,8 +32,13 @@ def run_scheduler_refresh_discovery(
             "published_baseline": "RECOVERY_REQUIRED",
             "discovered_source_ticker_count": 0,
             "publication_safety": safety,
+            "pending_changes": False,
+            "review_required": False,
+            "technical_failure": "PUBLICATION_RECOVERY_REQUIRED",
             "test_invoked": False,
             "production_invoked": False,
+            "full_workflow_invoked": False,
+            "unattended_production_available": False,
             "message": "Refresh discovery deferred because Fundamentals publication recovery requires attention.",
         }
     kwargs: dict[str, Any] = {
@@ -44,7 +49,35 @@ def run_scheduler_refresh_discovery(
     if preview_backend is not None:
         kwargs["refresh_preview"] = preview_backend
     service = FundamentalsAdminUIService(**kwargs)
-    response = service.preview("REFRESH_FUNDAMENTALS", trigger_source="SCHEDULER")
+    try:
+        response = service.preview("REFRESH_FUNDAMENTALS", trigger_source="SCHEDULER")
+    except Exception as exc:
+        return {
+            "operation_type": "REFRESH_FUNDAMENTALS",
+            "mode": "SCHEDULER_DISCOVERY",
+            "trigger_source": "SCHEDULER",
+            "outcome": "FAILED",
+            "scheduler_summary_result": "FAILED",
+            "status": "FAILED",
+            "preview_timestamp_utc": None,
+            "published_watermark": None,
+            "published_baseline": "UNKNOWN",
+            "discovered_source_ticker_count": 0,
+            "run_id": None,
+            "report": None,
+            "summary_counts": {"failed": 1},
+            "pending_changes": False,
+            "review_required": False,
+            "technical_failure": f"{type(exc).__name__}: {exc}",
+            "test_invoked": False,
+            "production_invoked": False,
+            "full_workflow_invoked": False,
+            "unattended_production_available": False,
+            "message": (
+                "Refresh Fundamentals Preview failed technically before completion: "
+                f"{type(exc).__name__}."
+            ),
+        }
     payload: dict[str, Any] = {}
     if response.run_id:
         result_path = run_root / response.run_id / "result.json"
@@ -58,9 +91,23 @@ def run_scheduler_refresh_discovery(
     preview = dict(payload.get("refresh_preview") or {})
     state = dict(preview.get("state") or {})
     discovery = dict(preview.get("discovery") or {})
-    pending = response.status == "COMPLETED" and response.outcome == "COMPLETED"
-    result_name = "CHANGES_FOUND" if pending else "NO_CHANGE" if response.outcome == "NO_CHANGE" else "FAILED"
     known = int(counts.get("effective_changed_known") or 0)
+    review_count = int(counts.get("REVIEW_REQUIRED") or 0)
+    review_required = response.outcome == "REVIEW_REQUIRED" or review_count > 0
+    pending = response.status == "COMPLETED" and response.outcome == "COMPLETED"
+    pending_changes = known > 0
+    result_name = (
+        "REVIEW_REQUIRED" if review_required
+        else "CHANGES_FOUND" if pending
+        else "NO_CHANGE" if response.outcome == "NO_CHANGE"
+        else "FAILED"
+    )
+    errors = payload.get("errors") or []
+    first_error = errors[0] if errors and isinstance(errors[0], dict) else {}
+    technical_failure = (
+        f"{first_error.get('type')}: {first_error.get('message')}"
+        if result_name == "FAILED" and first_error else None
+    )
     new_quarter = int(counts.get("NEW_QUARTER") or 0)
     revision = int(counts.get("HISTORICAL_REVISION") or 0)
     combined = int(counts.get("NEW_QUARTER_AND_REVISION") or 0)
@@ -82,15 +129,20 @@ def run_scheduler_refresh_discovery(
         "run_id": response.run_id,
         "report": str(run_root / response.run_id / "operation_report.md") if response.run_id else None,
         "summary_counts": counts,
-        "pending_changes": pending,
+        "pending_changes": pending_changes,
+        "review_required": review_required,
+        "technical_failure": technical_failure,
         "test_invoked": False,
         "production_invoked": False,
+        "full_workflow_invoked": False,
         "unattended_production_available": False,
         "message": (
             f"Refresh Fundamentals: {known} known tickers have pending changes: "
             f"{new_quarter} new quarters, {revision} revisions, "
             f"{combined} new-quarter + revision. Manual refresh pending."
             if pending
+            else f"Refresh Fundamentals: {review_count} ticker(s) require review. Manual review pending."
+            if review_required
             else "Refresh Fundamentals: No relevant Sharadar changes since the last published refresh."
             if response.outcome == "NO_CHANGE"
             else response.message

@@ -171,6 +171,9 @@ class ScheduledStockUpdateRunResult:
     fundamentals_refresh_preview_status: str = "DISABLED"
     fundamentals_refresh_preview_timestamp_utc: str = "NONE"
     fundamentals_refresh_published_baseline: str = "NONE"
+    fundamentals_refresh_pending_changes: bool = False
+    fundamentals_refresh_review_required: bool = False
+    fundamentals_refresh_technical_failure: str = "NONE"
     fundamentals_refresh_discovered_source_ticker_count: int = 0
     fundamentals_refresh_preview_run_id: str = "NONE"
     fundamentals_refresh_preview_changed_tickers: int = 0
@@ -2511,7 +2514,10 @@ def run_scheduler_config(
                 )
             refresh_discovery: dict[str, object] = {
                 "status": "DISABLED", "outcome": "DISABLED",
+                "scheduler_summary_result": "DISABLED",
                 "run_id": None, "report": None, "summary_counts": {},
+                "pending_changes": False, "review_required": False,
+                "technical_failure": None,
                 "message": "",
             }
             if config.fundamentals_refresh_preview_enabled:
@@ -2711,6 +2717,9 @@ def run_scheduler_config(
                 fundamentals_refresh_preview_status=str(refresh_discovery.get("scheduler_summary_result") or "UNKNOWN"),
                 fundamentals_refresh_preview_timestamp_utc=str(refresh_discovery.get("preview_timestamp_utc") or "NONE"),
                 fundamentals_refresh_published_baseline=str(refresh_discovery.get("published_baseline") or "NONE"),
+                fundamentals_refresh_pending_changes=bool(refresh_discovery.get("pending_changes")),
+                fundamentals_refresh_review_required=bool(refresh_discovery.get("review_required")),
+                fundamentals_refresh_technical_failure=str(refresh_discovery.get("technical_failure") or "NONE"),
                 fundamentals_refresh_discovered_source_ticker_count=int(refresh_discovery.get("discovered_source_ticker_count") or 0),
                 fundamentals_refresh_preview_run_id=str(refresh_discovery.get("run_id") or "NONE"),
                 fundamentals_refresh_preview_changed_tickers=int(
