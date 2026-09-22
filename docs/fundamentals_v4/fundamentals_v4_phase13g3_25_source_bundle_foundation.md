@@ -48,7 +48,7 @@ The compact market DB has reader-compatible `ticker_meta`, `osakedata`, and
 |---|---|
 | V2 split normalization | All `splits_data` rows |
 | Classification and peer fingerprint | All consumed `ticker_meta` columns and rows |
-| Filing-date valuation | Latest valid exact-ticker OHLC row on or before every V4 TTM availability date |
+| Filing-date valuation | Latest valid exact-ticker OHLC row on or before every non-null V4 TTM availability date; null availability is explicit `NO_CUTOFF` evidence |
 | RV current-price input | Exact-ticker and case-folded last 32 OHLC rows on or before the as-of date |
 | Snapshot current-price input | Case-folded last 32 OHLC rows on or before the as-of date |
 | Rebuild validation source state | Complete price history for the deterministic snapshot-validation sample ticker |
@@ -57,6 +57,17 @@ Rows selected by more than one rule are deduplicated by `osakedata.id`. A reused
 ID with different content fails closed. The canonical binding includes all V4 TTM
 price requirements, relevant recent-window tickers, the validation sample ticker,
 the as-of date, and the source-contract version.
+
+Each TTM requirement receives one deterministic coverage status:
+`PRICE_FOUND`, `NO_MATCHING_VALID_PRICE`, `NO_TICKER`, or `NO_CUTOFF`. The
+manifest records counts and a sorted TTM-ID fingerprint for every status. An
+accepted absence is therefore bound evidence, not a silently dropped row.
+
+Case-folded readers are supported by discovering physical `osake` spellings once
+through the covering ticker/date index and then issuing exact-ticker indexed
+window queries. Multiple spellings are retained when their date/value histories
+are compatible. Conflicting OHLC values for the same normalized ticker and date
+fail with `READ_ONLY_SOURCE_CASEFOLD_PRICE_CONFLICT`.
 
 The complete validation-sample ticker history is intentionally retained in V1 of
 the compact contract. The existing snapshot source-state reader asks for
@@ -148,12 +159,12 @@ coverage, lock absence, and source non-mutation.
 
 ## Fixture measurement
 
-The deterministic two-company fixture contained 400 market price rows. The
-contract selected 232 unique price rows, two classification rows, and one split
-row. Construction took approximately 0.071 seconds on the local test environment.
-The source and compact DB were both 57,344 bytes because SQLite page granularity
-dominates at this tiny scale; the JSON manifest was 4,424 bytes. A repeat sample
-after the final binding checks completed in approximately 0.067 seconds.
+The deterministic two-company fixture contained 400 market price rows and three
+TTM requirements, including one `NO_CUTOFF` case. The contract selected 232
+unique price rows, two classification rows, and one split row. Construction took
+approximately 0.070 seconds on the local test environment. The source and compact
+DB were both 57,344 bytes because SQLite page granularity dominates at this tiny
+scale; the JSON manifest was 4,940 bytes.
 
 These fixture byte sizes are functional evidence, not a production compression
 claim. The Phase 13G.3.24 read-only study measured the current full market and

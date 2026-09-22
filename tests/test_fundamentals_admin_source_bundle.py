@@ -62,7 +62,7 @@ def _canonical(path: Path) -> Path:
                 endpoint_fiscal_quarter TEXT NOT NULL,
                 endpoint_quarter_id INTEGER NOT NULL,
                 period_end TEXT NOT NULL,
-                ttm_source_available_date TEXT NOT NULL,
+                ttm_source_available_date TEXT,
                 readiness_status TEXT NOT NULL,
                 blocker_codes_json TEXT NOT NULL,
                 ttm_ebit REAL,
@@ -88,6 +88,11 @@ def _canonical(path: Path) -> Path:
                 202,2,22,2026,'Q2',2002,'2026-06-30','2026-08-20',
                 'TTM_READY','[]',22,14,11,1,20,8,3,'fp-b',
                 'V4_TTM_EBIT_FIRST_V1','2026-08-20T00:00:00Z','r1'
+            );
+            INSERT INTO v4_ttm_values VALUES(
+                303,1,11,2025,'Q4',1000,'2025-12-31',NULL,
+                'TTM_NOT_READY','["SOURCE_DATE_MISSING"]',NULL,NULL,NULL,0,10,5,2,'fp-c',
+                'V4_TTM_EBIT_FIRST_V1','2026-01-01T00:00:00Z','r1'
             );
             """
         )
@@ -250,6 +255,19 @@ def test_compact_market_bundle_matches_existing_reader_semantics(
         "osakedata": 232,
         "splits_data": 1,
     }
+    assert bundle.manifest["market"]["valuation_coverage"]["status_counts"] == {
+        "PRICE_FOUND": 2,
+        "NO_MATCHING_VALID_PRICE": 0,
+        "NO_TICKER": 0,
+        "NO_CUTOFF": 1,
+    }
+    no_cutoff_fingerprint = bundle.manifest["market"]["valuation_coverage"][
+        "status_identity_fingerprints"
+    ]["NO_CUTOFF"]
+    assert len(no_cutoff_fingerprint) == 64
+    assert no_cutoff_fingerprint != bundle.manifest["market"]["valuation_coverage"][
+        "status_identity_fingerprints"
+    ]["NO_TICKER"]
 
 
 def test_full_relative_valuation_source_loader_has_market_parity(
@@ -288,6 +306,30 @@ def test_full_relative_valuation_source_loader_has_market_parity(
     )
 
     assert compact == full
+
+
+def test_casefold_price_fallback_uses_indexable_source_ticker_forms(
+    tmp_path: Path, sources: tuple[Path, Path, Path]
+) -> None:
+    canonical, market, _ = sources
+    with sqlite3.connect(market) as connection:
+        connection.execute("UPDATE osakedata SET osake='aaa' WHERE osake='AAA'")
+    bundle = _build(tmp_path, canonical, market)
+    with sqlite3.connect(market) as source, sqlite3.connect(bundle.market_db) as compact:
+        source.row_factory = compact.row_factory = sqlite3.Row
+        assert _bars(compact, "AAA", AS_OF) == _bars(source, "AAA", AS_OF)
+
+
+def test_conflicting_casefold_price_rows_fail_closed(
+    tmp_path: Path, sources: tuple[Path, Path, Path]
+) -> None:
+    canonical, market, _ = sources
+    with sqlite3.connect(market) as connection:
+        connection.execute(
+            "INSERT INTO osakedata VALUES(9999,'aaa','2026-09-08',1,2,0.5,99)"
+        )
+    with pytest.raises(SourceBundleError, match="CASEFOLD_PRICE_CONFLICT:AAA:2026-09-08"):
+        _build(tmp_path, canonical, market)
 
 
 def test_unchanged_delete_journal_source_is_valid_and_not_mutated(

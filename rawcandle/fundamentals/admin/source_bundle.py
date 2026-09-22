@@ -244,13 +244,13 @@ def _canonical_requirements(
                 (TTM_MODEL_VERSION,),
             )
         ]
-        if any(row["ticker"] is None or row["cutoff"] is None for row in valuation):
-            raise SourceBundleError("CANONICAL_MARKET_REQUIREMENT_INCOMPLETE")
         recent_tickers = sorted(
             {
                 str(row["ticker"])
                 for row in valuation
-                if str(row["cutoff"]) <= as_of_date
+                if row["ticker"] is not None
+                and row["cutoff"] is not None
+                and str(row["cutoff"]) <= as_of_date
             }
         )
         sample = connection.execute(
@@ -311,6 +311,40 @@ def _normalized_market_projection(
             raise SourceBundleError("READ_ONLY_SOURCE_DUPLICATE_SPLIT")
         selected: dict[int, dict[str, Any]] = {}
         valuation_coverage: list[dict[str, Any]] = []
+        ticker_forms: dict[str, list[str]] = {}
+        for row in connection.execute(
+            "SELECT DISTINCT osake FROM osakedata WHERE osake IS NOT NULL ORDER BY osake"
+        ):
+            value = str(row[0])
+            ticker_forms.setdefault(value.upper(), []).append(value)
+        relevant_folded_tickers = {
+            str(row["ticker"]).upper()
+            for row in requirements["valuation_requirements"]
+            if row["ticker"] is not None
+        } | {str(ticker).upper() for ticker in requirements["recent_tickers"]}
+        if requirements["validation_sample_ticker"]:
+            relevant_folded_tickers.add(
+                str(requirements["validation_sample_ticker"]).upper()
+            )
+        for folded in sorted(relevant_folded_tickers):
+            forms = ticker_forms.get(folded, ())
+            if len(forms) < 2:
+                continue
+            by_date: dict[str, tuple[Any, ...]] = {}
+            for source_ticker in forms:
+                for row in connection.execute(
+                    "SELECT pvm,open,high,low,close FROM osakedata "
+                    "WHERE osake=? AND pvm<=? ORDER BY pvm",
+                    (source_ticker, requirements["as_of_date"]),
+                ):
+                    date_key = str(row["pvm"])
+                    values = tuple(row[column] for column in ("open", "high", "low", "close"))
+                    prior = by_date.get(date_key)
+                    if prior is not None and prior != values:
+                        raise SourceBundleError(
+                            f"READ_ONLY_SOURCE_CASEFOLD_PRICE_CONFLICT:{folded}:{date_key}"
+                        )
+                    by_date[date_key] = values
 
         def retain(rows: Sequence[sqlite3.Row]) -> None:
             for row in rows:
@@ -322,48 +356,63 @@ def _normalized_market_projection(
                 selected[row_id] = item
 
         price_columns = "id,osake,pvm,open,high,low,close"
+        valuation_cache: dict[tuple[str, str], sqlite3.Row | None] = {}
         for requirement in requirements["valuation_requirements"]:
-            row = connection.execute(
-                f"""SELECT {price_columns} FROM osakedata
-                     WHERE osake=? AND pvm<=?
-                       AND open>0 AND high>0 AND low>0 AND close>0
-                       AND high>=MAX(open,close,low)
-                       AND low<=MIN(open,close,high)
-                     ORDER BY pvm DESC LIMIT 1""",
-                (requirement["ticker"], requirement["cutoff"]),
-            ).fetchone()
+            ticker = requirement["ticker"]
+            cutoff = requirement["cutoff"]
+            row: sqlite3.Row | None = None
+            if ticker is None:
+                status = "NO_TICKER"
+            elif cutoff is None:
+                status = "NO_CUTOFF"
+            else:
+                status = "NO_MATCHING_VALID_PRICE"
+            if ticker is not None and cutoff is not None:
+                key = (str(ticker), str(cutoff))
+                if key not in valuation_cache:
+                    valuation_cache[key] = connection.execute(
+                        f"""SELECT {price_columns} FROM osakedata
+                             WHERE osake=? AND pvm<=?
+                               AND open>0 AND high>0 AND low>0 AND close>0
+                               AND high>=MAX(open,close,low)
+                               AND low<=MIN(open,close,high)
+                             ORDER BY pvm DESC LIMIT 1""",
+                        key,
+                    ).fetchone()
+                row = valuation_cache[key]
+                if row is not None:
+                    status = "PRICE_FOUND"
             if row is not None:
                 retain((row,))
             valuation_coverage.append(
-                {"ttm_id": int(requirement["ttm_id"]), "price_id": int(row["id"]) if row else None}
+                {
+                    "ttm_id": int(requirement["ttm_id"]),
+                    "status": status,
+                    "price_id": int(row["id"]) if row else None,
+                }
             )
         for ticker in requirements["recent_tickers"]:
-            exact = list(
-                connection.execute(
-                    f"SELECT {price_columns} FROM osakedata WHERE osake=? AND pvm<=? "
-                    "ORDER BY pvm DESC LIMIT 32",
-                    (ticker, requirements["as_of_date"]),
-                )
-            )
-            folded = list(
-                connection.execute(
-                    f"SELECT {price_columns} FROM osakedata WHERE UPPER(osake)=? AND pvm<=? "
-                    "ORDER BY pvm DESC LIMIT 32",
-                    (ticker.upper(), requirements["as_of_date"]),
-                )
-            )
-            retain(exact)
-            retain(folded)
-        sample = requirements["validation_sample_ticker"]
-        if sample:
-            retain(
-                list(
-                    connection.execute(
-                        f"SELECT {price_columns} FROM osakedata WHERE UPPER(osake)=? ORDER BY id",
-                        (str(sample).upper(),),
+            for source_ticker in ticker_forms.get(ticker.upper(), ()):
+                retain(
+                    list(
+                        connection.execute(
+                            f"SELECT {price_columns} FROM osakedata WHERE osake=? AND pvm<=? "
+                            "ORDER BY pvm DESC LIMIT 32",
+                            (source_ticker, requirements["as_of_date"]),
+                        )
                     )
                 )
-            )
+        sample = requirements["validation_sample_ticker"]
+        if sample:
+            for source_ticker in ticker_forms.get(str(sample).upper(), ()):
+                retain(
+                    list(
+                        connection.execute(
+                            f"SELECT {price_columns} FROM osakedata WHERE osake=? ORDER BY id",
+                            (source_ticker,),
+                        )
+                    )
+                )
         rows = [selected[key] for key in sorted(selected)]
         pragmas = _source_pragmas(connection)
     semantic_payload = {
@@ -631,6 +680,17 @@ def build_stable_read_only_source_bundle(
         if hook:
             hook("AFTER_BUNDLE_WRITE", {"market_db": market_db, "staging": staging})
         physical_sha256 = _sha256(market_path)
+        coverage_statuses = (
+            "PRICE_FOUND", "NO_MATCHING_VALID_PRICE", "NO_TICKER", "NO_CUTOFF"
+        )
+        coverage_ids = {
+            status: sorted(
+                int(row["ttm_id"])
+                for row in projection["valuation_coverage"]
+                if row["status"] == status
+            )
+            for status in coverage_statuses
+        }
         manifest: dict[str, Any] = {
             "source_contract_version": SOURCE_CONTRACT_VERSION,
             "mode": ReadOnlySourceMode.STABLE_SOURCE_BUNDLE.value,
@@ -652,12 +712,13 @@ def build_stable_read_only_source_bundle(
                 "row_counts": written["row_counts"],
                 "valuation_coverage": {
                     "requirements": len(projection["valuation_coverage"]),
-                    "resolved": sum(
-                        row["price_id"] is not None for row in projection["valuation_coverage"]
-                    ),
-                    "missing": sum(
-                        row["price_id"] is None for row in projection["valuation_coverage"]
-                    ),
+                    "status_counts": {
+                        status: len(coverage_ids[status]) for status in coverage_statuses
+                    },
+                    "status_identity_fingerprints": {
+                        status: _fingerprint(coverage_ids[status])
+                        for status in coverage_statuses
+                    },
                 },
                 "source_identity_before": before_identity,
                 "source_identity_after": after_identity,
