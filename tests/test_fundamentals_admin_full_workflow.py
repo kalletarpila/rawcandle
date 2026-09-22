@@ -170,7 +170,7 @@ def test_real_workflow_review_stop_propagates_structured_test_facts_without_mark
     assert result["final_completed_stage"] == "Test on copies"
     assert production_calls == []
     assert result["final_batch_outcome"] == {
-        "requested": 5, "new": 5, "already_present": 0,
+        "requested": 5, "new": 5, "eligible": 3, "already_present": 0,
         "tested_successfully": 3, "test_completed": 5,
         "review_required": 2, "rejected": 0,
         "published_added": 0, "added": 0, "existing_rebuilt": 0,
@@ -197,7 +197,7 @@ def test_real_workflow_review_stop_propagates_structured_test_facts_without_mark
     )._finalize(result, default_message="Full workflow completed.")
     assert ui_result.status == "FAILED"
     assert "2 tickers require review" in ui_result.message
-    assert "Tested successfully: 3; review required: 2; rejected: 0." in ui_result.summary_rows
+    assert "Requested: 5; eligible: 3; tested successfully: 3; review required: 2; rejected: 0." in ui_result.summary_rows
     assert "Affected tickers: DRK, KRSA." in ui_result.summary_rows
     assert "Production ran: No." in ui_result.summary_rows
 
@@ -216,6 +216,72 @@ def test_preview_review_stop_uses_preview_as_authoritative_terminal_stage(tmp_pa
     assert calls == []
     assert result["terminal_summary"]["authoritative_stage"] == "Preview"
     assert result["terminal_summary"]["problem_items"][0]["ticker"] == "DRK"
+
+
+def test_completed_preview_with_structured_review_stops_before_test_and_production(tmp_path: Path) -> None:
+    calls: list[str] = []
+    reports = [
+        _report("PSQL", action="Eligible to add"),
+        _review_report("KRSA", "NETWORK_TRANSIENT_FAILURE"),
+        _review_report("QVCG", "NETWORK_TRANSIENT_FAILURE"),
+    ]
+    for report in reports:
+        report["after"] = {"stage": "PREVIEW", "analysis": "Not calculated during Preview"}
+    result = run_full_workflow(
+        "KRSA PSQL QVCG", market="usa", run_root=tmp_path,
+        preview_stage=lambda callback: _stage_result(
+            tmp_path, "preview-run", mode="PREVIEW", ticker_reporting=reports,
+            extra={
+                "applyability": {
+                    "copy_apply_authorized": False,
+                    "eligible_count": 1,
+                    "review_required_count": 2,
+                    "rejected_count": 0,
+                }
+            },
+        ),
+        test_stage=lambda *args: calls.append("test"),
+        production_stage=lambda *args: calls.append("production"),
+    )
+
+    assert calls == []
+    assert result["outcome"] == "STOPPED"
+    assert result["final_completed_stage"] == "Preview"
+    assert result["terminal_summary"]["stop_kind"] == "REVIEW_REQUIRED"
+    assert result["terminal_summary"]["failure_stage"] == "Preview"
+    assert [item["ticker"] for item in result["terminal_summary"]["problem_items"]] == ["KRSA", "QVCG"]
+    assert result["final_batch_outcome"]["requested"] == 3
+    assert result["final_batch_outcome"]["eligible"] == 1
+    assert result["final_batch_outcome"]["review_required"] == 2
+
+
+def test_test_technical_failure_retains_latest_preview_ticker_evidence(tmp_path: Path) -> None:
+    preview_reports = [_report(ticker, action="Eligible to add") for ticker in ("KRSA", "PSQL", "QVCG")]
+    for report in preview_reports:
+        report["after"] = {"stage": "PREVIEW", "analysis": "Not calculated during Preview"}
+    result = run_full_workflow(
+        "KRSA PSQL QVCG", market="usa", run_root=tmp_path,
+        preview_stage=lambda callback: _stage_result(
+            tmp_path, "preview-run", mode="PREVIEW", ticker_reporting=preview_reports,
+            extra={"applyability": {"copy_apply_authorized": True, "blocking_items": []}},
+        ),
+        test_stage=lambda preview, callback: _stage_result(
+            tmp_path, "test-run", mode="COPY_ONLY_APPLY", outcome="FAILED",
+            extra={"user_failure_reason": "Candidate validation failed before ticker results were materialized."},
+        ),
+        production_stage=lambda *args: pytest.fail("Production must not run"),
+    )
+
+    terminal = result["terminal_summary"]
+    assert terminal["stop_kind"] == "TECHNICAL_FAILURE"
+    assert terminal["failure_stage"] == "Test on copies"
+    assert terminal["authoritative_stage"] == "Preview"
+    assert terminal["source"] == "STRUCTURED_LATEST_MATERIAL_RESULT"
+    assert terminal["batch_outcome"]["requested"] == 3
+    assert terminal["batch_outcome"]["eligible"] == 3
+    report = (Path(result["artifact_dir"]) / "workflow_report.md").read_text(encoding="utf-8")
+    assert "Technical failure/stop stage: Test on copies" in report
+    assert "Authoritative item evidence: Preview" in report
 
 
 def test_integrity_error_stops_automatic_production_but_zero_arq_does_not(tmp_path: Path) -> None:

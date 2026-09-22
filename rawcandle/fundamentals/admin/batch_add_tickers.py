@@ -66,7 +66,15 @@ from rawcandle.fundamentals.phase13d_backend import (
     build_ticker_preview,
     reject_production_or_alias,
 )
-from rawcandle.fundamentals.providers.sharadar import SharadarClient, redact_url
+from rawcandle.fundamentals.providers.sharadar import (
+    FUNDAMENTALS_REQUIRED_FIELDS,
+    STATUS_INVALID_RESPONSE,
+    STATUS_RATE_LIMITED,
+    STATUS_SCHEMA_MISMATCH,
+    STATUS_TRANSIENT_FAILURE,
+    SharadarClient,
+    redact_url,
+)
 from rawcandle.fundamentals.relative_valuation.engine import MODEL_FINGERPRINT as RV_MODEL_FINGERPRINT
 from rawcandle.fundamentals.relative_valuation.engine import calculate_relative_valuation
 from rawcandle.fundamentals.relative_valuation.persistence import (
@@ -88,7 +96,7 @@ REPORT_DATE = "2026-09-12"
 
 
 PHASE = "PHASE13G2_BATCH_ADD_TICKERS"
-CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V6_COMPLETE_FISCAL_IDENTITY"
+CONTRACT_VERSION = "PHASE13G2_BATCH_ADD_TICKERS_COPY_ONLY_V7_ACQUISITION_AUTHORITY"
 OUTCOME_B = "OUTCOME B — BATCH ADD TICKERS COPY-ONLY FOUNDATION READY; AUTHORITATIVE FULL DOWNSTREAM GAP REMAINS"
 OUTCOME_A = "OUTCOME A — GENERIC BATCH ADD TICKERS AUTHORITATIVE COPY-ONLY PIPELINE VERIFIED AND READY FOR SEPARATELY AUTHORIZED PRODUCTION DEPLOYMENT"
 PRODUCTION_OUTCOME_A = "OUTCOME A — BATCH ADD TICKERS ACTIVE AND STABLE IN PRODUCTION"
@@ -169,6 +177,7 @@ class GenericBatchItemPlan:
     status: str
     reason: str
     source_category: str
+    acquisition: Mapping[str, Any]
     provider_metadata: Mapping[str, Any]
     market: Mapping[str, Any]
     classification: Mapping[str, Any]
@@ -190,6 +199,7 @@ class GenericBatchItemPlan:
             "status": self.status,
             "reason": self.reason,
             "source_category": self.source_category,
+            "acquisition": dict(self.acquisition),
             "provider_metadata": dict(self.provider_metadata),
             "market": dict(self.market),
             "classification": dict(self.classification),
@@ -658,9 +668,43 @@ def _archive_rows(archive: Path, tickers: set[str]) -> dict[str, tuple[dict[str,
     return {ticker: tuple(items) for ticker, items in rows.items()}
 
 
+def _payload_shape_valid(payload: Any) -> bool:
+    if isinstance(payload, list):
+        return all(isinstance(row, Mapping) for row in payload)
+    if isinstance(payload, Mapping):
+        for key in ("data", "rows", "results"):
+            if key in payload:
+                value = payload[key]
+                return isinstance(value, list) and all(isinstance(row, Mapping) for row in value)
+        return bool(payload) and all(not isinstance(value, (list, Mapping)) for value in payload.values())
+    return False
+
+
+def _successful_acquisition_state(rows: Sequence[Mapping[str, Any]]) -> tuple[str, str | None]:
+    quarterly = [row for row in rows if str(row.get("dimension") or "").upper() in {"ARQ", "MRQ"}]
+    if not quarterly:
+        return "SUCCESS_NO_USABLE_QUARTERLY_HISTORY", None
+    if incomplete_fiscal_identity_rows(quarterly):
+        return "INCOMPLETE_FISCAL_IDENTITY", "INCOMPLETE_FISCAL_IDENTITY"
+    required_except_fiscalperiod = set(FUNDAMENTALS_REQUIRED_FIELDS) - {"fiscalperiod"}
+    if any(not required_except_fiscalperiod.issubset(row) for row in quarterly):
+        return "RESPONSE_SCHEMA_INVALID", "RESPONSE_SCHEMA_INVALID"
+    return "SUCCESS_WITH_USABLE_DATA", None
+
+
+def _network_failure_state(provider_status: str) -> tuple[str, str]:
+    if provider_status in {STATUS_TRANSIENT_FAILURE, STATUS_RATE_LIMITED}:
+        return "NETWORK_TRANSIENT_FAILURE", "NETWORK_TRANSIENT_FAILURE"
+    if provider_status in {STATUS_INVALID_RESPONSE, STATUS_SCHEMA_MISMATCH}:
+        return "RESPONSE_SCHEMA_INVALID", "RESPONSE_SCHEMA_INVALID"
+    return "NETWORK_PERMANENT_FAILURE", "NETWORK_PERMANENT_FAILURE"
+
+
 def _network_rows(tickers: Sequence[str], *, network_allowed: bool, client: SharadarClient | None = None) -> tuple[dict[str, tuple[dict[str, Any], ...]], dict[str, Any]]:
     if not network_allowed:
-        return {ticker: () for ticker in tickers}, {"status": "DISABLED", "request_count": 0}
+        return {ticker: () for ticker in tickers}, {
+            "status": "DISABLED", "request_count": 0, "acquisitions": {},
+        }
     client = client or SharadarClient()
     output: dict[str, tuple[dict[str, Any], ...]] = {}
     calls: list[dict[str, Any]] = []
@@ -668,17 +712,37 @@ def _network_rows(tickers: Sequence[str], *, network_allowed: bool, client: Shar
         # Replacement authority needs the provider's complete row. A fields
         # projection has previously returned successful but incomplete rows.
         result = client.fundamentals(ticker=ticker, limit=10000)
-        calls.append({
+        provider_status = str(result.status)
+        rows = tuple(dict(row) for row in result.records) if result.ok else ()
+        payload_valid = not hasattr(result, "payload") or result.payload is None or _payload_shape_valid(result.payload)
+        if result.ok and not payload_valid:
+            acquisition_status, reason_code = "RESPONSE_SCHEMA_INVALID", "RESPONSE_SCHEMA_INVALID"
+            rows = ()
+        elif result.ok:
+            acquisition_status, reason_code = _successful_acquisition_state(rows)
+        else:
+            acquisition_status, reason_code = _network_failure_state(provider_status)
+        call = {
             "ticker": ticker,
-            "status": result.status,
+            "status": provider_status,
             "auth_status": result.auth_status,
             "http_status": result.http_status,
             "endpoint": result.endpoint,
             "url": redact_url(result.url),
-            "rows": len(result.records),
-        })
-        output[ticker] = tuple(dict(row) for row in result.records) if result.ok else ()
-    return output, {"status": "ALLOWED", "request_count": client.request_count, "calls": calls}
+            "rows": len(rows) if result.ok else None,
+            "acquisition_status": acquisition_status,
+            "reason_code": reason_code,
+            "retryable": acquisition_status == "NETWORK_TRANSIENT_FAILURE",
+            "error_summary": str(getattr(result, "error", "") or "")[:500] or None,
+        }
+        calls.append(call)
+        output[ticker] = rows
+    return output, {
+        "status": "ALLOWED",
+        "request_count": client.request_count,
+        "calls": calls,
+        "acquisitions": {call["ticker"]: call for call in calls},
+    }
 
 
 def fiscal_sequence_contradictions(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -764,12 +828,59 @@ def build_generic_batch_plan(
         if local_rows_by_ticker[ticker]:
             rows = local_rows_by_ticker[ticker]
             source_category = "local_provider"
+            acquisition_status, acquisition_reason = _successful_acquisition_state(rows)
+            acquisition = {
+                "status": acquisition_status,
+                "reason_code": acquisition_reason,
+                "network_requested": False,
+                "network_used": False,
+                "authoritative": acquisition_status in {
+                    "SUCCESS_WITH_USABLE_DATA", "SUCCESS_NO_USABLE_QUARTERLY_HISTORY",
+                },
+            }
         elif archive_rows.get(ticker):
             rows = archive_rows[ticker]
             source_category = "verified_archive"
+            acquisition_status, acquisition_reason = _successful_acquisition_state(rows)
+            acquisition = {
+                "status": acquisition_status,
+                "reason_code": acquisition_reason,
+                "network_requested": False,
+                "network_used": False,
+                "authoritative": acquisition_status in {
+                    "SUCCESS_WITH_USABLE_DATA", "SUCCESS_NO_USABLE_QUARTERLY_HISTORY",
+                },
+            }
         else:
             rows = fetched_rows.get(ticker, ())
-            source_category = "network" if rows else ("network_unavailable" if network_allowed else "network_required")
+            network_acquisition = dict((network.get("acquisitions") or {}).get(ticker) or {})
+            if network_allowed:
+                acquisition_status = str(network_acquisition.get("acquisition_status") or "NETWORK_PERMANENT_FAILURE")
+                acquisition_reason = network_acquisition.get("reason_code")
+                source_category = "network" if acquisition_status.startswith("SUCCESS_") else "network_unavailable"
+                acquisition = {
+                    "status": acquisition_status,
+                    "reason_code": acquisition_reason,
+                    "network_requested": True,
+                    "network_used": acquisition_status.startswith("SUCCESS_"),
+                    "authoritative": acquisition_status.startswith("SUCCESS_"),
+                    "provider_status": network_acquisition.get("status"),
+                    "auth_status": network_acquisition.get("auth_status"),
+                    "http_status": network_acquisition.get("http_status"),
+                    "retryable": bool(network_acquisition.get("retryable")),
+                    "error_summary": network_acquisition.get("error_summary"),
+                }
+            else:
+                acquisition_status = "NETWORK_NOT_REQUESTED"
+                acquisition_reason = "NETWORK_REQUIRED"
+                source_category = "network_required"
+                acquisition = {
+                    "status": acquisition_status,
+                    "reason_code": acquisition_reason,
+                    "network_requested": False,
+                    "network_used": False,
+                    "authoritative": False,
+                }
         blockers: list[str] = []
         if identity_resolution["resolution_class"] == "IDENTITY_REVIEW_REQUIRED":
             blockers.extend(identity_resolution["reason_codes"])
@@ -786,10 +897,12 @@ def build_generic_batch_plan(
         if classification["status"] != "READY":
             blockers.append("MISSING_CLASSIFICATION")
         arq_rows = [row for row in rows if str(row.get("dimension") or "").upper() == "ARQ"]
-        if not arq_rows:
+        if acquisition_reason:
+            blockers.append(str(acquisition_reason))
+        elif not arq_rows:
             blockers.append("NO_USABLE_QUARTERLY_HISTORY")
         incomplete_fiscal_rows = incomplete_fiscal_identity_rows(rows)
-        if incomplete_fiscal_rows:
+        if incomplete_fiscal_rows and "INCOMPLETE_FISCAL_IDENTITY" not in blockers:
             blockers.append("INCOMPLETE_FISCAL_IDENTITY")
         fiscal_contradictions = fiscal_sequence_contradictions(rows)
         if fiscal_contradictions:
@@ -801,7 +914,7 @@ def build_generic_batch_plan(
             status = "REVIEW_REQUIRED"
             reason = "IDENTITY_MUTATION_NOT_AUTHORIZED"
         elif blockers:
-            status = "REVIEW_REQUIRED" if any("REVIEW" in blocker or "AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "NO_USABLE_QUARTERLY_HISTORY", "INCOMPLETE_FISCAL_IDENTITY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN"} for blocker in blockers) else "REJECTED"
+            status = "REVIEW_REQUIRED" if any("REVIEW" in blocker or "AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "NO_USABLE_QUARTERLY_HISTORY", "INCOMPLETE_FISCAL_IDENTITY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN", "NETWORK_REQUIRED", "NETWORK_TRANSIENT_FAILURE", "NETWORK_PERMANENT_FAILURE", "RESPONSE_SCHEMA_INVALID"} for blocker in blockers) else "REJECTED"
             reason = ",".join(blockers)
         else:
             status = "ELIGIBLE"
@@ -813,6 +926,7 @@ def build_generic_batch_plan(
             status=status,
             reason=reason,
             source_category=source_category,
+            acquisition=acquisition,
             provider_metadata=metadata_state,
             market=market,
             classification=classification,
@@ -1763,6 +1877,25 @@ def run_preview(
         )
         result_dict = result.as_dict()
         result_dict["ticker_reporting"] = raw_preview["generic_batch_plan"].get("ticker_reporting", [])
+        blocking_items = [
+            {
+                "ticker": item["ticker"],
+                "status": item["status"],
+                "reason": item["reason"],
+            }
+            for item in raw_preview["generic_batch_plan"].get("items", [])
+            if item.get("status") in {"REVIEW_REQUIRED", "REJECTED"}
+        ]
+        result_dict["applyability"] = {
+            "copy_apply_authorized": not blocking_items,
+            "eligible_count": sum(
+                item.get("status") == "ELIGIBLE"
+                for item in raw_preview["generic_batch_plan"].get("items", [])
+            ),
+            "review_required_count": sum(item["status"] == "REVIEW_REQUIRED" for item in blocking_items),
+            "rejected_count": sum(item["status"] == "REJECTED" for item in blocking_items),
+            "blocking_items": blocking_items,
+        }
         writer.write_json("result.json", result_dict)
         writer.write_text("report.md", render_markdown_report(result_dict))
         progress.running(ProgressStage.CLEANUP, "Removing preview copy lane.")

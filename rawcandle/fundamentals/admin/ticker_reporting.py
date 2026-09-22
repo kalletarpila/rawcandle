@@ -16,6 +16,12 @@ REASON_TEXT = {
     "MARKET_NOT_UNAMBIGUOUS_USA": "USA market listing could not be confirmed unambiguously",
     "MISSING_CLASSIFICATION": "Sector/Industry classification is missing",
     "FUNDAMENTAL_SOURCE_ROWS_MISSING": "No usable fundamental observations were found",
+    "NO_USABLE_QUARTERLY_HISTORY": "The provider returned no usable quarterly history",
+    "NETWORK_REQUIRED": "A provider network request is required to establish quarterly history",
+    "NETWORK_TRANSIENT_FAILURE": "The provider request failed temporarily after bounded retries",
+    "NETWORK_PERMANENT_FAILURE": "The provider request failed and did not establish quarterly history",
+    "RESPONSE_SCHEMA_INVALID": "The provider response did not satisfy the complete source schema",
+    "INCOMPLETE_FISCAL_IDENTITY": "Quarterly source rows are missing required fiscal identity",
     "CIK_IDENTITY_CONFLICT": "The provider CIK is already bound to another canonical identity",
     "PROVIDER_IDENTITY_CONFLICT": "The persistent provider security identity is already bound to another canonical identity",
 }
@@ -448,9 +454,25 @@ def build_preview_reporting(paths: Any, plan: Mapping[str, Any]) -> list[dict[st
             "local_provider": "Existing local provider data",
             "verified_archive": "Verified local archive",
             "network": "Network",
-            "network_required": "No usable fundamentals found",
-            "network_unavailable": "No usable fundamentals found",
+            "network_required": "Provider network request required",
+            "network_unavailable": "Provider acquisition failed",
         }.get(str(item.get("source_category")), "Not available")
+        acquisition = dict(item.get("acquisition") or {})
+        acquisition.update({
+            "source": source,
+            "source_category": item.get("source_category"),
+            "network_requested": bool(acquisition.get("network_requested", ticker in network_calls)),
+            "network_used": bool(acquisition.get("network_used", item.get("source_category") == "network")),
+        })
+        coverage = _coverage(item.get("rows") or [])
+        if not acquisition.get("authoritative"):
+            coverage = {
+                "provider_rows": None,
+                "arq_count": None,
+                "first_fiscal_quarter": None,
+                "latest_fiscal_quarter": None,
+                "authority": "NOT_ESTABLISHED",
+            }
         reports.append({
             "ticker": ticker,
             "company_name": identity.get("name"),
@@ -463,13 +485,8 @@ def build_preview_reporting(paths: Any, plan: Mapping[str, Any]) -> list[dict[st
                 "canonical_identity": canonical_before,
                 "v2_analysis": v2_before,
             },
-            "acquisition": {
-                "source": source,
-                "source_category": item.get("source_category"),
-                "network_requested": ticker in network_calls,
-                "network_used": item.get("source_category") == "network",
-            },
-            "coverage": _coverage(item.get("rows") or []),
+            "acquisition": acquisition,
+            "coverage": coverage,
             "classification": {
                 "sector": (item.get("classification") or {}).get("sector"),
                 "industry": (item.get("classification") or {}).get("industry"),
@@ -554,6 +571,9 @@ def _compact(report: Mapping[str, Any]) -> list[str]:
             v2 = f"Score V2 {_status((analysis.get('score') or {}).get('status'), 'SCORE_')} / Valuation {_status((analysis.get('valuation') or {}).get('status'), 'VALUATION_')}"
         rp = f"{(analysis.get('rp_v2') or {}).get('total_results', 0)} results"
     source = (report.get("acquisition") or {}).get("source") or "Not available"
+    acquisition_status = str((report.get("acquisition") or {}).get("status") or "")
+    if acquisition_status and acquisition_status != "SUCCESS_WITH_USABLE_DATA":
+        source += f" ({acquisition_status.replace('_', ' ').title()})"
     if not (report.get("acquisition") or {}).get("network_requested"):
         source += "; no network"
     return [str(report.get("ticker")), str((report.get("before") or {}).get("category", "Not available")), source, span, v2, sector, tax, rp, str(report.get("final_action") or "Not available")]
@@ -716,7 +736,9 @@ def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
             identity_text = "Canonical identity on copies: " + ("Present" if before.get("canonical_identity") else "Created" if after.get("canonical_identity") == "Present" else "Not present")
         else:
             identity_text = "Canonical identity: " + ("Present" if before.get("canonical_identity") else "Created" if after.get("canonical_identity") == "Present" else "Not present")
-        lines.extend(["", f"### {ticker} - {name}", "", "#### Identity", "", f"- Market / exchange: {report.get('market') or 'Not available'} / {report.get('exchange') or 'Not available'}", f"- {identity_text}", "", "#### Before the run", "", f"- State: {before.get('category', 'Not available')}", f"- Provider data: {'Yes' if before.get('provider_data') else 'No'}", f"- Canonical identity: {'Present' if before.get('canonical_identity') else 'Not present'}", f"- Existing V2 analysis: {'Yes' if before.get('v2_analysis') else 'No'}", "", "#### Data acquisition", "", f"- Source: {acquisition.get('source', 'Not available')}", f"- Network request: {'Yes' if acquisition.get('network_requested') else 'No'}", f"- Network result used: {'Yes' if acquisition.get('network_used') else 'No'}", f"- Provider rows: {coverage.get('provider_rows', 'Not available')}", f"- Quarterly coverage: {coverage.get('arq_count', 'Not available')} ARQ", f"- First fiscal quarter: {coverage.get('first_fiscal_quarter') or 'Not available'}", f"- Latest fiscal quarter: {coverage.get('latest_fiscal_quarter') or 'Not available'}"])
+        provider_rows = coverage.get("provider_rows")
+        arq_count = coverage.get("arq_count")
+        lines.extend(["", f"### {ticker} - {name}", "", "#### Identity", "", f"- Market / exchange: {report.get('market') or 'Not available'} / {report.get('exchange') or 'Not available'}", f"- {identity_text}", "", "#### Before the run", "", f"- State: {before.get('category', 'Not available')}", f"- Provider data: {'Yes' if before.get('provider_data') else 'No'}", f"- Canonical identity: {'Present' if before.get('canonical_identity') else 'Not present'}", f"- Existing V2 analysis: {'Yes' if before.get('v2_analysis') else 'No'}", "", "#### Data acquisition", "", f"- Source: {acquisition.get('source', 'Not available')}", f"- Acquisition status: {acquisition.get('status', 'Not available')}", f"- Acquisition reason: {acquisition.get('reason_code') or acquisition.get('error_summary') or 'None'}", f"- Retryable: {'Yes' if acquisition.get('retryable') else 'No'}", f"- Network request: {'Yes' if acquisition.get('network_requested') else 'No'}", f"- Network result used: {'Yes' if acquisition.get('network_used') else 'No'}", f"- Provider rows: {provider_rows if provider_rows is not None else 'Not established'}", f"- Quarterly coverage: {(str(arq_count) + ' ARQ') if arq_count is not None else 'Not established'}", f"- First fiscal quarter: {coverage.get('first_fiscal_quarter') or 'Not available'}", f"- Latest fiscal quarter: {coverage.get('latest_fiscal_quarter') or 'Not available'}"])
         lineage_evidence = report.get("lineage") if isinstance(report.get("lineage"), Mapping) else None
         if lineage_evidence:
             outputs = lineage_evidence.get("analysis_output_rows") or {}
@@ -730,7 +752,7 @@ def render_ticker_sections(reports: Sequence[Mapping[str, Any]]) -> str:
                 f"`{outputs.get('score', 0)} / {outputs.get('lifecycle', 0)} / {outputs.get('valuation', 0)}`",
             ])
         lines.extend(_reviewed_identity_lines(report))
-        if coverage.get("provider_rows", 0) > 0 and coverage.get("arq_count") == 0:
+        if int(coverage.get("provider_rows") or 0) > 0 and coverage.get("arq_count") == 0:
             lines.append("- Provider data exists, but no usable quarterly ARQ history was identified.")
         lines.extend(["", "#### Classification", "", f"- Sector: {classification.get('sector') or 'Not available'}", f"- Industry: {classification.get('industry') or 'Not available'}", "", "#### Taxonomy", "", f"- Member: {'Yes' if taxonomy.get('member') else 'No'}", f"- Roles: {', '.join(taxonomy.get('roles') or []) or 'Not applicable'}"])
         memberships = taxonomy.get("memberships") or []

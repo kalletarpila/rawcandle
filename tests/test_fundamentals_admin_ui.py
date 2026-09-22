@@ -899,12 +899,103 @@ def test_admin_history_cursor_pages_incrementally_without_rereading_results(tmp_
     cursor = service.history_cursor()
 
     assert len(cursor.fill(8)) == 8
-    assert len(service.result_reads) == 11
+    assert len(service.result_reads) == 8
     assert len(cursor.fill(16)) == 16
-    assert len(service.result_reads) == 19
+    assert len(service.result_reads) == 16
     assert len(cursor.fill(24)) == 24
-    assert len(service.result_reads) == 27
+    assert len(service.result_reads) == 24
     assert max(service.result_reads.count(path) for path in service.result_reads) == 1
+
+
+def test_history_is_globally_newest_first_across_visible_categories(tmp_path: Path) -> None:
+    admin_ids = [
+        "20260922T101500Z_add_tickers_preview",
+        "20260922T101700Z_add_tickers_test",
+        "20260922T101800Z_add_tickers_workflow",
+        "20260922T051200Z_add_tickers_production",
+    ]
+    for run_id in admin_ids:
+        run_dir = _write_run(tmp_path, run_id)
+        payload = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+        if run_id.endswith("workflow"):
+            payload["mode"] = "FULL_WORKFLOW"
+        elif run_id.endswith("test"):
+            payload["mode"] = "COPY_ONLY_APPLY"
+        elif run_id.endswith("production"):
+            payload["mode"] = "PRODUCTION_APPLY"
+        payload["completed_at_utc"] = None
+        (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    for run_id, marker in (
+        ("20260922T101600Z_acceptance_evidence", "acceptance_summary.json"),
+        ("20260922T101400Z_maintenance_cleanup", "cleanup.json"),
+        ("20260922T101300Z_legacy_evidence", "legacy.json"),
+    ):
+        run_dir = tmp_path / run_id
+        run_dir.mkdir()
+        (run_dir / marker).write_text("{}", encoding="utf-8")
+
+    service = FundamentalsAdminUIService(run_root=tmp_path)
+    normal = service.history_entries(limit=20)
+    broad = service.history_entries(limit=20, include_technical=True)
+
+    assert [entry.run_id for entry in normal] == [
+        "20260922T101800Z_add_tickers_workflow",
+        "20260922T101700Z_add_tickers_test",
+        "20260922T101500Z_add_tickers_preview",
+        "20260922T051200Z_add_tickers_production",
+    ]
+    assert [entry.run_id for entry in broad] == sorted(
+        admin_ids + [
+            "20260922T101600Z_acceptance_evidence",
+            "20260922T101400Z_maintenance_cleanup",
+            "20260922T101300Z_legacy_evidence",
+        ],
+        reverse=True,
+    )
+    assert [entry.run_id for entry in broad if entry.category == "Administration run"] == [
+        entry.run_id for entry in normal
+    ]
+
+
+def test_history_equal_timestamps_and_time_unavailable_are_deterministic(tmp_path: Path) -> None:
+    for run_id in (
+        "20260922T120000Z_add_tickers_same_a",
+        "20260922T120000Z_add_tickers_same_b",
+    ):
+        _write_run(tmp_path, run_id)
+    for run_id in ("legacy_without_time_a", "legacy_without_time_z"):
+        run_dir = tmp_path / run_id
+        run_dir.mkdir()
+        (run_dir / "legacy.json").write_text("{}", encoding="utf-8")
+
+    entries = FundamentalsAdminUIService(run_root=tmp_path).history_entries(
+        limit=20, include_technical=True,
+    )
+
+    assert [entry.run_id for entry in entries] == [
+        "20260922T120000Z_add_tickers_same_b",
+        "20260922T120000Z_add_tickers_same_a",
+        "legacy_without_time_z",
+        "legacy_without_time_a",
+    ]
+    assert all(entry.completed_at_utc for entry in entries[:2])
+    assert all(entry.completed_at_utc is None for entry in entries[2:])
+
+
+def test_history_show_more_preserves_global_order_across_page_boundaries(tmp_path: Path) -> None:
+    run_ids = [f"20260922T{hour:02d}{minute:02d}00Z_add_tickers_page{i:02d}" for i, (hour, minute) in enumerate(
+        ((hour, minute) for hour in range(8, 13) for minute in range(5))
+    )]
+    for run_id in reversed(run_ids):
+        _write_run(tmp_path, run_id)
+
+    cursor = FundamentalsAdminUIService(run_root=tmp_path).history_cursor()
+    expected = sorted(run_ids, reverse=True)
+
+    assert [entry.run_id for entry in cursor.fill(8)] == expected[:8]
+    assert [entry.run_id for entry in cursor.fill(16)] == expected[:16]
+    assert [entry.run_id for entry in cursor.fill(24)] == expected[:24]
 
 
 def test_terminal_history_projection_does_not_read_progress_events(tmp_path: Path, monkeypatch) -> None:

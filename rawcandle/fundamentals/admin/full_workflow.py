@@ -118,7 +118,7 @@ def _batch_outcome(payload: Mapping[str, Any], *, production_published: bool = F
     actions = [str(item.get("final_action") or "") for item in reports]
     analysis = analysis_reporting_counts(reports)
     counts = reporting_counts(reports) if reports else {
-        "requested": 0, "new": 0, "already_present": 0,
+        "requested": 0, "new": 0, "eligible": 0, "already_present": 0,
         "review_required": 0, "rejected": 0,
     }
     tested = sum(
@@ -136,6 +136,7 @@ def _batch_outcome(payload: Mapping[str, Any], *, production_published: bool = F
     return {
         "requested": int(counts.get("requested") or 0),
         "new": int(counts.get("new") or 0),
+        "eligible": int(counts.get("eligible") or 0),
         "already_present": int(counts.get("already_present") or 0),
         "tested_successfully": tested,
         "test_completed": len(reports) if report_stages == {"COPY_ONLY_APPLY"} or test_actions == len(reports) else 0,
@@ -184,8 +185,11 @@ def _terminal_summary(
     *, stage: str, child: Any, payload: Mapping[str, Any],
     workflow_outcome: str, requested_count: int, production_entered: bool,
     production_completed: bool, fallback_reason: str,
+    evidence_payload: Mapping[str, Any] | None = None,
+    evidence_stage: str | None = None,
 ) -> dict[str, Any]:
-    reports = [item for item in (payload.get("ticker_reporting") or []) if isinstance(item, Mapping)]
+    evidence = evidence_payload or payload
+    reports = [item for item in (evidence.get("ticker_reporting") or []) if isinstance(item, Mapping)]
     problems = _problem_items(reports)
     review_count = sum(item["review_required"] for item in problems)
     integrity_count = sum(item["reporting_integrity_error"] for item in problems)
@@ -213,11 +217,12 @@ def _terminal_summary(
         stop_kind = "TECHNICAL_FAILURE"
         headline = _child_reason(payload, child, fallback_reason)
         next_action = str(payload.get("recommended_next_action") or "Review the stage error and rerun only after correcting its cause.")
-    batch = _batch_outcome(payload, production_published=production_completed)
+    batch = _batch_outcome(evidence, production_published=production_completed)
     if not batch["requested"]:
         batch["requested"] = requested_count
     return {
-        "authoritative_stage": stage,
+        "failure_stage": stage if workflow_outcome not in {"COMPLETED", "NO_CHANGE"} else None,
+        "authoritative_stage": evidence_stage or stage,
         "child_run_id": _value(child, "run_id"),
         "child_status": _value(child, "status") or payload.get("status") or "UNKNOWN",
         "child_outcome": child_outcome,
@@ -234,8 +239,27 @@ def _terminal_summary(
         "production_completed": production_completed,
         "production_database_writes": _production_write_count(payload, completed=production_completed),
         "recommended_next_action": next_action,
-        "source": "STRUCTURED_CHILD_RESULT",
+        "source": "STRUCTURED_CHILD_RESULT" if evidence is payload else "STRUCTURED_LATEST_MATERIAL_RESULT",
     }
+
+
+def _preview_applyability(payload: Mapping[str, Any]) -> dict[str, Any]:
+    explicit = payload.get("applyability")
+    if isinstance(explicit, Mapping):
+        return dict(explicit)
+    reports = [item for item in (payload.get("ticker_reporting") or []) if isinstance(item, Mapping)]
+    if not reports:
+        return {"copy_apply_authorized": True, "blocking_items": []}
+    blockers = []
+    for report in reports:
+        eligibility = report.get("eligibility") if isinstance(report.get("eligibility"), Mapping) else {}
+        if eligibility.get("status") in {"REVIEW_REQUIRED", "REJECTED"}:
+            blockers.append({
+                "ticker": report.get("ticker"),
+                "status": eligibility.get("status"),
+                "reason": eligibility.get("reason"),
+            })
+    return {"copy_apply_authorized": not blockers, "blocking_items": blockers}
 
 
 def workflow_ui_summary(result: Mapping[str, Any]) -> tuple[str, ...]:
@@ -249,7 +273,8 @@ def workflow_ui_summary(result: Mapping[str, Any]) -> tuple[str, ...]:
     ]
     if batch:
         rows.append(
-            f"Tested successfully: {batch.get('tested_successfully', 0)}; "
+            f"Requested: {batch.get('requested', 0)}; eligible: {batch.get('eligible', 0)}; "
+            f"tested successfully: {batch.get('tested_successfully', 0)}; "
             f"review required: {batch.get('review_required', 0)}; rejected: {batch.get('rejected', 0)}."
         )
     problems = terminal.get("problem_items") or []
@@ -322,7 +347,8 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
         lines.extend([
             "", "## Failure / Review Summary", "",
             f"- Terminal workflow result: {result.get('outcome', 'UNKNOWN')}",
-            f"- Workflow stopped at: {terminal.get('authoritative_stage') or result.get('current_stage') or 'Unknown'}",
+            f"- Technical failure/stop stage: {terminal.get('failure_stage') or result.get('current_stage') or 'Unknown'}",
+            f"- Authoritative item evidence: {terminal.get('authoritative_stage') or result.get('current_stage') or 'Unknown'}",
             f"- Classification: {terminal.get('stop_kind', 'TECHNICAL_FAILURE')}",
             f"- Production entered: {'Yes' if terminal.get('production_entered') else 'No'}",
             f"- Production database writes: {terminal.get('production_database_writes', 0)}",
@@ -385,6 +411,7 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
             f"- Requested ticker count: {batch.get('requested', len(result.get('requested_inputs') or []))}",
             f"- New tickers: {batch.get('new', 0)}",
             f"- Already present: {batch.get('already_present', 0)}",
+            f"- Eligible after Preview: {batch.get('eligible', 0)}",
             f"- Test completed for: {batch.get('test_completed', 0)}",
             f"- Tested successfully: {batch.get('tested_successfully', 0)}",
             f"- Published/added: {batch.get('published_added', 0)}",
@@ -493,6 +520,8 @@ def run_operation_workflow(
         result["stop_reason"] = reason
 
     persist()
+    preview_payload: Mapping[str, Any] = {}
+    test_payload: Mapping[str, Any] = {}
     try:
         emit("Preview", 1, "RUNNING", "Preview - Running")
         stage_started = utc_now()
@@ -531,6 +560,22 @@ def run_operation_workflow(
             if adapter.operation_type == AdminOperationType.ADD_TICKERS:
                 result["final_batch_outcome"] = terminal["batch_outcome"]
             preview_record["child_summary"] = terminal
+        elif (
+            adapter.operation_type == AdminOperationType.ADD_TICKERS
+            and not _preview_applyability(preview_payload).get("copy_apply_authorized", False)
+        ):
+            stop("Preview", "Preview requires review before Test on copies can run.")
+            terminal = _terminal_summary(
+                stage="Preview", child=preview, payload=preview_payload,
+                workflow_outcome=result["outcome"], requested_count=len(adapter.requested_inputs),
+                production_entered=False, production_completed=False,
+                fallback_reason="Preview requires review before Test on copies can run.",
+            )
+            result["terminal_summary"] = terminal
+            result["stop_reason"] = terminal["headline"]
+            result["final_completed_stage"] = "Preview"
+            result["final_batch_outcome"] = terminal["batch_outcome"]
+            preview_record["child_summary"] = terminal
         else:
             result["preview_payload_path"] = _value(preview, "preview_payload_path")
             result["preview_fingerprint"] = _value(preview, "preview_fingerprint")
@@ -561,6 +606,16 @@ def run_operation_workflow(
                     workflow_outcome=result["outcome"], requested_count=len(adapter.requested_inputs),
                     production_entered=False, production_completed=False,
                     fallback_reason="Test on copies failed.",
+                    evidence_payload=(
+                        test_payload if test_payload.get("ticker_reporting")
+                        else preview_payload if preview_payload.get("ticker_reporting")
+                        else test_payload
+                    ),
+                    evidence_stage=(
+                        "Test on copies" if test_payload.get("ticker_reporting")
+                        else "Preview" if preview_payload.get("ticker_reporting")
+                        else None
+                    ),
                 )
                 result["terminal_summary"] = terminal
                 result["stop_reason"] = terminal["headline"]
@@ -642,6 +697,18 @@ def run_operation_workflow(
                     workflow_outcome=result["outcome"], requested_count=len(adapter.requested_inputs),
                     production_entered=True, production_completed=False,
                     fallback_reason="Production update failed or stopped.",
+                    evidence_payload=(
+                        production_payload if production_payload.get("ticker_reporting")
+                        else test_payload if test_payload.get("ticker_reporting")
+                        else preview_payload if preview_payload.get("ticker_reporting")
+                        else production_payload
+                    ),
+                    evidence_stage=(
+                        "Production update" if production_payload.get("ticker_reporting")
+                        else "Test on copies" if test_payload.get("ticker_reporting")
+                        else "Preview" if preview_payload.get("ticker_reporting")
+                        else None
+                    ),
                 )
                 result["terminal_summary"] = terminal
                 result["stop_reason"] = terminal["headline"]

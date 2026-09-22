@@ -99,6 +99,14 @@ class _RunHistoryProjection:
     invalid_artifact: bool
 
 
+def _run_id_timestamp(run_id: str) -> str | None:
+    match = re.match(r"^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z(?:_|$)", run_id)
+    if not match:
+        return None
+    year, month, day, hour, minute, second = match.groups()
+    return f"{year}-{month}-{day}T{hour}:{minute}:{second}Z"
+
+
 class AdminHistoryCursor:
     """Session-local newest-first history scan with one projection per run."""
 
@@ -112,7 +120,7 @@ class AdminHistoryCursor:
                     path for path in service.run_root.iterdir()
                     if path.is_dir() and not path.is_symlink() and path.name not in hidden
                 ),
-                key=lambda path: path.name,
+                key=self._candidate_order_key,
                 reverse=True,
             ) if service.run_root.exists() else []
         except OSError:
@@ -121,6 +129,13 @@ class AdminHistoryCursor:
         self.entries: list[AdminUIHistoryEntry] = []
         self.projections: dict[Path, _RunHistoryProjection] = {}
         self.exhausted = False
+
+    @staticmethod
+    def _candidate_order_key(path: Path) -> tuple[int, str, str]:
+        match = re.match(r"^(\d{8}T\d{6}Z)(?:_|$)", path.name)
+        # Durable run IDs are the history ordering authority. Unparseable legacy
+        # evidence remains deterministic, but follows every timestamped run.
+        return (1, match.group(1), path.name) if match else (0, "", path.name)
 
     def projection(self, run_dir: Path) -> _RunHistoryProjection:
         cached = self.projections.get(run_dir)
@@ -548,12 +563,7 @@ class FundamentalsAdminUIService:
 
     def history_entries(self, *, limit: int = 20, include_technical: bool = False) -> list[AdminUIHistoryEntry]:
         cursor = self.history_cursor(include_technical=include_technical)
-        if not include_technical:
-            return cursor.fill(limit)
-        cursor.fill(len(cursor.candidates))
-        administration = [item for item in cursor.entries if item.category == "Administration run"]
-        technical = [item for item in cursor.entries if item.category != "Administration run"]
-        return administration[:limit] + technical[:limit]
+        return cursor.fill(limit)
 
     def history_cursor(self, *, include_technical: bool = False) -> AdminHistoryCursor:
         return AdminHistoryCursor(self, include_technical=include_technical)
@@ -656,7 +666,12 @@ class FundamentalsAdminUIService:
                 outcome=(taxonomy_preview_presentation(payload) or {}).get("business_outcome", outcome),
                 status="completed" if outcome == "COMPLETED" else outcome.lower(),
                 mode=mode,
-                completed_at_utc=payload.get("completed_at_utc") or (status or {}).get("timestamp_utc"),
+                completed_at_utc=(
+                    payload.get("completed_at_utc")
+                    or payload.get("started_at_utc")
+                    or (status or {}).get("timestamp_utc")
+                    or _run_id_timestamp(run_id)
+                ),
                 report_available=(run_dir / OPERATION_REPORT_NAME).is_file(),
                 category=category,
                 primary_count=self._primary_count(payload or request or {}),
@@ -672,7 +687,12 @@ class FundamentalsAdminUIService:
             outcome=str(payload.get("outcome", category.upper().replace(" ", "_"))),
             status=category.lower().replace(" ", "_"),
             mode=str(payload.get("mode", "TECHNICAL")),
-            completed_at_utc=payload.get("completed_at_utc") or payload.get("timestamp_utc"),
+            completed_at_utc=(
+                payload.get("completed_at_utc")
+                or payload.get("started_at_utc")
+                or payload.get("timestamp_utc")
+                or _run_id_timestamp(run_id)
+            ),
             report_available=(run_dir / OPERATION_REPORT_NAME).is_file(),
             category=category,
             primary_count=self._primary_count(payload),

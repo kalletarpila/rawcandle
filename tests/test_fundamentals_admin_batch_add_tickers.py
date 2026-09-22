@@ -285,6 +285,30 @@ def test_apply_rejects_stale_preview(tmp_path: Path) -> None:
     assert result["error"] == "ValueError"
 
 
+def test_apply_rejects_bound_plan_content_change_with_specific_stale_guard(tmp_path: Path) -> None:
+    source = _paths(tmp_path / "source")
+    preview = run_preview(
+        "NEWC", source_paths=source,
+        run_root=tmp_path / "runs", temp_root=tmp_path / "temp",
+    )
+    payload_path = Path(preview["phase13d_preview_payload_path"])
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    payload["generic_batch_plan"]["plan_fingerprint"] = "deliberately-changed-bound-plan"
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_apply(
+        preview_payload_path=payload_path,
+        preview_fingerprint=preview["preview_fingerprint"],
+        source_paths=source,
+        run_root=tmp_path / "runs",
+        temp_root=tmp_path / "temp",
+        confirm_apply=True,
+    )
+
+    assert result["outcome"] == "FAILED"
+    assert result["errors"][0]["message"] == "ADMIN_ADD_TICKERS_STALE_PLAN_CONTENT_CHANGED"
+
+
 def test_failure_after_partial_mutation_rolls_back_copy_lane(tmp_path: Path) -> None:
     source = _paths(tmp_path / "source")
     preview = run_preview("NEWC", source_paths=source, run_root=tmp_path / "runs", temp_root=tmp_path / "temp")
@@ -849,7 +873,127 @@ def test_one_provider_not_found_is_per_ticker_result_and_batch_continues(tmp_pat
         ("NEWC", "ELIGIBLE"),
         ("ADR", "REVIEW_REQUIRED"),
     ]
-    assert "NO_USABLE_QUARTERLY_HISTORY" in plan.items[1].reason
+    assert plan.items[1].reason == "NETWORK_PERMANENT_FAILURE"
+    assert plan.items[1].acquisition["authoritative"] is False
+    assert plan.items[1].acquisition["provider_status"] == "NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    ("provider_status", "http_status", "expected_status", "retryable"),
+    [
+        ("TRANSIENT_FAILURE", 500, "NETWORK_TRANSIENT_FAILURE", True),
+        ("RATE_LIMITED", 429, "NETWORK_TRANSIENT_FAILURE", True),
+        ("AUTH_FAILED", 401, "NETWORK_PERMANENT_FAILURE", False),
+        ("REQUEST_FAILED", 404, "NETWORK_PERMANENT_FAILURE", False),
+        ("INVALID_RESPONSE", 200, "RESPONSE_SCHEMA_INVALID", False),
+    ],
+)
+def test_network_acquisition_failures_never_become_authoritative_empty_history(
+    tmp_path: Path,
+    provider_status: str,
+    http_status: int,
+    expected_status: str,
+    retryable: bool,
+) -> None:
+    paths = _generic_paths(tmp_path / "source")
+
+    class FailedClient:
+        request_count = 2
+
+        def fundamentals(self, **kwargs):
+            return SimpleNamespace(
+                ok=False,
+                status=provider_status,
+                auth_status="REQUEST_FAILED",
+                http_status=http_status,
+                endpoint="/data/fundamentals",
+                url="https://api.example.test/data/fundamentals?ticker=NEWC",
+                records=[],
+                error="bounded provider failure",
+            )
+
+    plan = build_generic_batch_plan(
+        paths,
+        parse_batch_tickers("NEWC"),
+        archive_path=tmp_path / "missing.zip",
+        network_allowed=True,
+        network_client=FailedClient(),
+    )
+    item = plan.items[0]
+    report = plan.ticker_reporting[0]
+
+    assert item.status == "REVIEW_REQUIRED"
+    assert item.reason == expected_status
+    assert item.acquisition["status"] == expected_status
+    assert item.acquisition["retryable"] is retryable
+    assert item.acquisition["authoritative"] is False
+    assert report["coverage"]["provider_rows"] is None
+    assert report["coverage"]["arq_count"] is None
+    assert "NO_USABLE_QUARTERLY_HISTORY" not in item.reason
+
+
+def test_successful_empty_network_response_is_distinct_from_acquisition_failure(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+
+    class EmptyClient:
+        request_count = 1
+
+        def fundamentals(self, **kwargs):
+            return SimpleNamespace(
+                ok=True,
+                status="SUCCESS",
+                auth_status="AUTH_OK",
+                http_status=200,
+                endpoint="/data/fundamentals",
+                url="https://api.example.test/data/fundamentals?ticker=NEWC",
+                records=[],
+                payload=[],
+                error="",
+            )
+
+    plan = build_generic_batch_plan(
+        paths,
+        parse_batch_tickers("NEWC"),
+        archive_path=tmp_path / "missing.zip",
+        network_allowed=True,
+        network_client=EmptyClient(),
+    )
+
+    assert plan.items[0].reason == "NO_USABLE_QUARTERLY_HISTORY"
+    assert plan.items[0].acquisition["status"] == "SUCCESS_NO_USABLE_QUARTERLY_HISTORY"
+    assert plan.items[0].acquisition["authoritative"] is True
+    assert plan.ticker_reporting[0]["coverage"]["provider_rows"] == 0
+
+
+def test_success_status_with_unrecognized_payload_shape_fails_closed(tmp_path: Path) -> None:
+    paths = _generic_paths(tmp_path / "source")
+
+    class InvalidShapeClient:
+        request_count = 1
+
+        def fundamentals(self, **kwargs):
+            return SimpleNamespace(
+                ok=True,
+                status="SUCCESS",
+                auth_status="AUTH_OK",
+                http_status=200,
+                endpoint="/data/fundamentals",
+                url="https://api.example.test/data/fundamentals?ticker=NEWC",
+                records=[],
+                payload={"unexpected": []},
+                error="",
+            )
+
+    plan = build_generic_batch_plan(
+        paths,
+        parse_batch_tickers("NEWC"),
+        archive_path=tmp_path / "missing.zip",
+        network_allowed=True,
+        network_client=InvalidShapeClient(),
+    )
+
+    assert plan.items[0].reason == "RESPONSE_SCHEMA_INVALID"
+    assert plan.items[0].acquisition["authoritative"] is False
 
 
 def _archive_row(ticker: str) -> dict[str, str]:
