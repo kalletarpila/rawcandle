@@ -7,12 +7,13 @@ import json
 import shutil
 import sqlite3
 from collections import Counter
+from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals import structural_break
-from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
+from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, sha256_file, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, _background_heartbeat
 from rawcandle.fundamentals.admin.contracts import AdminFinalResult, AdminOperationType, AdminStatus, RunStage, fingerprint, utc_now
 from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
@@ -46,6 +47,13 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     source_schema,
 )
 from rawcandle.fundamentals.admin.structural_context import _events
+from rawcandle.fundamentals.admin.source_bundle import (
+    ReadOnlySourceMode,
+    TaxonomySourceMode,
+    bind_taxonomy_source,
+    build_stable_read_only_source_bundle,
+    validate_stable_read_only_source_bundle,
+)
 from rawcandle.fundamentals.phase12d import rebuild_ttm, reconcile_canonical, stable_hash
 from rawcandle.fundamentals.phase13b_foundation import online_backup
 from rawcandle.fundamentals.providers.sharadar import SharadarClient
@@ -83,6 +91,77 @@ def prepare_full_v2_read_only_copies(
             "cleanup_required": True,
         }
     return copies, evidence
+
+
+def prepare_refresh_test_read_only_sources(
+    source_paths: BatchAddTickerPaths, *, lane_dir: Path,
+    canonical_candidate: Path, as_of_date: str,
+) -> tuple[dict[str, Path], dict[str, Any]]:
+    """Bind Refresh Test to a compact market bundle and copied taxonomy."""
+    taxonomy_source = source_paths.taxonomy_db
+    taxonomy_copy = lane_dir / "taxonomy.db"
+    taxonomy_stat = taxonomy_source.stat()
+    taxonomy_copy_result = online_backup(taxonomy_source, taxonomy_copy)
+    if taxonomy_copy_result.get("quick_check") != "ok":
+        raise RuntimeError("REFRESH_TAXONOMY_COPY_INTEGRITY_FAILED")
+    taxonomy_binding = bind_taxonomy_source(
+        taxonomy_copy,
+        canonical_candidate,
+        mode=TaxonomySourceMode.FULL_SQLITE_BACKUP,
+    )
+
+    bundle = build_stable_read_only_source_bundle(
+        market_db=source_paths.market_db,
+        canonical_db=canonical_candidate,
+        bundle_dir=lane_dir / "market_source_bundle",
+        as_of_date=as_of_date,
+        taxonomy_binding=taxonomy_binding,
+    )
+    validate_stable_read_only_source_bundle(bundle)
+    evidence = {
+        "market": {
+            "mode": ReadOnlySourceMode.STABLE_SOURCE_BUNDLE.value,
+            "bundle_path": str(bundle.market_db),
+            "manifest_path": str(bundle.manifest_path),
+            "bundle_manifest": bundle.manifest,
+            "bundle_build_seconds": bundle.extraction_seconds,
+            "old_full_copy_bytes_avoided": source_paths.market_db.stat().st_size,
+            "compact_bundle_bytes": bundle.market_db.stat().st_size,
+            "immutable_after_creation": True,
+            "cleanup_required": True,
+        },
+        "taxonomy": {
+            **taxonomy_copy_result,
+            "mode": TaxonomySourceMode.FULL_SQLITE_BACKUP.value,
+            "role": "taxonomy",
+            "purpose": "FULL_V2_READ_ONLY_SOURCE",
+            "source_size": taxonomy_stat.st_size,
+            "source_mtime_ns": taxonomy_stat.st_mtime_ns,
+            "copy_sha256": sha256_file(taxonomy_copy),
+            "binding": asdict(taxonomy_binding),
+            "immutable_after_creation": True,
+            "cleanup_required": True,
+        },
+    }
+    return {"market": bundle.market_db, "taxonomy": taxonomy_copy}, evidence
+
+
+def run_refresh_test_full_v2_downstream(
+    *, provider_candidate: Path, canonical_candidate: Path,
+    read_only_sources: Mapping[str, Path], lane_dir: Path, as_of_date: str,
+) -> dict[str, Any]:
+    candidate_paths = BatchAddTickerPaths(
+        provider_candidate,
+        canonical_candidate,
+        lane_dir / "unused_analysis.db",
+        read_only_sources["market"],
+        read_only_sources["taxonomy"],
+    )
+    return run_full_v2_downstream(
+        candidate_paths.as_dict(),
+        output=lane_dir / "analysis_rebuild",
+        as_of_date=as_of_date,
+    )
 
 
 def _load_bound_preview(path: Path, expected_fingerprint: str, run_root: Path) -> dict[str, Any]:
@@ -712,6 +791,14 @@ def _render_report(result: Mapping[str, Any]) -> str:
     bootstrap = downstream.get("canonical", {}).get("publication_date_bootstrap", {})
     retention = downstream.get("test_evidence", {}).get("summary", {})
     representative_evidence = downstream.get("test_evidence", {}).get("representatives", {})
+    source_binding = downstream.get("read_only_source_binding", {})
+    market_source = source_binding.get("market", {})
+    market_manifest = market_source.get("bundle_manifest", {})
+    market = market_manifest.get("market", {})
+    coverage = market.get("valuation_coverage", {}).get("status_counts", {})
+    canonical_binding = market_manifest.get("canonical_binding", {})
+    taxonomy_source = source_binding.get("taxonomy", {})
+    taxonomy_binding = taxonomy_source.get("binding", {})
     lines = [
         "# Refresh Fundamentals Test on Copies", "", "## Executive Summary", "",
         f"- Preview run: `{result.get('bound_preview_run_id')}`",
@@ -724,6 +811,22 @@ def _render_report(result: Mapping[str, Any]) -> str:
         f"- First-public dates bootstrapped: {bootstrap.get('bootstrapped_in_candidate', 0)}",
         f"- B1/full rebuild: {downstream.get('analysis', {}).get('status', 'NOT_RUN')}",
         "- Production writes: 0", "",
+        "## Read-Only Source Binding", "",
+        f"- Market mode: `{market_source.get('mode', 'NOT_RECORDED')}`",
+        f"- Source contract: `{market_manifest.get('source_contract_version', 'NOT_RECORDED')}`",
+        f"- Market semantic fingerprint: `{market.get('semantic_fingerprint', 'NOT_RECORDED')}`",
+        f"- Compact market SHA-256: `{market.get('physical_sha256', 'NOT_RECORDED')}`",
+        f"- Canonical binding fingerprint: `{canonical_binding.get('semantic_fingerprint', 'NOT_RECORDED')}`",
+        f"- Calculation date: `{market_manifest.get('as_of_date', 'NOT_RECORDED')}`",
+        f"- Market rows: `{market.get('row_counts', {})}`",
+        f"- Coverage: PRICE_FOUND={coverage.get('PRICE_FOUND', 0)}, NO_MATCHING_VALID_PRICE={coverage.get('NO_MATCHING_VALID_PRICE', 0)}, NO_CUTOFF={coverage.get('NO_CUTOFF', 0)}, NO_TICKER={coverage.get('NO_TICKER', 0)}",
+        f"- Full market-copy bytes avoided: {market_source.get('old_full_copy_bytes_avoided', 0)}",
+        f"- Compact market bytes: {market_source.get('compact_bundle_bytes', 0)}",
+        f"- Bundle build seconds: {market_source.get('bundle_build_seconds', 0)}",
+        f"- Taxonomy mode: `{taxonomy_source.get('mode', 'NOT_RECORDED')}`",
+        f"- Taxonomy copy SHA-256: `{taxonomy_source.get('copy_sha256', 'NOT_RECORDED')}`",
+        f"- Taxonomy version: `{taxonomy_binding.get('version', 'NOT_RECORDED')}`",
+        f"- Taxonomy semantic fingerprint: `{taxonomy_binding.get('semantic_fingerprint', 'NOT_RECORDED')}`", "",
         "## Publication Date Bootstrap", "",
         f"- Canonical quarters inspected: {bootstrap.get('canonical_quarters_inspected', 0)}",
         f"- Bootstrap eligible: {bootstrap.get('bootstrap_eligible', 0)}",
@@ -876,7 +979,7 @@ def run_apply(
         selected_merge_plans = {ticker: revalidated["merge_plans"][ticker] for ticker in changed_tickers}
 
         failed_stage = ProgressStage.COPY_PROVIDER
-        progress.running(failed_stage, "Copying provider and stable read-only authorities.")
+        progress.running(failed_stage, "Copying provider and canonical candidates.")
         lane_dir.mkdir(parents=True, exist_ok=False)
         provider_candidate = lane_dir / "provider_candidate.db"
         canonical_candidate = lane_dir / "canonical_candidate.db"
@@ -885,11 +988,6 @@ def run_apply(
                 "provider": online_backup(source_paths.provider_db, provider_candidate),
                 "canonical": online_backup(source_paths.canonical_db, canonical_candidate),
             }
-            read_only_copies, read_only_evidence = prepare_full_v2_read_only_copies(
-                source_paths, lane_dir=lane_dir,
-            )
-            copies.update(read_only_evidence)
-        writer.write_json("copy_manifest.json", copies)
         progress.completed(failed_stage, "Disposable database copies created.")
 
         applied_at = utc_now()
@@ -931,15 +1029,26 @@ def run_apply(
         progress.completed(failed_stage, "Canonical candidate validation completed.")
 
         failed_stage = ProgressStage.ANALYSIS_REBUILD
-        progress.running(failed_stage, "Building complete V2, RP V2 and RV analysis candidate.")
+        progress.running(failed_stage, "Binding read-only sources and building complete V2, RP V2 and RV analysis candidate.")
         analysis_before = _analysis_state(source_paths.analysis_db, source_paths.canonical_db, changed_tickers)
-        candidate_paths = BatchAddTickerPaths(
-            provider_candidate, canonical_candidate, lane_dir / "unused_analysis.db",
-            read_only_copies["market"], read_only_copies["taxonomy"],
-        )
+        calculation_as_of_date = as_of_date or date.today().isoformat()
+        with _background_heartbeat(progress, "Compact market source bundle construction is still running."):
+            read_only_copies, read_only_evidence = prepare_refresh_test_read_only_sources(
+                source_paths,
+                lane_dir=lane_dir,
+                canonical_candidate=canonical_candidate,
+                as_of_date=calculation_as_of_date,
+            )
+        copies.update(read_only_evidence)
+        writer.write_json("copy_manifest.json", copies)
+        writer.write_json("read_only_source_binding.json", read_only_evidence)
         with _background_heartbeat(progress, "Full V2, RP V2 and RV rebuild is still running."):
-            analysis_result = run_full_v2_downstream(
-                candidate_paths.as_dict(), output=lane_dir / "analysis_rebuild", as_of_date=as_of_date or date.today().isoformat(),
+            analysis_result = run_refresh_test_full_v2_downstream(
+                provider_candidate=provider_candidate,
+                canonical_candidate=canonical_candidate,
+                read_only_sources=read_only_copies,
+                lane_dir=lane_dir,
+                as_of_date=calculation_as_of_date,
             )
         analysis_candidate = Path(analysis_result["candidate_analysis_db"])
         progress.completed(failed_stage, "Full V2, RP V2 and RV candidate built.")
@@ -959,10 +1068,12 @@ def run_apply(
             production_provider=source_paths.provider_db, provider_candidate=provider_candidate,
             production_canonical=source_paths.canonical_db, canonical_candidate=canonical_candidate,
         )
+        test_evidence["read_only_source_binding"] = read_only_evidence
         downstream = {
             "provider": provider_result, "canonical": canonical_result, "analysis": analysis_result,
             "analysis_before": analysis_before, "analysis_after": analysis_after, "ticker_changes": changed,
             "test_evidence": test_evidence,
+            "read_only_source_binding": read_only_evidence,
             "legacy_provider_compaction": provider_key_diagnostics(source_paths.provider_db),
         }
         deletion_evidence = []
@@ -1006,6 +1117,7 @@ def run_apply(
             rollback={"status": "NOT_REQUIRED", "write_boundary_crossed": False}, downstream=downstream,
             artifacts={
                 "source_revalidation": str(writer.run_dir / "source_revalidation.json"),
+                "read_only_source_binding": str(writer.run_dir / "read_only_source_binding.json"),
                 "refresh_test_evidence": str(writer.run_dir / "refresh_test_evidence.json"),
                 "operation_report": str(writer.run_dir / "operation_report.md"),
             },
@@ -1044,7 +1156,14 @@ def run_apply(
             mode="COPY_ONLY_APPLY", started_at_utc=started, completed_at_utc=utc_now(),
             preview_fingerprint=preview_fingerprint, request=request.as_dict(), summary_counts={"failed": 1},
             rollback={"status": "NOT_REQUIRED", "write_boundary_crossed": False},
-            artifacts={"error": str(writer.run_dir / "error.json")}, recommended_next_action=message,
+            artifacts={
+                "error": str(writer.run_dir / "error.json"),
+                **(
+                    {"read_only_source_binding": str(writer.run_dir / "read_only_source_binding.json")}
+                    if (writer.run_dir / "read_only_source_binding.json").exists()
+                    else {}
+                ),
+            }, recommended_next_action=message,
             errors=({"type": type(exc).__name__, "message": str(exc)},),
         ).as_dict() | {
             "artifact_dir": str(writer.run_dir), "failed_stage": failed_stage.value,

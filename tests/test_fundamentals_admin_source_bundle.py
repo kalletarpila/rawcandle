@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -9,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
+from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
+from rawcandle.fundamentals.admin.refresh_copy_runtime import prepare_refresh_test_read_only_sources
 from rawcandle.fundamentals.admin.source_bundle import (
     MARKET_READ_CLOSURE,
     SOURCE_CONTRACT_VERSION,
@@ -494,3 +497,44 @@ def test_taxonomy_direct_read_requires_authoritative_lock(
             canonical,
             mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
         )
+
+
+def test_refresh_test_binding_uses_real_compact_bundle_and_survives_lane_cleanup(
+    tmp_path: Path, sources: tuple[Path, Path, Path]
+) -> None:
+    canonical, market, taxonomy = sources
+    provider = tmp_path / "provider.db"
+    analysis = tmp_path / "analysis-source.db"
+    provider.write_bytes(b"")
+    analysis.write_bytes(b"")
+    lane = tmp_path / "refresh-test-lane"
+    lane.mkdir()
+
+    paths, evidence = prepare_refresh_test_read_only_sources(
+        BatchAddTickerPaths(provider, canonical, analysis, market, taxonomy),
+        lane_dir=lane,
+        canonical_candidate=canonical,
+        as_of_date=AS_OF,
+    )
+
+    assert paths["market"].resolve() != market.resolve()
+    assert evidence["market"]["old_full_copy_bytes_avoided"] == market.stat().st_size
+    assert evidence["market"]["compact_bundle_bytes"] == paths["market"].stat().st_size
+    assert evidence["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
+    assert evidence["market"]["bundle_manifest"]["source_contract_version"] == SOURCE_CONTRACT_VERSION
+    assert evidence["market"]["bundle_manifest"]["market"]["valuation_coverage"]["status_counts"] == {
+        "PRICE_FOUND": 2,
+        "NO_MATCHING_VALID_PRICE": 0,
+        "NO_TICKER": 0,
+        "NO_CUTOFF": 1,
+    }
+    assert evidence["taxonomy"]["mode"] == "FULL_SQLITE_BACKUP"
+    assert evidence["taxonomy"]["binding"]["version"] == "DC_V1"
+    assert evidence["taxonomy"]["copy_sha256"] == _sha256(paths["taxonomy"])
+
+    durable_evidence = evidence
+    shutil.rmtree(lane)
+    assert not paths["market"].exists()
+    assert not paths["taxonomy"].exists()
+    assert durable_evidence["market"]["bundle_manifest"]["market"]["semantic_fingerprint"]
+    assert durable_evidence["taxonomy"]["binding"]["semantic_fingerprint"]

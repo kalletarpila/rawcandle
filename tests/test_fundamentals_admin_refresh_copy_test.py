@@ -13,9 +13,11 @@ from rawcandle.fundamentals.admin.refresh_copy_runtime import (
     build_publication_date_preservation_map,
     fresh_rebuild_canonical,
     prepare_full_v2_read_only_copies,
+    prepare_refresh_test_read_only_sources,
     replace_provider_histories,
     revalidate_bound_source,
     run_apply,
+    run_refresh_test_full_v2_downstream,
     validate_provider_candidate,
 )
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
@@ -33,6 +35,7 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     source_key,
     validate_complete_history,
 )
+from rawcandle.fundamentals.admin.source_bundle import TaxonomySourceBinding
 from rawcandle.fundamentals.schema.migrations import (
     CANONICAL_SCHEMA_SQL,
     PROVIDER_SCHEMA_SQL,
@@ -624,6 +627,188 @@ def test_full_v2_read_only_copy_helper_prepares_market_and_taxonomy(tmp_path: Pa
         assert evidence[role]["cleanup_required"] is True
 
 
+def test_refresh_test_uses_compact_market_bundle_and_full_taxonomy_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    roles = ("provider", "canonical", "analysis", "market", "taxonomy")
+    sources = []
+    for role in roles:
+        path = tmp_path / "source" / f"{role}.db"
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(role.encode())
+        sources.append(path)
+    canonical_candidate = tmp_path / "lane" / "canonical_candidate.db"
+    canonical_candidate.parent.mkdir()
+    canonical_candidate.write_bytes(b"canonical-candidate")
+    copied_sources: list[Path] = []
+
+    def fake_backup(source: Path, destination: Path) -> dict[str, object]:
+        copied_sources.append(source)
+        destination.write_bytes(source.read_bytes())
+        return {
+            "source": str(source), "destination": str(destination),
+            "quick_check": "ok", "size": destination.stat().st_size,
+        }
+
+    taxonomy_binding = TaxonomySourceBinding(
+        mode="FULL_SQLITE_BACKUP", source_path="taxonomy.db", domain="dc_ecosystem",
+        version="DC_V1", semantic_fingerprint="taxonomy-fingerprint", membership_rows=1,
+        lock_path=None, lock_contract_status="FULL_SQLITE_BACKUP_RUNTIME_AUTHORITY",
+        runtime_authorized=True, packaged=False,
+    )
+    manifest = {
+        "source_contract_version": "FUNDAMENTALS_READ_ONLY_SOURCE_V1",
+        "mode": "STABLE_SOURCE_BUNDLE",
+        "as_of_date": "2026-09-22",
+        "canonical_binding": {"semantic_fingerprint": "canonical-fingerprint"},
+        "market": {
+            "semantic_fingerprint": "market-fingerprint", "physical_sha256": "market-sha",
+            "row_counts": {"ticker_meta": 2, "osakedata": 3, "splits_data": 1},
+            "valuation_coverage": {"status_counts": {
+                "PRICE_FOUND": 1, "NO_MATCHING_VALID_PRICE": 1,
+                "NO_CUTOFF": 1, "NO_TICKER": 0,
+            }},
+        },
+    }
+
+    def fake_build(**kwargs: object) -> SimpleNamespace:
+        assert kwargs["market_db"] == sources[3]
+        assert kwargs["canonical_db"] == canonical_candidate
+        assert kwargs["as_of_date"] == "2026-09-22"
+        bundle_dir = Path(kwargs["bundle_dir"])
+        bundle_dir.mkdir()
+        market_db = bundle_dir / "market.db"
+        market_db.write_bytes(b"compact")
+        manifest_path = bundle_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return SimpleNamespace(
+            market_db=market_db, manifest_path=manifest_path,
+            manifest=manifest, extraction_seconds=0.25,
+        )
+
+    validated: list[object] = []
+    monkeypatch.setattr(refresh_copy_runtime, "online_backup", fake_backup)
+    monkeypatch.setattr(refresh_copy_runtime, "bind_taxonomy_source", lambda *args, **kwargs: taxonomy_binding)
+    monkeypatch.setattr(refresh_copy_runtime, "build_stable_read_only_source_bundle", fake_build)
+    monkeypatch.setattr(refresh_copy_runtime, "validate_stable_read_only_source_bundle", validated.append)
+
+    paths, evidence = prepare_refresh_test_read_only_sources(
+        BatchAddTickerPaths(*sources), lane_dir=canonical_candidate.parent,
+        canonical_candidate=canonical_candidate, as_of_date="2026-09-22",
+    )
+
+    assert copied_sources == [sources[4]]
+    assert paths["market"].name == "market.db"
+    assert paths["taxonomy"].name == "taxonomy.db"
+    assert evidence["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
+    assert evidence["market"]["bundle_manifest"] is manifest
+    assert evidence["market"]["bundle_manifest"]["market"]["valuation_coverage"]["status_counts"] == {
+        "PRICE_FOUND": 1, "NO_MATCHING_VALID_PRICE": 1, "NO_CUTOFF": 1, "NO_TICKER": 0,
+    }
+    assert evidence["taxonomy"]["mode"] == "FULL_SQLITE_BACKUP"
+    assert evidence["taxonomy"]["binding"]["version"] == "DC_V1"
+    assert evidence["market"]["old_full_copy_bytes_avoided"] == len(b"market")
+    assert validated
+
+
+@pytest.mark.parametrize("failure_point", ["taxonomy", "bundle", "validation"])
+def test_refresh_test_source_preparation_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str,
+) -> None:
+    sources = []
+    for role in ("provider", "canonical", "analysis", "market", "taxonomy"):
+        path = tmp_path / f"{role}.db"
+        path.write_bytes(role.encode())
+        sources.append(path)
+    lane = tmp_path / "lane"
+    lane.mkdir()
+    canonical_candidate = lane / "canonical_candidate.db"
+    canonical_candidate.write_bytes(b"canonical")
+
+    def fake_backup(source: Path, destination: Path) -> dict[str, object]:
+        if failure_point == "taxonomy":
+            raise RuntimeError("taxonomy-copy-failed")
+        destination.write_bytes(source.read_bytes())
+        return {"source": str(source), "destination": str(destination), "quick_check": "ok", "size": 1}
+
+    def fake_build(**kwargs: object) -> SimpleNamespace:
+        if failure_point == "bundle":
+            raise RuntimeError("READ_ONLY_SOURCE_DRIFT")
+        bundle_dir = Path(kwargs["bundle_dir"])
+        bundle_dir.mkdir()
+        market_db = bundle_dir / "market.db"
+        market_db.write_bytes(b"compact")
+        manifest_path = bundle_dir / "manifest.json"
+        manifest_path.write_text("{}", encoding="utf-8")
+        return SimpleNamespace(
+            market_db=market_db, manifest_path=manifest_path,
+            manifest={"market": {}}, extraction_seconds=0.1,
+        )
+
+    monkeypatch.setattr(refresh_copy_runtime, "online_backup", fake_backup)
+    monkeypatch.setattr(
+        refresh_copy_runtime, "bind_taxonomy_source",
+        lambda *args, **kwargs: TaxonomySourceBinding(
+            mode="FULL_SQLITE_BACKUP", source_path="taxonomy.db", domain="dc_ecosystem",
+            version="DC_V1", semantic_fingerprint="fp", membership_rows=1, lock_path=None,
+            lock_contract_status="FULL_SQLITE_BACKUP_RUNTIME_AUTHORITY", runtime_authorized=True,
+            packaged=False,
+        ),
+    )
+    monkeypatch.setattr(refresh_copy_runtime, "build_stable_read_only_source_bundle", fake_build)
+    monkeypatch.setattr(
+        refresh_copy_runtime, "validate_stable_read_only_source_bundle",
+        lambda _bundle: (_ for _ in ()).throw(RuntimeError("SOURCE_BUNDLE_INVALID"))
+        if failure_point == "validation" else None,
+    )
+
+    expected = {
+        "taxonomy": "taxonomy-copy-failed",
+        "bundle": "READ_ONLY_SOURCE_DRIFT",
+        "validation": "SOURCE_BUNDLE_INVALID",
+    }[failure_point]
+    with pytest.raises(RuntimeError, match=expected):
+        prepare_refresh_test_read_only_sources(
+            BatchAddTickerPaths(*sources), lane_dir=lane,
+            canonical_candidate=canonical_candidate, as_of_date="2026-09-22",
+        )
+
+
+def test_refresh_production_keeps_full_copy_source_policy() -> None:
+    from rawcandle.fundamentals.admin import refresh_production
+
+    assert refresh_production.prepare_full_v2_read_only_copies is prepare_full_v2_read_only_copies
+
+
+def test_refresh_test_downstream_receives_compact_market_and_copied_taxonomy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = tmp_path / "provider_candidate.db"
+    canonical = tmp_path / "canonical_candidate.db"
+    compact_market = tmp_path / "market_source_bundle" / "market.db"
+    taxonomy_copy = tmp_path / "taxonomy.db"
+    captured: dict[str, object] = {}
+
+    def fake_downstream(paths: dict[str, Path], **kwargs: object) -> dict[str, object]:
+        captured.update({"paths": paths, **kwargs})
+        return {"status": "READY"}
+
+    monkeypatch.setattr(refresh_copy_runtime, "run_full_v2_downstream", fake_downstream)
+    result = run_refresh_test_full_v2_downstream(
+        provider_candidate=provider,
+        canonical_candidate=canonical,
+        read_only_sources={"market": compact_market, "taxonomy": taxonomy_copy},
+        lane_dir=tmp_path,
+        as_of_date="2026-09-22",
+    )
+
+    assert result == {"status": "READY"}
+    assert captured["paths"]["market"] == compact_market
+    assert captured["paths"]["taxonomy"] == taxonomy_copy
+    assert captured["paths"]["market"] != tmp_path / "osakedata.db"
+    assert captured["as_of_date"] == "2026-09-22"
+
+
 def test_revalidation_rejects_source_fingerprint_b_after_preview_a(monkeypatch: pytest.MonkeyPatch) -> None:
     class State(SimpleNamespace):
         def as_dict(self):
@@ -701,10 +886,35 @@ def test_report_contains_explicit_identity_and_publish_date_invariants() -> None
                 },
             },
             "analysis": {"status": "READY"}, "ticker_changes": [],
+            "read_only_source_binding": {
+                "market": {
+                    "mode": "STABLE_SOURCE_BUNDLE",
+                    "bundle_manifest": {
+                        "source_contract_version": "FUNDAMENTALS_READ_ONLY_SOURCE_V1",
+                        "as_of_date": "2026-09-22",
+                        "canonical_binding": {"semantic_fingerprint": "canonical-fp"},
+                        "market": {
+                            "semantic_fingerprint": "market-fp", "physical_sha256": "market-sha",
+                            "row_counts": {"osakedata": 10},
+                            "valuation_coverage": {"status_counts": {
+                                "PRICE_FOUND": 7, "NO_MATCHING_VALID_PRICE": 1,
+                                "NO_CUTOFF": 2, "NO_TICKER": 0,
+                            }},
+                        },
+                    },
+                },
+                "taxonomy": {
+                    "mode": "FULL_SQLITE_BACKUP", "copy_sha256": "taxonomy-sha",
+                    "binding": {"version": "DC_V1", "semantic_fingerprint": "taxonomy-fp"},
+                },
+            },
         },
     })
     assert "company/security identity mapping before candidate rebuild == after candidate rebuild`: true" in report
     assert "first_public_result_date preservation map applied: 10/10 existing quarters" in report
+    assert "Market mode: `STABLE_SOURCE_BUNDLE`" in report
+    assert "Coverage: PRICE_FOUND=7, NO_MATCHING_VALID_PRICE=1, NO_CUTOFF=2, NO_TICKER=0" in report
+    assert "Taxonomy mode: `FULL_SQLITE_BACKUP`" in report
 
 
 def test_report_uses_exact_canonical_deltas_and_renders_retention_validation() -> None:
