@@ -105,11 +105,12 @@ class AdminHistoryCursor:
     def __init__(self, service: "FundamentalsAdminUIService", *, include_technical: bool) -> None:
         self.service = service
         self.include_technical = include_technical
+        hidden = service.history.hidden_run_ids()
         try:
             self.candidates = sorted(
                 (
                     path for path in service.run_root.iterdir()
-                    if path.is_dir() and not path.is_symlink()
+                    if path.is_dir() and not path.is_symlink() and path.name not in hidden
                 ),
                 key=lambda path: path.name,
                 reverse=True,
@@ -556,6 +557,16 @@ class FundamentalsAdminUIService:
 
     def history_cursor(self, *, include_technical: bool = False) -> AdminHistoryCursor:
         return AdminHistoryCursor(self, include_technical=include_technical)
+
+    def remove_history_entry(self, run_id: str) -> Mapping[str, Any]:
+        with self._operation_lock():
+            retained_path = self.history.hide_run(run_id)
+        return {
+            "run_id": run_id,
+            "status": "REMOVED_FROM_HISTORY",
+            "audit_evidence_retained": True,
+            "retained_path": str(retained_path),
+        }
 
     def history_result_summary(
         self,

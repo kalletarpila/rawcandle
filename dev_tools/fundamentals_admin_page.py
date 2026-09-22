@@ -424,6 +424,13 @@ def build_fundamentals_admin_page(
                         ft.Text(count_text, width=125, weight=weight),
                         ft.Text(category, width=170, tooltip=f"run_id={item.run_id}; mode={item.mode}"),
                         ft.IconButton(
+                            icon=ft.Icons.DELETE_OUTLINE,
+                            tooltip="Remove from run history",
+                            on_click=lambda _event, selected_run_id=run_id: open_history_delete_confirmation(
+                                selected_run_id
+                            ),
+                        ),
+                        ft.IconButton(
                             icon=ft.Icons.INFO,
                             tooltip="View details",
                             on_click=lambda _event, selected_run_id=run_id: select_history_run(selected_run_id),
@@ -584,6 +591,56 @@ def build_fundamentals_admin_page(
             history_detail_field.value = f"Run: {run_id}\nStatus: unavailable or incomplete."
         if history_cursor is not None:
             render_history(history_cursor.entries[:history_limit])
+        if hasattr(page, "update"):
+            page.update()
+
+    def confirm_history_delete(run_id: str) -> None:
+        nonlocal selected_history_run_id, current_report_run_id
+        try:
+            admin_service.remove_history_entry(run_id)
+        except Exception as exc:
+            LOGGER.exception("Administration history removal failed")
+            history_detail_field.value = f"Run: {run_id}\nCould not remove from history: {exc}"
+            close_dialog()
+            if hasattr(page, "update"):
+                page.update()
+            return
+        if selected_history_run_id == run_id:
+            selected_history_run_id = None
+            history_detail_field.value = (
+                f"Run {run_id} was removed from this history list. "
+                "Its report files remain available as audit evidence."
+            )
+        if current_report_run_id == run_id:
+            current_report_run_id = None
+            report_button.visible = False
+        close_dialog()
+        refresh_history(force=True)
+        if hasattr(page, "update"):
+            page.update()
+
+    def open_history_delete_confirmation(run_id: str) -> None:
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Remove run from history?"),
+            content=ft.Text(
+                f"Run: {run_id}\n\n"
+                "This removes the row from Run history. The report files remain on disk as audit evidence."
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda _event: close_dialog()),
+                ft.ElevatedButton(
+                    "Remove",
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    on_click=lambda _event: confirm_history_delete(run_id),
+                ),
+            ],
+        )
+        setattr(page, "dialog", dialog)
+        if hasattr(page, "open"):
+            page.open(dialog)
+        else:
+            dialog.open = True
         if hasattr(page, "update"):
             page.update()
 
@@ -993,6 +1050,7 @@ def build_fundamentals_admin_page(
                     ft.Text("Result", width=135, weight=ft.FontWeight.BOLD),
                     ft.Text("Count", width=125, weight=ft.FontWeight.BOLD),
                     ft.Text("Category", width=170, weight=ft.FontWeight.BOLD),
+                    ft.Container(width=48),
                     ft.Container(width=48),
                     ft.Container(width=48),
                 ]

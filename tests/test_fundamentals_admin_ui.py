@@ -837,6 +837,29 @@ def test_history_selection_displays_progress_and_unavailable_report_state(tmp_pa
     assert "Selected run progress loaded" in controls.progress_field.value
 
 
+def test_history_delete_button_confirms_and_hides_row_without_deleting_evidence(tmp_path: Path) -> None:
+    run_id = "20260916T130000Z_add_tickers_remove"
+    run_dir = _write_run(tmp_path, run_id)
+    page = _Page()
+    controls = build_fundamentals_admin_page(
+        page=page,
+        service=FundamentalsAdminUIService(run_root=tmp_path),
+    )
+
+    row = controls.history_column.controls[0]
+    row.controls[-3].on_click(None)
+
+    assert page.dialog.title.value == "Remove run from history?"
+    assert run_id in page.dialog.content.value
+    assert run_dir.is_dir()
+
+    page.dialog.actions[1].on_click(None)
+
+    assert run_dir.is_dir()
+    assert controls.history_column.controls[0].value == "No administration runs found."
+    assert FundamentalsAdminUIService(run_root=tmp_path).history_entries(limit=10) == []
+
+
 def test_history_defaults_to_admin_runs_and_filter_exposes_technical_evidence(tmp_path: Path) -> None:
     _write_run(tmp_path, "20260916T130000Z_add_tickers_admin")
     evidence = tmp_path / "phase13h1_1_acceptance"

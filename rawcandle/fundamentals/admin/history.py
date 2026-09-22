@@ -10,6 +10,7 @@ from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT
 
 
 _RESULT_NOT_PROVIDED = object()
+_HIDDEN_RUNS_FILE = ".hidden_runs.json"
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,54 @@ class AdminRunHistory:
             return payload if isinstance(payload, Mapping) else None
         except Exception:
             return None
+
+    def hidden_run_ids(self) -> frozenset[str]:
+        path = self.root / _HIDDEN_RUNS_FILE
+        if not path.exists() or path.is_symlink():
+            return frozenset()
+        payload = self._load_json(path)
+        values = payload.get("hidden_run_ids") if payload else None
+        if not isinstance(values, list):
+            return frozenset()
+        return frozenset(
+            value for value in values
+            if isinstance(value, str) and value and "/" not in value and "\\" not in value
+        )
+
+    def hide_run(self, run_id: str) -> Path:
+        """Persistently remove a run from history without deleting audit evidence."""
+        run_dir = self._resolve_run_dir(run_id)
+        if not run_dir.exists() or not run_dir.is_dir():
+            raise FileNotFoundError("admin run not found")
+        hidden = set(self.hidden_run_ids())
+        hidden.add(run_id)
+        self.root.mkdir(parents=True, exist_ok=True)
+        destination = self.root / _HIDDEN_RUNS_FILE
+        if destination.is_symlink():
+            raise ValueError("hidden-run registry symlink is not allowed")
+        temporary = self.root / f"{_HIDDEN_RUNS_FILE}.{os.getpid()}.tmp"
+        if temporary.exists() or temporary.is_symlink():
+            raise FileExistsError("hidden-run registry temporary path already exists")
+        try:
+            with temporary.open("x", encoding="utf-8") as handle:
+                json.dump(
+                    {"schema_version": 1, "hidden_run_ids": sorted(hidden)},
+                    handle,
+                    indent=2,
+                    sort_keys=True,
+                )
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, destination)
+            directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return run_dir
 
     def _heartbeat_recent(self, run_dir: Path) -> bool:
         heartbeat = run_dir / "heartbeat.jsonl"
@@ -125,9 +174,10 @@ class AdminRunHistory:
     def list_runs(self, *, operation_type: str | None = None, outcome: str | None = None) -> list[RunHistoryEntry]:
         if not self.root.exists():
             return []
+        hidden = self.hidden_run_ids()
         entries: list[RunHistoryEntry] = []
         for path in sorted(self.root.iterdir(), key=lambda item: item.name, reverse=True):
-            if not path.is_dir() or path.is_symlink():
+            if not path.is_dir() or path.is_symlink() or path.name in hidden:
                 continue
             try:
                 entry = self.summarize(path.name)

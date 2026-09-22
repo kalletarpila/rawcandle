@@ -191,6 +191,33 @@ def test_history_reader_rejects_symlink_escape(tmp_path) -> None:
         history.summarize("evil")
 
 
+def test_history_hide_removes_row_but_retains_audit_evidence(tmp_path) -> None:
+    writer = AdminRunWriter("20260101T000000Z_add_tickers_a", AdminOperationType.ADD_TICKERS, root=tmp_path)
+    writer.write_json(
+        "result.json",
+        {"run_id": writer.run_id, "operation_type": "ADD_TICKERS", "outcome": "COMPLETED"},
+    )
+
+    history = AdminRunHistory(tmp_path)
+    retained = history.hide_run(writer.run_id)
+
+    assert history.list_runs() == []
+    assert retained == writer.run_dir
+    assert (retained / "result.json").is_file()
+    assert history.hidden_run_ids() == frozenset({writer.run_id})
+
+
+def test_history_hide_rejects_escape_and_symlink(tmp_path) -> None:
+    history = AdminRunHistory(tmp_path)
+    with pytest.raises(ValueError):
+        history.hide_run("../outside")
+    outside = tmp_path.parent / "outside-run"
+    outside.mkdir(exist_ok=True)
+    (tmp_path / "linked-run").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError):
+        history.hide_run("linked-run")
+
+
 def test_corrupt_incomplete_artifact_set(tmp_path) -> None:
     run_dir = tmp_path / "run1"
     run_dir.mkdir()
