@@ -1028,6 +1028,8 @@ def build_fundamentals_admin_page(
         operation = (operation_dropdown.value or "ADD_TICKERS").strip().upper()
         if operation == "ADD_TICKERS":
             return "CONFIRM_PRODUCTION_BATCH_ADD_TICKERS"
+        if operation == "REMOVE_TICKERS":
+            return "CONFIRM_PRODUCTION_REMOVE_TICKERS"
         if operation == "REFRESH_FUNDAMENTALS":
             return "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS"
         if operation == "CHECK_UPDATE_SECTOR_INDUSTRY":

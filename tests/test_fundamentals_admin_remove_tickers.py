@@ -11,9 +11,11 @@ import pytest
 
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.remove_tickers import (
+    SimulatedRemoveTickersPublicationCrash,
     _canonical_plan,
     _shared_sources,
     run_preview,
+    run_production_apply,
     run_test,
 )
 from rawcandle.fundamentals.admin.operation_report import build_operation_summary
@@ -24,6 +26,7 @@ from rawcandle.fundamentals.schema.migrations import (
     bootstrap_database,
 )
 from rawcandle.fundamentals.ttm.engine import TTM_SCHEMA_SQL, load_canonical_rows
+from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 
 
 def _hash(path: Path) -> str:
@@ -179,26 +182,68 @@ def _preview_and_test(
     raw_inputs: str,
     *,
     paths: BatchAddTickerPaths | None = None,
+    source_context=_fake_source_context,
 ) -> tuple[dict, dict, BatchAddTickerPaths]:
     paths = paths or _paths(tmp_path)
+    run_root = tmp_path / "runs"
     monkeypatch.setattr(
         "rawcandle.fundamentals.admin.remove_tickers.structural_break.apply_contract",
         lambda *_args, **_kwargs: {"outcome": "READY"},
     )
     preview = run_preview(
-        raw_inputs, source_paths=paths, run_root=tmp_path / "preview_runs",
+        raw_inputs, source_paths=paths, run_root=run_root,
         temp_root=tmp_path / "temp", journal_path=tmp_path / "journal.json",
-        source_context=_fake_source_context,
+        source_context=source_context,
     )
     result = run_test(
         preview_payload_path=Path(preview["preview_payload_path"]),
         preview_fingerprint=preview["preview_fingerprint"],
-        source_paths=paths, run_root=tmp_path / "test_runs", temp_root=tmp_path / "temp",
+        source_paths=paths, run_root=run_root, temp_root=tmp_path / "temp",
         journal_path=tmp_path / "journal.json", lock_path=tmp_path / "remove.lock",
-        source_context=_fake_source_context, downstream_runner=_fake_downstream,
+        source_context=source_context, downstream_runner=_fake_downstream,
         as_of_date="2026-09-23",
     )
     return preview, result, paths
+
+
+def _source_context_with(*, market_fingerprint: str = "market-fp", taxonomy_fingerprint: str = "taxonomy-fp"):
+    @contextmanager
+    def source(*_args, **_kwargs):
+        evidence = _source_evidence()
+        evidence["market"]["bundle_manifest"]["market"]["semantic_fingerprint"] = market_fingerprint
+        evidence["taxonomy"]["binding"]["semantic_fingerprint"] = taxonomy_fingerprint
+        yield evidence
+
+    return source
+
+
+def _production_kwargs(
+    tmp_path: Path,
+    preview: dict,
+    test: dict,
+    paths: BatchAddTickerPaths,
+    **overrides,
+) -> dict:
+    values = {
+        "preview_payload_path": Path(preview["preview_payload_path"]),
+        "preview_fingerprint": preview["preview_fingerprint"],
+        "test_run_id": test["run_id"],
+        "source_paths": paths,
+        "run_root": tmp_path / "runs",
+        "temp_root": tmp_path / "production_temp",
+        "backup_root": tmp_path / "backups",
+        "journal_path": tmp_path / "publication_journal.json",
+        "lock_path": tmp_path / "production.lock",
+        "scheduler_log_dir": str(tmp_path / "scheduler"),
+        "taxonomy_evidence_root": tmp_path / "temp" / "taxonomy_lock",
+        "confirm_production": True,
+        "production_intent": False,
+        "rehearsal": True,
+        "source_context": _fake_source_context,
+        "downstream_runner": _fake_downstream,
+    }
+    values.update(overrides)
+    return values
 
 
 @pytest.fixture(autouse=True)
@@ -355,8 +400,16 @@ def test_ui_dispatch_enables_test_but_keeps_production_unavailable(tmp_path: Pat
             "outcome": "COMPLETED",
         }
 
+    def production(**kwargs) -> dict:
+        captured["production"] = kwargs
+        return {
+            "operation_type": "REMOVE_TICKERS", "mode": "PRODUCTION_APPLY",
+            "outcome": "COMPLETED",
+        }
+
     service = FundamentalsAdminUIService(
         run_root=tmp_path / "runs", remove_preview=preview, remove_apply=apply,
+        remove_production_apply=production,
         recover_publication_on_startup=False,
     )
     capability = next(item for item in service.capabilities() if item.operation_type == "REMOVE_TICKERS")
@@ -364,16 +417,18 @@ def test_ui_dispatch_enables_test_but_keeps_production_unavailable(tmp_path: Pat
     tested = service.copy_apply(
         "REMOVE_TICKERS", preview_payload_path="preview.json", preview_fingerprint="fingerprint",
     )
-    assert (capability.preview_enabled, capability.copy_apply_enabled, capability.production_apply_enabled) == (True, True, False)
+    assert (capability.preview_enabled, capability.copy_apply_enabled, capability.production_apply_enabled) == (True, True, True)
     assert captured["raw_inputs"] == "AAA"
     assert captured["apply"]["preview_fingerprint"] == "fingerprint"
     assert tested.outcome == "COMPLETED"
     assert result.copy_actionable is True
-    with pytest.raises(ValueError, match="UNSUPPORTED_ADMIN_OPERATION"):
-        service.production_apply(
-            "REMOVE_TICKERS", preview_payload_path="preview.json",
-            preview_fingerprint="fingerprint", confirmation="anything", test_run_id="test-run",
-        )
+    published = service.production_apply(
+        "REMOVE_TICKERS", preview_payload_path="preview.json",
+        preview_fingerprint="fingerprint",
+        confirmation="CONFIRM_PRODUCTION_REMOVE_TICKERS", test_run_id="test-run",
+    )
+    assert published.outcome == "COMPLETED"
+    assert captured["production"]["production_intent"] is True
     assert build_operation_summary({
         "operation_type": "REMOVE_TICKERS", "mode": "PREVIEW", "outcome": "COMPLETED",
         "removal_plan": [{
@@ -568,3 +623,216 @@ def test_remove_test_writer_contention_fails_without_candidates(
     assert result["outcome"] == "FAILED"
     assert result["errors"][0]["message"] == "REMOVE_TICKERS_TEST_ALREADY_RUNNING"
     assert not (tmp_path / "temp").exists()
+
+
+@pytest.mark.parametrize(
+    ("ticker", "remaining_ttm"),
+    (("AAA", []), ("BBB", [22])),
+)
+def test_remove_production_publishes_validated_single_and_shared_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ticker: str,
+    remaining_ttm: list[int],
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, ticker)
+    result = run_production_apply(**_production_kwargs(tmp_path, preview, tested, paths))
+
+    assert result["outcome"] == "COMPLETED"
+    assert result["write_set"] == ["provider", "canonical", "analysis"]
+    assert result["postflight"]["passed"] is True
+    assert result["postflight"]["ttm_active_security_invariants"]["results"][0]["ttm_security_ids"] == remaining_ttm
+    assert result["postflight"]["identity_history_matches_candidate"] is True
+    assert result["full_market_copy_created"] is False
+    assert result["full_taxonomy_copy_created"] is False
+    assert result["journal"]["state"] == "COMPLETED"
+    assert set(result["journal"]["roles"]) == {"provider", "canonical", "analysis"}
+    assert result["rollback"]["status"] == "NOT_REQUIRED"
+    assert result["cleanup"]["remaining_phase_owned_files"] == 0
+
+
+def test_remove_production_stale_preview_stops_before_candidates_and_backups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+    before = {role: _hash(path) for role, path in paths.as_dict().items()}
+    with sqlite3.connect(paths.provider_db) as connection:
+        connection.execute("INSERT INTO sharadar_ticker_metadata VALUES('AAA','drift')")
+    drifted = {role: _hash(path) for role, path in paths.as_dict().items()}
+
+    result = run_production_apply(**_production_kwargs(tmp_path, preview, tested, paths))
+
+    assert before != drifted
+    assert result["outcome"] == "STALE_PREVIEW_OR_TEST"
+    assert result["pre_publication_cleanup"] == {
+        "journal_removed": True, "backup_directory_removed": True,
+    }
+    assert not (tmp_path / "production_temp").exists()
+    assert drifted == {role: _hash(path) for role, path in paths.as_dict().items()}
+
+
+@pytest.mark.parametrize(
+    ("drift_role", "production_source"),
+    (
+        ("market", _source_context_with(market_fingerprint="market-drift")),
+        ("taxonomy", _source_context_with(taxonomy_fingerprint="taxonomy-drift")),
+    ),
+)
+def test_remove_production_read_only_source_drift_blocks_before_candidates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift_role: str,
+    production_source,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+    before = {role: _hash(path) for role, path in paths.as_dict().items()}
+
+    result = run_production_apply(**_production_kwargs(
+        tmp_path, preview, tested, paths, source_context=production_source,
+    ))
+
+    assert result["outcome"] == "STALE_PREVIEW_OR_TEST"
+    assert "PREVIEW_STALE" in result["error"]
+    assert result["pre_publication_cleanup"]["journal_removed"] is True
+    assert before == {role: _hash(path) for role, path in paths.as_dict().items()}
+    assert drift_role in {"market", "taxonomy"}
+
+
+def test_remove_production_operational_universe_drift_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute(
+            "UPDATE fundamentals_operational_universe_member SET reason='drift' WHERE company_id=1"
+        )
+    drifted = {role: _hash(path) for role, path in paths.as_dict().items()}
+
+    result = run_production_apply(**_production_kwargs(tmp_path, preview, tested, paths))
+
+    assert result["outcome"] == "STALE_PREVIEW_OR_TEST"
+    assert drifted == {role: _hash(path) for role, path in paths.as_dict().items()}
+
+
+def test_remove_production_stale_test_contract_stops_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+    test_path = tmp_path / "runs" / tested["run_id"] / "result.json"
+    payload = json.loads(test_path.read_text(encoding="utf-8"))
+    payload["exact_candidate_mutation_set"] = []
+    test_path.write_text(json.dumps(payload), encoding="utf-8")
+    before = {role: _hash(path) for role, path in paths.as_dict().items()}
+
+    result = run_production_apply(**_production_kwargs(tmp_path, preview, tested, paths))
+
+    assert result["outcome"] == "STALE_PREVIEW_OR_TEST"
+    assert "MATCHING_SUCCESSFUL_TEST_REQUIRED" in result["error"]
+    assert before == {role: _hash(path) for role, path in paths.as_dict().items()}
+    assert not (tmp_path / "publication_journal.json").exists()
+
+
+@pytest.mark.parametrize("failure_point", ("BEFORE_PREPARED", "BEFORE_FIRST_REPLACEMENT"))
+def test_remove_production_preboundary_failure_removes_journal_backups_and_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    failure_point: str,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+    before = {role: _hash(path) for role, path in paths.as_dict().items()}
+
+    result = run_production_apply(**_production_kwargs(
+        tmp_path, preview, tested, paths, inject_failure_at=failure_point,
+    ))
+
+    assert result["outcome"] == "FAILED"
+    assert result["pre_publication_cleanup"]["journal_removed"] is True
+    assert result["pre_publication_cleanup"]["backup_directory_removed"] is True
+    assert before == {role: _hash(path) for role, path in paths.as_dict().items()}
+    assert result["cleanup"]["remaining_phase_owned_files"] == 0
+
+
+def test_remove_production_postboundary_failure_rolls_back_complete_old_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+    before = {role: _hash(path) for role, path in paths.as_dict().items()}
+
+    result = run_production_apply(**_production_kwargs(
+        tmp_path, preview, tested, paths, inject_failure_at="AFTER_CANONICAL_REPLACEMENT",
+    ))
+
+    assert result["outcome"] == "FAILED_ROLLED_BACK"
+    assert result["rollback"]["status"] == "ROLLED_BACK"
+    assert set(result["rollback"]["roles"]) == {"provider", "canonical", "analysis"}
+    for role in ("provider", "canonical", "analysis"):
+        assert _hash(paths.as_dict()[role]) == result["journal"]["roles"][role]["verified_backup_fingerprint"]
+    assert _hash(paths.market_db) == before["market"]
+    assert _hash(paths.taxonomy_db) == before["taxonomy"]
+    assert result["journal"]["state"] == "ROLLED_BACK"
+
+
+def test_remove_production_postflight_failure_uses_same_complete_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+
+    result = run_production_apply(**_production_kwargs(
+        tmp_path, preview, tested, paths, inject_failure_at="POSTFLIGHT",
+    ))
+
+    assert result["outcome"] == "FAILED_ROLLED_BACK"
+    assert set(result["rollback"]["roles"]) == {"provider", "canonical", "analysis"}
+    assert result["journal"]["state"] == "ROLLED_BACK"
+
+
+@pytest.mark.parametrize("crash_point", ("AFTER_PREPARED", "AFTER_PROVIDER_REPLACEMENT"))
+def test_remove_production_crash_is_recovered_by_next_real_entrypoint_and_requires_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    crash_point: str,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+    before = {role: _hash(path) for role, path in paths.as_dict().items()}
+    kwargs = _production_kwargs(tmp_path, preview, tested, paths, inject_crash_at=crash_point)
+
+    with pytest.raises(SimulatedRemoveTickersPublicationCrash):
+        run_production_apply(**kwargs)
+    journal = json.loads((tmp_path / "publication_journal.json").read_text(encoding="utf-8"))
+    assert journal["state"] in {"PREPARED", "PUBLISHING"}
+    assert set(journal["roles"]) == {"provider", "canonical", "analysis"}
+
+    retry = run_production_apply(**_production_kwargs(tmp_path, preview, tested, paths))
+
+    assert retry["outcome"] == "RETRY_REQUIRED"
+    assert retry["publication_recovery"]["status"] == "RECOVERED"
+    assert retry["retry_authorization"]["preview_test_rerun_required"] is True
+    recovered = json.loads((tmp_path / "publication_journal.json").read_text(encoding="utf-8"))
+    assert recovered["state"] == "RECOVERED"
+    for role in ("provider", "canonical", "analysis"):
+        assert _hash(paths.as_dict()[role]) == recovered["roles"][role]["verified_backup_fingerprint"]
+    assert _hash(paths.market_db) == before["market"]
+    assert _hash(paths.taxonomy_db) == before["taxonomy"]
+
+
+def test_remove_production_taxonomy_writer_contention_blocks_before_authorization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview, tested, paths = _preview_and_test(tmp_path, monkeypatch, "AAA")
+    evidence_root = tmp_path / "temp" / "taxonomy_lock"
+    with taxonomy_operation_lock_context(
+        deployment_id="TEST",
+        operation_type="TEST_WRITER",
+        operation_id="writer",
+        evidence_root=evidence_root,
+    ):
+        result = run_production_apply(**_production_kwargs(
+            tmp_path, preview, tested, paths, taxonomy_evidence_root=evidence_root,
+        ))
+
+    assert result["outcome"] == "FAILED"
+    assert (
+        "taxonomy operation lock is active" in result["error"]
+        or "LOCK_ORDER_VIOLATION:TAXONOMY_BEFORE_ADMIN_PRODUCTION" in result["error"]
+    )
+    assert not (tmp_path / "publication_journal.json").exists()
+    assert not (tmp_path / "production_temp").exists()

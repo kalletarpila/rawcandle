@@ -5,26 +5,64 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import secrets
 import shutil
 import sqlite3
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
-from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
+from rawcandle.datacenter_taxonomy_operation_log import (
+    current_taxonomy_operation_lock,
+    taxonomy_lock_held_in_process,
+    taxonomy_operation_lock_context,
+)
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import (
     BatchAddTickerPaths,
     CopyLane,
+    _assert_clean_worktree,
     cleanup_copy_lane,
     create_copy_lane,
 )
-from rawcandle.fundamentals.admin.contracts import AdminOperationType, build_batch_request, fingerprint, utc_now
+from rawcandle.fundamentals.admin.contracts import (
+    AdminOperationType,
+    RunStage,
+    build_batch_request,
+    fingerprint,
+    utc_now,
+)
 from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
 from rawcandle.fundamentals.admin.identity_resolution import DEFAULT_REGISTRY_PATH
-from rawcandle.fundamentals.admin.publication_journal import ACTIVE_JOURNAL_PATH, safety_status
+from rawcandle.fundamentals.admin.production_transaction import (
+    ADMIN_LOCK,
+    BACKUP_ROOT,
+    _storage_preflight,
+    production_lock,
+)
+from rawcandle.fundamentals.admin.publication_journal import (
+    ACTIVE_JOURNAL_PATH,
+    PUBLICATION_ROLES,
+    PublicationRecoveryError,
+    PublicationRecoveredRetryRequired,
+    fsync_directory,
+    guard_production_writes,
+    prepare_journal,
+    restore_old_generation,
+    safety_status,
+    sqlite_verification,
+    update_journal,
+)
+from rawcandle.fundamentals.admin.refresh_production import (
+    _candidate_manifest,
+    _cleanup_candidate_lane,
+    _production_file_state,
+    _publication_activity,
+    _replace_role,
+    _verified_backups,
+)
 from rawcandle.fundamentals.admin.structural_context import _events
 from rawcandle.fundamentals.admin.source_bundle import (
     SOURCE_CONTRACT_VERSION,
@@ -35,12 +73,13 @@ from rawcandle.fundamentals.admin.source_bundle import (
 )
 from rawcandle.fundamentals import structural_break
 from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_active_dc_memberships
-from rawcandle.fundamentals.phase12d import rebuild_ttm
+from rawcandle.fundamentals.phase12d import PRODUCTION, rebuild_ttm
 from rawcandle.fundamentals.phase13b_foundation import universe_identity
 
 
 CONTRACT_VERSION = "PHASE13G3_34_REMOVE_TICKERS_PREVIEW_V1"
 TEST_CONTRACT_VERSION = "PHASE13G3_35_REMOVE_TICKERS_TEST_V1"
+PRODUCTION_CONTRACT_VERSION = "PHASE13G3_36_REMOVE_TICKERS_PRODUCTION_V1"
 MAX_TICKERS = 25
 REMOVE_TEST_LOCK = ADMIN_TEMP_ROOT.parent / ".remove_tickers_test.lock"
 ANALYSIS_TABLES = (
@@ -406,11 +445,7 @@ def _shared_sources(
     tickers: Sequence[str],
     operation_id: str,
 ) -> Iterator[dict[str, Any]]:
-    with taxonomy_operation_lock_context(
-        deployment_id="FUNDAMENTALS",
-        operation_type="REMOVE_TICKERS_PREVIEW_DIRECT_LOCKED_READ",
-        operation_id=operation_id,
-    ) as operation_lock:
+    def prepare(operation_lock: Any) -> dict[str, Any]:
         taxonomy = bind_taxonomy_source(
             paths.taxonomy_db,
             paths.canonical_db,
@@ -426,7 +461,17 @@ def _shared_sources(
             taxonomy_binding=taxonomy,
             additional_full_history_tickers=tickers,
         )
-        yield evidence
+        return evidence
+
+    if taxonomy_lock_held_in_process():
+        yield prepare(current_taxonomy_operation_lock())
+        return
+    with taxonomy_operation_lock_context(
+        deployment_id="FUNDAMENTALS",
+        operation_type="REMOVE_TICKERS_PREVIEW_DIRECT_LOCKED_READ",
+        operation_id=operation_id,
+    ) as operation_lock:
+        yield prepare(operation_lock)
 
 
 def _render_report(result: Mapping[str, Any]) -> str:
@@ -1159,3 +1204,669 @@ def run_test(
         writer.write_json("result.json", result)
         writer.write_text("operation_report.md", _render_test_report(result))
         writer.write_manifest()
+
+
+class StaleRemoveTickersAuthorization(RuntimeError):
+    pass
+
+
+class SimulatedRemoveTickersPublicationCrash(BaseException):
+    """Fault injection that models process death without ordinary rollback."""
+
+
+def _load_production_authorization(
+    *,
+    preview_payload_path: Path,
+    preview_fingerprint: str,
+    test_run_id: str,
+    run_root: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    root = run_root.resolve()
+    preview_path = preview_payload_path.resolve(strict=True)
+    if (
+        preview_payload_path.is_symlink()
+        or preview_path.name != "remove_tickers_preview.json"
+        or root not in preview_path.parents
+    ):
+        raise ValueError("REMOVE_TICKERS_PRODUCTION_PREVIEW_PATH_INVALID")
+    preview = json.loads(preview_path.read_text(encoding="utf-8"))
+    eligible = [item for item in preview.get("removal_plan") or () if item.get("removal_eligible")]
+    if (
+        preview.get("contract_version") != CONTRACT_VERSION
+        or preview.get("operation_type") != AdminOperationType.REMOVE_TICKERS.value
+        or preview.get("mode") != "PREVIEW"
+        or preview.get("outcome") != "COMPLETED"
+        or preview.get("preview_fingerprint") != preview_fingerprint
+        or fingerprint(preview.get("plan_binding")) != preview_fingerprint
+        or not eligible
+    ):
+        raise ValueError("REMOVE_TICKERS_PRODUCTION_ELIGIBLE_PREVIEW_REQUIRED")
+    if not test_run_id or Path(test_run_id).name != test_run_id or ".." in test_run_id:
+        raise ValueError("REMOVE_TICKERS_PRODUCTION_TEST_RUN_ID_REQUIRED")
+    test_dir = (root / test_run_id).resolve()
+    if root not in test_dir.parents or test_dir.name != test_run_id:
+        raise ValueError("REMOVE_TICKERS_PRODUCTION_TEST_PATH_INVALID")
+    test_path = test_dir / "result.json"
+    evidence_path = test_dir / "remove_tickers_test_evidence.json"
+    if test_path.is_symlink() or evidence_path.is_symlink():
+        raise ValueError("REMOVE_TICKERS_PRODUCTION_TEST_EVIDENCE_INVALID")
+    test = json.loads(test_path.read_text(encoding="utf-8"))
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    expected_mutations = [
+        mutation
+        for item in eligible
+        for mutation in item["canonical"]["expected_mutation_set"]
+    ]
+    requested = list(preview.get("request", {}).get("normalized_inputs") or ())
+    resolved = [
+        (item.get("requested_ticker"), item.get("company_id"), item.get("security_id"))
+        for item in preview.get("removal_plan") or ()
+    ]
+    tested_resolved = [
+        (item.get("ticker"), item.get("company_id"), item.get("security_id"))
+        for item in test.get("ticker_results") or ()
+    ]
+    valid = (
+        test == evidence
+        and test.get("contract_version") == TEST_CONTRACT_VERSION
+        and test.get("operation_type") == AdminOperationType.REMOVE_TICKERS.value
+        and test.get("mode") == "COPY_ONLY_APPLY"
+        and test.get("outcome") == "COMPLETED"
+        and test.get("preview_run_id") == preview.get("run_id")
+        and test.get("preview_fingerprint") == preview_fingerprint
+        and test.get("requested_tickers") == requested
+        and tested_resolved == resolved
+        and test.get("exact_candidate_mutation_set") == expected_mutations
+        and test.get("removed_current_state_participation_verified") is True
+        and test.get("production_changed") is False
+        and test.get("production_available") is False
+        and test.get("cleanup", {}).get("run_temp_exists") is False
+        and test.get("downstream", {}).get("invocation_counts", {}).get("full_v2_rebuild") == 1
+        and test.get("active_universe_invariants", {}).get("passed") is True
+        and test.get("ttm_active_security_invariants", {}).get("passed") is True
+        and all(test.get("identity_invariants", {}).values())
+    )
+    binding = test.get("market_taxonomy_binding") or {}
+    if (
+        not valid
+        or binding.get("market", {}).get("mode") != "STABLE_SOURCE_BUNDLE"
+        or binding.get("market", {}).get("source_contract_version") != SOURCE_CONTRACT_VERSION
+        or binding.get("taxonomy", {}).get("mode") != "DIRECT_LOCKED_READ"
+    ):
+        raise StaleRemoveTickersAuthorization(
+            "REMOVE_TICKERS_PRODUCTION_MATCHING_SUCCESSFUL_TEST_REQUIRED"
+        )
+    return preview, test
+
+
+def _build_production_candidate(
+    *,
+    source_paths: BatchAddTickerPaths,
+    items: Sequence[Mapping[str, Any]],
+    requested: Sequence[str],
+    lane: CopyLane,
+    source_context: Callable[..., Any],
+    downstream_runner: Callable[..., dict[str, Any]],
+    as_of_date: str,
+    applied_at: str,
+    run_id: str,
+) -> dict[str, Any]:
+    eligible = [item for item in items if item.get("removal_eligible")]
+    target_security_ids = {int(item["security_id"]) for item in eligible}
+    identity_before = _identity_state(lane.paths.canonical_db, target_security_ids=target_security_ids)
+    provider_before = _sha256(lane.paths.provider_db)
+    registry_before = _registry_fingerprint()
+    mutation = _mutate_candidate_universe(lane.paths.canonical_db, eligible, applied_at=applied_at)
+    ttm = rebuild_ttm(lane.paths.canonical_db, applied_at=applied_at)
+    structural = structural_break.apply_contract(
+        lane.paths.canonical_db, events=_events(), applied_at_utc=applied_at,
+    )
+    identity_after = _identity_state(lane.paths.canonical_db, target_security_ids=target_security_ids)
+    identity_invariants = {
+        "permanent_company_security_identity_preserved": identity_before["permanent_identity_fingerprint"] == identity_after["permanent_identity_fingerprint"],
+        "ticker_alias_history_preserved": identity_before["alias_fingerprint"] == identity_after["alias_fingerprint"],
+        "company_rows_preserved": identity_before["company_fingerprint"] == identity_after["company_fingerprint"],
+        "unrelated_securities_unchanged": identity_before["unrelated_security_fingerprint"] == identity_after["unrelated_security_fingerprint"],
+        "reviewed_identity_registry_preserved": registry_before == _registry_fingerprint(),
+        "provider_history_preserved": provider_before == _sha256(lane.paths.provider_db),
+        "target_security_ids_preserved": {
+            int(row["security_id"]) for row in identity_after["target_security_rows"]
+        } == target_security_ids,
+        "target_securities_inactive": all(
+            int(row.get("active") or 0) == 0 for row in identity_after["target_security_rows"]
+        ),
+    }
+    universe = _candidate_universe_state(lane.paths.canonical_db, eligible)
+    ttm_state = _candidate_ttm_state(lane.paths.canonical_db, eligible)
+    if not all(identity_invariants.values()) or not universe["passed"] or not ttm_state["passed"]:
+        raise RuntimeError("REMOVE_TICKERS_PRODUCTION_CANDIDATE_INVARIANT_FAILED")
+    candidate_paths = replace(
+        lane.paths, market_db=source_paths.market_db, taxonomy_db=source_paths.taxonomy_db,
+    )
+    with source_context(
+        candidate_paths,
+        bundle_dir=lane.lane_dir / "read_only_sources" / "market_source_bundle",
+        as_of_date=as_of_date,
+        tickers=requested,
+        operation_id=f"{run_id}:candidate",
+    ) as source_evidence:
+        sources = {
+            "provider": lane.paths.provider_db,
+            "canonical": lane.paths.canonical_db,
+            "market": Path(source_evidence["market"]["bundle_path"]),
+            "taxonomy": source_paths.taxonomy_db,
+        }
+        downstream = downstream_runner(
+            sources, output=lane.lane_dir / "full_v2_downstream", as_of_date=as_of_date,
+        )
+        source_binding = semantic_source_binding(source_evidence)
+    analysis_candidate = Path(downstream["candidate_analysis_db"])
+    health = {
+        "provider": _database_health(lane.paths.provider_db),
+        "canonical": _database_health(lane.paths.canonical_db),
+        "analysis": _database_health(analysis_candidate),
+    }
+    if (
+        downstream.get("status") != "READY"
+        or downstream.get("invocation_counts", {}).get("full_v2_rebuild") != 1
+        or not all(item["passed"] for item in health.values())
+    ):
+        raise RuntimeError("REMOVE_TICKERS_PRODUCTION_FULL_V2_REBUILD_NOT_READY")
+    ticker_results = []
+    for item in items:
+        participation = (
+            _derived_participation(
+                analysis_candidate,
+                ticker=str(item["requested_ticker"]),
+                company_id=int(item["company_id"]),
+                security_id=int(item["security_id"]),
+            )
+            if item.get("company_id") is not None and item.get("security_id") is not None
+            else {"removed_current_participation": True, "target_rows_total": 0}
+        )
+        ticker_results.append({
+            "ticker": item["requested_ticker"], "classification": item["classification"],
+            "company_id": item["company_id"], "security_id": item["security_id"],
+            **participation,
+        })
+    if not all(
+        item["removed_current_participation"]
+        for item in ticker_results
+        if item["classification"] != "ALREADY_ABSENT"
+    ):
+        raise RuntimeError("REMOVE_TICKERS_PRODUCTION_DERIVED_PARTICIPATION_REMAINS")
+    return {
+        "candidate_paths": {
+            "provider": lane.paths.provider_db,
+            "canonical": lane.paths.canonical_db,
+            "analysis": analysis_candidate,
+        },
+        "mutation": mutation,
+        "ttm": ttm,
+        "structural": structural,
+        "identity_before": identity_before,
+        "identity_after": identity_after,
+        "reviewed_identity_registry_fingerprint": registry_before,
+        "identity_invariants": identity_invariants,
+        "active_universe_invariants": universe,
+        "ttm_active_security_invariants": ttm_state,
+        "source_binding": source_binding,
+        "downstream": downstream,
+        "ticker_results": ticker_results,
+        "candidate_database_health": health,
+    }
+
+
+def _assert_test_candidate_match(
+    test: Mapping[str, Any], candidate: Mapping[str, Any], items: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    expected_mutations = [
+        mutation
+        for item in items if item.get("removal_eligible")
+        for mutation in item["canonical"]["expected_mutation_set"]
+    ]
+    comparisons = {
+        "requested_identity_set": [
+            (item.get("ticker"), item.get("company_id"), item.get("security_id"))
+            for item in test.get("ticker_results") or ()
+        ] == [
+            (item.get("ticker"), item.get("company_id"), item.get("security_id"))
+            for item in candidate["ticker_results"]
+        ],
+        "mutation_set": test.get("exact_candidate_mutation_set") == expected_mutations,
+        "operational_universe": test.get("post_mutation_operational_universe_fingerprint")
+        == candidate["mutation"]["new_universe"]["economic_result_fingerprint"],
+        "source_binding": test.get("market_taxonomy_binding") == candidate["source_binding"],
+        "identity_contract": test.get("identity_invariants") == candidate["identity_invariants"],
+        "ttm_fingerprint": test.get("ttm_reconciliation", {}).get("fingerprint")
+        == candidate["ttm"].get("fingerprint"),
+    }
+    if not all(comparisons.values()):
+        raise StaleRemoveTickersAuthorization(
+            "REMOVE_TICKERS_TEST_BINDING_STALE:"
+            + ",".join(key for key, matches in comparisons.items() if not matches)
+        )
+    return {"status": "MATCH", "comparisons": comparisons}
+
+
+def _production_postflight(
+    *,
+    source_paths: BatchAddTickerPaths,
+    items: Sequence[Mapping[str, Any]],
+    candidate: Mapping[str, Any],
+    roles: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    eligible = [item for item in items if item.get("removal_eligible")]
+    universe = _candidate_universe_state(source_paths.canonical_db, eligible)
+    ttm_state = _candidate_ttm_state(source_paths.canonical_db, eligible)
+    identity = _identity_state(
+        source_paths.canonical_db,
+        target_security_ids={int(item["security_id"]) for item in eligible},
+    )
+    identity_matches = identity == candidate["identity_after"]
+    registry_preserved = (
+        _registry_fingerprint() == candidate["reviewed_identity_registry_fingerprint"]
+    )
+    ticker_results = [
+        {
+            "ticker": item["requested_ticker"],
+            **_derived_participation(
+                source_paths.analysis_db,
+                ticker=str(item["requested_ticker"]),
+                company_id=int(item["company_id"]),
+                security_id=int(item["security_id"]),
+            ),
+        }
+        for item in eligible
+    ]
+    role_fingerprints = {
+        role: sqlite_verification(source_paths.as_dict()[role]) for role in PUBLICATION_ROLES
+    }
+    roles_match = all(
+        role_fingerprints[role]["sha256"] == roles[role]["candidate_fingerprint"]
+        for role in PUBLICATION_ROLES
+    )
+    passed = (
+        universe["passed"]
+        and ttm_state["passed"]
+        and identity_matches
+        and registry_preserved
+        and roles_match
+        and all(item["removed_current_participation"] for item in ticker_results)
+    )
+    if not passed:
+        raise RuntimeError("REMOVE_TICKERS_PRODUCTION_POSTFLIGHT_FAILED")
+    return {
+        "passed": True,
+        "active_universe_invariants": universe,
+        "ttm_active_security_invariants": ttm_state,
+        "identity_history_matches_candidate": identity_matches,
+        "reviewed_identity_registry_preserved": registry_preserved,
+        "removed_current_state": ticker_results,
+        "database_integrity": role_fingerprints,
+        "published_role_fingerprints_match": roles_match,
+    }
+
+
+def _render_production_report(result: Mapping[str, Any]) -> str:
+    return "\n".join([
+        "# Remove Tickers Production", "",
+        f"- Outcome: `{result.get('outcome')}`",
+        f"- Preview fingerprint: `{result.get('preview_fingerprint')}`",
+        f"- Test run: `{result.get('test_run_id')}`",
+        f"- Publication roles: `{','.join(result.get('write_set') or ())}`",
+        f"- Postflight: `{(result.get('postflight') or {}).get('passed', False)}`",
+        f"- Rollback: `{(result.get('rollback') or {}).get('status', 'NOT_REQUIRED')}`",
+        "- Market/taxonomy publication roles: `No`", "",
+    ])
+
+
+def run_production_apply(
+    *,
+    preview_payload_path: Path,
+    preview_fingerprint: str,
+    test_run_id: str,
+    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    run_root: Path = ADMIN_RUN_ROOT,
+    temp_root: Path = ADMIN_TEMP_ROOT,
+    backup_root: Path = BACKUP_ROOT,
+    journal_path: Path = ACTIVE_JOURNAL_PATH,
+    lock_path: Path = ADMIN_LOCK,
+    scheduler_log_dir: str | None = None,
+    confirm_production: bool = False,
+    production_intent: bool = False,
+    rehearsal: bool = False,
+    source_context: Callable[..., Any] = _shared_sources,
+    downstream_runner: Callable[..., dict[str, Any]] = run_full_v2_downstream,
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    inject_failure_at: str | None = None,
+    inject_crash_at: str | None = None,
+    taxonomy_evidence_root: Path | None = None,
+) -> dict[str, Any]:
+    if not confirm_production:
+        raise PermissionError("REMOVE_TICKERS_PRODUCTION_CONFIRMATION_REQUIRED")
+    production_paths = {role: path.resolve() for role, path in PRODUCTION.items()}
+    actual_production = source_paths.analysis_db.resolve() == production_paths["analysis"]
+    if actual_production != (production_intent and not rehearsal):
+        raise PermissionError("REMOVE_TICKERS_EXPLICIT_PRODUCTION_INTENT_REQUIRED")
+    if actual_production:
+        if any(source_paths.as_dict()[role].resolve() != production_paths[role] for role in source_paths.as_dict()):
+            raise PermissionError("REMOVE_TICKERS_EXACT_PRODUCTION_PATHS_REQUIRED")
+        if (
+            run_root.resolve() != ADMIN_RUN_ROOT.resolve()
+            or journal_path.resolve() != ACTIVE_JOURNAL_PATH.resolve()
+            or lock_path.resolve() != ADMIN_LOCK.resolve()
+        ):
+            raise PermissionError("REMOVE_TICKERS_PRODUCTION_GUARD_PATH_OVERRIDE_REJECTED")
+    elif any(path.resolve() in set(production_paths.values()) for path in source_paths.as_dict().values()):
+        raise PermissionError("REMOVE_TICKERS_REHEARSAL_MUST_USE_ONLY_COPIES")
+    run_id = stable_run_id(
+        AdminOperationType.REMOVE_TICKERS,
+        preview_fingerprint,
+        suffix="production" if actual_production else "transaction_rehearsal",
+    ) + "_" + secrets.token_hex(4)
+    writer = AdminRunWriter(run_id, AdminOperationType.REMOVE_TICKERS, root=run_root)
+    started = utc_now()
+    lane_dir = temp_root / run_id
+    backup_dir = backup_root / run_id
+    stage = "PRODUCTION_PREFLIGHT"
+    lane: CopyLane | None = None
+    journal: dict[str, Any] | None = None
+    write_boundary_crossed = False
+    before_files: dict[str, Any] | None = None
+    result: dict[str, Any] = {
+        "contract_version": PRODUCTION_CONTRACT_VERSION,
+        "operation_type": AdminOperationType.REMOVE_TICKERS.value,
+        "mode": "PRODUCTION_APPLY" if actual_production else "TRANSACTION_REHEARSAL",
+        "run_id": run_id,
+        "artifact_dir": str(writer.run_dir),
+        "preview_fingerprint": preview_fingerprint,
+        "test_run_id": test_run_id,
+        "started_at_utc": started,
+        "outcome": "FAILED",
+        "write_set": list(PUBLICATION_ROLES),
+        "full_market_copy_created": False,
+        "full_taxonomy_copy_created": False,
+        "warnings": [],
+    }
+
+    def progress(state: str, message: str) -> None:
+        payload = {
+            "run_id": run_id, "operation_type": AdminOperationType.REMOVE_TICKERS.value,
+            "current_stage_id": stage, "stage_state": state,
+            "message": message, "timestamp_utc": utc_now(),
+        }
+        writer.write_json("progress_status.json", payload)
+        writer.append_jsonl("progress_events.jsonl", payload)
+        if progress_callback:
+            try:
+                progress_callback(payload)
+            except Exception:
+                pass
+
+    def crash(point: str) -> None:
+        if inject_crash_at == point:
+            raise SimulatedRemoveTickersPublicationCrash(
+                f"SIMULATED_REMOVE_TICKERS_PUBLICATION_CRASH:{point}"
+            )
+
+    writer.write_json("request.json", {
+        "operation_type": AdminOperationType.REMOVE_TICKERS.value,
+        "preview_payload_path": str(preview_payload_path),
+        "preview_fingerprint": preview_fingerprint,
+        "test_run_id": test_run_id,
+    })
+    writer.checkpoint(RunStage.REQUEST_CREATED, message="Remove Tickers Production requested.", preview_fingerprint=preview_fingerprint)
+    writer.checkpoint(RunStage.APPLY_STARTED, message="Remove Tickers Production preflight started.", preview_fingerprint=preview_fingerprint)
+    locks = ExitStack()
+    try:
+        progress("RUNNING", "Acquiring Production, scheduler and taxonomy locks before recovery preflight.")
+        owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
+        taxonomy_lock = locks.enter_context(taxonomy_operation_lock_context(
+            deployment_id="FUNDAMENTALS",
+            operation_type="REMOVE_TICKERS_PRODUCTION_DIRECT_LOCKED_READ",
+            operation_id=f"{run_id}:taxonomy",
+            evidence_root=taxonomy_evidence_root,
+        ))
+        result["lock_owner"] = owner
+        result["taxonomy_lock"] = {"lock_path": taxonomy_lock.lock_path, "operation_id": taxonomy_lock.operation_id}
+        result["recovery_preflight"] = guard_production_writes(journal_path)
+        if actual_production:
+            result["git_state"] = _assert_clean_worktree()
+            if result["git_state"].get("dirty"):
+                result["warnings"].append({
+                    "code": "DIRTY_GIT_WORKTREE",
+                    "message": "Git worktree contains uncommitted changes.",
+                })
+            elif result["git_state"].get("error"):
+                result["warnings"].append({
+                    "code": "GIT_STATE_UNAVAILABLE",
+                    "message": "Git provenance could not be read.",
+                })
+        preview, test = _load_production_authorization(
+            preview_payload_path=preview_payload_path,
+            preview_fingerprint=preview_fingerprint,
+            test_run_id=test_run_id,
+            run_root=run_root,
+        )
+        result["preview_run_id"] = preview.get("run_id")
+        requested = tuple(preview.get("request", {}).get("normalized_inputs") or ())
+        as_of_date = str(preview.get("started_at_utc") or started)[:10]
+        before_files = _production_file_state(source_paths)
+        result["production_file_state_before"] = before_files
+        preflight_dir = temp_root / f".{run_id}.preflight"
+        try:
+            with source_context(
+                source_paths,
+                bundle_dir=preflight_dir / "market_source_bundle",
+                as_of_date=as_of_date,
+                tickers=requested,
+                operation_id=f"{run_id}:preflight",
+            ) as source_evidence:
+                current_items = _plan_items(source_paths, requested)
+                current_binding = _build_plan_binding(
+                    current_items, requested, semantic_source_binding(source_evidence),
+                )
+        finally:
+            shutil.rmtree(preflight_dir, ignore_errors=True)
+        if current_binding != preview.get("plan_binding") or fingerprint(current_binding) != preview_fingerprint:
+            raise StaleRemoveTickersAuthorization("REMOVE_TICKERS_PREVIEW_STALE")
+        if any(item["classification"] in {"REMOVAL_BLOCKED", "AMBIGUOUS_IDENTITY_REVIEW_REQUIRED"} for item in current_items):
+            raise StaleRemoveTickersAuthorization("REMOVE_TICKERS_ELIGIBILITY_CHANGED")
+        progress("COMPLETED", "Recovery, Preview, Test, identity and source authorization passed.")
+
+        stage = "CANDIDATE_BUILD"
+        progress("RUNNING", "Building provider, canonical and analysis candidates.")
+        lane = create_copy_lane(
+            source_paths, lane_dir=lane_dir, writer=writer,
+            roles=("provider", "canonical", "analysis"),
+        )
+        candidate = _build_production_candidate(
+            source_paths=source_paths,
+            items=current_items,
+            requested=requested,
+            lane=lane,
+            source_context=source_context,
+            downstream_runner=downstream_runner,
+            as_of_date=as_of_date,
+            applied_at=started,
+            run_id=run_id,
+        )
+        result["candidate"] = {
+            key: value for key, value in candidate.items()
+            if key not in {"candidate_paths", "identity_before", "identity_after"}
+        }
+        result["test_to_production_binding"] = _assert_test_candidate_match(
+            test, candidate, current_items,
+        )
+        if before_files != _production_file_state(source_paths):
+            raise RuntimeError("REMOVE_TICKERS_PRODUCTION_DATABASE_CHANGED_DURING_CANDIDATE_BUILD")
+        result["storage_preflight"] = _storage_preflight(
+            source_paths, tuple(PUBLICATION_ROLES), backup_root,
+        )
+        progress("COMPLETED", "Candidate generation matches the successful Test evidence.")
+
+        stage = "BACKUP"
+        result["backups"] = _verified_backups(source_paths, backup_dir)
+        if inject_failure_at == "BEFORE_PREPARED":
+            raise RuntimeError("INJECTED_REMOVE_TICKERS_PRE_PUBLICATION_FAILURE")
+
+        stage = "JOURNAL_PREPARE"
+        roles = _candidate_manifest(candidate["candidate_paths"], result["backups"])
+        journal = prepare_journal(
+            path=journal_path,
+            operation_type=AdminOperationType.REMOVE_TICKERS.value,
+            run_id=run_id,
+            preview_run_id=str(preview.get("run_id") or preview_payload_path.resolve().parent.name),
+            test_run_id=test_run_id,
+            refresh_set_fingerprint=preview_fingerprint,
+            old_source_watermark=None,
+            new_source_watermark=as_of_date,
+            source_schema_fingerprint=SOURCE_CONTRACT_VERSION,
+            roles=roles,
+        )
+        result["journal"] = journal
+        crash("AFTER_PREPARED")
+        if inject_failure_at == "BEFORE_FIRST_REPLACEMENT":
+            raise RuntimeError("INJECTED_REMOVE_TICKERS_PRE_PUBLICATION_FAILURE")
+        boundary_preview, boundary_test = _load_production_authorization(
+            preview_payload_path=preview_payload_path,
+            preview_fingerprint=preview_fingerprint,
+            test_run_id=test_run_id,
+            run_root=run_root,
+        )
+        if (
+            boundary_preview != preview
+            or boundary_test != test
+            or before_files != _production_file_state(source_paths)
+        ):
+            raise StaleRemoveTickersAuthorization(
+                "REMOVE_TICKERS_PUBLICATION_BOUNDARY_AUTHORIZATION_STALE"
+            )
+        result["publication_boundary_revalidation"] = "PASSED"
+
+        for role in PUBLICATION_ROLES:
+            stage = f"PUBLISH_{role.upper()}"
+            if not write_boundary_crossed:
+                writer.checkpoint(
+                    RunStage.WRITE_BOUNDARY_CROSSED,
+                    message="Journaled Remove Tickers publication started.",
+                    preview_fingerprint=preview_fingerprint,
+                    write_boundary_crossed=True,
+                )
+                write_boundary_crossed = True
+            journal = _replace_role(role, journal, journal_path=journal_path)
+            result["journal"] = journal
+            crash(f"AFTER_{role.upper()}_REPLACEMENT")
+            if inject_failure_at == f"AFTER_{role.upper()}_REPLACEMENT":
+                raise RuntimeError(f"INJECTED_REMOVE_TICKERS_PUBLICATION_FAILURE:{role}")
+
+        stage = "POSTFLIGHT"
+        journal = update_journal(
+            journal_path, journal, state="POSTFLIGHT",
+            current_publication_step="POSTFLIGHT", postflight_state="RUNNING",
+        )
+        result["journal"] = journal
+        if inject_failure_at == "POSTFLIGHT":
+            raise RuntimeError("INJECTED_REMOVE_TICKERS_POSTFLIGHT_FAILURE")
+        result["postflight"] = _production_postflight(
+            source_paths=source_paths, items=current_items, candidate=candidate, roles=roles,
+        )
+        journal = update_journal(
+            journal_path, journal, state="COMPLETED",
+            current_publication_step="COMPLETED", postflight_state="PASSED",
+            rollback_recovery_state="NOT_REQUIRED",
+        )
+        result["journal"] = journal
+        result["outcome"] = "COMPLETED"
+        result["rollback"] = {"status": "NOT_REQUIRED"}
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+        result["errors"] = [{"type": type(exc).__name__, "message": str(exc)}]
+        result["failed_stage"] = stage
+        stale = isinstance(exc, StaleRemoveTickersAuthorization)
+        recovery_retry = isinstance(exc, PublicationRecoveredRetryRequired)
+        recovery_failed = isinstance(exc, PublicationRecoveryError) and not recovery_retry
+        if recovery_retry:
+            result["outcome"] = "RETRY_REQUIRED"
+            result["publication_recovery"] = exc.recovery
+        elif recovery_failed:
+            result["outcome"] = "RECOVERY_FAILED"
+        elif stale:
+            result["outcome"] = "STALE_PREVIEW_OR_TEST"
+        if journal is not None and write_boundary_crossed:
+            try:
+                journal = update_journal(
+                    journal_path, journal, state="ROLLING_BACK",
+                    rollback_recovery_state="ROLLING_BACK_COMPLETE_SET",
+                )
+                recovered = restore_old_generation(journal, journal_path=journal_path)
+                journal = update_journal(
+                    journal_path, recovered["journal"], state="ROLLED_BACK",
+                    rollback_recovery_state="OLD_GENERATION_RESTORED_AND_VERIFIED",
+                )
+                result["journal"] = journal
+                result["rollback"] = {"status": "ROLLED_BACK", "roles": recovered["roles"]}
+                result["outcome"] = "FAILED_ROLLED_BACK"
+            except Exception as rollback_exc:
+                result["rollback"] = {
+                    "status": "CRITICAL_ROLLBACK_FAILED",
+                    "error": f"{type(rollback_exc).__name__}: {rollback_exc}",
+                }
+                result["outcome"] = "CRITICAL_ROLLBACK_FAILED"
+        elif not write_boundary_crossed:
+            if journal is not None:
+                journal_path.unlink(missing_ok=True)
+                fsync_directory(journal_path.parent)
+                journal = None
+            backup_dir_existed = backup_dir.exists()
+            shutil.rmtree(backup_dir, ignore_errors=True)
+            if backup_dir_existed:
+                fsync_directory(backup_dir.parent)
+            result["pre_publication_cleanup"] = {
+                "journal_removed": not journal_path.exists(),
+                "backup_directory_removed": not backup_dir.exists(),
+            }
+            result["database_safety"] = "NO_PRODUCTION_DATABASES_MODIFIED"
+            result["retry_authorization"] = {
+                "direct_production_retry_available": False,
+                "preview_test_preserved": False,
+                "preview_test_rerun_required": True,
+                "reason": (
+                    "RECOVERY_COMPLETED_FRESH_INVOCATION_REQUIRED"
+                    if recovery_retry else "STALE_OR_FAILED_PREPUBLICATION_VALIDATION"
+                ),
+            }
+    finally:
+        try:
+            result["cleanup"] = _cleanup_candidate_lane(lane_dir, journal)
+        finally:
+            locks.close()
+        if before_files is not None:
+            result["production_file_state_after"] = _production_file_state(source_paths)
+            result["production_file_state_unchanged"] = (
+                before_files == result["production_file_state_after"]
+            )
+        result["publication_activity"] = _publication_activity(journal)
+        result["completed_at_utc"] = utc_now()
+        writer.write_json("result.json", result)
+        writer.write_text("operation_report.md", _render_production_report(result))
+        terminal = (
+            RunStage.COMPLETED
+            if result.get("outcome") == "COMPLETED"
+            else RunStage.FAILED_AFTER_WRITE
+            if write_boundary_crossed
+            else RunStage.FAILED_BEFORE_WRITE
+        )
+        try:
+            writer.checkpoint(
+                terminal,
+                message=f"Remove Tickers Production {result.get('outcome')}.",
+                preview_fingerprint=preview_fingerprint,
+                write_boundary_crossed=write_boundary_crossed,
+            )
+        except ValueError:
+            pass
+        writer.write_exit_code(0 if result.get("outcome") == "COMPLETED" else 3)
+        writer.write_manifest()
+    return result

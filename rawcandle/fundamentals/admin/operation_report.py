@@ -92,6 +92,17 @@ def final_status_message(result: Mapping[str, Any]) -> str:
     stage = operation_stage(result.get("mode"))
     outcome = str(result.get("outcome") or "").upper()
     if stage == "Production update":
+        if result.get("operation_type") == "REMOVE_TICKERS":
+            remove_message = {
+                "COMPLETED": "Remove Tickers Production completed successfully.",
+                "STALE_PREVIEW_OR_TEST": "Remove Tickers Preview or Test is stale. Run Preview and Test on copies again.",
+                "RETRY_REQUIRED": "An incomplete publication was recovered. Run Preview and Test on copies again before retrying.",
+                "FAILED_ROLLED_BACK": "Remove Tickers Production failed and the complete previous generation was restored.",
+                "ROLLED_BACK": "Remove Tickers Production failed and the complete previous generation was restored.",
+                "RECOVERY_FAILED": "Remove Tickers recovery failed. Production writes remain blocked.",
+            }.get(outcome)
+            if remove_message:
+                return remove_message
         if outcome in {"COMPLETED", "NO_CHANGE"}:
             return "Production update completed successfully."
         if outcome in {"FAILED_ROLLED_BACK", "ROLLED_BACK"}:
