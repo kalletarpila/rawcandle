@@ -93,7 +93,7 @@ def _material_preview_signature(
     operation = operation_type.strip().upper()
     return (
         operation,
-        raw_inputs.strip() if operation in {"ADD_TICKERS", "RESOLVE_TICKER_IDENTITY"} else "",
+        raw_inputs.strip() if operation in {"ADD_TICKERS", "REMOVE_TICKERS", "RESOLVE_TICKER_IDENTITY"} else "",
         market.strip().lower(),
         taxonomy_domain.strip().lower() if operation == "CHECK_UPDATE_TAXONOMY" else "",
         "",
@@ -145,6 +145,7 @@ def build_fundamentals_admin_page(
         width=360,
         options=[
             ft.dropdown.Option("ADD_TICKERS", "Add Tickers"),
+            ft.dropdown.Option("REMOVE_TICKERS", "Remove Tickers"),
             ft.dropdown.Option("REFRESH_FUNDAMENTALS", "Refresh Fundamentals"),
             ft.dropdown.Option("CHECK_UPDATE_SECTOR_INDUSTRY", "Sector and Industry"),
             ft.dropdown.Option("CHECK_UPDATE_TAXONOMY", "Taxonomy"),
@@ -355,6 +356,11 @@ def build_fundamentals_admin_page(
             )
         if operation == "RESOLVE_TICKER_IDENTITY":
             return "Inspect company, security, ticker and provider continuity for up to 25 tickers. This operation is read-only."
+        if operation == "REMOVE_TICKERS":
+            return (
+                "Plan removal of up to 25 current securities from the active Fundamentals universe. "
+                "Preview preserves permanent identity and history; Test and Production are not available yet."
+            )
         return (
             "Enter 1 to 25 tickers. Commas, spaces, newlines and duplicates are accepted. "
             "Provider network access is enabled automatically when local data is insufficient."
@@ -363,12 +369,13 @@ def build_fundamentals_admin_page(
     def update_operation_visibility() -> None:
         operation = (operation_dropdown.value or "ADD_TICKERS").strip().upper()
         is_add = operation == "ADD_TICKERS"
+        is_remove = operation == "REMOVE_TICKERS"
         is_refresh = operation == "REFRESH_FUNDAMENTALS"
         is_sector = operation == "CHECK_UPDATE_SECTOR_INDUSTRY"
         is_taxonomy = operation == "CHECK_UPDATE_TAXONOMY"
         is_cik_sync = operation == "SYNCHRONIZE_PROVIDER_CIK"
         is_identity = operation == "RESOLVE_TICKER_IDENTITY"
-        tickers_field.visible = is_add or is_identity
+        tickers_field.visible = is_add or is_remove or is_identity
         market_field.visible = is_add or is_sector
         taxonomy_domain_dropdown.visible = False
         candidate_path_field.visible = False
@@ -386,7 +393,7 @@ def build_fundamentals_admin_page(
 
     def can_preview() -> bool:
         operation = (operation_dropdown.value or "ADD_TICKERS").strip().upper()
-        if operation in {"ADD_TICKERS", "RESOLVE_TICKER_IDENTITY"}:
+        if operation in {"ADD_TICKERS", "REMOVE_TICKERS", "RESOLVE_TICKER_IDENTITY"}:
             return bool((tickers_field.value or "").strip())
         if operation == "CHECK_UPDATE_TAXONOMY":
             return bool(taxonomy_domain_dropdown.value)
@@ -417,6 +424,7 @@ def build_fundamentals_admin_page(
             count_text = getattr(item, "count_label", None) or (f"{primary} items" if primary is not None else "")
             operation_label = {
                 "ADD_TICKERS": "Add Tickers",
+                "REMOVE_TICKERS": "Remove Tickers",
                 "REFRESH_FUNDAMENTALS": "Refresh Fundamentals",
                 "CHECK_UPDATE_SECTOR_INDUSTRY": "Sector and Industry",
                 "CHECK_UPDATE_TAXONOMY": "Taxonomy",

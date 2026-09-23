@@ -164,9 +164,10 @@ class AdminHistoryCursor:
         return list(self.entries[:wanted])
 
 
-_ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy|synchronize_provider_cik|resolve_ticker_identity)_[A-Za-z0-9_]+$")
+_ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|remove_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy|synchronize_provider_cik|resolve_ticker_identity)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
     "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
+    "REMOVE_TICKERS": {"PREVIEW"},
     "REFRESH_FUNDAMENTALS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
@@ -184,6 +185,7 @@ class FundamentalsAdminUIService:
         add_preview: Callable[..., dict[str, Any]] | None = None,
         add_apply: Callable[..., dict[str, Any]] | None = None,
         add_production_apply: Callable[..., dict[str, Any]] | None = None,
+        remove_preview: Callable[..., dict[str, Any]] | None = None,
         refresh_preview: Callable[..., dict[str, Any]] | None = None,
         refresh_apply: Callable[..., dict[str, Any]] | None = None,
         refresh_production_apply: Callable[..., dict[str, Any]] | None = None,
@@ -209,6 +211,7 @@ class FundamentalsAdminUIService:
         self._add_preview = add_preview or _admin_callable("batch_add_tickers", "run_preview")
         self._add_apply = add_apply or _admin_callable("batch_add_tickers", "run_apply")
         self._add_production_apply = add_production_apply or _admin_callable("batch_add_tickers", "run_production_apply")
+        self._remove_preview = remove_preview or _admin_callable("remove_tickers", "run_preview")
         self._refresh_preview = refresh_preview or _admin_callable("refresh_fundamentals", "run_preview")
         self._refresh_apply = refresh_apply or _admin_callable("refresh_copy_runtime", "run_apply")
         self._refresh_production_apply = refresh_production_apply or _admin_callable("refresh_production", "run_production_apply")
@@ -286,6 +289,7 @@ class FundamentalsAdminUIService:
     def capabilities(self) -> tuple[AdminOperationCapability, ...]:
         return (
             AdminOperationCapability("ADD_TICKERS", True, True, True),
+            AdminOperationCapability("REMOVE_TICKERS", True, False, False),
             AdminOperationCapability(
                 "REFRESH_FUNDAMENTALS", True, True, True,
                 "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS",
@@ -333,6 +337,12 @@ class FundamentalsAdminUIService:
                 run_root=self.run_root,
                 market=market,
                 network_allowed=network_allowed,
+                progress_callback=progress_callback,
+            )
+        elif operation == "REMOVE_TICKERS":
+            result = self._remove_preview(
+                raw_inputs,
+                run_root=self.run_root,
                 progress_callback=progress_callback,
             )
         elif operation == "REFRESH_FUNDAMENTALS":

@@ -363,6 +363,15 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
         from rawcandle.fundamentals.admin.ticker_reporting import summary_rows
 
         rows.extend(summary_rows(ticker_reporting))
+    elif result.get("operation_type") == "REMOVE_TICKERS":
+        for item in _sequence(result.get("removal_plan")):
+            if not isinstance(item, Mapping):
+                continue
+            rows.append(
+                f"{item.get('requested_ticker')}: {item.get('classification')}; "
+                f"eligible={bool(item.get('removal_eligible'))}; "
+                f"company/security={item.get('company_id')}/{item.get('security_id')}."
+            )
     elif result.get("operation_type") == "RESOLVE_TICKER_IDENTITY":
         for item in _sequence(result.get("resolutions")):
             if not isinstance(item, Mapping):

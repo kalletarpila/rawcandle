@@ -436,6 +436,7 @@ def test_admin_page_exposes_six_operations_and_downloads_exact_report() -> None:
 
     assert [option.key for option in controls.operation_dropdown.options] == [
         "ADD_TICKERS",
+        "REMOVE_TICKERS",
         "REFRESH_FUNDAMENTALS",
         "CHECK_UPDATE_SECTOR_INDUSTRY",
         "CHECK_UPDATE_TAXONOMY",
@@ -494,6 +495,15 @@ def test_admin_page_conditional_fields_switch_by_operation() -> None:
     assert controls.taxonomy_domain_dropdown.visible is False
     assert controls.candidate_path_field.visible is False
     assert controls.network_allowed_checkbox.visible is False
+
+    controls.operation_dropdown.value = "REMOVE_TICKERS"
+    controls.operation_dropdown.on_change(None)
+    assert controls.tickers_field.visible is True
+    assert controls.market_field.visible is False
+    assert controls.copy_apply_button.visible is False
+    assert controls.production_apply_button.visible is False
+    assert controls.full_workflow_button.visible is False
+    assert "permanent identity" in controls.operation_guidance_field.value
 
     controls.operation_dropdown.value = "CHECK_UPDATE_SECTOR_INDUSTRY"
     controls.operation_dropdown.on_change(None)
