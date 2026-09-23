@@ -25,6 +25,7 @@ MAX_EVIDENCE_PACKAGE_BYTES = 50 * 1024 * 1024
 EXCLUDED_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".wal", ".shm"}
 EXCLUDED_NAME_PARTS = {"backup", "scheduler_config"}
 _TAXONOMY_LOCK_DEPTH: ContextVar[int] = ContextVar("taxonomy_lock_depth", default=0)
+_CURRENT_TAXONOMY_LOCK: ContextVar[TaxonomyOperationLock | None]
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,9 @@ class TaxonomyOperationLock:
         }
 
 
+_CURRENT_TAXONOMY_LOCK = ContextVar("current_taxonomy_lock", default=None)
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
 
@@ -117,6 +121,13 @@ def authoritative_taxonomy_lock_path() -> Path:
 
 def taxonomy_lock_held_in_process() -> bool:
     return _TAXONOMY_LOCK_DEPTH.get() > 0
+
+
+def current_taxonomy_operation_lock() -> TaxonomyOperationLock:
+    lock = _CURRENT_TAXONOMY_LOCK.get()
+    if lock is None:
+        raise RuntimeError("AUTHORITATIVE_TAXONOMY_LOCK_NOT_HELD")
+    return lock
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -215,12 +226,14 @@ def taxonomy_operation_lock_context(
         evidence_root=evidence_root,
     )
     depth_token = _TAXONOMY_LOCK_DEPTH.set(_TAXONOMY_LOCK_DEPTH.get() + 1)
+    lock_token = _CURRENT_TAXONOMY_LOCK.set(lock)
     try:
         yield lock
     finally:
         try:
             release_taxonomy_operation_lock(lock)
         finally:
+            _CURRENT_TAXONOMY_LOCK.reset(lock_token)
             _TAXONOMY_LOCK_DEPTH.reset(depth_token)
 
 

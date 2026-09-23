@@ -70,6 +70,16 @@ def test_add_tickers_and_sector_use_the_same_full_v2_entrypoint(tmp_path, monkey
     monkeypatch.setattr(batch_add_tickers.structural_break, "apply_contract", lambda *args, **kwargs: {})
     monkeypatch.setattr(batch_add_tickers, "_structural_evidence", lambda *args, **kwargs: {})
     monkeypatch.setattr(batch_add_tickers, "_structural_package_fingerprint", lambda *args, **kwargs: "structural")
+    monkeypatch.setattr(batch_add_tickers, "current_taxonomy_operation_lock", lambda: object())
+    monkeypatch.setattr(batch_add_tickers, "bind_taxonomy_source", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        batch_add_tickers,
+        "prepare_protected_read_only_sources",
+        lambda **kwargs: (
+            {"market": kwargs["market_db"], "taxonomy": kwargs["taxonomy_db"]},
+            {"market": {"mode": "STABLE_SOURCE_BUNDLE"}, "taxonomy": {"mode": "DIRECT_LOCKED_READ"}},
+        ),
+    )
 
     def smoke(*args, **kwargs):
         smoke_dates.append(kwargs["report_date"])

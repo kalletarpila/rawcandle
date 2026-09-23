@@ -22,10 +22,22 @@ from rawcandle.fundamentals.admin.identity_resolution import (
 )
 from rawcandle.fundamentals.admin.ticker_reporting import enrich_after_state, render_ticker_sections, summary_rows
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 from rawcandle.fundamentals.schema.migrations import CANONICAL_SCHEMA_SQL
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 from tests.test_fundamentals_admin_batch_add_tickers import _archive, _archive_row, _generic_paths
 from tests.test_fundamentals_admin_taxonomy_acceptance import _create_db as _active_taxonomy_db
+
+
+def _insert_price(connection: sqlite3.Connection, ticker: str) -> None:
+    row_id = int(
+        connection.execute("SELECT COALESCE(MAX(id),0)+1 FROM osakedata").fetchone()[0]
+    )
+    connection.execute(
+        """INSERT INTO osakedata(id,osake,market,pvm,open,high,low,close)
+           VALUES(?,?,?,'2026-09-20',10.0,10.0,10.0,10.0)""",
+        (row_id, ticker, "usa"),
+    )
 
 
 def _reviewed_history_archive(path: Path) -> Path:
@@ -68,7 +80,7 @@ def _metadata(paths, ticker: str, permaticker: str, cik: str | None = "0000101")
         )
     with sqlite3.connect(paths.market_db) as conn:
         conn.execute("INSERT INTO ticker_meta VALUES(?,'usa','Technology','Software - Application')", (ticker,))
-        conn.execute("INSERT INTO osakedata VALUES(?,'usa','2026-09-20',10.0)", (ticker,))
+        _insert_price(conn, ticker)
 
 
 def _registry(path: Path, record: dict) -> Path:
@@ -278,7 +290,7 @@ def test_identity_and_quarterly_history_are_independent_and_exchange_unknown_is_
         conn.execute("INSERT INTO sharadar_fundamental_observation(observation_id,ticker,dimension,reportperiod) VALUES('o','GHOST','MRQ','2026-06-30')")
     with sqlite3.connect(paths.market_db) as conn:
         conn.execute("INSERT INTO ticker_meta VALUES('GHOST','usa','Technology','Software - Application')")
-        conn.execute("INSERT INTO osakedata VALUES('GHOST','usa','2026-09-20',10.0)")
+        _insert_price(conn, "GHOST")
 
     resolution = resolve_ticker_identity(paths, "GHOST", registry_path=registry)
     assert resolution.exchange_status == "EXCHANGE_UNKNOWN"
@@ -454,7 +466,7 @@ def test_approved_same_company_new_security_and_new_company_plans_are_explicit(t
     with sqlite3.connect(paths.market_db) as conn:
         for ticker in ("SUCCESSOR", "NEWISSUER"):
             conn.execute("INSERT INTO ticker_meta VALUES(?,'usa','Technology','Software - Application')", (ticker,))
-            conn.execute("INSERT INTO osakedata VALUES(?,'usa','2026-09-20',10.0)", (ticker,))
+            _insert_price(conn, ticker)
     monkeypatch.setattr(batch, "resolve_ticker_identity", lambda source_paths, ticker: resolve_ticker_identity(source_paths, ticker, registry_path=successor_registry))
     successor_plan = build_generic_batch_plan(paths, parse_batch_tickers("SUCCESSOR"), archive_path=_archive(tmp_path / "successor.zip", ("SUCCESSOR",)))
     _apply_identities(paths, [successor_plan.safe_dict(include_rows=True)["items"][0]], applied_at="2026-09-21T00:00:00Z")
@@ -533,7 +545,7 @@ def test_real_add_tickers_candidate_path_applies_bound_same_security_review(tmp_
     monkeypatch.setattr(batch, "resolve_ticker_identity", lambda source_paths, ticker: resolve_ticker_identity(source_paths, ticker, registry_path=registry))
     with sqlite3.connect(paths.market_db) as conn:
         conn.execute("INSERT INTO ticker_meta VALUES('RENAMED','usa','Technology','Software - Application')")
-        conn.execute("INSERT INTO osakedata VALUES('RENAMED','usa','2026-09-20',10.0)")
+        _insert_price(conn, "RENAMED")
     plan = build_generic_batch_plan(paths, parse_batch_tickers("RENAMED"), archive_path=_archive(tmp_path / "renamed.zip", ("RENAMED",)))
     item = plan.safe_dict(include_rows=True)["items"][0]
 
@@ -626,13 +638,7 @@ def test_real_approved_records_flow_through_add_tickers_reporting_and_candidate_
     with sqlite3.connect(paths.market_db) as conn:
         for ticker in ("KRSA", "PSQL", "QVCG"):
             conn.execute("INSERT INTO ticker_meta VALUES(?,'usa','Technology','Software - Application')", (ticker,))
-            conn.execute("INSERT INTO osakedata VALUES(?,'usa','2026-09-20',10.0)", (ticker,))
-        for column in ("open", "high", "low", "id"):
-            conn.execute(f"ALTER TABLE osakedata ADD COLUMN {column} REAL")
-        conn.execute("UPDATE osakedata SET open=close,high=close,low=close,id=rowid")
-        conn.execute(
-            "CREATE TABLE splits_data(osake TEXT,split_date TEXT,split_ratio REAL,is_price_data_corrected INTEGER)"
-        )
+            _insert_price(conn, ticker)
 
     plan = build_generic_batch_plan(
         paths,
@@ -681,12 +687,17 @@ def test_real_approved_records_flow_through_add_tickers_reporting_and_candidate_
     concise = summary_rows(plan.ticker_reporting)
     assert any("KRSA identity: APPROVED_VALID; approved review: successor security; state=MATCH; fingerprint=9440127ada42" in row for row in concise)
 
-    applied = batch._apply_generic_plan(
-        paths,
-        plan.safe_dict(include_rows=True),
-        output=tmp_path / "reviewed_downstream",
-        as_of_date="2026-09-21",
-    )
+    with taxonomy_operation_lock_context(
+        deployment_id="FUNDAMENTALS",
+        operation_type="ADD_TICKERS_TEST",
+        operation_id="approved-records-fixture",
+    ):
+        applied = batch._apply_generic_plan(
+            paths,
+            plan.safe_dict(include_rows=True),
+            output=tmp_path / "reviewed_downstream",
+            as_of_date="2026-09-21",
+        )
     lineage = applied["downstream"]["ticker_lineage"]
     assert lineage["KRSA"]["source_arq_acceptance_invariant"] == "34/34"
     assert lineage["KRSA"]["canonical_quarter_invariant"] == "34/34"

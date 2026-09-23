@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from rawcandle.fundamentals.admin import refresh_copy_runtime
+from rawcandle.fundamentals.admin import refresh_copy_runtime, source_bundle
 from rawcandle.fundamentals.admin.refresh_copy_runtime import (
     StaleRefreshPreview,
     build_publication_date_preservation_map,
@@ -688,8 +688,8 @@ def test_refresh_test_uses_compact_market_bundle_and_direct_locked_taxonomy(
 
     validated: list[object] = []
     monkeypatch.setattr(refresh_copy_runtime, "online_backup", fake_backup)
-    monkeypatch.setattr(refresh_copy_runtime, "build_stable_read_only_source_bundle", fake_build)
-    monkeypatch.setattr(refresh_copy_runtime, "validate_stable_read_only_source_bundle", validated.append)
+    monkeypatch.setattr(source_bundle, "build_stable_read_only_source_bundle", fake_build)
+    monkeypatch.setattr(source_bundle, "validate_stable_read_only_source_bundle", validated.append)
 
     paths, evidence = prepare_refresh_test_read_only_sources(
         BatchAddTickerPaths(*sources), lane_dir=canonical_candidate.parent,
@@ -757,9 +757,9 @@ def test_refresh_test_source_preparation_fails_closed(
         ),
         runtime_authorized=True, packaged=False,
     )
-    monkeypatch.setattr(refresh_copy_runtime, "build_stable_read_only_source_bundle", fake_build)
+    monkeypatch.setattr(source_bundle, "build_stable_read_only_source_bundle", fake_build)
     monkeypatch.setattr(
-        refresh_copy_runtime, "validate_stable_read_only_source_bundle",
+        source_bundle, "validate_stable_read_only_source_bundle",
         lambda _bundle: (_ for _ in ()).throw(RuntimeError("SOURCE_BUNDLE_INVALID"))
         if failure_point == "validation" else None,
     )

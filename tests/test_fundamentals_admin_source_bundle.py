@@ -113,6 +113,7 @@ def _market(path: Path, *, journal_mode: str = "DELETE", include_splits: bool = 
             CREATE TABLE osakedata(
                 id INTEGER PRIMARY KEY,
                 osake TEXT NOT NULL,
+                market TEXT,
                 pvm TEXT NOT NULL,
                 open REAL,high REAL,low REAL,close REAL
             );
@@ -133,9 +134,9 @@ def _market(path: Path, *, journal_mode: str = "DELETE", include_splits: bool = 
             for index in range(200):
                 current = start + timedelta(days=index)
                 value = 10.0 + offset + index / 10
-                rows.append((row_id, ticker, current.isoformat(), value, value + 1, value - 1, value + 0.5))
+                rows.append((row_id, ticker, "usa", current.isoformat(), value, value + 1, value - 1, value + 0.5))
                 row_id += 1
-        connection.executemany("INSERT INTO osakedata VALUES(?,?,?,?,?,?,?)", rows)
+        connection.executemany("INSERT INTO osakedata VALUES(?,?,?,?,?,?,?,?)", rows)
     return path.absolute()
 
 
@@ -331,7 +332,7 @@ def test_conflicting_casefold_price_rows_fail_closed(
     canonical, market, _ = sources
     with sqlite3.connect(market) as connection:
         connection.execute(
-            "INSERT INTO osakedata VALUES(9999,'aaa','2026-09-08',1,2,0.5,99)"
+            "INSERT INTO osakedata VALUES(9999,'aaa','usa','2026-09-08',1,2,0.5,99)"
         )
     with pytest.raises(SourceBundleError, match="CASEFOLD_PRICE_CONFLICT:AAA:2026-09-08"):
         _build(tmp_path, canonical, market)
@@ -370,7 +371,7 @@ def test_post_as_of_irrelevant_price_does_not_change_semantic_fingerprint(
     first = _build(tmp_path, canonical, market, "first")
     with sqlite3.connect(market) as connection:
         connection.execute(
-            "INSERT INTO osakedata VALUES(9999,'ZZZ','2026-12-01',1,2,0.5,1.5)"
+            "INSERT INTO osakedata VALUES(9999,'ZZZ','usa','2026-12-01',1,2,0.5,1.5)"
         )
     second = _build(tmp_path, canonical, market, "second")
     assert first.semantic_fingerprint == second.semantic_fingerprint

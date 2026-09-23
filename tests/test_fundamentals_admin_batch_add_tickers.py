@@ -32,6 +32,84 @@ from rawcandle.fundamentals.phase13d_backend import Phase13DPaths
 from tests.test_phase13d_backend import _analysis, _canonical, _market, _provider, _taxonomy
 
 
+def _direct_taxonomy(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE ec_ecosystem(ecosystem_id INTEGER PRIMARY KEY,ecosystem_code TEXT,ecosystem_name TEXT,status TEXT);
+            INSERT INTO ec_ecosystem VALUES(1,'DATACENTER','Data Center','ACTIVE');
+            ALTER TABLE ec_taxonomy_version ADD COLUMN ecosystem_id INTEGER;
+            ALTER TABLE ec_taxonomy_version ADD COLUMN taxonomy_name TEXT;
+            UPDATE ec_taxonomy_version SET ecosystem_id=1,taxonomy_name='Fixture';
+            ALTER TABLE ec_entity ADD COLUMN ecosystem_id INTEGER;
+            ALTER TABLE ec_entity ADD COLUMN entity_level INTEGER;
+            UPDATE ec_entity SET ecosystem_id=1,entity_level=3;
+            ALTER TABLE ec_membership ADD COLUMN ecosystem_id INTEGER;
+            ALTER TABLE ec_membership ADD COLUMN parent_entity_id INTEGER;
+            ALTER TABLE ec_membership ADD COLUMN source_note TEXT;
+            UPDATE ec_membership SET ecosystem_id=1;
+            """
+        )
+
+
+def _bundle_canonical(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """CREATE TABLE v4_ttm_values(
+                   ttm_id INTEGER PRIMARY KEY,
+                   company_id INTEGER NOT NULL,
+                   security_id INTEGER,
+                   ttm_source_available_date TEXT,
+                   model_version TEXT NOT NULL,
+                   endpoint_fiscal_year INTEGER NOT NULL,
+                   endpoint_fiscal_quarter TEXT NOT NULL
+               )"""
+        )
+
+
+def _bundle_market(path: Path) -> None:
+    with sqlite3.connect(path) as conn:
+        columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(osakedata)")
+        }
+        for name, declaration in (
+            ("id", "INTEGER"),
+            ("open", "REAL"),
+            ("high", "REAL"),
+            ("low", "REAL"),
+        ):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE osakedata ADD COLUMN {name} {declaration}")
+        conn.execute(
+            "UPDATE osakedata SET id=rowid,open=close,high=close,low=close"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_osakedata_id ON osakedata(id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_osake_pvm ON osakedata(osake,pvm)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS ticker_meta(
+                   ticker TEXT,market TEXT,sector TEXT,industry TEXT
+               )"""
+        )
+        conn.execute(
+            """INSERT INTO ticker_meta(ticker,market,sector,industry)
+               SELECT DISTINCT osake,LOWER(market),'Technology','Software'
+                 FROM osakedata
+                WHERE NOT EXISTS(
+                    SELECT 1 FROM ticker_meta t WHERE UPPER(t.ticker)=UPPER(osakedata.osake)
+                )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS splits_data(
+                   osake TEXT,split_date TEXT,split_ratio REAL,
+                   is_price_data_corrected INTEGER
+               )"""
+        )
+
+
 def test_add_tickers_fiscal_sequence_validation_is_narrow() -> None:
     clean = [
         {"dimension": "ARQ", "reportperiod": "2026-04-30", "fiscalperiod": "2026-Q4"},
@@ -74,9 +152,12 @@ def _paths(tmp_path: Path) -> BatchAddTickerPaths:
     taxonomy = tmp_path / "taxonomy.db"
     _provider(provider)
     _canonical(canonical)
+    _bundle_canonical(canonical)
     _analysis(analysis)
     _market(market)
+    _bundle_market(market)
     _taxonomy(taxonomy)
+    _direct_taxonomy(taxonomy)
     return BatchAddTickerPaths(provider, canonical, analysis, market, taxonomy)
 
 
@@ -88,9 +169,11 @@ def _generic_paths(tmp_path: Path) -> BatchAddTickerPaths:
     market = tmp_path / "market.db"
     taxonomy = tmp_path / "taxonomy.db"
     _canonical(canonical)
+    _bundle_canonical(canonical)
     _analysis(analysis)
     _market(market)
     _taxonomy(taxonomy)
+    _direct_taxonomy(taxonomy)
     paths = BatchAddTickerPaths(provider, canonical, analysis, market, taxonomy)
     with sqlite3.connect(provider) as conn:
         conn.executescript(PROVIDER_SCHEMA_SQL)
@@ -111,6 +194,7 @@ def _generic_paths(tmp_path: Path) -> BatchAddTickerPaths:
         conn.execute("INSERT INTO ticker_meta VALUES('NEWC','usa','Technology','Software - Application')")
         conn.execute("INSERT INTO ticker_meta VALUES('ADR','usa','Technology','Semiconductors')")
         conn.execute("INSERT INTO osakedata VALUES('ADR','usa','2026-09-10',15.0)")
+    _bundle_market(paths.market_db)
     return paths
 
 
@@ -235,7 +319,12 @@ def test_run_preview_writes_durable_artifacts_and_history(tmp_path: Path) -> Non
     assert (run_dir / "progress_status.json").is_file()
     assert (run_dir / "progress_events.jsonl").is_file()
     assert (run_dir / "report.md").read_text(encoding="utf-8").startswith("# Fundamentals Administration Run")
-    assert result["cleanup"]["removed_count"] == 5
+    assert result["cleanup"]["removed_count"] == 4
+    binding = result["read_only_source_binding"]
+    assert binding["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
+    assert binding["taxonomy"]["mode"] == "DIRECT_LOCKED_READ"
+    assert not list((tmp_path / "temp").rglob("market.db"))
+    assert not list((tmp_path / "temp").rglob("taxonomy.db"))
     assert events[0]["current_stage_id"] == "PREFLIGHT"
     assert events[-1]["current_stage_id"] == "COMPLETED"
     history = AdminRunHistory(tmp_path / "runs")
@@ -398,6 +487,7 @@ def test_exact_production_path_validation_rejects_alias_symlink_and_uri(tmp_path
 def test_exact_production_validator_rebuilds_plan_without_phase13d_copy_guard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import rawcandle.fundamentals.admin.batch_add_tickers as batch
     import rawcandle.fundamentals.admin.production_operations as operations
+    from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 
     paths = _generic_paths(tmp_path / "source")
     monkeypatch.setattr(batch, "DEFAULT_ARCHIVE", _archive(tmp_path / "source.zip"))
@@ -413,28 +503,101 @@ def test_exact_production_validator_rebuilds_plan_without_phase13d_copy_guard(tm
     for role, path in paths.as_dict().items():
         monkeypatch.setitem(batch.PRODUCTION, role, path)
 
-    validated = operations._add_validate_production(paths, payload, preview["preview_fingerprint"])
+    with taxonomy_operation_lock_context(
+        deployment_id="FUNDAMENTALS",
+        operation_type="ADD_TICKERS_PRODUCTION_VALIDATION",
+        operation_id="fixture-validation",
+    ):
+        validated = operations._add_validate_production(paths, payload, preview["preview_fingerprint"])
 
     assert validated["no_change"] is False
     assert validated["plan"]["accepted_tickers"] == ["NEWC"]
 
 
-def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("changed_source", ("market", "taxonomy"))
+def test_production_preflight_rejects_relevant_read_only_source_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed_source: str,
+) -> None:
+    import rawcandle.fundamentals.admin.batch_add_tickers as batch
     import rawcandle.fundamentals.admin.production_operations as operations
-    import rawcandle.fundamentals.admin.production_transaction as transaction
+    from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 
     paths = _generic_paths(tmp_path / "source")
+    monkeypatch.setattr(batch, "DEFAULT_ARCHIVE", _archive(tmp_path / "source.zip"))
+    preview = run_preview(
+        "NEWC", source_paths=paths, run_root=tmp_path / "runs",
+        temp_root=tmp_path / "temp",
+    )
+    payload = json.loads(
+        Path(preview["phase13d_preview_payload_path"]).read_text(encoding="utf-8")
+    )
+    if changed_source == "market":
+        with sqlite3.connect(paths.market_db) as conn:
+            conn.execute("UPDATE osakedata SET close=close+1 WHERE osake='NEWC'")
+    else:
+        with sqlite3.connect(paths.taxonomy_db) as conn:
+            conn.execute(
+                """UPDATE ec_taxonomy_version
+                      SET taxonomy_version_code='TAX_V2',source_hash='changed-hash'"""
+            )
+    for role, path in paths.as_dict().items():
+        monkeypatch.setitem(batch.PRODUCTION, role, path)
+
+    with taxonomy_operation_lock_context(
+        deployment_id="FUNDAMENTALS",
+        operation_type="ADD_TICKERS_PRODUCTION_VALIDATION",
+        operation_id=f"fixture-{changed_source}-drift",
+    ):
+        with pytest.raises(
+            ValueError,
+            match=f"ADMIN_ADD_TICKERS_PREVIEW_SOURCE_BINDING_STALE:{changed_source}",
+        ):
+            operations._add_validate_production(
+                paths, payload, preview["preview_fingerprint"]
+            )
+
+
+def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import rawcandle.fundamentals.admin.batch_add_tickers as batch
+    import rawcandle.fundamentals.admin.production_operations as operations
+    import rawcandle.fundamentals.admin.production_transaction as transaction
+    from rawcandle.datacenter_taxonomy_operation_log import (
+        current_taxonomy_operation_lock,
+        taxonomy_operation_lock_context,
+    )
+    from rawcandle.fundamentals.admin.source_bundle import (
+        TaxonomySourceMode,
+        bind_taxonomy_source,
+        prepare_protected_read_only_sources,
+    )
+
+    paths = _generic_paths(tmp_path / "source")
+    backup_sources: list[Path] = []
+    real_online_backup = batch.online_backup
+
+    def tracked_online_backup(source, destination):
+        backup_sources.append(Path(source).resolve())
+        return real_online_backup(source, destination)
+
+    monkeypatch.setattr(batch, "online_backup", tracked_online_backup)
+    monkeypatch.setattr(transaction, "online_backup", tracked_online_backup)
     monkeypatch.setattr(
         "rawcandle.fundamentals.admin.batch_add_tickers.DEFAULT_ARCHIVE",
         _archive(tmp_path / "source.zip"),
     )
-    active_taxonomy = {
-        "domain": "dc_ecosystem",
-        "version": "fixture-v2",
-        "semantic_fingerprint": "fixture-taxonomy",
-    }
+    active_taxonomy = batch.source_state(paths)["active_taxonomy"]
+    downstream_sources: list[dict[str, Path]] = []
+    contention_checks: list[str] = []
 
     def downstream(*args, **kwargs):
+        with pytest.raises(RuntimeError, match="taxonomy operation lock is active"):
+            with taxonomy_operation_lock_context(
+                deployment_id="fixture_writer",
+                operation_type="ACTIVATE",
+                operation_id="during-add-tickers-test",
+            ):
+                raise AssertionError("taxonomy writer entered during Add Tickers Test")
+        contention_checks.append("TEST")
         copy_paths = args[0]
         with sqlite3.connect(copy_paths.canonical_db) as conn:
             company_id = conn.execute(
@@ -462,11 +625,28 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
                 "INSERT INTO valuation_revised_result VALUES(?,1,'VALUATION_FULL','VALUATION_FULL')",
                 (company_id,),
             )
+        taxonomy_binding = bind_taxonomy_source(
+            copy_paths.taxonomy_db,
+            copy_paths.canonical_db,
+            mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
+            operation_lock=current_taxonomy_operation_lock(),
+        )
+        read_paths, read_only_source_binding = prepare_protected_read_only_sources(
+            market_db=copy_paths.market_db,
+            taxonomy_db=copy_paths.taxonomy_db,
+            canonical_db=copy_paths.canonical_db,
+            bundle_dir=Path(args[1]) / "fixture_read_only_sources",
+            as_of_date=kwargs["as_of_date"],
+            taxonomy_binding=taxonomy_binding,
+            additional_full_history_tickers=kwargs["accepted_tickers"],
+        )
+        downstream_sources.append(read_paths)
         return {
             "package": {"first_apply": {"outcome": "APPLIED"}},
             "relative_position": {"apply": {"outcome": "APPLIED"}},
             "relative_valuation": {"first_apply": {"outcome": "ACTIVATED"}},
             "active_taxonomy": active_taxonomy,
+            "read_only_source_binding": read_only_source_binding,
             "candidate_analysis_db": str(candidate_analysis),
             "ticker_lineage": {
                 "NEWC": {
@@ -508,7 +688,6 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
     tested_result = json.loads(tested_result_path.read_text(encoding="utf-8"))
     tested_result["downstream"]["active_taxonomy"] = active_taxonomy
     tested_result_path.write_text(json.dumps(tested_result), encoding="utf-8")
-    monkeypatch.setattr(operations, "_taxonomy", lambda _paths: None)
     monkeypatch.setattr(
         transaction,
         "_source_fingerprints",
@@ -520,6 +699,15 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
     monkeypatch.setattr(transaction, "database_inventory", lambda path: {"quick_check": "ok"})
 
     def rebuild(target, sources, **kwargs):
+        with pytest.raises(RuntimeError, match="taxonomy operation lock is active"):
+            with taxonomy_operation_lock_context(
+                deployment_id="fixture_writer",
+                operation_type="ACTIVATE",
+                operation_id="during-add-tickers-production",
+            ):
+                raise AssertionError("taxonomy writer entered during Add Tickers Production")
+        contention_checks.append("PRODUCTION")
+        downstream_sources.append({key: Path(value) for key, value in sources.items()})
         with sqlite3.connect(target) as conn:
             conn.execute("CREATE TABLE rebuilt(status TEXT NOT NULL)")
             conn.execute("INSERT INTO rebuilt VALUES('READY')")
@@ -548,6 +736,7 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
         operations.ADD_TICKERS.written_roles,
         validate,
         operations.ADD_TICKERS.mutate_sources,
+        shared_read_only_sources=True,
     )
 
     rehearsed = transaction.run_transaction(
@@ -573,6 +762,22 @@ def test_preview_test_and_guarded_production_rehearsal_complete_end_to_end(tmp_p
     assert rehearsed["full_v2_rebuild"]["status"] == "READY"
     assert rehearsed["atomic_replacement"]["status"] == "REPLACED"
     assert rehearsed["postflight"]["status"] == "READY"
+    for binding in (
+        preview["read_only_source_binding"],
+        tested["downstream"]["read_only_source_binding"],
+        rehearsed["production_source_binding"],
+    ):
+        assert binding["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
+        assert binding["taxonomy"]["mode"] == "DIRECT_LOCKED_READ"
+    assert len(downstream_sources) == 2
+    for sources in downstream_sources:
+        assert Path(sources["market"]).resolve() != paths.market_db.resolve()
+        assert Path(sources["taxonomy"]).resolve() == paths.taxonomy_db.resolve()
+    assert paths.market_db.resolve() not in backup_sources
+    assert paths.taxonomy_db.resolve() not in backup_sources
+    assert contention_checks == ["TEST", "PRODUCTION"]
+    assert not list((tmp_path / "temp").rglob("market.db"))
+    assert not list((tmp_path / "temp").rglob("taxonomy.db"))
     preview_report = Path(preview["artifact_dir"], "operation_report.md").read_text(encoding="utf-8")
     test_report = Path(tested["artifact_dir"], "operation_report.md").read_text(encoding="utf-8")
     production_report = Path(rehearsed["artifact_dir"], "operation_report.md").read_text(encoding="utf-8")

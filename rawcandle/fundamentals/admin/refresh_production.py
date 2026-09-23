@@ -54,7 +54,9 @@ from rawcandle.fundamentals.admin.source_bundle import (
     ReadOnlySourceMode,
     SOURCE_CONTRACT_VERSION,
     TaxonomySourceMode,
+    compare_source_bindings,
     protected_direct_taxonomy_source,
+    semantic_source_binding,
 )
 from rawcandle.fundamentals.operating_income_v2.full_rebuild import validate_rebuild
 from rawcandle.fundamentals.phase12d import PRODUCTION
@@ -180,72 +182,13 @@ def load_production_authorization(
 
 
 def _semantic_source_binding(evidence: Mapping[str, Any]) -> dict[str, Any]:
-    market_evidence = evidence.get("market")
-    taxonomy_evidence = evidence.get("taxonomy")
-    if not isinstance(market_evidence, Mapping) or not isinstance(taxonomy_evidence, Mapping):
-        raise ValueError("REFRESH_SOURCE_BINDING_MALFORMED")
-    manifest = market_evidence.get("bundle_manifest")
-    taxonomy = taxonomy_evidence.get("binding")
-    if not isinstance(manifest, Mapping) or not isinstance(taxonomy, Mapping):
-        raise ValueError("REFRESH_SOURCE_BINDING_MALFORMED")
-    market = manifest.get("market")
-    canonical = manifest.get("canonical_binding")
-    coverage = market.get("valuation_coverage") if isinstance(market, Mapping) else None
-    if not all(isinstance(value, Mapping) for value in (market, canonical, coverage)):
-        raise ValueError("REFRESH_SOURCE_BINDING_MALFORMED")
-    required = (
-        manifest.get("source_contract_version"), manifest.get("as_of_date"),
-        market.get("semantic_fingerprint"), canonical.get("semantic_fingerprint"),
-        taxonomy.get("version"), taxonomy.get("semantic_fingerprint"),
-    )
-    if any(not str(value or "") for value in required):
-        raise ValueError("REFRESH_SOURCE_BINDING_MALFORMED")
-    return {
-        "market": {
-            "mode": market_evidence.get("mode"),
-            "source_contract_version": manifest.get("source_contract_version"),
-            "as_of_date": manifest.get("as_of_date"),
-            "semantic_fingerprint": market.get("semantic_fingerprint"),
-            "schema_fingerprint": market.get("schema_fingerprint"),
-            "row_counts": market.get("row_counts"),
-            "canonical_binding": {
-                key: canonical.get(key)
-                for key in (
-                    "semantic_fingerprint", "valuation_requirement_count",
-                    "recent_ticker_count", "validation_sample_ticker",
-                )
-            },
-            "valuation_coverage": {
-                "requirements": coverage.get("requirements"),
-                "status_counts": coverage.get("status_counts"),
-                "status_identity_fingerprints": coverage.get("status_identity_fingerprints"),
-            },
-        },
-        "taxonomy": {
-            "mode": taxonomy_evidence.get("mode"),
-            "domain": taxonomy.get("domain"),
-            "version": taxonomy.get("version"),
-            "semantic_fingerprint": taxonomy.get("semantic_fingerprint"),
-            "membership_rows": taxonomy.get("membership_rows"),
-        },
-    }
+    return semantic_source_binding(evidence)
 
 
 def compare_test_and_production_source_bindings(
     test_evidence: Mapping[str, Any], production_evidence: Mapping[str, Any],
 ) -> dict[str, Any]:
-    tested = _semantic_source_binding(test_evidence)
-    production = _semantic_source_binding(production_evidence)
-    differences = [
-        section for section in ("market", "taxonomy")
-        if tested[section] != production[section]
-    ]
-    return {
-        "status": "MATCH" if not differences else "STALE",
-        "differing_contract_sections": differences,
-        "test": tested,
-        "production": production,
-    }
+    return compare_source_bindings(test_evidence, production_evidence)
 
 
 def run_refresh_production_full_v2_downstream(

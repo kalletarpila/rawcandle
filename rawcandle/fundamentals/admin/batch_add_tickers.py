@@ -11,7 +11,7 @@ import sqlite3
 import subprocess
 import threading
 import traceback
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -43,6 +43,18 @@ from rawcandle.fundamentals.admin.identity_resolution import resolve_ticker_iden
 from rawcandle.fundamentals.admin.reporting import render_markdown_report
 from rawcandle.fundamentals.admin.structural_context import _events, _structural_evidence, _structural_package_fingerprint
 from rawcandle.fundamentals.admin.rv_identity import active_relative_valuation_identity
+from rawcandle.fundamentals.admin.source_bundle import (
+    bind_taxonomy_source,
+    compare_source_bindings,
+    prepare_protected_read_only_sources,
+    semantic_source_binding,
+    TaxonomySourceMode,
+)
+from rawcandle.datacenter_taxonomy_operation_log import (
+    TaxonomyOperationLock,
+    current_taxonomy_operation_lock,
+    taxonomy_operation_lock_context,
+)
 from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_active_dc_memberships
 from rawcandle.fundamentals import structural_break
 from rawcandle.fundamentals.phase12d import (
@@ -793,6 +805,7 @@ def build_generic_batch_plan(
     archive_path: Path | None = None,
     network_client: SharadarClient | None = None,
     include_rows: bool = True,
+    authoritative_source_state: Mapping[str, Any] | None = None,
 ) -> GenericBatchPlan:
     created = now or utc_now()
     tickers = tuple(request.normalized_inputs)
@@ -942,7 +955,7 @@ def build_generic_batch_plan(
         created_at_utc=created,
         network_allowed=network_allowed,
         archive_path=str(effective_archive) if effective_archive else None,
-        source_state=source_state(paths),
+        source_state=dict(authoritative_source_state) if authoritative_source_state is not None else source_state(paths),
         items=tuple(items),
         network=network,
     )
@@ -959,11 +972,12 @@ def create_copy_lane(
     *,
     lane_dir: Path,
     writer: AdminRunWriter | None = None,
+    roles: Sequence[str] = ROLE_ORDER,
 ) -> CopyLane:
     lane_dir.mkdir(parents=True, exist_ok=True)
     manifest: dict[str, Any] = {}
     copied: dict[str, Path] = {}
-    for role in ROLE_ORDER:
+    for role in roles:
         source = paths.as_dict()[role]
         destination = lane_dir / f"{role}.db"
         manifest[role] = online_backup(source, destination)
@@ -974,11 +988,42 @@ def create_copy_lane(
         provider_db=copied["provider"],
         canonical_db=copied["canonical"],
         analysis_db=copied["analysis"],
-        market_db=copied["market"],
-        taxonomy_db=copied["taxonomy"],
+        market_db=copied.get("market", paths.market_db),
+        taxonomy_db=copied.get("taxonomy", paths.taxonomy_db),
     )
     reject_production_write_targets(copy_paths)
     return CopyLane(lane_dir=lane_dir, paths=copy_paths, manifest=manifest)
+
+
+def prepare_add_tickers_read_only_sources(
+    lane: CopyLane,
+    *,
+    source_paths: BatchAddTickerPaths,
+    as_of_date: str,
+    operation_lock: TaxonomyOperationLock,
+    requested_tickers: Sequence[str],
+) -> tuple[CopyLane, dict[str, Any]]:
+    taxonomy_binding = bind_taxonomy_source(
+        source_paths.taxonomy_db,
+        lane.paths.canonical_db,
+        mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
+        operation_lock=operation_lock,
+    )
+    sources, evidence = prepare_protected_read_only_sources(
+        market_db=source_paths.market_db,
+        taxonomy_db=source_paths.taxonomy_db,
+        canonical_db=lane.paths.canonical_db,
+        bundle_dir=lane.lane_dir / "market_source_bundle",
+        as_of_date=as_of_date,
+        taxonomy_binding=taxonomy_binding,
+        additional_full_history_tickers=requested_tickers,
+    )
+    paths = replace(
+        lane.paths,
+        market_db=sources["market"],
+        taxonomy_db=sources["taxonomy"],
+    )
+    return replace(lane, paths=paths, manifest={**lane.manifest, "read_only_sources": evidence}), evidence
 
 
 def cleanup_copy_lane(lane: CopyLane) -> dict[str, Any]:
@@ -1120,6 +1165,7 @@ def build_preview_from_copy(
     now: str | None = None,
     network_allowed: bool = False,
     network_client: SharadarClient | None = None,
+    authoritative_source_state: Mapping[str, Any] | None = None,
 ) -> tuple[AdminPreview, dict[str, Any]]:
     raw_preview = build_ticker_preview(paths.as_phase13d(), request.normalized_inputs, now=now)
     generic_plan = build_generic_batch_plan(
@@ -1129,6 +1175,8 @@ def build_preview_from_copy(
         network_allowed=network_allowed,
         network_client=network_client,
     )
+    if authoritative_source_state is not None:
+        generic_plan = replace(generic_plan, source_state=dict(authoritative_source_state))
     rejected_decisions = tuple(
         AdminItemDecision(
             item_key=str(item["requested_value"]),
@@ -1678,9 +1726,30 @@ def _run_authoritative_downstream(
         )
     if progress:
         progress.running(ProgressStage.PACKAGE_CALCULATION, "Building fresh full V2 analysis and Relative Valuation.")
+    taxonomy_binding = bind_taxonomy_source(
+        paths.taxonomy_db,
+        paths.canonical_db,
+        mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
+        operation_lock=current_taxonomy_operation_lock(),
+    )
+    read_only_paths, read_only_source_binding = prepare_protected_read_only_sources(
+        market_db=paths.market_db,
+        taxonomy_db=paths.taxonomy_db,
+        canonical_db=paths.canonical_db,
+        bundle_dir=output / "read_only_sources" / "market_source_bundle",
+        as_of_date=as_of_date or applied_at[:10],
+        taxonomy_binding=taxonomy_binding,
+        additional_full_history_tickers=accepted_tickers,
+    )
+    downstream_paths = replace(
+        paths,
+        market_db=read_only_paths["market"],
+        taxonomy_db=read_only_paths["taxonomy"],
+    )
     with _background_heartbeat(progress, "Full V2 analysis rebuild is still running."):
-        rebuilt = run_full_v2_downstream(paths.as_dict(), output=output, as_of_date=as_of_date or applied_at[:10])
+        rebuilt = run_full_v2_downstream(downstream_paths.as_dict(), output=output, as_of_date=as_of_date or applied_at[:10])
     result.update(rebuilt)
+    result["read_only_source_binding"] = read_only_source_binding
     if progress:
         progress.completed(
             ProgressStage.PACKAGE_CALCULATION,
@@ -1692,7 +1761,7 @@ def _run_authoritative_downstream(
         progress.skipped(ProgressStage.DEPENDENCY_ATTACHMENT, "Fresh V2 analysis has its own validated dependencies.")
         progress.running(ProgressStage.SNAPSHOT_SMOKE, "Generating eligible Snapshot smoke reports.")
     snapshot_tickers = tuple(dict.fromkeys([*accepted_tickers, *snapshot_control_tickers]))
-    candidate_paths = replace(paths, analysis_db=Path(rebuilt["candidate_analysis_db"]))
+    candidate_paths = replace(downstream_paths, analysis_db=Path(rebuilt["candidate_analysis_db"]))
     result["snapshots"] = _snapshot_smoke_generic(candidate_paths, output, tickers=snapshot_tickers, report_date=as_of_date or applied_at[:10])
     if progress:
         progress.completed(ProgressStage.SNAPSHOT_SMOKE, "Snapshot smoke completed.", processed_items=len(result["snapshots"]), total_items=len(snapshot_tickers))
@@ -1834,14 +1903,41 @@ def run_preview(
     writer.checkpoint(RunStage.PREVIEW_STARTED, message="Creating copy lane for read-only production-shaped preview.")
     lane: CopyLane | None = None
     failure_stage = ProgressStage.PREVIEW_VALIDATION
+    locks = ExitStack()
     try:
         if len(request.normalized_inputs) > 25:
             raise ValueError("ADD_TICKERS_MAXIMUM_25_TICKERS")
-        lane = create_copy_lane(source_paths, lane_dir=temp_root / run_id / "preview_lane", writer=writer)
+        lane = create_copy_lane(
+            source_paths,
+            lane_dir=temp_root / run_id / "preview_lane",
+            writer=writer,
+            roles=WRITE_ROLES,
+        )
+        taxonomy_lock = locks.enter_context(
+            taxonomy_operation_lock_context(
+                deployment_id="FUNDAMENTALS",
+                operation_type="ADD_TICKERS_PREVIEW_DIRECT_LOCKED_READ",
+                operation_id=f"{run_id}:taxonomy",
+            )
+        )
+        lane, read_only_source_binding = prepare_add_tickers_read_only_sources(
+            lane,
+            source_paths=source_paths,
+            as_of_date=started[:10],
+            operation_lock=taxonomy_lock,
+            requested_tickers=request.normalized_inputs,
+        )
+        writer.write_json("read_only_source_binding.json", read_only_source_binding)
         progress.completed(ProgressStage.PREVIEW_VALIDATION, "Preview copy lane ready.")
         failure_stage = ProgressStage.SOURCE_RESOLUTION
         progress.running(ProgressStage.SOURCE_RESOLUTION, "Resolving provider, market, identity and classification evidence.", processed_items=0, total_items=len(request.normalized_inputs))
-        preview, raw_preview = build_preview_from_copy(lane.paths, request, network_allowed=network_allowed)
+        preview, raw_preview = build_preview_from_copy(
+            lane.paths,
+            request,
+            network_allowed=network_allowed,
+            authoritative_source_state=source_state(source_paths),
+        )
+        raw_preview["read_only_source_binding"] = read_only_source_binding
         progress.completed(ProgressStage.SOURCE_RESOLUTION, "Source resolution completed.", processed_items=len(request.normalized_inputs), total_items=len(request.normalized_inputs))
         preview_dict = preview.as_dict()
         preview_path = writer.write_json("preview.json", preview_dict)
@@ -1876,6 +1972,7 @@ def run_preview(
             recommended_next_action="Review the preview. Copy-only apply requires --apply, --confirm-apply and the preview fingerprint.",
         )
         result_dict = result.as_dict()
+        result_dict["read_only_source_binding"] = read_only_source_binding
         result_dict["ticker_reporting"] = raw_preview["generic_batch_plan"].get("ticker_reporting", [])
         blocking_items = [
             {
@@ -1965,6 +2062,8 @@ def run_preview(
         writer.write_manifest()
         cleanup = cleanup_copy_lane(lane) if lane is not None else {"removed_files": [], "removed_count": 0}
         return result | {"cleanup": cleanup, "error": type(exc).__name__}
+    finally:
+        locks.close()
 
 
 def run_apply(
@@ -2011,13 +2110,51 @@ def run_apply(
     progress.completed(ProgressStage.PREFLIGHT, "Apply request recorded.", processed_items=0, total_items=len(request.normalized_inputs))
     progress.running(ProgressStage.PREVIEW_VALIDATION, "Creating copy lane for copy-only apply.")
     writer.checkpoint(RunStage.APPLY_STARTED, message="Creating copy lane for copy-only apply.", preview_fingerprint=preview_fingerprint)
-    lane = create_copy_lane(source_paths, lane_dir=temp_root / run_id / "apply_lane", writer=writer)
+    lane = create_copy_lane(
+        source_paths,
+        lane_dir=temp_root / run_id / "apply_lane",
+        writer=writer,
+        roles=WRITE_ROLES,
+    )
     rollback: dict[str, Any] = {}
     write_boundary_crossed = False
+    locks = ExitStack()
     try:
+        taxonomy_lock = locks.enter_context(
+            taxonomy_operation_lock_context(
+                deployment_id="FUNDAMENTALS",
+                operation_type="ADD_TICKERS_TEST_DIRECT_LOCKED_READ",
+                operation_id=f"{run_id}:taxonomy",
+            )
+        )
+        lane, preflight_source_binding = prepare_add_tickers_read_only_sources(
+            lane,
+            source_paths=source_paths,
+            as_of_date=str(payload["created_at_utc"])[:10],
+            operation_lock=taxonomy_lock,
+            requested_tickers=request.normalized_inputs,
+        )
+        preview_source_binding = payload.get("read_only_source_binding")
+        if not isinstance(preview_source_binding, Mapping):
+            raise ValueError("ADMIN_ADD_TICKERS_PREVIEW_SOURCE_BINDING_REQUIRED")
+        preview_binding_comparison = compare_source_bindings(
+            preview_source_binding,
+            preflight_source_binding,
+        )
+        if preview_binding_comparison["status"] != "MATCH":
+            raise ValueError(
+                "ADMIN_ADD_TICKERS_PREVIEW_SOURCE_BINDING_STALE:"
+                + ",".join(preview_binding_comparison["differing_contract_sections"])
+            )
+        writer.write_json("preview_source_binding_comparison.json", preview_binding_comparison)
+        apply_paths = replace(
+            lane.paths,
+            market_db=source_paths.market_db,
+            taxonomy_db=source_paths.taxonomy_db,
+        )
         progress.completed(ProgressStage.PREVIEW_VALIDATION, "Apply copy lane ready.")
         progress.running(ProgressStage.SOURCE_RESOLUTION, "Validating saved preview freshness and source plan.", processed_items=0, total_items=len(request.normalized_inputs))
-        _assert_preview_not_stale(lane.paths, payload)
+        _assert_preview_not_stale(apply_paths, payload)
         writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Preview is fresh on apply copy.", preview_fingerprint=preview_fingerprint)
         saved_plan = payload.get("generic_batch_plan")
         if not isinstance(saved_plan, Mapping):
@@ -2025,6 +2162,7 @@ def run_apply(
         copy_preview, raw_preview = build_preview_from_copy(
             lane.paths, request, now=payload.get("created_at_utc"),
             network_allowed=bool(saved_plan.get("network_allowed")),
+            authoritative_source_state=source_state(apply_paths),
         )
         if raw_preview["generic_batch_plan"]["plan_fingerprint"] != saved_plan.get("plan_fingerprint"):
             raise ValueError("ADMIN_ADD_TICKERS_STALE_PLAN_CONTENT_CHANGED")
@@ -2033,11 +2171,11 @@ def run_apply(
         write_json(copy_preview_path, raw_preview)
         writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Applying accepted tickers to database copies.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
         write_boundary_crossed = True
-        before = source_state(lane.paths)["databases"]
+        before = source_state(apply_paths)["databases"]
         if not _provider_schema_ready(lane.paths.provider_db):
             raise RuntimeError("ADMIN_ADD_TICKERS_PROVIDER_SCHEMA_REQUIRED_FOR_V2_REBUILD")
         applied = _apply_generic_plan(
-            lane.paths,
+            apply_paths,
             saved_plan,
             output=lane.lane_dir / "generic_authoritative_apply",
             failure_boundary=failure_boundary,
@@ -2045,9 +2183,9 @@ def run_apply(
             as_of_date=str(payload["created_at_utc"])[:10],
         )
         applied["mode"] = "GENERIC_AUTHORITATIVE_BATCH"
-        after = source_state(lane.paths)["databases"]
+        after = source_state(apply_paths)["databases"]
         repeated = _apply_generic_plan(
-            lane.paths,
+            apply_paths,
             saved_plan,
             output=lane.lane_dir / "generic_authoritative_repeat",
             progress=progress,
@@ -2077,6 +2215,7 @@ def run_apply(
                 "relative_position": downstream.get("relative_position", "NOT_RUN") if isinstance(downstream, Mapping) else "NOT_RUN",
                 "relative_valuation": downstream.get("relative_valuation", applied.get("relative_valuation_state")) if isinstance(downstream, Mapping) else applied.get("relative_valuation_state"),
                 "active_taxonomy": downstream.get("active_taxonomy") if isinstance(downstream, Mapping) else None,
+                "read_only_source_binding": downstream.get("read_only_source_binding") if isinstance(downstream, Mapping) else None,
                 "invocation_counts": invocation_counts or {"package": 0, "relative_position": 0, "relative_valuation": 0},
                 "repeat_apply_outcome": repeated.get("outcome"),
                 "authoritative_downstream": {
@@ -2088,6 +2227,8 @@ def run_apply(
             recommended_next_action="Review copy-only evidence. A production run still requires a separate explicit authorization.",
         )
         result_dict = result.as_dict()
+        if downstream.get("read_only_source_binding"):
+            writer.write_json("read_only_source_binding.json", downstream["read_only_source_binding"])
         from rawcandle.fundamentals.admin.ticker_reporting import enrich_after_state
 
         preview_reports = {
@@ -2111,9 +2252,9 @@ def run_apply(
         result_dict["ticker_reporting"] = enrich_after_state(
             saved_plan.get("ticker_reporting") or (),
             replace(
-                lane.paths,
+                apply_paths,
                 analysis_db=Path(downstream["candidate_analysis_db"]),
-            ) if downstream.get("candidate_analysis_db") else lane.paths,
+            ) if downstream.get("candidate_analysis_db") else apply_paths,
             stage="COPY_ONLY_APPLY", final_actions=action_labels,
             lineage=downstream.get("ticker_lineage") if isinstance(downstream.get("ticker_lineage"), Mapping) else None,
         )
@@ -2189,6 +2330,8 @@ def run_apply(
         cleanup = {"retained": str(lane.lane_dir)} if keep_copies else cleanup_copy_lane(lane)
         progress.completed(ProgressStage.CLEANUP, "Failed copy lane cleanup completed.", processed_items=int(cleanup.get("removed_count") or 0) if "removed_count" in cleanup else None)
         return result_dict | {"run_id": run_id, "artifact_dir": str(writer.run_dir), "cleanup": cleanup, "error": type(exc).__name__}
+    finally:
+        locks.close()
 
 
 def run_production_apply(
@@ -2219,7 +2362,9 @@ def run_production_apply(
 
 def _restore_copy_lane_from_sources(source_paths: BatchAddTickerPaths, lane: CopyLane) -> dict[str, Any]:
     restored: dict[str, Any] = {"status": "ROLLED_BACK", "roles": {}}
-    for role in ROLE_ORDER:
+    for role in lane.manifest:
+        if role not in source_paths.as_dict():
+            continue
         destination = lane.paths.as_dict()[role]
         source = source_paths.as_dict()[role]
         online_backup(source, destination)

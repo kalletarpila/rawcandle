@@ -31,7 +31,7 @@ from rawcandle.fundamentals.operating_income_v2.taxonomy_source import (
 
 
 SOURCE_CONTRACT_VERSION = "FUNDAMENTALS_READ_ONLY_SOURCE_V1"
-MARKET_BUNDLE_SCHEMA_VERSION = 1
+MARKET_BUNDLE_SCHEMA_VERSION = 2
 TTM_MODEL_VERSION = "V4_TTM_EBIT_FIRST_V1"
 DIRECT_LOCKED_TAXONOMY_READ_RUNTIME_AUTHORIZED = True
 
@@ -54,6 +54,11 @@ class SourceReadDependency:
 
 
 MARKET_READ_CLOSURE = (
+    SourceReadDependency(
+        "phase13d_backend._market_lookup",
+        ("osakedata",),
+        "complete requested-ticker price history with market identity for Add Tickers eligibility",
+    ),
     SourceReadDependency(
         "operating_income_v2.rehearsal._load_split_events",
         ("splits_data",),
@@ -212,7 +217,8 @@ def _source_pragmas(connection: sqlite3.Connection) -> dict[str, Any]:
 
 
 def _canonical_requirements(
-    canonical_db: Path, as_of_date: str
+    canonical_db: Path, as_of_date: str,
+    additional_full_history_tickers: Sequence[str] = (),
 ) -> dict[str, Any]:
     with _readonly(canonical_db) as connection:
         _require_columns(
@@ -271,6 +277,11 @@ def _canonical_requirements(
         "as_of_date": as_of_date,
         "valuation_requirements": valuation,
         "recent_tickers": recent_tickers,
+        "additional_full_history_tickers": sorted({
+            str(ticker).strip().upper()
+            for ticker in additional_full_history_tickers
+            if str(ticker).strip()
+        }),
         "validation_sample_ticker": str(sample[0]) if sample else None,
     }
     return {**payload, "semantic_fingerprint": _fingerprint(payload)}
@@ -286,7 +297,7 @@ def _normalized_market_projection(
         _require_columns(
             connection,
             "osakedata",
-            ("id", "osake", "pvm", "open", "high", "low", "close"),
+            ("id", "osake", "market", "pvm", "open", "high", "low", "close"),
         )
         _require_columns(
             connection,
@@ -326,6 +337,7 @@ def _normalized_market_projection(
             for row in requirements["valuation_requirements"]
             if row["ticker"] is not None
         } | {str(ticker).upper() for ticker in requirements["recent_tickers"]}
+        relevant_folded_tickers.update(requirements["additional_full_history_tickers"])
         if requirements["validation_sample_ticker"]:
             relevant_folded_tickers.add(
                 str(requirements["validation_sample_ticker"]).upper()
@@ -359,7 +371,7 @@ def _normalized_market_projection(
                     raise SourceBundleError(f"MARKET_PRICE_ID_NOT_STABLE:{row_id}")
                 selected[row_id] = item
 
-        price_columns = "id,osake,pvm,open,high,low,close"
+        price_columns = "id,osake,market,pvm,open,high,low,close"
         valuation_cache: dict[tuple[str, str], sqlite3.Row | None] = {}
         for requirement in requirements["valuation_requirements"]:
             ticker = requirement["ticker"]
@@ -402,6 +414,16 @@ def _normalized_market_projection(
                         connection.execute(
                             f"SELECT {price_columns} FROM osakedata WHERE osake=? AND pvm<=? "
                             "ORDER BY pvm DESC LIMIT 32",
+                            (source_ticker, requirements["as_of_date"]),
+                        )
+                    )
+                )
+        for ticker in requirements["additional_full_history_tickers"]:
+            for source_ticker in ticker_forms.get(ticker.upper(), ()):
+                retain(
+                    list(
+                        connection.execute(
+                            f"SELECT {price_columns} FROM osakedata WHERE osake=? AND pvm<=? ORDER BY id",
                             (source_ticker, requirements["as_of_date"]),
                         )
                     )
@@ -469,6 +491,7 @@ def _write_market_bundle(path: Path, projection: Mapping[str, Any]) -> dict[str,
             CREATE TABLE osakedata(
                 id INTEGER PRIMARY KEY,
                 osake TEXT NOT NULL,
+                market TEXT,
                 pvm TEXT NOT NULL,
                 open REAL,
                 high REAL,
@@ -504,10 +527,10 @@ def _write_market_bundle(path: Path, projection: Mapping[str, Any]) -> dict[str,
             ],
         )
         connection.executemany(
-            "INSERT INTO osakedata(id,osake,pvm,open,high,low,close) VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO osakedata(id,osake,market,pvm,open,high,low,close) VALUES (?,?,?,?,?,?,?,?)",
             [
                 (
-                    row["id"], row["osake"], row["pvm"], row["open"],
+                    row["id"], row["osake"], row["market"], row["pvm"], row["open"],
                     row["high"], row["low"], row["close"],
                 )
                 for row in projection["osakedata"]
@@ -556,7 +579,7 @@ def _manifest_projection(path: Path) -> dict[str, Any]:
         prices = [
             dict(row)
             for row in connection.execute(
-                "SELECT id,osake,pvm,open,high,low,close FROM osakedata ORDER BY id"
+                "SELECT id,osake,market,pvm,open,high,low,close FROM osakedata ORDER BY id"
             )
         ]
     return {
@@ -659,6 +682,133 @@ def protected_direct_taxonomy_source(
         )
 
 
+def prepare_protected_read_only_sources(
+    *,
+    market_db: Path,
+    taxonomy_db: Path,
+    canonical_db: Path,
+    bundle_dir: Path,
+    as_of_date: str,
+    taxonomy_binding: TaxonomySourceBinding,
+    additional_full_history_tickers: Sequence[str] = (),
+) -> tuple[dict[str, Path], dict[str, Any]]:
+    """Build the shared compact-market/direct-taxonomy source pair."""
+    market_db = market_db.absolute()
+    taxonomy_db = taxonomy_db.absolute()
+    if (
+        taxonomy_binding.mode != TaxonomySourceMode.DIRECT_LOCKED_READ.value
+        or not taxonomy_binding.runtime_authorized
+        or Path(taxonomy_binding.source_path).resolve() != taxonomy_db.resolve()
+        or not taxonomy_binding.lock_path
+        or taxonomy_binding.lock_contract_status != "AUTHORITATIVE_TAXONOMY_LOCK_HELD"
+    ):
+        raise SourceBundleError("DIRECT_TAXONOMY_BINDING_REQUIRED")
+    bundle = build_stable_read_only_source_bundle(
+        market_db=market_db,
+        canonical_db=canonical_db,
+        bundle_dir=bundle_dir,
+        as_of_date=as_of_date,
+        taxonomy_binding=taxonomy_binding,
+        additional_full_history_tickers=additional_full_history_tickers,
+    )
+    validate_stable_read_only_source_bundle(bundle)
+    evidence = {
+        "market": {
+            "mode": ReadOnlySourceMode.STABLE_SOURCE_BUNDLE.value,
+            "bundle_path": str(bundle.market_db),
+            "manifest_path": str(bundle.manifest_path),
+            "bundle_manifest": bundle.manifest,
+            "bundle_build_seconds": bundle.extraction_seconds,
+            "old_full_copy_bytes_avoided": market_db.stat().st_size,
+            "compact_bundle_bytes": bundle.market_db.stat().st_size,
+            "immutable_after_creation": True,
+            "cleanup_required": True,
+        },
+        "taxonomy": {
+            "mode": TaxonomySourceMode.DIRECT_LOCKED_READ.value,
+            "role": "taxonomy",
+            "purpose": "FULL_V2_PROTECTED_DIRECT_READ_SOURCE",
+            "source_size": taxonomy_db.stat().st_size,
+            "source_mtime_ns": taxonomy_db.stat().st_mtime_ns,
+            "old_full_copy_bytes_avoided": taxonomy_db.stat().st_size,
+            "binding": asdict(taxonomy_binding),
+            "protected_for_consumer_lifetime": True,
+            "cleanup_required": False,
+        },
+    }
+    return {"market": bundle.market_db, "taxonomy": taxonomy_db.resolve()}, evidence
+
+
+def semantic_source_binding(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only durable semantic fields used for Test/Production binding."""
+    market_evidence = evidence.get("market")
+    taxonomy_evidence = evidence.get("taxonomy")
+    if not isinstance(market_evidence, Mapping) or not isinstance(taxonomy_evidence, Mapping):
+        raise SourceBundleError("SOURCE_BINDING_MALFORMED")
+    manifest = market_evidence.get("bundle_manifest")
+    taxonomy = taxonomy_evidence.get("binding")
+    if not isinstance(manifest, Mapping) or not isinstance(taxonomy, Mapping):
+        raise SourceBundleError("SOURCE_BINDING_MALFORMED")
+    market = manifest.get("market")
+    canonical = manifest.get("canonical_binding")
+    coverage = market.get("valuation_coverage") if isinstance(market, Mapping) else None
+    if not all(isinstance(value, Mapping) for value in (market, canonical, coverage)):
+        raise SourceBundleError("SOURCE_BINDING_MALFORMED")
+    required = (
+        manifest.get("source_contract_version"), manifest.get("as_of_date"),
+        market.get("semantic_fingerprint"), canonical.get("semantic_fingerprint"),
+        taxonomy.get("version"), taxonomy.get("semantic_fingerprint"),
+    )
+    if any(not str(value or "") for value in required):
+        raise SourceBundleError("SOURCE_BINDING_MALFORMED")
+    return {
+        "market": {
+            "mode": market_evidence.get("mode"),
+            "source_contract_version": manifest.get("source_contract_version"),
+            "as_of_date": manifest.get("as_of_date"),
+            "semantic_fingerprint": market.get("semantic_fingerprint"),
+            "schema_fingerprint": market.get("schema_fingerprint"),
+            "row_counts": market.get("row_counts"),
+            "canonical_binding": {
+                key: canonical.get(key)
+                for key in (
+                    "semantic_fingerprint", "valuation_requirement_count",
+                    "recent_ticker_count", "validation_sample_ticker",
+                )
+            },
+            "valuation_coverage": {
+                "requirements": coverage.get("requirements"),
+                "status_counts": coverage.get("status_counts"),
+                "status_identity_fingerprints": coverage.get("status_identity_fingerprints"),
+            },
+        },
+        "taxonomy": {
+            "mode": taxonomy_evidence.get("mode"),
+            "domain": taxonomy.get("domain"),
+            "version": taxonomy.get("version"),
+            "semantic_fingerprint": taxonomy.get("semantic_fingerprint"),
+            "membership_rows": taxonomy.get("membership_rows"),
+        },
+    }
+
+
+def compare_source_bindings(
+    test_evidence: Mapping[str, Any], production_evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    tested = semantic_source_binding(test_evidence)
+    production = semantic_source_binding(production_evidence)
+    differences = [
+        section for section in ("market", "taxonomy")
+        if tested[section] != production[section]
+    ]
+    return {
+        "status": "MATCH" if not differences else "STALE",
+        "differing_contract_sections": differences,
+        "test": tested,
+        "production": production,
+    }
+
+
 def build_stable_read_only_source_bundle(
     *,
     market_db: Path,
@@ -666,6 +816,7 @@ def build_stable_read_only_source_bundle(
     bundle_dir: Path,
     as_of_date: str,
     taxonomy_binding: TaxonomySourceBinding | None = None,
+    additional_full_history_tickers: Sequence[str] = (),
     hook: Hook | None = None,
 ) -> StableReadOnlySourceBundle:
     # ISO validation without importing workflow-level date policy.
@@ -685,13 +836,17 @@ def build_stable_read_only_source_bundle(
     canonical_identity_before = _file_identity(canonical_db)
     try:
         staging.mkdir(parents=True)
-        requirements = _canonical_requirements(canonical_db, as_of_date)
+        requirements = _canonical_requirements(
+            canonical_db, as_of_date, additional_full_history_tickers,
+        )
         projection = _normalized_market_projection(market_db, requirements)
         if hook:
             hook("AFTER_SOURCE_EXTRACTION", {"market_db": market_db, "staging": staging})
         after_projection = _normalized_market_projection(market_db, requirements)
         after_identity = _file_identity(market_db)
-        requirements_after = _canonical_requirements(canonical_db, as_of_date)
+        requirements_after = _canonical_requirements(
+            canonical_db, as_of_date, additional_full_history_tickers,
+        )
         canonical_identity_after = _file_identity(canonical_db)
         if (
             projection["semantic_fingerprint"] != after_projection["semantic_fingerprint"]
@@ -730,6 +885,7 @@ def build_stable_read_only_source_bundle(
                 "semantic_fingerprint": requirements["semantic_fingerprint"],
                 "valuation_requirement_count": len(requirements["valuation_requirements"]),
                 "recent_ticker_count": len(requirements["recent_tickers"]),
+                "additional_full_history_tickers": requirements["additional_full_history_tickers"],
                 "validation_sample_ticker": requirements["validation_sample_ticker"],
                 "source_identity_before": canonical_identity_before,
                 "source_identity_after": canonical_identity_after,

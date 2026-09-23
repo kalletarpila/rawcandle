@@ -14,10 +14,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
-from rawcandle.datacenter_taxonomy_operation_log import taxonomy_lock_held_in_process
+from rawcandle.datacenter_taxonomy_operation_log import (
+    current_taxonomy_operation_lock,
+    taxonomy_lock_held_in_process,
+    taxonomy_operation_lock_context,
+)
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, database_inventory, online_backup
 from rawcandle.fundamentals.admin.contracts import AdminOperationType, RunStage, utc_now
+from rawcandle.fundamentals.admin.source_bundle import (
+    TaxonomySourceMode,
+    bind_taxonomy_source,
+    compare_source_bindings,
+    prepare_protected_read_only_sources,
+    semantic_source_binding,
+)
 from rawcandle.fundamentals.operating_income_v2.full_rebuild import rebuild_v2_analysis, validate_rebuild
 from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_active_dc_memberships
 from rawcandle.fundamentals.phase12d import PRODUCTION
@@ -256,6 +267,7 @@ class ProductionOperation:
     validate_preview: Callable[[BatchAddTickerPaths, Mapping[str, Any], str], dict[str, Any]]
     mutate_sources: Callable[[BatchAddTickerPaths, Mapping[str, Any]], dict[str, Any]]
     production_validate_preview: Callable[[BatchAddTickerPaths, Mapping[str, Any], str], dict[str, Any]] | None = None
+    shared_read_only_sources: bool = False
 
 
 def render_production_report(result: Mapping[str, Any]) -> str:
@@ -396,6 +408,7 @@ def run_transaction(
     source_mutation_started = False
     write_boundary_crossed = False
     candidate_owned = False
+    source_bundle_root: Path | None = None
     candidate = source_paths.analysis_db.parent / f".{source_paths.analysis_db.name}.{run_id}.candidate.db"
     if candidate.exists() or candidate.is_symlink():
         raise FileExistsError("ADMIN_CANDIDATE_STAGING_PATH_EXISTS")
@@ -430,6 +443,17 @@ def run_transaction(
                 result["warnings"].append({"code": "DIRTY_GIT_WORKTREE", "message": "Git worktree contains uncommitted changes."})
             elif result["git_state"].get("error"):
                 result["warnings"].append({"code": "GIT_STATE_UNAVAILABLE", "message": "Git provenance could not be read."})
+        owner: dict[str, Any] | None = None
+        if operation.shared_read_only_sources:
+            owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
+            locks.enter_context(
+                taxonomy_operation_lock_context(
+                    deployment_id="FUNDAMENTALS",
+                    operation_type=f"{operation.operation_type.value}_PRODUCTION_DIRECT_LOCKED_READ",
+                    operation_id=f"{run_id}:taxonomy",
+                )
+            )
+            result["lock_owner"] = owner
         validate_preview = (
             operation.production_validate_preview
             if actual_production and operation.production_validate_preview is not None
@@ -487,13 +511,18 @@ def run_transaction(
             progress(9, "COMPLETED", "COMPLETED", "Production update completed; no changes were required.")
             return result
         test = _verify_test(run_root, test_run_id, operation.operation_type, preview_fingerprint)
-        tested_taxonomy = test.get("downstream", {}).get("active_taxonomy") or {}
-        preview_taxonomy = preview["taxonomy_dependency"]
-        if any(tested_taxonomy.get(key) != preview_taxonomy.get(key) for key in ("domain", "version", "semantic_fingerprint")):
-            raise ValueError("ADMIN_PRODUCTION_TEST_TAXONOMY_MISMATCH")
+        test_source_binding = test.get("downstream", {}).get("read_only_source_binding")
+        if operation.shared_read_only_sources and not isinstance(test_source_binding, Mapping):
+            raise ValueError("ADMIN_PRODUCTION_TEST_SOURCE_BINDING_REQUIRED")
+        if not operation.shared_read_only_sources:
+            tested_taxonomy = test.get("downstream", {}).get("active_taxonomy") or {}
+            preview_taxonomy = preview["taxonomy_dependency"]
+            if any(tested_taxonomy.get(key) != preview_taxonomy.get(key) for key in ("domain", "version", "semantic_fingerprint")):
+                raise ValueError("ADMIN_PRODUCTION_TEST_TAXONOMY_MISMATCH")
         result["test_on_copies"] = {"run_id": test_run_id, "outcome": test["outcome"]}
         writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Preview and Test are bound; no production write yet.", preview_fingerprint=preview_fingerprint)
-        owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
+        if owner is None:
+            owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
         if owner:
             if actual_production or publication_journal_path is not None:
                 from rawcandle.fundamentals.admin.publication_journal import (
@@ -532,7 +561,51 @@ def run_transaction(
             stage = "SOURCE_STABILITY"
             before_rebuild = _source_fingerprints(source_paths)
             stage = "FULL_V2_REBUILD"
-            sources = {role: source_paths.as_dict()[role] for role in ("provider", "canonical", "market", "taxonomy")}
+            if operation.shared_read_only_sources:
+                taxonomy_binding = bind_taxonomy_source(
+                    source_paths.taxonomy_db,
+                    source_paths.canonical_db,
+                    mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
+                    operation_lock=current_taxonomy_operation_lock(),
+                )
+                source_bundle_root = writer.run_dir / "read_only_sources"
+                read_only_paths, production_source_binding = prepare_protected_read_only_sources(
+                    market_db=source_paths.market_db,
+                    taxonomy_db=source_paths.taxonomy_db,
+                    canonical_db=source_paths.canonical_db,
+                    bundle_dir=source_bundle_root / "market_source_bundle",
+                    as_of_date=preview["as_of_date"],
+                    taxonomy_binding=taxonomy_binding,
+                    additional_full_history_tickers=[
+                        str(item.get("ticker") or "").upper()
+                        for item in preview.get("plan", {}).get("items", [])
+                        if item.get("status") == "ELIGIBLE"
+                    ],
+                )
+                source_binding_comparison = compare_source_bindings(
+                    test_source_binding,
+                    production_source_binding,
+                )
+                result["production_source_binding"] = production_source_binding
+                result["test_source_binding_comparison"] = source_binding_comparison
+                result["test_source_binding_reference"] = {
+                    "test_run_id": test_run_id,
+                    "semantic_contract": semantic_source_binding(test_source_binding),
+                }
+                writer.write_json("read_only_source_binding.json", production_source_binding)
+                writer.write_json("test_source_binding_comparison.json", source_binding_comparison)
+                if source_binding_comparison["status"] != "MATCH":
+                    raise ValueError(
+                        "ADMIN_PRODUCTION_TEST_SOURCE_BINDING_STALE:"
+                        + ",".join(source_binding_comparison["differing_contract_sections"])
+                    )
+                sources = {
+                    "provider": source_paths.provider_db,
+                    "canonical": source_paths.canonical_db,
+                    **read_only_paths,
+                }
+            else:
+                sources = {role: source_paths.as_dict()[role] for role in ("provider", "canonical", "market", "taxonomy")}
             if candidate.exists() or candidate.is_symlink():
                 raise FileExistsError("ADMIN_CANDIDATE_STAGING_PATH_EXISTS")
             candidate_owned = True
@@ -608,11 +681,13 @@ def run_transaction(
         progress(9, "COMPLETED", "FAILED", "Production update failed; see the final summary.")
         return result
     finally:
-        locks.close()
         if candidate_owned:
             candidate.unlink(missing_ok=True)
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(candidate) + suffix).unlink(missing_ok=True)
+        if source_bundle_root is not None:
+            shutil.rmtree(source_bundle_root, ignore_errors=True)
+        locks.close()
         writer.write_json("result.json", result)
         writer.write_text("operation_report.md", render_production_report(result))
         terminal = RunStage.COMPLETED if result["outcome"] in {"COMPLETED", "NO_CHANGE"} else RunStage.FAILED_AFTER_WRITE if write_boundary_crossed else RunStage.FAILED_BEFORE_WRITE

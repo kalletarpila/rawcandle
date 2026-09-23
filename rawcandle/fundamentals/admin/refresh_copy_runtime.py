@@ -8,13 +8,12 @@ import shutil
 import sqlite3
 from collections import Counter
 from contextlib import ExitStack
-from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals import structural_break
-from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, sha256_file, stable_run_id
+from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, _background_heartbeat
 from rawcandle.fundamentals.admin.contracts import AdminFinalResult, AdminOperationType, AdminStatus, RunStage, fingerprint, utc_now
 from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
@@ -49,12 +48,9 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
 )
 from rawcandle.fundamentals.admin.structural_context import _events
 from rawcandle.fundamentals.admin.source_bundle import (
-    ReadOnlySourceMode,
     TaxonomySourceBinding,
-    TaxonomySourceMode,
-    build_stable_read_only_source_bundle,
+    prepare_protected_read_only_sources,
     protected_direct_taxonomy_source,
-    validate_stable_read_only_source_bundle,
 )
 from rawcandle.fundamentals.phase12d import rebuild_ttm, reconcile_canonical, stable_hash
 from rawcandle.fundamentals.phase13b_foundation import online_backup
@@ -101,50 +97,16 @@ def prepare_compact_read_only_sources(
     taxonomy_binding: TaxonomySourceBinding,
 ) -> tuple[dict[str, Path], dict[str, Any]]:
     """Bind a rebuild to a compact market bundle and protected live taxonomy."""
-    taxonomy_source = source_paths.taxonomy_db
-    taxonomy_stat = taxonomy_source.stat()
-    if (
-        taxonomy_binding.mode != TaxonomySourceMode.DIRECT_LOCKED_READ.value
-        or not taxonomy_binding.runtime_authorized
-        or Path(taxonomy_binding.source_path).resolve() != taxonomy_source.resolve()
-        or not taxonomy_binding.lock_path
-        or taxonomy_binding.lock_contract_status != "AUTHORITATIVE_TAXONOMY_LOCK_HELD"
-    ):
+    if taxonomy_binding.mode != "DIRECT_LOCKED_READ":
         raise RuntimeError("REFRESH_DIRECT_TAXONOMY_BINDING_REQUIRED")
-
-    bundle = build_stable_read_only_source_bundle(
+    return prepare_protected_read_only_sources(
         market_db=source_paths.market_db,
+        taxonomy_db=source_paths.taxonomy_db,
         canonical_db=canonical_candidate,
         bundle_dir=lane_dir / "market_source_bundle",
         as_of_date=as_of_date,
         taxonomy_binding=taxonomy_binding,
     )
-    validate_stable_read_only_source_bundle(bundle)
-    evidence = {
-        "market": {
-            "mode": ReadOnlySourceMode.STABLE_SOURCE_BUNDLE.value,
-            "bundle_path": str(bundle.market_db),
-            "manifest_path": str(bundle.manifest_path),
-            "bundle_manifest": bundle.manifest,
-            "bundle_build_seconds": bundle.extraction_seconds,
-            "old_full_copy_bytes_avoided": source_paths.market_db.stat().st_size,
-            "compact_bundle_bytes": bundle.market_db.stat().st_size,
-            "immutable_after_creation": True,
-            "cleanup_required": True,
-        },
-        "taxonomy": {
-            "mode": TaxonomySourceMode.DIRECT_LOCKED_READ.value,
-            "role": "taxonomy",
-            "purpose": "FULL_V2_PROTECTED_DIRECT_READ_SOURCE",
-            "source_size": taxonomy_stat.st_size,
-            "source_mtime_ns": taxonomy_stat.st_mtime_ns,
-            "old_full_copy_bytes_avoided": taxonomy_stat.st_size,
-            "binding": asdict(taxonomy_binding),
-            "protected_for_consumer_lifetime": True,
-            "cleanup_required": False,
-        },
-    }
-    return {"market": bundle.market_db, "taxonomy": taxonomy_source.resolve()}, evidence
 
 
 def prepare_refresh_test_read_only_sources(

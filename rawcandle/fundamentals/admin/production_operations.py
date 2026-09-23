@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -12,6 +14,13 @@ from rawcandle.fundamentals.admin import taxonomy_v2_sync as taxonomy
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.contracts import AdminBatchRequest, AdminOperationType, fingerprint, utc_now
 from rawcandle.fundamentals.admin.production_transaction import ProductionOperation
+from rawcandle.fundamentals.admin.source_bundle import (
+    TaxonomySourceMode,
+    bind_taxonomy_source,
+    compare_source_bindings,
+    prepare_protected_read_only_sources,
+)
+from rawcandle.datacenter_taxonomy_operation_log import current_taxonomy_operation_lock
 from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_active_dc_memberships
 
 
@@ -35,10 +44,6 @@ def _add_validate(
 ) -> dict[str, Any]:
     preview = payload.get("phase13g2_preview") or {}
     _assert_preview_hash(preview, expected)
-    add._assert_preview_not_stale(paths, payload)
-    active_taxonomy = _taxonomy(paths)
-    if preview.get("source_state", {}).get("active_taxonomy") != active_taxonomy:
-        raise ValueError("ADMIN_ADD_TICKERS_PREVIEW_TAXONOMY_MISMATCH")
     plan = payload.get("generic_batch_plan")
     if not isinstance(plan, Mapping):
         raise ValueError("ADMIN_ADD_TICKERS_PLAN_REQUIRED")
@@ -54,18 +59,56 @@ def _add_validate(
         raise ValueError("ADMIN_ADD_TICKERS_VALID_BATCH_REQUIRED")
     if exact_production_paths:
         add.validate_exact_production_paths(paths)
-        rebuilt_plan = add.build_generic_batch_plan(
-            paths,
-            request,
-            now=payload.get("created_at_utc"),
-            network_allowed=bool(plan.get("network_allowed")),
-        ).safe_dict(include_rows=True)
-    else:
-        _, raw = add.build_preview_from_copy(
-            paths, request, now=payload.get("created_at_utc"),
-            network_allowed=bool(plan.get("network_allowed")),
+    preview_source_binding = payload.get("read_only_source_binding")
+    if not isinstance(preview_source_binding, Mapping):
+        raise ValueError("ADMIN_ADD_TICKERS_PREVIEW_SOURCE_BINDING_REQUIRED")
+    authoritative_state = add.source_state(paths)
+    with tempfile.TemporaryDirectory(prefix="rawcandle-add-tickers-preflight-") as directory:
+        taxonomy_binding = bind_taxonomy_source(
+            paths.taxonomy_db,
+            paths.canonical_db,
+            mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
+            operation_lock=current_taxonomy_operation_lock(),
         )
-        rebuilt_plan = raw["generic_batch_plan"]
+        read_paths, source_binding = prepare_protected_read_only_sources(
+            market_db=paths.market_db,
+            taxonomy_db=paths.taxonomy_db,
+            canonical_db=paths.canonical_db,
+            bundle_dir=Path(directory) / "market_source_bundle",
+            as_of_date=str(payload["created_at_utc"])[:10],
+            taxonomy_binding=taxonomy_binding,
+            additional_full_history_tickers=request.normalized_inputs,
+        )
+        comparison = compare_source_bindings(preview_source_binding, source_binding)
+        if comparison["status"] != "MATCH":
+            raise ValueError(
+                "ADMIN_ADD_TICKERS_PREVIEW_SOURCE_BINDING_STALE:"
+                + ",".join(comparison["differing_contract_sections"])
+            )
+        add._assert_preview_not_stale(paths, payload)
+        active_taxonomy = _taxonomy(paths)
+        if preview.get("source_state", {}).get("active_taxonomy") != active_taxonomy:
+            raise ValueError("ADMIN_ADD_TICKERS_PREVIEW_TAXONOMY_MISMATCH")
+        read_paths = replace(
+            paths,
+            market_db=read_paths["market"],
+            taxonomy_db=read_paths["taxonomy"],
+        )
+        if exact_production_paths:
+            rebuilt_plan = add.build_generic_batch_plan(
+                read_paths,
+                request,
+                now=payload.get("created_at_utc"),
+                network_allowed=bool(plan.get("network_allowed")),
+                authoritative_source_state=authoritative_state,
+            ).safe_dict(include_rows=True)
+        else:
+            _, raw = add.build_preview_from_copy(
+                read_paths, request, now=payload.get("created_at_utc"),
+                network_allowed=bool(plan.get("network_allowed")),
+                authoritative_source_state=authoritative_state,
+            )
+            rebuilt_plan = raw["generic_batch_plan"]
     if rebuilt_plan["plan_fingerprint"] != plan.get("plan_fingerprint"):
         raise ValueError("ADMIN_ADD_TICKERS_STALE_PLAN_CONTENT_CHANGED")
     eligible = [item for item in plan.get("items", []) if item.get("status") == "ELIGIBLE"]
@@ -136,6 +179,7 @@ ADD_TICKERS = ProductionOperation(
     _add_validate,
     _add_mutate,
     production_validate_preview=_add_validate_production,
+    shared_read_only_sources=True,
 )
 SECTOR_INDUSTRY = ProductionOperation(AdminOperationType.CHECK_UPDATE_SECTOR_INDUSTRY, ("analysis",), _sector_validate, _sector_mutate)
 TAXONOMY = ProductionOperation(AdminOperationType.CHECK_UPDATE_TAXONOMY, ("analysis",), _taxonomy_validate, _taxonomy_mutate)
