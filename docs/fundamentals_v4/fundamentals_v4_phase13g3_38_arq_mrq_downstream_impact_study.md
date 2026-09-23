@@ -14,7 +14,7 @@ Phase 13G.3.38 is a design and impact study only. It does not change ARQ/MRQ run
 
 The study inspected the provider ingestion and Refresh contracts, ARQ canonical reconciliation, TTM construction, and V2/Relative Position/Relative Valuation readers. The quantitative work used only the local production-shaped provider, canonical, and analysis databases opened with SQLite `mode=ro` and `query_only=ON`.
 
-For comparisons, one row per `(ticker, dimension, fiscalperiod)` was selected by the existing canonical-style precedence: latest `reportperiod`, then latest `COALESCE(lastupdated, date)`, then observation identity. A deliberately naive shadow overlay replaced non-null ARQ canonical fields with matching MRQ values in memory, then called the real TTM, Score, and Valuation calculation functions. It did not write a database and is an impact upper bound, not a proposed merge policy.
+For comparisons, provider observations were joined to canonical company identity and one row per `(company_id, dimension, fiscal_year, fiscal_quarter)` was selected with the exact canonical reconciliation authority and precedence: valid parsed `fiscalperiod`, resolved `company_id`, then the existing ticker/fiscal ordering with latest `reportperiod`, latest `COALESCE(lastupdated, date)`, and observation identity. A deliberately naive shadow overlay replaced non-null ARQ canonical fields with authority-matched MRQ values in memory, then called the real TTM, Score, and Valuation calculation functions. It did not write a database and is an impact upper bound, not a proposed merge policy.
 
 No network request, Admin workflow, scheduler operation, or production write was performed.
 
@@ -46,18 +46,18 @@ Local winner-level evidence:
 
 | Measure | Result |
 | --- | ---: |
-| ARQ winners | 89,904 |
-| MRQ winners | 92,611 |
-| shared ticker/fiscal keys | 89,693 |
+| ARQ winners | 89,872 |
+| MRQ winners | 92,575 |
+| shared company/fiscal keys | 89,661 |
 | ARQ-only historical keys | 211 |
-| MRQ-only historical keys | 2,918 |
-| latest fiscal quarter aligned | 2,541 / 2,541 tickers |
+| MRQ-only historical keys | 2,914 |
+| latest fiscal quarter aligned | 2,540 / 2,540 authority-resolved companies |
 | shared keys with report-period mismatch | 181 (0.202%) |
 | shared keys with calendar-date mismatch | 125 (0.139%) |
-| ARQ duplicate fiscal groups | 2,140; 2,488 extra rows; max 7 versions |
-| MRQ duplicate fiscal groups | 476; 479 extra rows; max 4 versions |
+| ARQ duplicate fiscal groups | 2,149; 2,520 extra rows; max 7 versions |
+| MRQ duplicate fiscal groups | 491; 515 extra rows; max 4 versions |
 
-The canonical database contains 89,872 quarters for 2,540 companies. Its smaller count is expected because provider winner counts and canonical accepted company identity/current universe are different contracts.
+The canonical database contains 89,872 quarters for 2,540 companies. Exact equality with the 89,872 ARQ authority winners confirms that the study uses the same accepted company/fiscal winner contract as canonical reconciliation.
 
 ## Date And Freshness Semantics
 
@@ -75,16 +75,18 @@ Thus the negative date lag is principally a dimension/date-definition difference
 
 Classification is for downstream runtime use under the current evidence.
 
+Flow metrics are revenue/profit and cash-flow-period measures that participate in four-quarter sums. Stock metrics are quarter-end balance-sheet and share-count levels used only from the endpoint quarter. They must not share an overlay rule: OCF, capex, and FCF in particular remain flow metrics even when an MRQ row appears more current.
+
 | Field group | Classification | Decision |
 | --- | --- | --- |
 | Revenue and gross profit | `ARQ_ONLY_PREFERRED` | Keep the four-quarter flow chain coherent. Historical disagreement exists, while the latest shared quarter adds no different value. |
 | Operating income, EBIT, EBITDA | `ARQ_ONLY_PREFERRED` | These drive Score, Lifecycle, Diagnostics, Valuation, RP, and RV. Mixing dimensions would change margins and ranking universes. |
 | Net income and common net income | `ARQ_ONLY_PREFERRED` | Preserve the same fiscal chain used by earnings valuation. |
 | Operating cash flow, capex, free cash flow | `ARQ_ONLY_PREFERRED` | Cumulative/YTD versus discrete-quarter ambiguity can contaminate all four quarters of TTM. No dimension mixing is acceptable without a proven provider contract. |
-| Cash and total debt, including debt components | `MRQ_UNSAFE_OR_REDUNDANT` | Endpoint candidates in theory, but latest ARQ/MRQ values were identical for every comparable ticker; MRQ adds no demonstrated information and has unsafe availability semantics. |
-| Receivables, inventory, payables, deferred revenue, assets | `MRQ_UNSAFE_OR_REDUNDANT` | Latest values were identical across all 2,541 comparable tickers. They are canonical/diagnostic inputs but provide no demonstrated current-state gain. |
-| `sharesbas` (canonical shares outstanding) | `MRQ_UNSAFE_OR_REDUNDANT` | Latest values disagreed for 2,444 / 2,541 tickers (96.2%). This is a dimension/timing-definition conflict, not safe freshness. It materially changes dilution and valuation denominators. |
-| `shareswa` | `MRQ_UNSAFE_OR_REDUNDANT` | Latest values disagreed for 268 / 2,541 tickers (10.5%); it is a support field, not a safe replacement for endpoint shares. |
+| Cash and total debt, including debt components | `MRQ_UNSAFE_OR_REDUNDANT` | Endpoint stock candidates in theory, but latest ARQ/MRQ values were identical for every comparable company; MRQ adds no demonstrated information and has unsafe availability semantics. |
+| Receivables, inventory, payables, deferred revenue, assets | `MRQ_UNSAFE_OR_REDUNDANT` | Latest values were identical across all 2,540 comparable companies. They are canonical/diagnostic inputs but provide no demonstrated current-state gain. |
+| `sharesbas` (canonical shares outstanding) | `MRQ_UNSAFE_OR_REDUNDANT` | Latest values disagreed for 2,443 / 2,540 companies (96.18%). This is a dimension/timing-definition conflict, not safe freshness. It materially changes dilution and valuation denominators. |
+| `shareswa` | `MRQ_UNSAFE_OR_REDUNDANT` | Latest values disagreed for 268 / 2,540 companies (10.55%); it is a support field, not a safe replacement for endpoint shares. |
 | `shareswadil` | `MRQ_UNSAFE_OR_REDUNDANT` | It is a provider support field, not a current canonical input. Latest values added no difference, and dimension mixing would not improve current dilution semantics. |
 | Period end / latest-quarter identity | `MRQ_UNSAFE_OR_REDUNDANT` | Latest fiscal identities align, but report/calendar mismatches exist historically and MRQ `date` is period-end-like, not an availability authority. |
 
@@ -94,38 +96,40 @@ No field currently qualifies as `MRQ_OVERLAY_CANDIDATE` or `MRQ_PREFERRED_CURREN
 
 ### Historical field disagreement
 
-Among 89,693 shared winner keys, disagreement rates for comparable values were:
+Among 89,661 shared winner keys, disagreement rates for comparable values were:
 
 | Field | Different | Rate | Differences over 5% of ARQ |
 | --- | ---: | ---: | ---: |
-| revenue | 7,345 | 8.30% | 3,469 |
-| operating income | 13,237 | 14.96% | 7,037 |
-| EBIT | 12,449 | 14.07% | 5,911 |
+| revenue | 7,344 | 8.31% | 3,468 |
+| operating income | 13,230 | 14.96% | 7,031 |
+| EBIT | 12,442 | 14.07% | 5,909 |
 | net income common | 6,583 | 7.44% | 3,447 |
 | operating cash flow | 8,390 | 9.54% | 3,475 |
 | capex | 8,108 | 9.22% | 4,076 |
 | free cash flow | 12,140 | 13.80% | 5,580 |
 | cash | 1,944 | 2.17% | 1,043 |
 | total debt | 2,366 | 2.64% | 890 |
-| `sharesbas` | 82,002 | 91.50% | 8,943 |
-| `shareswa` | 15,494 | 17.28% | 2,492 |
+| `sharesbas` | 81,978 | 91.51% | 8,933 |
+| `shareswa` | 15,476 | 17.26% | 2,487 |
 
 SUI, CCO, PPSI, TRMB, and GE were the leading local revision-heavy proxies after excluding all share-count fields, with economic-field disagreements in 33-35 historical fiscal quarters each. This identifies useful future review cases; it does not establish which dimension is economically correct.
 
 ### Latest-quarter comparison
 
-All 2,541 provider tickers had the same latest ARQ and MRQ fiscal identity. At that latest identity, every comparable economic flow, cash, debt, and other balance-sheet value was equal. Differences were confined to `sharesbas` and `shareswa`; `shareswadil` was equal where present.
+All 2,540 authority-resolved companies had the same latest ARQ and MRQ fiscal identity. At that latest identity, every comparable economic flow, cash, debt, and other balance-sheet value was equal. Differences were confined to `sharesbas` and `shareswa`; `shareswadil` was equal where present.
 
 The selected financial-sector probes JPM and BAC were absent from this local provider/canonical study universe, so this dataset cannot establish financial-sector MRQ suitability. The other representative probes included large caps (AAPL, MSFT, NVDA, AMZN, GOOGL), datacenter-related names (NVDA, AMD, AVGO, VRT, ANET), recent IPO CRWV, and smaller/structural names (FLWS, LOVE, KRSA, PSQL, QVCG).
 
 ### Naive overlay impact
 
-The in-memory full-history overlay changed 81,440 canonical share cells and thousands of historical flow cells. At the latest TTM endpoint it changed shares outstanding for 2,423 companies, but cash and debt for none. It changed only 8-20 latest TTM flow outputs per measured flow, because most historical disagreements were outside the current four-quarter window. One TTM readiness status changed.
+This is a **what-if sensitivity analysis only**, not a corrected representation of production truth or a candidate publication result.
+
+The in-memory full-history overlay changed 81,634 canonical share cells and thousands of historical flow cells. At the latest TTM endpoint it changed shares outstanding for 2,428 companies, but cash and debt for none. It changed only 8-20 latest TTM flow outputs per measured flow, because most historical disagreements were outside the current four-quarter window. One TTM readiness status changed.
 
 Despite limited current flow changes, share-count replacement propagated broadly:
 
-- 1,759 latest Score rows changed; among 1,758 comparable numeric deltas, median absolute change was 0.383 points, mean 1.729, 95th percentile 7.586, and maximum 45.0.
-- 1,570 latest Valuation rows changed; among 1,562 comparable numeric deltas, median absolute change was 0.087 points, mean 0.382, 95th percentile 1.241, and maximum 30.571.
+- 1,762 latest Score rows changed; among 1,761 comparable numeric deltas, median absolute change was 0.383 points, mean 1.728, 95th percentile 7.570, and maximum 45.0.
+- 1,574 latest Valuation rows changed; among 1,566 comparable numeric deltas, median absolute change was 0.087 points, mean 0.382, 95th percentile 1.241, and maximum 30.571.
 - AAPL, MSFT, NVDA, AMD, AVGO, VRT, and ANET had identical latest economic fields but changed Score and/or Valuation through MRQ `sharesbas`.
 - LOVE's shadow Score moved from 41.83 to 39.63 and Valuation from 80.27 to 79.87 despite identical latest flow/balance values; QVCG had no latest field or score change.
 - KRSA and PSQL had share differences but no ready current Score/Valuation result on which to measure a numeric delta. CRWV remained at Score 0 and Valuation 0.
