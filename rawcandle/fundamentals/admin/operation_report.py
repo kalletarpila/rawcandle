@@ -382,7 +382,12 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
         from rawcandle.fundamentals.admin.ticker_reporting import summary_rows
 
         rows.extend(summary_rows(ticker_reporting))
-    elif result.get("operation_type") == "REMOVE_TICKERS":
+    elif (
+        result.get("operation_type") == "REMOVE_TICKERS"
+        and result.get("mode") in {
+            "PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL",
+        }
+    ):
         for item in _sequence(result.get("removal_plan")) or _sequence(result.get("ticker_results")):
             if not isinstance(item, Mapping):
                 continue
@@ -621,7 +626,7 @@ def render_operation_report(
         elif analysis_counts["reporting_integrity_errors"]:
             next_step = "Reporting integrity requires attention. Manual Production update remains backend-authorized by the successful Test, but automatic workflow progression is stopped."
         elif result.get("operation_type") == "REMOVE_TICKERS":
-            next_step = "Production update is not available for Remove Tickers in this phase."
+            next_step = "A successful current Remove Tickers Test authorizes guarded Production update."
         else:
             next_step = "Next step: Production update is available."
         actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed.", next_step]
@@ -780,6 +785,25 @@ def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT) -> Opera
         from rawcandle.fundamentals.admin.identity_resolution import render_preview_report
 
         report = render_preview_report(result)
+    elif (
+        result.get("operation_type") == "REMOVE_TICKERS"
+        and result.get("mode") in {
+            "PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL",
+        }
+    ):
+        from rawcandle.fundamentals.admin.remove_tickers import (
+            _render_production_report,
+            _render_report,
+            _render_test_report,
+        )
+
+        report = (
+            _render_production_report(result)
+            if result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"}
+            else _render_test_report(result)
+            if result.get("mode") == "COPY_ONLY_APPLY"
+            else _render_report(result)
+        )
     elif result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"} and "write_set" in result:
         from rawcandle.fundamentals.admin.production_transaction import render_production_report
         report = render_production_report(result)

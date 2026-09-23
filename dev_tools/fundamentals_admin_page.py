@@ -923,7 +923,7 @@ def build_fundamentals_admin_page(
         production_apply_button.visible = bool(production_authorized and production_ready)
         production_apply_button.disabled = bool(operation_running or production_safety_blocked or not production_authorized or not production_ready)
         full_workflow_button.visible = (operation_dropdown.value or "").strip().upper() in {
-            "ADD_TICKERS", "REFRESH_FUNDAMENTALS",
+            "ADD_TICKERS", "REMOVE_TICKERS", "REFRESH_FUNDAMENTALS",
         }
         full_workflow_button.disabled = bool(
             operation_running

@@ -11,7 +11,12 @@ from typing import Any, Callable, Mapping
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import parse_batch_tickers
-from rawcandle.fundamentals.admin.contracts import AdminOperationType, fingerprint, utc_now
+from rawcandle.fundamentals.admin.contracts import (
+    AdminOperationType,
+    build_batch_request,
+    fingerprint,
+    utc_now,
+)
 from rawcandle.fundamentals.admin.ticker_reporting import (
     analysis_reporting_counts,
     human_reasons,
@@ -778,6 +783,28 @@ def run_refresh_full_workflow(
         label="Refresh Fundamentals",
         request_identity={"operation": AdminOperationType.REFRESH_FUNDAMENTALS.value},
         requested_inputs=(),
+        preview_stage=preview_stage,
+        test_stage=test_stage,
+        production_stage=production_stage,
+    )
+    return run_operation_workflow(adapter, run_root=run_root, progress_callback=progress_callback)
+
+
+def run_remove_tickers_full_workflow(
+    raw_inputs: str,
+    *,
+    run_root: Path = ADMIN_RUN_ROOT,
+    preview_stage: Callable[[Callable[[Mapping[str, Any]], None]], Any],
+    test_stage: Callable[[Any, Callable[[Mapping[str, Any]], None]], Any],
+    production_stage: Callable[[Any, Any, Callable[[Mapping[str, Any]], None]], Any],
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    request = build_batch_request(AdminOperationType.REMOVE_TICKERS, raw_inputs)
+    adapter = WorkflowOperationAdapter(
+        operation_type=AdminOperationType.REMOVE_TICKERS,
+        label="Remove Tickers",
+        request_identity={"inputs": request.normalized_inputs},
+        requested_inputs=tuple(request.normalized_inputs),
         preview_stage=preview_stage,
         test_stage=test_stage,
         production_stage=production_stage,

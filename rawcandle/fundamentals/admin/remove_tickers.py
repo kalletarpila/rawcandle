@@ -496,7 +496,7 @@ def _render_report(result: Mapping[str, Any]) -> str:
         "## Source Policy", "",
         "- Market: `STABLE_SOURCE_BUNDLE`", "- Taxonomy: `DIRECT_LOCKED_READ`",
         "- Full market/taxonomy copies: `0`", "", "## Next Step", "",
-        "Eligible plans may proceed to Test on copies. Production mutation is not available in this phase.", "",
+        "Eligible plans may proceed to Test on copies. Production requires a successful matching Test.", "",
     ])
     return "\n".join(lines)
 
@@ -567,7 +567,7 @@ def run_preview(
         "read_only_source_binding": source_binding,
         "full_source_copies_created": 0, "production_changed": False,
         "artifact_dir": str(writer.run_dir),
-        "recommended_next_action": "Review the removal plan, then run Test on copies for eligible items. Production is not available.",
+        "recommended_next_action": "Review the removal plan, then run Test on copies for eligible items. Production remains unavailable until that Test succeeds.",
     }
     plan_path = writer.write_json("remove_tickers_preview.json", result)
     result["preview_payload_path"] = str(plan_path)
@@ -957,7 +957,7 @@ def _render_test_report(result: Mapping[str, Any]) -> str:
         "- Taxonomy: `DIRECT_LOCKED_READ`",
         "- Full market/taxonomy copies: `0`", "",
         "## Safety", "",
-        "Candidate copies were removed. Production publication remains unavailable.", "",
+        "Candidate copies were removed. This successful matching Test may authorize guarded Production publication.", "",
     ])
     return "\n".join(lines)
 

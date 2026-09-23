@@ -167,7 +167,7 @@ class AdminHistoryCursor:
 _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|remove_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy|synchronize_provider_cik|resolve_ticker_identity)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
     "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
-    "REMOVE_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY"},
+    "REMOVE_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
     "REFRESH_FUNDAMENTALS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
@@ -600,6 +600,30 @@ class FundamentalsAdminUIService:
                         preview_payload_path=preview.preview_payload_path or "",
                         preview_fingerprint=preview.preview_fingerprint or "",
                         confirmation="CONFIRM_PRODUCTION_BATCH_ADD_TICKERS",
+                        test_run_id=test.run_id or "",
+                        progress_callback=callback,
+                    ),
+                    progress_callback=progress_callback,
+                )
+            elif operation == "REMOVE_TICKERS":
+                result = workflow_module.run_remove_tickers_full_workflow(
+                    raw_inputs,
+                    run_root=self.run_root,
+                    preview_stage=lambda callback: self._preview_unlocked(
+                        operation, raw_inputs=raw_inputs,
+                        progress_callback=callback,
+                    ),
+                    test_stage=lambda preview, callback: self._copy_apply_unlocked(
+                        operation,
+                        preview_payload_path=preview.preview_payload_path or "",
+                        preview_fingerprint=preview.preview_fingerprint or "",
+                        progress_callback=callback,
+                    ),
+                    production_stage=lambda preview, test, callback: self._production_apply_unlocked(
+                        operation,
+                        preview_payload_path=preview.preview_payload_path or "",
+                        preview_fingerprint=preview.preview_fingerprint or "",
+                        confirmation="CONFIRM_PRODUCTION_REMOVE_TICKERS",
                         test_run_id=test.run_id or "",
                         progress_callback=callback,
                     ),

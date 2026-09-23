@@ -502,7 +502,8 @@ def test_admin_page_conditional_fields_switch_by_operation() -> None:
     assert controls.market_field.visible is False
     assert controls.copy_apply_button.visible is False
     assert controls.production_apply_button.visible is False
-    assert controls.full_workflow_button.visible is False
+    assert controls.full_workflow_button.visible is True
+    assert controls.full_workflow_button.disabled is True
     assert "permanent identity" in controls.operation_guidance_field.value
 
     controls.operation_dropdown.value = "CHECK_UPDATE_SECTOR_INDUSTRY"
