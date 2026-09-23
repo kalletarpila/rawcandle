@@ -41,6 +41,10 @@ ROOT = Path(__file__).resolve().parents[3]
 ADMIN_LOCK = ROOT / "temp/.fundamentals_admin_production.lock"
 BACKUP_ROOT = ROOT / "backups/fundamentals_admin_production"
 
+
+class SimulatedTransactionCrash(BaseException):
+    """Fault-injection crash that deliberately bypasses normal rollback."""
+
 _STALE_AUTHORIZATION_MARKERS = (
     "STALE",
     "MISMATCH",
@@ -309,7 +313,8 @@ def render_production_report(result: Mapping[str, Any]) -> str:
             "- No backup was required.",
             "- No rollback was required.",
         ])
-        retry = result.get("retry_authorization") or {}
+        retry_value = result.get("retry_authorization")
+        retry = retry_value if isinstance(retry_value, Mapping) else {}
         lines.append(
             "- The successful Preview and Test remain valid; Production update may be retried directly."
             if retry.get("direct_production_retry_available")
@@ -383,6 +388,7 @@ def run_transaction(
     scheduler_log_dir: str | None = None, lock_path: Path = ADMIN_LOCK,
     production_intent: bool = False, rehearsal: bool = False,
     inject_failure_at: str | None = None,
+    inject_crash_at: str | None = None,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
     publication_journal_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -409,7 +415,10 @@ def run_transaction(
     write_boundary_crossed = False
     candidate_owned = False
     source_bundle_root: Path | None = None
-    candidate = source_paths.analysis_db.parent / f".{source_paths.analysis_db.name}.{run_id}.candidate.db"
+    publication_journal: dict[str, Any] | None = None
+    active_journal_path: Path | None = None
+    candidate_dir = source_paths.analysis_db.parent / ".fundamentals_admin_candidates" / run_id
+    candidate = candidate_dir / "analysis.db"
     if candidate.exists() or candidate.is_symlink():
         raise FileExistsError("ADMIN_CANDIDATE_STAGING_PATH_EXISTS")
     backup_dir = (backup_root or BACKUP_ROOT) / run_id
@@ -430,6 +439,10 @@ def run_transaction(
             })
         except Exception:
             pass
+
+    def crash(point: str) -> None:
+        if inject_crash_at == point:
+            raise SimulatedTransactionCrash(f"SIMULATED_ADMIN_TRANSACTION_CRASH:{point}")
 
     progress(1, "PREFLIGHT", "RUNNING", "Validating the production request and exact database paths.")
     writer.checkpoint(RunStage.REQUEST_CREATED, message="Guarded production transaction requested.", preview_fingerprint=preview_fingerprint)
@@ -454,6 +467,16 @@ def run_transaction(
                 )
             )
             result["lock_owner"] = owner
+        if owner and (actual_production or publication_journal_path is not None):
+            from rawcandle.fundamentals.admin.publication_journal import (
+                ACTIVE_JOURNAL_PATH,
+                guard_production_writes,
+            )
+
+            active_journal_path = publication_journal_path or ACTIVE_JOURNAL_PATH
+            result["publication_recovery_preflight"] = guard_production_writes(
+                active_journal_path
+            )
         validate_preview = (
             operation.production_validate_preview
             if actual_production and operation.production_validate_preview is not None
@@ -524,14 +547,15 @@ def run_transaction(
         if owner is None:
             owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
         if owner:
-            if actual_production or publication_journal_path is not None:
+            if active_journal_path is None and (actual_production or publication_journal_path is not None):
                 from rawcandle.fundamentals.admin.publication_journal import (
                     ACTIVE_JOURNAL_PATH,
                     guard_production_writes,
                 )
 
+                active_journal_path = publication_journal_path or ACTIVE_JOURNAL_PATH
                 result["publication_recovery_preflight"] = guard_production_writes(
-                    publication_journal_path or ACTIVE_JOURNAL_PATH
+                    active_journal_path
                 )
             progress(3, "LOCKS", "COMPLETED", "Production and scheduler locks acquired.")
             result["lock_owner"] = owner
@@ -544,14 +568,78 @@ def run_transaction(
             progress(4, "BACKUPS", "COMPLETED", "Verified production backups created.")
             if locked_source_state != _source_fingerprints(source_paths):
                 raise RuntimeError("ADMIN_SOURCE_CHANGED_DURING_BACKUP")
+            if active_journal_path is not None and set(operation.written_roles) == {"provider", "canonical", "analysis"}:
+                from rawcandle.fundamentals.admin.publication_journal import prepare_journal
+
+                placeholder_dir = writer.run_dir / "candidates"
+                roles = {
+                    role: {
+                        "production_path": str(source_paths.as_dict()[role].resolve()),
+                        "old_production_fingerprint": backups[role]["verification"]["sha256"],
+                        "backup_path": str(Path(backups[role]["backup"]).resolve()),
+                        "verified_backup_fingerprint": backups[role]["verification"]["sha256"],
+                        "candidate_path": str(
+                            candidate.resolve()
+                            if role == "analysis"
+                            else (placeholder_dir / f"{role}.db").resolve()
+                        ),
+                        "candidate_fingerprint": None,
+                        "replacement_state": "NOT_STARTED",
+                    }
+                    for role in ("provider", "canonical", "analysis")
+                }
+                publication_journal = prepare_journal(
+                    path=active_journal_path,
+                    operation_type=operation.operation_type.value,
+                    run_id=run_id,
+                    preview_run_id=payload_path.resolve().parent.name,
+                    test_run_id=test_run_id,
+                    refresh_set_fingerprint=preview_fingerprint,
+                    old_source_watermark=None,
+                    new_source_watermark=str(preview.get("as_of_date") or ""),
+                    source_schema_fingerprint="ADD_TICKERS_V1",
+                    roles=roles,
+                )
+                result["journal"] = publication_journal
+                crash("AFTER_PREPARED")
+                if inject_failure_at == "before_first_replacement":
+                    raise RuntimeError("ADMIN_INJECTED_PRE_PUBLICATION_FAILURE")
             stage = "SOURCE_MUTATION"
             source_mutation_started = len(operation.written_roles) > 1
             if source_mutation_started:
                 writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Authoritative source mutation starting.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
                 write_boundary_crossed = True
                 result["write_boundary_crossed"] = True
+            if publication_journal is not None and active_journal_path is not None:
+                from rawcandle.fundamentals.admin.publication_journal import update_journal
+
+                publication_journal = update_journal(
+                    active_journal_path,
+                    publication_journal,
+                    state="PUBLISHING",
+                    current_publication_step="MUTATING_PROVIDER_CANONICAL",
+                )
+                result["journal"] = publication_journal
             mutation = operation.mutate_sources(source_paths, preview)
             result["source_writes"] = mutation
+            if publication_journal is not None and active_journal_path is not None:
+                from rawcandle.fundamentals.admin.publication_journal import update_journal
+
+                roles = dict(publication_journal["roles"])
+                for role in ("provider", "canonical"):
+                    record = dict(roles[role])
+                    record["replacement_state"] = "MUTATED_AND_VERIFIED"
+                    record["candidate_fingerprint"] = _sha256(source_paths.as_dict()[role])
+                    record["candidate_replacement_verified"] = True
+                    roles[role] = record
+                publication_journal = update_journal(
+                    active_journal_path,
+                    publication_journal,
+                    roles=roles,
+                    current_publication_step="PUBLISHED_PROVIDER_CANONICAL",
+                )
+                result["journal"] = publication_journal
+                crash("AFTER_SOURCE_MUTATION")
             progress(5, "SOURCE_UPDATE", "COMPLETED", "Authorized source updates completed.")
             if mutation.get("outcome") == "NO_CHANGE":
                 result.update(outcome="NO_CHANGE", completed_at_utc=utc_now())
@@ -608,6 +696,7 @@ def run_transaction(
                 sources = {role: source_paths.as_dict()[role] for role in ("provider", "canonical", "market", "taxonomy")}
             if candidate.exists() or candidate.is_symlink():
                 raise FileExistsError("ADMIN_CANDIDATE_STAGING_PATH_EXISTS")
+            candidate_dir.mkdir(parents=True, exist_ok=False)
             candidate_owned = True
             progress(6, "FULL_V2_REBUILD", "RUNNING", "Building and validating the full V2 analysis candidate, RP V2 and RV.")
             rebuild = rebuild_v2_analysis(candidate, sources, as_of_date=preview["as_of_date"], output=writer.run_dir / "full_v2_rebuild", inject_failure_at=inject_failure_at if inject_failure_at in {"v2_calculation", "validation"} else None)
@@ -629,16 +718,70 @@ def run_transaction(
                 write_boundary_crossed = True
                 result["write_boundary_crossed"] = True
             publication_started = True
+            if publication_journal is not None and active_journal_path is not None:
+                from rawcandle.fundamentals.admin.publication_journal import update_journal
+
+                roles = dict(publication_journal["roles"])
+                analysis_role = dict(roles["analysis"])
+                analysis_role["candidate_fingerprint"] = _sha256(candidate)
+                roles["analysis"] = analysis_role
+                publication_journal = update_journal(
+                    active_journal_path,
+                    publication_journal,
+                    state="PUBLISHING",
+                    roles=roles,
+                    current_publication_step="REPLACING_ANALYSIS",
+                )
+                result["journal"] = publication_journal
             result["atomic_replacement"] = _publish_candidate(candidate=candidate, target=source_paths.analysis_db, rebuild=rebuild, backup=backups["analysis"], lock_owner=owner, bound_test=test, source_stable=True, production_intent=production_intent, rehearsal=rehearsal)
             replaced = True
+            if publication_journal is not None and active_journal_path is not None:
+                from rawcandle.fundamentals.admin.publication_journal import update_journal
+
+                roles = dict(publication_journal["roles"])
+                analysis_role = dict(roles["analysis"])
+                analysis_role["replacement_state"] = "REPLACED_AND_VERIFIED"
+                analysis_role["candidate_replacement_verified"] = True
+                roles["analysis"] = analysis_role
+                publication_journal = update_journal(
+                    active_journal_path,
+                    publication_journal,
+                    roles=roles,
+                    current_publication_step="PUBLISHED_ANALYSIS",
+                )
+                result["journal"] = publication_journal
             progress(7, "ATOMIC_REPLACEMENT", "COMPLETED", "Analysis database replacement completed atomically.")
+            crash("AFTER_ANALYSIS_REPLACEMENT")
             if inject_failure_at == "post_replacement":
                 raise RuntimeError("ADMIN_INJECTED_POST_REPLACEMENT_FAILURE")
             stage = "POSTFLIGHT"
+            if publication_journal is not None and active_journal_path is not None:
+                from rawcandle.fundamentals.admin.publication_journal import update_journal
+
+                publication_journal = update_journal(
+                    active_journal_path,
+                    publication_journal,
+                    state="POSTFLIGHT",
+                    current_publication_step="POSTFLIGHT",
+                    postflight_state="RUNNING",
+                )
+                result["journal"] = publication_journal
             postflight = validate_rebuild(source_paths.analysis_db, as_of_date=preview["as_of_date"], taxonomy_dependency=actual_taxonomy, sources=sources)
             if _sha256(source_paths.analysis_db) != result["atomic_replacement"]["candidate_sha256"]:
                 raise RuntimeError("ADMIN_PRODUCTION_PATH_FINGERPRINT_MISMATCH")
             result["postflight"] = postflight
+            if publication_journal is not None and active_journal_path is not None:
+                from rawcandle.fundamentals.admin.publication_journal import update_journal
+
+                publication_journal = update_journal(
+                    active_journal_path,
+                    publication_journal,
+                    state="COMPLETED",
+                    current_publication_step="COMPLETED",
+                    postflight_state="PASSED",
+                    rollback_recovery_state="NOT_REQUIRED",
+                )
+                result["journal"] = publication_journal
             added = {str(ticker).upper() for ticker in (result.get("source_writes") or {}).get("tickers", [])}
             attach_ticker_reporting(result["mode"], production_actions(added=added, rebuilt=True))
             progress(8, "POSTFLIGHT", "COMPLETED", "Production postflight checks passed.")
@@ -655,7 +798,33 @@ def run_transaction(
         if recovery_retry:
             result["outcome"] = "RETRY_REQUIRED"
             result["publication_recovery"] = exc.recovery
-        if backups and (source_mutation_started or publication_started):
+        if publication_journal is not None and active_journal_path is not None and write_boundary_crossed:
+            try:
+                from rawcandle.fundamentals.admin.publication_journal import restore_old_generation, update_journal
+
+                publication_journal = update_journal(
+                    active_journal_path,
+                    publication_journal,
+                    state="ROLLING_BACK",
+                    rollback_recovery_state="ROLLING_BACK_COMPLETE_SET",
+                )
+                recovered = restore_old_generation(
+                    publication_journal,
+                    journal_path=active_journal_path,
+                )
+                publication_journal = update_journal(
+                    active_journal_path,
+                    recovered["journal"],
+                    state="ROLLED_BACK",
+                    rollback_recovery_state="OLD_GENERATION_RESTORED_AND_VERIFIED",
+                )
+                result["journal"] = publication_journal
+                result["rollback"] = {"status": "ROLLED_BACK", "roles": recovered["roles"]}
+                result["outcome"] = "FAILED_ROLLED_BACK"
+            except Exception as rollback_exc:
+                result["rollback"] = {"status": "CRITICAL_ROLLBACK_FAILED", "error": f"{type(rollback_exc).__name__}: {rollback_exc}"}
+                result["outcome"] = "CRITICAL_ROLLBACK_FAILED"
+        elif backups and (source_mutation_started or publication_started):
             try:
                 writer.checkpoint(RunStage.ROLLBACK_STARTED, message="Restoring pre-operation databases.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
                 result["rollback"] = _restore_all(source_paths, backups, run_dir=writer.run_dir)
@@ -665,6 +834,17 @@ def run_transaction(
                 result["rollback"] = {"status": "CRITICAL_ROLLBACK_FAILED", "error": f"{type(rollback_exc).__name__}: {rollback_exc}"}
                 result["outcome"] = "CRITICAL_ROLLBACK_FAILED"
         if not write_boundary_crossed:
+            if publication_journal is not None and active_journal_path is not None:
+                active_journal_path.unlink(missing_ok=True)
+                if active_journal_path.parent.exists():
+                    _fsync_dir(active_journal_path.parent)
+                shutil.rmtree(backup_dir, ignore_errors=True)
+                result.pop("journal", None)
+                result.pop("backups", None)
+                result["pre_publication_cleanup"] = {
+                    "journal_removed": not active_journal_path.exists(),
+                    "backup_directory_removed": not backup_dir.exists(),
+                }
             result["database_safety"] = "NO_DATABASE_WRITES"
             result["user_failure_reason"] = _preflight_failure_reason(result["error"])
             result["retry_authorization"] = (
@@ -685,6 +865,11 @@ def run_transaction(
             candidate.unlink(missing_ok=True)
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(candidate) + suffix).unlink(missing_ok=True)
+            shutil.rmtree(candidate_dir, ignore_errors=True)
+            try:
+                candidate_dir.parent.rmdir()
+            except OSError:
+                pass
         if source_bundle_root is not None:
             shutil.rmtree(source_bundle_root, ignore_errors=True)
         locks.close()

@@ -58,6 +58,27 @@ class _Page:
         dialog.open = True
 
 
+def test_ui_finalize_tolerates_redacted_retry_authorization(tmp_path: Path) -> None:
+    service = FundamentalsAdminUIService(
+        run_root=tmp_path / "runs",
+        recover_publication_on_startup=False,
+    )
+
+    result = service._finalize(
+        {
+            "operation_type": "ADD_TICKERS",
+            "mode": "TRANSACTION_REHEARSAL",
+            "outcome": "FAILED",
+            "retry_authorization": "[REDACTED]",
+        },
+        default_message="Production failed.",
+    )
+
+    assert result.status == "FAILED"
+    assert result.direct_production_retry_available is False
+    assert result.preview_test_rerun_required is False
+
+
 def _write_run(root: Path, run_id: str = "20260916T120000Z_add_tickers_test") -> Path:
     run_dir = root / run_id
     run_dir.mkdir(parents=True)

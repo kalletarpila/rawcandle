@@ -199,7 +199,7 @@ def _create_market(path: Path) -> None:
             """
             CREATE TABLE ticker_meta(ticker TEXT,market TEXT,sector TEXT,industry TEXT);
             CREATE TABLE osakedata(
-                id INTEGER PRIMARY KEY,osake TEXT NOT NULL,pvm TEXT NOT NULL,
+                id INTEGER PRIMARY KEY,osake TEXT NOT NULL,market TEXT NOT NULL,pvm TEXT NOT NULL,
                 open REAL,high REAL,low REAL,close REAL
             );
             CREATE INDEX idx_osake_pvm ON osakedata(osake,pvm DESC);
@@ -216,8 +216,8 @@ def _create_market(path: Path) -> None:
         for index in range(630):
             current = start + timedelta(days=index)
             value = 20 + index / 100
-            rows.append((index + 1, "AAA", current.isoformat(), value, value + 1, value - 1, value + 0.5))
-        connection.executemany("INSERT INTO osakedata VALUES(?,?,?,?,?,?,?)", rows)
+            rows.append((index + 1, "AAA", "usa", current.isoformat(), value, value + 1, value - 1, value + 0.5))
+        connection.executemany("INSERT INTO osakedata VALUES(?,?,?,?,?,?,?,?)", rows)
 
 
 def _create_taxonomy(path: Path, *, version: str = "DC_FIXTURE_V1") -> None:

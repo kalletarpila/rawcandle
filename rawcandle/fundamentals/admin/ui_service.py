@@ -883,6 +883,8 @@ class FundamentalsAdminUIService:
     def _finalize(self, result: Mapping[str, Any], *, default_message: str) -> AdminUIRunResult:
         run_id = str(result.get("run_id") or "")
         taxonomy = taxonomy_preview_presentation(result)
+        retry_value = result.get("retry_authorization")
+        retry = retry_value if isinstance(retry_value, Mapping) else {}
         report: OperationReportSummary | None = None
         workflow_mode = result.get("mode") == "FULL_WORKFLOW"
         if run_id and workflow_mode:
@@ -936,9 +938,9 @@ class FundamentalsAdminUIService:
             failure_stage=str(result.get("failed_stage")) if result.get("failed_stage") else None,
             exception_type=str(first_error.get("type")) if first_error.get("type") else None,
             technical_error=str(first_error.get("message")) if first_error.get("message") else None,
-            direct_production_retry_available=bool((result.get("retry_authorization") or {}).get("direct_production_retry_available") or result.get("manual_production_retry_available") or result.get("manual_production_available")),
+            direct_production_retry_available=bool(retry.get("direct_production_retry_available") or result.get("manual_production_retry_available") or result.get("manual_production_available")),
             preview_test_rerun_required=bool(
-                (result.get("retry_authorization") or {}).get("preview_test_rerun_required")
+                retry.get("preview_test_rerun_required")
                 or result.get("preview_test_rerun_required")
             ),
             workflow_stage_run_ids=tuple(
