@@ -682,9 +682,16 @@ def run_operation_workflow(
                 production_record["child_summary"] = result["terminal_summary"]
                 emit("Production update", 3, "COMPLETED", "Production update - Completed")
             else:
-                retry = production_payload.get("retry_authorization") or {}
-                result["manual_production_retry_available"] = bool(retry.get("direct_production_retry_available"))
-                result["preview_test_rerun_required"] = bool(retry.get("preview_test_rerun_required"))
+                persisted_retry = production_payload.get("retry_authorization")
+                retry = persisted_retry if isinstance(persisted_retry, Mapping) else {}
+                result["manual_production_retry_available"] = bool(
+                    retry.get("direct_production_retry_available")
+                    or _value(production, "direct_production_retry_available")
+                )
+                result["preview_test_rerun_required"] = bool(
+                    retry.get("preview_test_rerun_required")
+                    or _value(production, "preview_test_rerun_required")
+                )
                 if _value(production, "outcome") == "RETRY_REQUIRED":
                     result["workflow_status"] = "STOPPED"
                     result["outcome"] = "RETRY_REQUIRED"

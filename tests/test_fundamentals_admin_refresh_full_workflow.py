@@ -171,6 +171,31 @@ def test_refresh_full_workflow_stops_without_automatic_retry(
     assert len(production_calls) <= 1
 
 
+def test_refresh_full_workflow_handles_redacted_retry_authorization(tmp_path: Path) -> None:
+    production = _stage(
+        tmp_path,
+        "production-run",
+        mode="PRODUCTION_APPLY",
+        outcome="FAILED",
+        extra={"retry_authorization": "[REDACTED]"},
+    )
+    production.preview_test_rerun_required = True
+
+    result = run_refresh_full_workflow(
+        run_root=tmp_path,
+        preview_stage=lambda _callback: _stage(tmp_path, "preview-run", mode="PREVIEW"),
+        test_stage=lambda _preview, _callback: _stage(
+            tmp_path, "test-run", mode="COPY_ONLY_APPLY", outcome="COMPLETED",
+        ),
+        production_stage=lambda _preview, _test, _callback: production,
+    )
+
+    assert result["outcome"] == "STOPPED"
+    assert result["preview_test_rerun_required"] is True
+    assert result["manual_production_retry_available"] is False
+    assert result["terminal_summary"]["stop_kind"] == "TECHNICAL_FAILURE"
+
+
 def test_scheduler_preview_no_change_and_pending_never_run_writes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

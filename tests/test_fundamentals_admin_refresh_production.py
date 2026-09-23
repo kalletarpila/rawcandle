@@ -38,7 +38,7 @@ from rawcandle.fundamentals.admin.refresh_production import (
     compare_test_and_production_source_bindings,
     load_production_authorization,
     render_report,
-    run_production_apply,
+    run_production_apply as _run_production_apply,
 )
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.contracts import AdminOperationType
@@ -49,6 +49,14 @@ from rawcandle.fundamentals.schema.migrations import (
     PROVIDER_SCHEMA_SQL,
     bootstrap_database,
 )
+
+
+FIXTURE_AS_OF_DATE = "2026-09-22"
+
+
+def run_production_apply(*args, **kwargs):
+    kwargs.setdefault("as_of_date", FIXTURE_AS_OF_DATE)
+    return _run_production_apply(*args, **kwargs)
 
 
 def _database(path: Path, generation: str) -> None:
