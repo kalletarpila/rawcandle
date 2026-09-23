@@ -54,6 +54,7 @@ from rawcandle.fundamentals.admin.source_bundle import (
     ReadOnlySourceMode,
     SOURCE_CONTRACT_VERSION,
     TaxonomySourceMode,
+    protected_direct_taxonomy_source,
 )
 from rawcandle.fundamentals.operating_income_v2.full_rebuild import validate_rebuild
 from rawcandle.fundamentals.phase12d import PRODUCTION
@@ -61,7 +62,7 @@ from rawcandle.fundamentals.phase13b_foundation import online_backup
 from rawcandle.fundamentals.providers.sharadar import SharadarClient
 
 
-PRODUCTION_CONTRACT_VERSION = "PHASE13G3_28_REFRESH_PRODUCTION_COMPACT_SOURCE_V2"
+PRODUCTION_CONTRACT_VERSION = "PHASE13G3_31_REFRESH_DIRECT_TAXONOMY_READ_V1"
 PRODUCTION_STAGES = (
     "PRODUCTION_PREFLIGHT", "SOURCE_REVALIDATION", "PROVIDER_CANDIDATE",
     "CANONICAL_CANDIDATE", "ANALYSIS_CANDIDATE", "CANDIDATE_VALIDATION",
@@ -170,7 +171,7 @@ def load_production_authorization(
     if (
         test_semantic_binding["market"]["mode"] != ReadOnlySourceMode.STABLE_SOURCE_BUNDLE.value
         or test_semantic_binding["market"]["source_contract_version"] != SOURCE_CONTRACT_VERSION
-        or test_semantic_binding["taxonomy"]["mode"] != TaxonomySourceMode.FULL_SQLITE_BACKUP.value
+        or test_semantic_binding["taxonomy"]["mode"] != TaxonomySourceMode.DIRECT_LOCKED_READ.value
     ):
         raise ValueError("REFRESH_PRODUCTION_TEST_SOURCE_BINDING_POLICY_UNSUPPORTED")
     test["_authorized_source_binding"] = source_binding
@@ -864,12 +865,20 @@ def run_production_apply(
         stage = "ANALYSIS_CANDIDATE"
         progress(stage, "RUNNING", "Binding compact read-only sources and building the full V2, RP V2, and RV candidate once.")
         before_analysis = _analysis_state(source_paths.analysis_db, source_paths.canonical_db, changed_tickers)
-        with _durable_heartbeat(writer, stage, "Compact market bundle and taxonomy copy preparation is still running."):
+        taxonomy_binding = locks.enter_context(
+            protected_direct_taxonomy_source(
+                source_paths.taxonomy_db,
+                canonical_candidate,
+                operation_id=f"{run_id}:taxonomy",
+            )
+        )
+        with _durable_heartbeat(writer, stage, "Compact market bundle and protected taxonomy binding are being prepared."):
             read_only_copies, production_source_binding = prepare_compact_read_only_sources(
                 source_paths,
                 lane_dir=lane_dir,
                 canonical_candidate=canonical_candidate,
                 as_of_date=calculation_as_of_date,
+                taxonomy_binding=taxonomy_binding,
             )
         binding_comparison = compare_test_and_production_source_bindings(
             test_source_binding,
@@ -1057,8 +1066,10 @@ def run_production_apply(
                 "Production candidates did not pass validation. No production databases were modified."
             )
     finally:
-        locks.close()
-        result["cleanup"] = _cleanup_candidate_lane(lane_dir, journal)
+        try:
+            result["cleanup"] = _cleanup_candidate_lane(lane_dir, journal)
+        finally:
+            locks.close()
         if result.get("production_file_state_before"):
             result["production_file_state_after"] = _production_file_state(source_paths)
             result["production_file_state_unchanged"] = (

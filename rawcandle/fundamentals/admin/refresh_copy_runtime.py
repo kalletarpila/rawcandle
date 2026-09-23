@@ -7,6 +7,7 @@ import json
 import shutil
 import sqlite3
 from collections import Counter
+from contextlib import ExitStack
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
@@ -49,9 +50,10 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
 from rawcandle.fundamentals.admin.structural_context import _events
 from rawcandle.fundamentals.admin.source_bundle import (
     ReadOnlySourceMode,
+    TaxonomySourceBinding,
     TaxonomySourceMode,
-    bind_taxonomy_source,
     build_stable_read_only_source_bundle,
+    protected_direct_taxonomy_source,
     validate_stable_read_only_source_bundle,
 )
 from rawcandle.fundamentals.phase12d import rebuild_ttm, reconcile_canonical, stable_hash
@@ -60,7 +62,7 @@ from rawcandle.fundamentals.providers.sharadar import SharadarClient
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 
 
-TEST_CONTRACT_VERSION = "PHASE13G3_10_SHARADAR_REFRESH_RETENTION_COPY_TEST_V1"
+TEST_CONTRACT_VERSION = "PHASE13G3_31_REFRESH_DIRECT_TAXONOMY_READ_V1"
 REPLACEMENT_CLASSES = REFRESH_REPLACEMENT_CLASSES
 FULL_V2_READ_ONLY_SOURCE_ROLES = ("market", "taxonomy")
 
@@ -96,19 +98,19 @@ def prepare_full_v2_read_only_copies(
 def prepare_compact_read_only_sources(
     source_paths: BatchAddTickerPaths, *, lane_dir: Path,
     canonical_candidate: Path, as_of_date: str,
+    taxonomy_binding: TaxonomySourceBinding,
 ) -> tuple[dict[str, Path], dict[str, Any]]:
-    """Bind a rebuild to a compact market bundle and copied taxonomy."""
+    """Bind a rebuild to a compact market bundle and protected live taxonomy."""
     taxonomy_source = source_paths.taxonomy_db
-    taxonomy_copy = lane_dir / "taxonomy.db"
     taxonomy_stat = taxonomy_source.stat()
-    taxonomy_copy_result = online_backup(taxonomy_source, taxonomy_copy)
-    if taxonomy_copy_result.get("quick_check") != "ok":
-        raise RuntimeError("REFRESH_TAXONOMY_COPY_INTEGRITY_FAILED")
-    taxonomy_binding = bind_taxonomy_source(
-        taxonomy_copy,
-        canonical_candidate,
-        mode=TaxonomySourceMode.FULL_SQLITE_BACKUP,
-    )
+    if (
+        taxonomy_binding.mode != TaxonomySourceMode.DIRECT_LOCKED_READ.value
+        or not taxonomy_binding.runtime_authorized
+        or Path(taxonomy_binding.source_path).resolve() != taxonomy_source.resolve()
+        or not taxonomy_binding.lock_path
+        or taxonomy_binding.lock_contract_status != "AUTHORITATIVE_TAXONOMY_LOCK_HELD"
+    ):
+        raise RuntimeError("REFRESH_DIRECT_TAXONOMY_BINDING_REQUIRED")
 
     bundle = build_stable_read_only_source_bundle(
         market_db=source_paths.market_db,
@@ -131,30 +133,31 @@ def prepare_compact_read_only_sources(
             "cleanup_required": True,
         },
         "taxonomy": {
-            **taxonomy_copy_result,
-            "mode": TaxonomySourceMode.FULL_SQLITE_BACKUP.value,
+            "mode": TaxonomySourceMode.DIRECT_LOCKED_READ.value,
             "role": "taxonomy",
-            "purpose": "FULL_V2_READ_ONLY_SOURCE",
+            "purpose": "FULL_V2_PROTECTED_DIRECT_READ_SOURCE",
             "source_size": taxonomy_stat.st_size,
             "source_mtime_ns": taxonomy_stat.st_mtime_ns,
-            "copy_sha256": sha256_file(taxonomy_copy),
+            "old_full_copy_bytes_avoided": taxonomy_stat.st_size,
             "binding": asdict(taxonomy_binding),
-            "immutable_after_creation": True,
-            "cleanup_required": True,
+            "protected_for_consumer_lifetime": True,
+            "cleanup_required": False,
         },
     }
-    return {"market": bundle.market_db, "taxonomy": taxonomy_copy}, evidence
+    return {"market": bundle.market_db, "taxonomy": taxonomy_source.resolve()}, evidence
 
 
 def prepare_refresh_test_read_only_sources(
     source_paths: BatchAddTickerPaths, *, lane_dir: Path,
     canonical_candidate: Path, as_of_date: str,
+    taxonomy_binding: TaxonomySourceBinding,
 ) -> tuple[dict[str, Path], dict[str, Any]]:
     return prepare_compact_read_only_sources(
         source_paths,
         lane_dir=lane_dir,
         canonical_candidate=canonical_candidate,
         as_of_date=as_of_date,
+        taxonomy_binding=taxonomy_binding,
     )
 
 
@@ -836,7 +839,7 @@ def _render_report(result: Mapping[str, Any]) -> str:
         f"- Compact market bytes: {market_source.get('compact_bundle_bytes', 0)}",
         f"- Bundle build seconds: {market_source.get('bundle_build_seconds', 0)}",
         f"- Taxonomy mode: `{taxonomy_source.get('mode', 'NOT_RECORDED')}`",
-        f"- Taxonomy copy SHA-256: `{taxonomy_source.get('copy_sha256', 'NOT_RECORDED')}`",
+        f"- Taxonomy lock contract: `{(taxonomy_source.get('binding') or {}).get('lock_contract_status', 'NOT_RECORDED')}`",
         f"- Taxonomy version: `{taxonomy_binding.get('version', 'NOT_RECORDED')}`",
         f"- Taxonomy semantic fingerprint: `{taxonomy_binding.get('semantic_fingerprint', 'NOT_RECORDED')}`", "",
         "## Publication Date Bootstrap", "",
@@ -970,6 +973,7 @@ def run_apply(
     lane_dir = temp_root / run_id
     failed_stage = ProgressStage.PREVIEW_BINDING
     api = client or SharadarClient()
+    locks = ExitStack()
     try:
         progress.running(failed_stage, "Validating bound Refresh Preview.")
         preview = _load_bound_preview(preview_payload_path, preview_fingerprint, run_root)
@@ -1044,12 +1048,20 @@ def run_apply(
         progress.running(failed_stage, "Binding read-only sources and building complete V2, RP V2 and RV analysis candidate.")
         analysis_before = _analysis_state(source_paths.analysis_db, source_paths.canonical_db, changed_tickers)
         calculation_as_of_date = as_of_date or date.today().isoformat()
+        taxonomy_binding = locks.enter_context(
+            protected_direct_taxonomy_source(
+                source_paths.taxonomy_db,
+                canonical_candidate,
+                operation_id=f"{run_id}:taxonomy",
+            )
+        )
         with _background_heartbeat(progress, "Compact market source bundle construction is still running."):
             read_only_copies, read_only_evidence = prepare_refresh_test_read_only_sources(
                 source_paths,
                 lane_dir=lane_dir,
                 canonical_candidate=canonical_candidate,
                 as_of_date=calculation_as_of_date,
+                taxonomy_binding=taxonomy_binding,
             )
         copies.update(read_only_evidence)
         writer.write_json("copy_manifest.json", copies)
@@ -1188,3 +1200,5 @@ def run_apply(
         writer.write_exit_code(2)
         writer.write_manifest()
         return result
+    finally:
+        locks.close()

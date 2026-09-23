@@ -5,6 +5,7 @@ import os
 import shutil
 import sqlite3
 from copy import deepcopy
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,7 @@ from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.contracts import AdminOperationType
 from rawcandle.fundamentals.admin.production_transaction import ProductionOperation, run_transaction
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+from rawcandle.fundamentals.admin.source_bundle import TaxonomySourceBinding
 from rawcandle.fundamentals.schema.migrations import (
     CANONICAL_SCHEMA_SQL,
     PROVIDER_SCHEMA_SQL,
@@ -112,8 +114,7 @@ def _source_binding(as_of_date: str = "2026-09-22") -> dict[str, object]:
             },
         },
         "taxonomy": {
-            "mode": "FULL_SQLITE_BACKUP",
-            "copy_sha256": "physical-taxonomy-copy",
+            "mode": "DIRECT_LOCKED_READ",
             "binding": {
                 "domain": "dc_ecosystem", "version": "v",
                 "semantic_fingerprint": "t", "membership_rows": 1,
@@ -729,19 +730,33 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
         lambda *_args, **_kwargs: revalidated,
     )
 
-    def prepare_sources(_paths, *, lane_dir, canonical_candidate, as_of_date):
+    @contextmanager
+    def protected_taxonomy(_taxonomy, _canonical, *, operation_id):
+        yield TaxonomySourceBinding(
+            mode="DIRECT_LOCKED_READ", source_path=str(source_paths.taxonomy_db.resolve()),
+            domain="dc_ecosystem", version="v", semantic_fingerprint="t",
+            membership_rows=1, lock_path=str(source_paths.taxonomy_db.with_suffix(".lock")),
+            lock_contract_status="AUTHORITATIVE_TAXONOMY_LOCK_HELD",
+            runtime_authorized=True, packaged=False,
+        )
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.refresh_production.protected_direct_taxonomy_source",
+        protected_taxonomy,
+    )
+
+    def prepare_sources(_paths, *, lane_dir, canonical_candidate, as_of_date, taxonomy_binding):
         del canonical_candidate
+        assert taxonomy_binding.mode == "DIRECT_LOCKED_READ"
         bundle_dir = lane_dir / "market_source_bundle"
         bundle_dir.mkdir()
         compact_market = bundle_dir / "market.db"
         _database(compact_market, "authority")
-        taxonomy_copy = lane_dir / "taxonomy.db"
-        shutil.copy2(source_paths.taxonomy_db, taxonomy_copy)
         evidence = _source_binding(as_of_date)
         evidence["market"]["bundle_path"] = str(compact_market)
         evidence["market"]["manifest_path"] = str(bundle_dir / "manifest.json")
-        evidence["taxonomy"]["destination"] = str(taxonomy_copy)
-        return {"market": compact_market, "taxonomy": taxonomy_copy}, evidence
+        evidence["taxonomy"]["binding"]["source_path"] = str(source_paths.taxonomy_db.resolve())
+        return {"market": compact_market, "taxonomy": source_paths.taxonomy_db.resolve()}, evidence
 
     monkeypatch.setattr(
         "rawcandle.fundamentals.admin.refresh_production.prepare_compact_read_only_sources",
@@ -854,7 +869,7 @@ def test_production_shaped_rehearsal_commits_only_after_postflight(
     assert result["publication_activity"]["rollback_restorations"] == []
 
 
-def test_production_analysis_candidate_uses_compact_market_and_taxonomy_copy(
+def test_production_analysis_candidate_uses_compact_market_and_direct_taxonomy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
@@ -892,15 +907,15 @@ def test_production_analysis_candidate_uses_compact_market_and_taxonomy_copy(
     )
     assert result["outcome"] == "COMPLETED"
     assert observed["market"] != paths.market_db
-    assert observed["taxonomy"] != paths.taxonomy_db
+    assert observed["taxonomy"] == paths.taxonomy_db.resolve()
     assert observed["market"].parent.name == "market_source_bundle"
     assert observed["market"].name == "market.db"
-    assert observed["taxonomy"].name == "taxonomy.db"
+    assert paths.taxonomy_db not in copied_sources
     assert paths.market_db not in copied_sources
     assert paths.provider_db in copied_sources
     assert paths.canonical_db in copied_sources
     assert result["production_source_binding"]["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
-    assert result["production_source_binding"]["taxonomy"]["mode"] == "FULL_SQLITE_BACKUP"
+    assert result["production_source_binding"]["taxonomy"]["mode"] == "DIRECT_LOCKED_READ"
     assert result["test_source_binding_comparison"]["status"] == "MATCH"
     assert result["cleanup"]["status"] == "COMPLETED"
     assert result["cleanup"]["remaining_phase_owned_files"] == 0
@@ -1098,7 +1113,7 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
     ]
     assert all(
         call["sources"]["market"].parent.name == "market_source_bundle"
-        and call["sources"]["taxonomy"].name == "taxonomy.db"
+        and call["sources"]["taxonomy"] == paths.taxonomy_db.resolve()
         for call in validation_calls
     )
     assert len(prepared_source_pairs) == 1
@@ -1368,7 +1383,7 @@ def test_production_report_separates_financial_and_first_public_changes() -> Non
     assert "first_public_result_date repair_required: 0" in report
     assert "MRQ overlay intentionally deferred for a later impact study." in report
     assert "Market mode: `STABLE_SOURCE_BUNDLE`" in report
-    assert "Taxonomy mode: `FULL_SQLITE_BACKUP`" in report
+    assert "Taxonomy mode: `DIRECT_LOCKED_READ`" in report
     assert "Test vs Production: `MATCH`" in report
 
 

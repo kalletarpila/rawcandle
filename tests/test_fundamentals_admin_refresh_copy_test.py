@@ -627,7 +627,7 @@ def test_full_v2_read_only_copy_helper_prepares_market_and_taxonomy(tmp_path: Pa
         assert evidence[role]["cleanup_required"] is True
 
 
-def test_refresh_test_uses_compact_market_bundle_and_full_taxonomy_copy(
+def test_refresh_test_uses_compact_market_bundle_and_direct_locked_taxonomy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     roles = ("provider", "canonical", "analysis", "market", "taxonomy")
@@ -651,9 +651,9 @@ def test_refresh_test_uses_compact_market_bundle_and_full_taxonomy_copy(
         }
 
     taxonomy_binding = TaxonomySourceBinding(
-        mode="FULL_SQLITE_BACKUP", source_path="taxonomy.db", domain="dc_ecosystem",
+        mode="DIRECT_LOCKED_READ", source_path=str(sources[4].resolve()), domain="dc_ecosystem",
         version="DC_V1", semantic_fingerprint="taxonomy-fingerprint", membership_rows=1,
-        lock_path=None, lock_contract_status="FULL_SQLITE_BACKUP_RUNTIME_AUTHORITY",
+        lock_path=str(tmp_path / "taxonomy.lock"), lock_contract_status="AUTHORITATIVE_TAXONOMY_LOCK_HELD",
         runtime_authorized=True, packaged=False,
     )
     manifest = {
@@ -688,25 +688,27 @@ def test_refresh_test_uses_compact_market_bundle_and_full_taxonomy_copy(
 
     validated: list[object] = []
     monkeypatch.setattr(refresh_copy_runtime, "online_backup", fake_backup)
-    monkeypatch.setattr(refresh_copy_runtime, "bind_taxonomy_source", lambda *args, **kwargs: taxonomy_binding)
     monkeypatch.setattr(refresh_copy_runtime, "build_stable_read_only_source_bundle", fake_build)
     monkeypatch.setattr(refresh_copy_runtime, "validate_stable_read_only_source_bundle", validated.append)
 
     paths, evidence = prepare_refresh_test_read_only_sources(
         BatchAddTickerPaths(*sources), lane_dir=canonical_candidate.parent,
         canonical_candidate=canonical_candidate, as_of_date="2026-09-22",
+        taxonomy_binding=taxonomy_binding,
     )
 
-    assert copied_sources == [sources[4]]
+    assert copied_sources == []
     assert paths["market"].name == "market.db"
-    assert paths["taxonomy"].name == "taxonomy.db"
+    assert paths["taxonomy"] == sources[4].resolve()
     assert evidence["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
     assert evidence["market"]["bundle_manifest"] is manifest
     assert evidence["market"]["bundle_manifest"]["market"]["valuation_coverage"]["status_counts"] == {
         "PRICE_FOUND": 1, "NO_MATCHING_VALID_PRICE": 1, "NO_CUTOFF": 1, "NO_TICKER": 0,
     }
-    assert evidence["taxonomy"]["mode"] == "FULL_SQLITE_BACKUP"
+    assert evidence["taxonomy"]["mode"] == "DIRECT_LOCKED_READ"
     assert evidence["taxonomy"]["binding"]["version"] == "DC_V1"
+    assert evidence["taxonomy"]["old_full_copy_bytes_avoided"] == len(b"taxonomy")
+    assert evidence["taxonomy"]["cleanup_required"] is False
     assert evidence["market"]["old_full_copy_bytes_avoided"] == len(b"market")
     assert validated
 
@@ -726,8 +728,6 @@ def test_refresh_test_source_preparation_fails_closed(
     canonical_candidate.write_bytes(b"canonical")
 
     def fake_backup(source: Path, destination: Path) -> dict[str, object]:
-        if failure_point == "taxonomy":
-            raise RuntimeError("taxonomy-copy-failed")
         destination.write_bytes(source.read_bytes())
         return {"source": str(source), "destination": str(destination), "quick_check": "ok", "size": 1}
 
@@ -746,14 +746,16 @@ def test_refresh_test_source_preparation_fails_closed(
         )
 
     monkeypatch.setattr(refresh_copy_runtime, "online_backup", fake_backup)
-    monkeypatch.setattr(
-        refresh_copy_runtime, "bind_taxonomy_source",
-        lambda *args, **kwargs: TaxonomySourceBinding(
-            mode="FULL_SQLITE_BACKUP", source_path="taxonomy.db", domain="dc_ecosystem",
-            version="DC_V1", semantic_fingerprint="fp", membership_rows=1, lock_path=None,
-            lock_contract_status="FULL_SQLITE_BACKUP_RUNTIME_AUTHORITY", runtime_authorized=True,
-            packaged=False,
+    taxonomy_binding = TaxonomySourceBinding(
+        mode="FULL_SQLITE_BACKUP" if failure_point == "taxonomy" else "DIRECT_LOCKED_READ",
+        source_path=str(sources[4].resolve()), domain="dc_ecosystem",
+        version="DC_V1", semantic_fingerprint="fp", membership_rows=1,
+        lock_path=str(tmp_path / "taxonomy.lock"),
+        lock_contract_status=(
+            "FULL_SQLITE_BACKUP_RUNTIME_AUTHORITY"
+            if failure_point == "taxonomy" else "AUTHORITATIVE_TAXONOMY_LOCK_HELD"
         ),
+        runtime_authorized=True, packaged=False,
     )
     monkeypatch.setattr(refresh_copy_runtime, "build_stable_read_only_source_bundle", fake_build)
     monkeypatch.setattr(
@@ -763,7 +765,7 @@ def test_refresh_test_source_preparation_fails_closed(
     )
 
     expected = {
-        "taxonomy": "taxonomy-copy-failed",
+        "taxonomy": "REFRESH_DIRECT_TAXONOMY_BINDING_REQUIRED",
         "bundle": "READ_ONLY_SOURCE_DRIFT",
         "validation": "SOURCE_BUNDLE_INVALID",
     }[failure_point]
@@ -771,6 +773,7 @@ def test_refresh_test_source_preparation_fails_closed(
         prepare_refresh_test_read_only_sources(
             BatchAddTickerPaths(*sources), lane_dir=lane,
             canonical_candidate=canonical_candidate, as_of_date="2026-09-22",
+            taxonomy_binding=taxonomy_binding,
         )
 
 
@@ -783,13 +786,13 @@ def test_refresh_production_uses_same_compact_source_policy_as_test() -> None:
     )
 
 
-def test_refresh_test_downstream_receives_compact_market_and_copied_taxonomy(
+def test_refresh_test_downstream_receives_compact_market_and_live_taxonomy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     provider = tmp_path / "provider_candidate.db"
     canonical = tmp_path / "canonical_candidate.db"
     compact_market = tmp_path / "market_source_bundle" / "market.db"
-    taxonomy_copy = tmp_path / "taxonomy.db"
+    live_taxonomy = tmp_path / "analysis.db"
     captured: dict[str, object] = {}
 
     def fake_downstream(paths: dict[str, Path], **kwargs: object) -> dict[str, object]:
@@ -800,14 +803,14 @@ def test_refresh_test_downstream_receives_compact_market_and_copied_taxonomy(
     result = run_refresh_test_full_v2_downstream(
         provider_candidate=provider,
         canonical_candidate=canonical,
-        read_only_sources={"market": compact_market, "taxonomy": taxonomy_copy},
+        read_only_sources={"market": compact_market, "taxonomy": live_taxonomy},
         lane_dir=tmp_path,
         as_of_date="2026-09-22",
     )
 
     assert result == {"status": "READY"}
     assert captured["paths"]["market"] == compact_market
-    assert captured["paths"]["taxonomy"] == taxonomy_copy
+    assert captured["paths"]["taxonomy"] == live_taxonomy
     assert captured["paths"]["market"] != tmp_path / "osakedata.db"
     assert captured["as_of_date"] == "2026-09-22"
 
@@ -907,7 +910,7 @@ def test_report_contains_explicit_identity_and_publish_date_invariants() -> None
                     },
                 },
                 "taxonomy": {
-                    "mode": "FULL_SQLITE_BACKUP", "copy_sha256": "taxonomy-sha",
+                    "mode": "DIRECT_LOCKED_READ",
                     "binding": {"version": "DC_V1", "semantic_fingerprint": "taxonomy-fp"},
                 },
             },
@@ -917,7 +920,7 @@ def test_report_contains_explicit_identity_and_publish_date_invariants() -> None
     assert "first_public_result_date preservation map applied: 10/10 existing quarters" in report
     assert "Market mode: `STABLE_SOURCE_BUNDLE`" in report
     assert "Coverage: PRICE_FOUND=7, NO_MATCHING_VALID_PRICE=1, NO_CUTOFF=2, NO_TICKER=0" in report
-    assert "Taxonomy mode: `FULL_SQLITE_BACKUP`" in report
+    assert "Taxonomy mode: `DIRECT_LOCKED_READ`" in report
 
 
 def test_report_uses_exact_canonical_deltas_and_renders_retention_validation() -> None:

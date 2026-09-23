@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 import pytest
 
+import rawcandle.datacenter_taxonomy_operation_log as taxonomy_locking
 from rawcandle.fundamentals.admin import refresh_copy_runtime, refresh_production
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
@@ -32,6 +33,7 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     validate_complete_history,
 )
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 from rawcandle.fundamentals.providers.sharadar import AUTH_OK, STATUS_SUCCESS, SharadarResult
 from rawcandle.fundamentals.schema.migrations import (
     CANONICAL_SCHEMA_SQL,
@@ -275,6 +277,11 @@ def _semantic_fingerprint(path: Path) -> str:
 
 
 def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> WorkflowFixture:
+    monkeypatch.setattr(
+        taxonomy_locking,
+        "DEFAULT_TAXONOMY_OPERATION_ROOT",
+        tmp_path / "temp" / "taxonomy-lock-authority",
+    )
     db_root = tmp_path / "databases"
     db_root.mkdir()
     paths = BatchAddTickerPaths(*(db_root / f"{role}.db" for role in ("provider", "canonical", "analysis", "market", "taxonomy")))
@@ -419,6 +426,7 @@ def _assert_terminal_lane_cleanup(fixture: WorkflowFixture) -> None:
         assert not list(fixture.temp_root.rglob("market_source_bundle"))
         assert not list(fixture.temp_root.rglob("taxonomy.db"))
         assert not list(fixture.temp_root.rglob("*_candidate.db"))
+    assert not taxonomy_locking.authoritative_taxonomy_lock_path().exists()
 
 
 def _workflow_payload(result: Any) -> dict[str, Any]:
@@ -429,6 +437,39 @@ def test_refresh_full_workflow_real_production_parity_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture = _fixture(tmp_path, monkeypatch)
+    taxonomy_before = sha256_file(fixture.paths.taxonomy_db)
+    contention_checks: list[str] = []
+    actual_test_downstream = refresh_copy_runtime.run_refresh_test_full_v2_downstream
+    actual_postflight = refresh_production._postflight
+
+    def test_downstream_with_writer_contention(**kwargs: Any) -> dict[str, Any]:
+        with pytest.raises(RuntimeError, match="taxonomy operation lock is active"):
+            with taxonomy_operation_lock_context(
+                deployment_id="fixture_writer",
+                operation_type="ACTIVATE",
+                operation_id="during-test-downstream",
+            ):
+                raise AssertionError("taxonomy writer entered during Refresh Test")
+        contention_checks.append("TEST_DOWNSTREAM")
+        return actual_test_downstream(**kwargs)
+
+    def postflight_with_writer_contention(**kwargs: Any) -> dict[str, Any]:
+        with pytest.raises(RuntimeError, match="taxonomy operation lock is active"):
+            with taxonomy_operation_lock_context(
+                deployment_id="fixture_writer",
+                operation_type="ACTIVATE",
+                operation_id="during-production-postflight",
+            ):
+                raise AssertionError("taxonomy writer entered during Refresh Production postflight")
+        contention_checks.append("PRODUCTION_POSTFLIGHT")
+        return actual_postflight(**kwargs)
+
+    monkeypatch.setattr(
+        refresh_copy_runtime,
+        "run_refresh_test_full_v2_downstream",
+        test_downstream_with_writer_contention,
+    )
+    monkeypatch.setattr(refresh_production, "_postflight", postflight_with_writer_contention)
     started = time.monotonic()
     result = _service(fixture).full_workflow(operation_type="REFRESH_FUNDAMENTALS", raw_inputs="")
     runtime = time.monotonic() - started
@@ -444,7 +485,7 @@ def test_refresh_full_workflow_real_production_parity_success(
     production_contract = comparison["production"]
 
     assert tested["market"]["mode"] == published["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
-    assert tested["taxonomy"]["mode"] == published["taxonomy"]["mode"] == "FULL_SQLITE_BACKUP"
+    assert tested["taxonomy"]["mode"] == published["taxonomy"]["mode"] == "DIRECT_LOCKED_READ"
     assert comparison["status"] == "MATCH"
     assert comparison["test"] == comparison["production"]
     assert comparison["differing_contract_sections"] == []
@@ -474,6 +515,9 @@ def test_refresh_full_workflow_real_production_parity_success(
     assert not any(item.get("source") == str(fixture.paths.market_db) for item in production.get("backups", {}).values())
     assert fixture.client.request_count > 0
     assert fixture.paths.market_db not in fixture.copied_sources
+    assert fixture.paths.taxonomy_db not in fixture.copied_sources
+    assert sha256_file(fixture.paths.taxonomy_db) == taxonomy_before
+    assert contention_checks == ["TEST_DOWNSTREAM", "PRODUCTION_POSTFLIGHT"]
     assert runtime < 30
     _assert_terminal_lane_cleanup(fixture)
 

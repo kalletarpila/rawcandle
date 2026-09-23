@@ -1,8 +1,7 @@
 """Immutable market-source bundle foundation for Fundamentals rebuilds.
 
-The market bundle is active for Refresh Test and Production. Phase 13G.3.30
-authorizes direct taxonomy reads under the authoritative taxonomy operation lock;
-runtime callers remain on the full-copy fallback until a separate migration.
+The market bundle and protected direct taxonomy read are active for Refresh Test
+and Production. Full taxonomy backup remains an explicit fallback mode only.
 """
 
 from __future__ import annotations

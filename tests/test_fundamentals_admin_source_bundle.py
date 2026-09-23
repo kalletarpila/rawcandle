@@ -517,6 +517,28 @@ def test_protected_direct_taxonomy_read_blocks_writer_and_preserves_file(
     assert hashlib.sha256(taxonomy.read_bytes()).hexdigest() == before
 
 
+def test_protected_direct_taxonomy_read_fails_cleanly_when_writer_owns_lock(
+    tmp_path: Path, sources: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical, _, taxonomy = sources
+    monkeypatch.setattr(
+        taxonomy_locking,
+        "DEFAULT_TAXONOMY_OPERATION_ROOT",
+        tmp_path / "temp" / "taxonomy",
+    )
+    with taxonomy_operation_lock_context(
+        deployment_id="writer",
+        operation_type="ACTIVATE",
+        operation_id="active-writer",
+    ):
+        with pytest.raises(RuntimeError, match="taxonomy operation lock is active"):
+            with protected_direct_taxonomy_source(
+                taxonomy, canonical, operation_id="blocked-refresh",
+            ):
+                raise AssertionError("Refresh entered while taxonomy writer was active")
+    assert not taxonomy_locking.authoritative_taxonomy_lock_path().exists()
+
+
 def test_taxonomy_mutation_after_test_changes_direct_semantic_binding(
     tmp_path: Path, sources: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -593,7 +615,7 @@ def test_taxonomy_direct_read_rejects_non_authoritative_lock_root(
 
 
 def test_refresh_test_binding_uses_real_compact_bundle_and_survives_lane_cleanup(
-    tmp_path: Path, sources: tuple[Path, Path, Path]
+    tmp_path: Path, sources: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     canonical, market, taxonomy = sources
     provider = tmp_path / "provider.db"
@@ -603,12 +625,21 @@ def test_refresh_test_binding_uses_real_compact_bundle_and_survives_lane_cleanup
     lane = tmp_path / "refresh-test-lane"
     lane.mkdir()
 
-    paths, evidence = prepare_refresh_test_read_only_sources(
-        BatchAddTickerPaths(provider, canonical, analysis, market, taxonomy),
-        lane_dir=lane,
-        canonical_candidate=canonical,
-        as_of_date=AS_OF,
+    monkeypatch.setattr(
+        taxonomy_locking,
+        "DEFAULT_TAXONOMY_OPERATION_ROOT",
+        tmp_path / "temp" / "taxonomy",
     )
+    with protected_direct_taxonomy_source(
+        taxonomy, canonical, operation_id="refresh-test-binding",
+    ) as taxonomy_binding:
+        paths, evidence = prepare_refresh_test_read_only_sources(
+            BatchAddTickerPaths(provider, canonical, analysis, market, taxonomy),
+            lane_dir=lane,
+            canonical_candidate=canonical,
+            as_of_date=AS_OF,
+            taxonomy_binding=taxonomy_binding,
+        )
 
     assert paths["market"].resolve() != market.resolve()
     assert evidence["market"]["old_full_copy_bytes_avoided"] == market.stat().st_size
@@ -621,13 +652,14 @@ def test_refresh_test_binding_uses_real_compact_bundle_and_survives_lane_cleanup
         "NO_TICKER": 0,
         "NO_CUTOFF": 1,
     }
-    assert evidence["taxonomy"]["mode"] == "FULL_SQLITE_BACKUP"
+    assert evidence["taxonomy"]["mode"] == "DIRECT_LOCKED_READ"
     assert evidence["taxonomy"]["binding"]["version"] == "DC_V1"
-    assert evidence["taxonomy"]["copy_sha256"] == _sha256(paths["taxonomy"])
+    assert paths["taxonomy"] == taxonomy.resolve()
+    assert evidence["taxonomy"]["old_full_copy_bytes_avoided"] == taxonomy.stat().st_size
 
     durable_evidence = evidence
     shutil.rmtree(lane)
     assert not paths["market"].exists()
-    assert not paths["taxonomy"].exists()
+    assert paths["taxonomy"].exists()
     assert durable_evidence["market"]["bundle_manifest"]["market"]["semantic_fingerprint"]
     assert durable_evidence["taxonomy"]["binding"]["semantic_fingerprint"]
