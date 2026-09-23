@@ -200,12 +200,12 @@ def load_canonical_rows(db_path: Path) -> list[dict[str, Any]]:
                    q.quarter_id, q.fiscal_year, q.fiscal_quarter, q.period_end,
                    q.source_availability_date, q.first_public_result_date, {fields}
             FROM company c
-            LEFT JOIN security s ON s.company_id = c.company_id
+            JOIN security s ON s.security_id = (
+                SELECT MIN(s2.security_id) FROM security s2
+                WHERE s2.company_id = c.company_id AND s2.active = 1
+            )
             JOIN v4_quarter q ON q.company_id = c.company_id
             JOIN v4_quarter_financials f ON f.quarter_id = q.quarter_id
-            WHERE s.security_id IS NULL OR s.security_id = (
-                SELECT MIN(s2.security_id) FROM security s2 WHERE s2.company_id = c.company_id
-            )
             ORDER BY c.company_id, q.fiscal_year,
                      CASE q.fiscal_quarter WHEN 'Q1' THEN 1 WHEN 'Q2' THEN 2 WHEN 'Q3' THEN 3 WHEN 'Q4' THEN 4 END
         """)]

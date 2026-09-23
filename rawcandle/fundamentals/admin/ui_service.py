@@ -167,7 +167,7 @@ class AdminHistoryCursor:
 _ADMIN_RUN_ID = re.compile(r"^\d{8}T\d{6}Z_(add_tickers|remove_tickers|refresh_fundamentals|check_update_sector_industry|check_update_taxonomy|synchronize_provider_cik|resolve_ticker_identity)_[A-Za-z0-9_]+$")
 _ADMIN_MODES = {
     "ADD_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
-    "REMOVE_TICKERS": {"PREVIEW"},
+    "REMOVE_TICKERS": {"PREVIEW", "COPY_ONLY_APPLY"},
     "REFRESH_FUNDAMENTALS": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL", "FULL_WORKFLOW"},
     "CHECK_UPDATE_SECTOR_INDUSTRY": {"PREVIEW", "COPY_ONLY_APPLY", "PRODUCTION_NO_CHANGE_APPLY", "READ_ONLY_AUDIT", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
     "CHECK_UPDATE_TAXONOMY": {"CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "COPY_ONLY_APPLY", "PROTECTED_PRODUCTION_PREVIEW", "PROTECTED_PRODUCTION_NO_CHANGE_VERIFY", "ACTIVE_TAXONOMY_PREVIEW", "PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"},
@@ -186,6 +186,7 @@ class FundamentalsAdminUIService:
         add_apply: Callable[..., dict[str, Any]] | None = None,
         add_production_apply: Callable[..., dict[str, Any]] | None = None,
         remove_preview: Callable[..., dict[str, Any]] | None = None,
+        remove_apply: Callable[..., dict[str, Any]] | None = None,
         refresh_preview: Callable[..., dict[str, Any]] | None = None,
         refresh_apply: Callable[..., dict[str, Any]] | None = None,
         refresh_production_apply: Callable[..., dict[str, Any]] | None = None,
@@ -212,6 +213,7 @@ class FundamentalsAdminUIService:
         self._add_apply = add_apply or _admin_callable("batch_add_tickers", "run_apply")
         self._add_production_apply = add_production_apply or _admin_callable("batch_add_tickers", "run_production_apply")
         self._remove_preview = remove_preview or _admin_callable("remove_tickers", "run_preview")
+        self._remove_apply = remove_apply or _admin_callable("remove_tickers", "run_test")
         self._refresh_preview = refresh_preview or _admin_callable("refresh_fundamentals", "run_preview")
         self._refresh_apply = refresh_apply or _admin_callable("refresh_copy_runtime", "run_apply")
         self._refresh_production_apply = refresh_production_apply or _admin_callable("refresh_production", "run_production_apply")
@@ -289,7 +291,7 @@ class FundamentalsAdminUIService:
     def capabilities(self) -> tuple[AdminOperationCapability, ...]:
         return (
             AdminOperationCapability("ADD_TICKERS", True, True, True),
-            AdminOperationCapability("REMOVE_TICKERS", True, False, False),
+            AdminOperationCapability("REMOVE_TICKERS", True, True, False),
             AdminOperationCapability(
                 "REFRESH_FUNDAMENTALS", True, True, True,
                 "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS",
@@ -412,6 +414,13 @@ class FundamentalsAdminUIService:
                 preview_fingerprint=preview_fingerprint,
                 run_root=self.run_root,
                 confirm_apply=True,
+                progress_callback=progress_callback,
+            )
+        elif operation == "REMOVE_TICKERS":
+            result = self._remove_apply(
+                preview_payload_path=payload_path,
+                preview_fingerprint=preview_fingerprint,
+                run_root=self.run_root,
                 progress_callback=progress_callback,
             )
         elif operation == "REFRESH_FUNDAMENTALS":
@@ -942,7 +951,20 @@ class FundamentalsAdminUIService:
             summary_rows=report.summary_rows if report else (),
             business_outcome=taxonomy["business_outcome"] if taxonomy else None,
             preview_domain=taxonomy["domain"] if taxonomy else None,
-            copy_actionable=True if result.get("mode") == "ACTIVE_TAXONOMY_PREVIEW" else (bool(taxonomy["changes"] and taxonomy["eligible"] and not taxonomy["blockers"] and taxonomy["candidate"] and result.get("mode") == "CANDIDATE_PREVIEW" and taxonomy["business_outcome"] == "CHANGES_AVAILABLE") if taxonomy else None),
+            copy_actionable=(
+                all(
+                    str(item.get("classification")) in {
+                        "REMOVABLE_ACTIVE_SECURITY",
+                        "SHARED_COMPANY_PRESERVE_COMPANY",
+                        "ALREADY_ABSENT",
+                    }
+                    for item in (result.get("removal_plan") or ())
+                    if isinstance(item, Mapping)
+                ) and bool(result.get("removal_plan"))
+                if result.get("operation_type") == "REMOVE_TICKERS" and result.get("mode") == "PREVIEW"
+                else True if result.get("mode") == "ACTIVE_TAXONOMY_PREVIEW"
+                else (bool(taxonomy["changes"] and taxonomy["eligible"] and not taxonomy["blockers"] and taxonomy["candidate"] and result.get("mode") == "CANDIDATE_PREVIEW" and taxonomy["business_outcome"] == "CHANGES_AVAILABLE") if taxonomy else None)
+            ),
             production_actionable=result.get("mode") == "ACTIVE_TAXONOMY_PREVIEW" if result.get("operation_type") == "CHECK_UPDATE_TAXONOMY" else None,
             duration_seconds=self._duration_seconds(result),
             failure_stage=str(result.get("failed_stage")) if result.get("failed_stage") else None,

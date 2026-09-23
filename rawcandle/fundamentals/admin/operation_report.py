@@ -100,6 +100,14 @@ def final_status_message(result: Mapping[str, Any]) -> str:
             return "CRITICAL: Production update failed and rollback did not complete. Immediate operator review is required."
         return "Production update failed before any production database changes were made."
     if stage == "Test on copies":
+        if result.get("operation_type") == "REMOVE_TICKERS":
+            return {
+                "COMPLETED": "Remove Tickers tested successfully on copies.",
+                "NO_CHANGE": "The requested ticker is already absent; no candidate changes were needed.",
+                "STALE_PREVIEW": "The Remove Tickers Preview is stale. Run Preview again.",
+                "REVIEW_REQUIRED": "Remove Tickers requires identity review before Test on copies.",
+                "BLOCKED": "Remove Tickers Test is blocked by the current identity or universe state.",
+            }.get(outcome, "Remove Tickers Test on copies failed.")
         return "Test on copies completed successfully." if outcome == "COMPLETED" else "Test on copies failed."
     if stage == "Preview":
         if outcome in {"COMPLETED", "NO_CHANGE"}:
@@ -364,12 +372,17 @@ def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, An
 
         rows.extend(summary_rows(ticker_reporting))
     elif result.get("operation_type") == "REMOVE_TICKERS":
-        for item in _sequence(result.get("removal_plan")):
+        for item in _sequence(result.get("removal_plan")) or _sequence(result.get("ticker_results")):
             if not isinstance(item, Mapping):
                 continue
+            eligibility = (
+                f"eligible={bool(item.get('removal_eligible'))}"
+                if "removal_eligible" in item
+                else "candidate tested"
+            )
             rows.append(
-                f"{item.get('requested_ticker')}: {item.get('classification')}; "
-                f"eligible={bool(item.get('removal_eligible'))}; "
+                f"{item.get('requested_ticker') or item.get('ticker')}: {item.get('classification')}; "
+                f"{eligibility}; "
                 f"company/security={item.get('company_id')}/{item.get('security_id')}."
             )
     elif result.get("operation_type") == "RESOLVE_TICKER_IDENTITY":
@@ -590,10 +603,14 @@ def render_operation_report(
         from rawcandle.fundamentals.admin.ticker_reporting import analysis_reporting_counts
 
         analysis_counts = analysis_reporting_counts(ticker_reporting)
-        if failed:
+        if failed and result.get("operation_type") == "REMOVE_TICKERS":
+            next_step = "Resolve the recorded outcome and run a new Preview if required. Production remains unavailable."
+        elif failed:
             next_step = "Next step: resolve the Test on copies failure before Production update."
         elif analysis_counts["reporting_integrity_errors"]:
             next_step = "Reporting integrity requires attention. Manual Production update remains backend-authorized by the successful Test, but automatic workflow progression is stopped."
+        elif result.get("operation_type") == "REMOVE_TICKERS":
+            next_step = "Production update is not available for Remove Tickers in this phase."
         else:
             next_step = "Next step: Production update is available."
         actions = ["The proposed change was tested on isolated database copies.", "No production database writes were performed.", next_step]

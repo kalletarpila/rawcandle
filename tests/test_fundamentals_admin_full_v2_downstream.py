@@ -42,6 +42,33 @@ def test_shared_downstream_rejects_production_source(tmp_path):
         full_v2_downstream.run_full_v2_downstream(paths, output=tmp_path / "output", as_of_date="2026-09-18")
 
 
+def test_shared_downstream_allows_direct_taxonomy_only_while_authoritative_lock_is_held(
+    tmp_path, monkeypatch,
+):
+    paths = _paths(tmp_path).as_dict()
+    paths["taxonomy"] = full_v2_downstream.PRODUCTION["taxonomy"]
+    calls = []
+
+    monkeypatch.setattr(full_v2_downstream, "taxonomy_lock_held_in_process", lambda: True)
+    monkeypatch.setattr(
+        full_v2_downstream,
+        "rebuild_v2_analysis",
+        lambda target, sources, **kwargs: calls.append((target, sources, kwargs)) or {
+            "status": "READY", "package": {},
+            "validation": {"rp_snapshot_id": "rp-v2"}, "rv": {},
+            "fingerprints": {}, "taxonomy_dependency": {},
+        },
+    )
+
+    result = full_v2_downstream.run_full_v2_downstream(
+        paths, output=tmp_path / "output", as_of_date="2026-09-18",
+    )
+
+    assert result["status"] == "READY"
+    assert len(calls) == 1
+    assert calls[0][1]["taxonomy"] == full_v2_downstream.PRODUCTION["taxonomy"]
+
+
 def test_shared_downstream_rejects_production_data_output(tmp_path):
     with pytest.raises(PermissionError, match="OUTPUT_MUST_BE_DISPOSABLE"):
         full_v2_downstream.run_full_v2_downstream(

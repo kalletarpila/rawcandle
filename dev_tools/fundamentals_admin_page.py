@@ -359,7 +359,8 @@ def build_fundamentals_admin_page(
         if operation == "REMOVE_TICKERS":
             return (
                 "Plan removal of up to 25 current securities from the active Fundamentals universe. "
-                "Preview preserves permanent identity and history; Test and Production are not available yet."
+                "Preview preserves permanent identity and history; Test on copies validates the removal and full rebuild. "
+                "Production is not available yet."
             )
         return (
             "Enter 1 to 25 tickers. Commas, spaces, newlines and duplicates are accepted. "
@@ -908,6 +909,12 @@ def build_fundamentals_admin_page(
                 else current_preview_result.outcome != "NO_CHANGE"
             )
         )
+        if operation == "REMOVE_TICKERS":
+            generic_preview_ok = bool(
+                generic_preview_ok
+                and current_preview_result
+                and current_preview_result.copy_actionable is True
+            )
         copy_available = bool(preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.copy_actionable is True)))
         copy_ready = bool(copy_available and not current_test_run_id)
         production_ready = bool(current_test_run_id and preview_ready and ((generic_preview_ok and not taxonomy) or (taxonomy and taxonomy_preview_ok and current_preview_result.production_actionable is True)))

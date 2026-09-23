@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Mapping
 
+from rawcandle.datacenter_taxonomy_operation_log import taxonomy_lock_held_in_process
 from rawcandle.fundamentals.operating_income_v2.full_rebuild import rebuild_v2_analysis
 from rawcandle.fundamentals.phase12d import PRODUCTION
 
@@ -19,7 +20,12 @@ def run_full_v2_downstream(
     sources = {role: Path(paths[role]) for role in ("provider", "canonical", "market", "taxonomy")}
     protected_sources = {path.resolve() for path in PRODUCTION.values()}
     for role, path in sources.items():
-        if path.resolve() in protected_sources:
+        direct_locked_taxonomy = (
+            role == "taxonomy"
+            and path.resolve() == PRODUCTION["taxonomy"].resolve()
+            and taxonomy_lock_held_in_process()
+        )
+        if path.resolve() in protected_sources and not direct_locked_taxonomy:
             raise PermissionError(f"ADMIN_FULL_V2_COPY_SOURCE_REQUIRED:{role}")
     output = Path(output)
     if output.is_symlink() or output.resolve().is_relative_to(PRODUCTION["analysis"].parent.resolve()):
