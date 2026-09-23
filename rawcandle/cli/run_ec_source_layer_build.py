@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from rawcandle.cli.plan_ec_source_layer_build import plan_ec_source_layer_build
+from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_ec_sidecar
 from rawcandle.ec_datacenter_watchlist_loader import load_datacenter_watchlist_to_ec_sidecar
 from rawcandle.ec_dc_coverage_audit import audit_dc_facts_against_ec_sidecar
@@ -446,19 +447,24 @@ def render_build_text(summary: dict[str, object]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    summary = run_ec_source_layer_build(
-        db_path=args.db,
-        ecosystem_code=args.ecosystem,
-        taxonomy_version_code=args.taxonomy_version,
-        taxonomy_csv_path=args.taxonomy_csv,
-        watchlist_path=args.watchlist,
-        backup_dir=args.backup_dir,
-        confirm_db=args.confirm_db,
-        confirm_ecosystem=args.confirm_ecosystem,
-        confirm_taxonomy_version=args.confirm_taxonomy_version,
-        signal_date=args.signal_date,
-        replace_existing=args.replace_existing,
-    )
+    with taxonomy_operation_lock_context(
+        deployment_id=args.taxonomy_version,
+        operation_type="EC_SOURCE_LAYER_BUILD",
+        operation_id=f"source-layer-{args.taxonomy_version}",
+    ):
+        summary = run_ec_source_layer_build(
+            db_path=args.db,
+            ecosystem_code=args.ecosystem,
+            taxonomy_version_code=args.taxonomy_version,
+            taxonomy_csv_path=args.taxonomy_csv,
+            watchlist_path=args.watchlist,
+            backup_dir=args.backup_dir,
+            confirm_db=args.confirm_db,
+            confirm_ecosystem=args.confirm_ecosystem,
+            confirm_taxonomy_version=args.confirm_taxonomy_version,
+            signal_date=args.signal_date,
+            replace_existing=args.replace_existing,
+        )
     sys.stdout.write(render_build_text(summary) + "\n")
     return 0 if summary.get("status") == "BUILD_COMPLETED" else 1
 

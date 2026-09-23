@@ -36,7 +36,6 @@ def main(argv: list[str] | None = None) -> int:
         deployment_id=args.deployment_id,
         operation_type=operation_type,
         operation_id=operation.operation_id,
-        evidence_root=args.evidence_root,
     ):
         runner = resume_taxonomy_rebuild if args.resume else execute_taxonomy_rebuild
         summary = runner(

@@ -7,6 +7,7 @@ import shutil
 import uuid
 import zipfile
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ LOCK_FILE_NAME = "taxonomy_operation.lock"
 MAX_EVIDENCE_PACKAGE_BYTES = 50 * 1024 * 1024
 EXCLUDED_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".wal", ".shm"}
 EXCLUDED_NAME_PARTS = {"backup", "scheduler_config"}
+_TAXONOMY_LOCK_DEPTH: ContextVar[int] = ContextVar("taxonomy_lock_depth", default=0)
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,14 @@ def _deployment_dir(deployment_id: str | int, *, root: str | Path | None = None)
 
 def _lock_path(*, evidence_root: str | Path | None = None) -> Path:
     return _approved_root(evidence_root) / LOCK_FILE_NAME
+
+
+def authoritative_taxonomy_lock_path() -> Path:
+    return _lock_path()
+
+
+def taxonomy_lock_held_in_process() -> bool:
+    return _TAXONOMY_LOCK_DEPTH.get() > 0
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -204,10 +214,14 @@ def taxonomy_operation_lock_context(
         operation_id=operation_id,
         evidence_root=evidence_root,
     )
+    depth_token = _TAXONOMY_LOCK_DEPTH.set(_TAXONOMY_LOCK_DEPTH.get() + 1)
     try:
         yield lock
     finally:
-        release_taxonomy_operation_lock(lock)
+        try:
+            release_taxonomy_operation_lock(lock)
+        finally:
+            _TAXONOMY_LOCK_DEPTH.reset(depth_token)
 
 
 def _resolve_under_root(path: str | Path, root: Path) -> Path:

@@ -1358,7 +1358,7 @@ def run_app(
         thread = getattr(page, "taxonomy_job_thread", None)
         if thread is not None and thread.is_alive():
             return True
-        lock = inspect_taxonomy_operation_lock(evidence_root=_TAXONOMY_EVIDENCE_ROOT)
+        lock = inspect_taxonomy_operation_lock()
         return bool(lock.get("lock_active") and not lock.get("stale"))
 
     def _taxonomy_services(*, resume: bool = False) -> Any:
@@ -1625,7 +1625,6 @@ def run_app(
                     deployment_id=summary["deployment_id"],
                     operation_type="REBUILD",
                     operation_id=operation.operation_id,
-                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
                 ):
                     run_summary = execute_taxonomy_rebuild(
                         analysis_db=analysis_db_field.value,
@@ -1677,7 +1676,6 @@ def run_app(
                     deployment_id=deployment_id,
                     operation_type="RESUME",
                     operation_id=operation.operation_id,
-                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
                 ):
                     run_summary = resume_taxonomy_rebuild(
                         analysis_db=analysis_db_field.value,
@@ -1754,7 +1752,6 @@ def run_app(
                     deployment_id=deployment_id,
                     operation_type="VALIDATE_FINALIZE",
                     operation_id=operation.operation_id,
-                    evidence_root=_TAXONOMY_EVIDENCE_ROOT,
                 ):
                     finalize_summary = validate_and_finalize_taxonomy_rebuild(
                         analysis_db=analysis_db_field.value,
@@ -1855,29 +1852,34 @@ def run_app(
                 if action["activate_disabled"]:
                     taxonomy_status_field.value = "Activation blocked: guarded activation plan is not safe."
                 else:
-                    activation_summary = activate_taxonomy_change(
-                        analysis_db=analysis_db_field.value,
-                        ecosystem_code=DATACENTER_ECOSYSTEM_CODE,
-                        deployment_id=int(summary["deployment_id"]),
-                        current_taxonomy_version=str(plan["current_taxonomy_version"]),
-                        current_taxonomy_csv=str(plan["current_source_reference"]),
-                        proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
-                        proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
-                        required_signal_date=str(plan["date_to"]),
-                        confirm_activate_taxonomy_version=str(plan["proposed_taxonomy_version"]),
-                        expected_scheduler_taxonomy_version=str(plan["proposed_taxonomy_version"]),
-                        expected_scheduler_taxonomy_csv=taxonomy_proposed_csv_field.value,
-                        scheduler_config_path=config_path,
-                        expected_current_scheduler_taxonomy_version=str(plan["current_taxonomy_version"]),
-                        expected_current_scheduler_taxonomy_csv=str(plan["current_source_reference"]),
-                        target_scheduler_taxonomy_csv=taxonomy_proposed_csv_field.value,
-                        config_backup_dir=Path(_TAXONOMY_EVIDENCE_ROOT) / "activation_config_backups",
-                    )
                     operation = create_taxonomy_change_operation(
                         deployment_id=summary["deployment_id"],
                         operation_type="ACTIVATE",
                         evidence_root=_TAXONOMY_EVIDENCE_ROOT,
                     )
+                    with taxonomy_operation_lock_context(
+                        deployment_id=summary["deployment_id"],
+                        operation_type="ACTIVATE",
+                        operation_id=operation.operation_id,
+                    ):
+                        activation_summary = activate_taxonomy_change(
+                            analysis_db=analysis_db_field.value,
+                            ecosystem_code=DATACENTER_ECOSYSTEM_CODE,
+                            deployment_id=int(summary["deployment_id"]),
+                            current_taxonomy_version=str(plan["current_taxonomy_version"]),
+                            current_taxonomy_csv=str(plan["current_source_reference"]),
+                            proposed_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                            proposed_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                            required_signal_date=str(plan["date_to"]),
+                            confirm_activate_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                            expected_scheduler_taxonomy_version=str(plan["proposed_taxonomy_version"]),
+                            expected_scheduler_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                            scheduler_config_path=config_path,
+                            expected_current_scheduler_taxonomy_version=str(plan["current_taxonomy_version"]),
+                            expected_current_scheduler_taxonomy_csv=str(plan["current_source_reference"]),
+                            target_scheduler_taxonomy_csv=taxonomy_proposed_csv_field.value,
+                            config_backup_dir=Path(_TAXONOMY_EVIDENCE_ROOT) / "activation_config_backups",
+                        )
                     write_taxonomy_operation_artifact(
                         operation,
                         relative_name="activation_result.json",

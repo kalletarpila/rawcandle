@@ -408,6 +408,10 @@ def read_scheduler_status(log_dir: str) -> Optional[dict]:
 
 
 def acquire_scheduler_lock(log_dir: str) -> IO[str]:
+    from rawcandle.datacenter_taxonomy_operation_log import taxonomy_lock_held_in_process
+
+    if taxonomy_lock_held_in_process():
+        raise RuntimeError("LOCK_ORDER_VIOLATION:TAXONOMY_BEFORE_SCHEDULER")
     log_dir_path = Path(log_dir)
     log_dir_path.mkdir(parents=True, exist_ok=True)
     lock_path = Path(scheduler_lock_path(log_dir))

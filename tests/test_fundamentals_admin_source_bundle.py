@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from rawcandle import datacenter_taxonomy_operation_log as taxonomy_locking
 from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.refresh_copy_runtime import prepare_refresh_test_read_only_sources
@@ -21,6 +22,7 @@ from rawcandle.fundamentals.admin.source_bundle import (
     TaxonomySourceMode,
     bind_taxonomy_source,
     build_stable_read_only_source_bundle,
+    protected_direct_taxonomy_source,
     validate_stable_read_only_source_bundle,
 )
 from rawcandle.fundamentals.operating_income_v2.canonical_valuation_source import (
@@ -455,17 +457,21 @@ def test_missing_schema_and_missing_bundle_coverage_fail_closed(tmp_path: Path) 
         validate_stable_read_only_source_bundle(bundle)
 
 
-def test_wal_taxonomy_direct_read_is_bound_but_not_runtime_authorized(
-    tmp_path: Path, sources: tuple[Path, Path, Path]
+def test_wal_taxonomy_direct_read_is_bound_and_runtime_authorized(
+    tmp_path: Path, sources: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     canonical, _, taxonomy = sources
+    monkeypatch.setattr(
+        taxonomy_locking,
+        "DEFAULT_TAXONOMY_OPERATION_ROOT",
+        tmp_path / "temp" / "taxonomy",
+    )
     fallback_copy = _copy_sqlite(taxonomy, tmp_path / "taxonomy-copy.db")
     fallback = bind_taxonomy_source(fallback_copy, canonical)
     with taxonomy_operation_lock_context(
         deployment_id="fixture",
         operation_type="SOURCE_BUNDLE_PROOF",
         operation_id="fixture-op",
-        evidence_root=tmp_path / "temp" / "taxonomy",
     ) as lock:
         direct = bind_taxonomy_source(
             taxonomy,
@@ -477,14 +483,82 @@ def test_wal_taxonomy_direct_read_is_bound_but_not_runtime_authorized(
     assert direct.version == fallback.version == "DC_V1"
     assert direct.membership_rows == fallback.membership_rows == 1
     assert direct.packaged is False
-    assert direct.runtime_authorized is False
-    assert direct.lock_contract_status == "LOCK_HELD_BUT_ALL_WRITER_COVERAGE_UNPROVEN"
+    assert direct.runtime_authorized is True
+    assert direct.lock_contract_status == "AUTHORITATIVE_TAXONOMY_LOCK_HELD"
     with sqlite3.connect(taxonomy) as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     direct_memberships, direct_dependency = load_active_dc_memberships(taxonomy, canonical)
     copy_memberships, copy_dependency = load_active_dc_memberships(fallback_copy, canonical)
     assert direct_memberships == copy_memberships
     assert direct_dependency == copy_dependency
+
+
+def test_protected_direct_taxonomy_read_blocks_writer_and_preserves_file(
+    tmp_path: Path, sources: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical, _, taxonomy = sources
+    lock_root = tmp_path / "temp" / "taxonomy"
+    monkeypatch.setattr(taxonomy_locking, "DEFAULT_TAXONOMY_OPERATION_ROOT", lock_root)
+    before = hashlib.sha256(taxonomy.read_bytes()).hexdigest()
+
+    with protected_direct_taxonomy_source(taxonomy, canonical, operation_id="read-1") as binding:
+        with pytest.raises(RuntimeError, match="taxonomy operation lock is active"):
+            with taxonomy_operation_lock_context(
+                deployment_id="writer",
+                operation_type="ACTIVATE",
+                operation_id="writer-1",
+            ):
+                raise AssertionError("conflicting writer entered protected read")
+        _, dependency = load_active_dc_memberships(taxonomy, canonical)
+        assert dependency["semantic_fingerprint"] == binding.semantic_fingerprint
+        assert dependency["version"] == binding.version
+
+    assert not taxonomy_locking.authoritative_taxonomy_lock_path().exists()
+    assert hashlib.sha256(taxonomy.read_bytes()).hexdigest() == before
+
+
+def test_taxonomy_mutation_after_test_changes_direct_semantic_binding(
+    tmp_path: Path, sources: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical, _, taxonomy = sources
+    monkeypatch.setattr(
+        taxonomy_locking,
+        "DEFAULT_TAXONOMY_OPERATION_ROOT",
+        tmp_path / "temp" / "taxonomy",
+    )
+    with protected_direct_taxonomy_source(taxonomy, canonical, operation_id="test") as tested:
+        tested_contract = (tested.version, tested.semantic_fingerprint, tested.membership_rows)
+
+    with taxonomy_operation_lock_context(
+        deployment_id="writer",
+        operation_type="ACTIVATE",
+        operation_id="writer-2",
+    ):
+        with sqlite3.connect(taxonomy) as connection:
+            connection.execute(
+                "UPDATE ec_taxonomy_version SET taxonomy_version_code='DC_V2',source_hash='changed' "
+                "WHERE is_active=1"
+            )
+
+    with protected_direct_taxonomy_source(taxonomy, canonical, operation_id="production") as current:
+        current_contract = (current.version, current.semantic_fingerprint, current.membership_rows)
+
+    assert current_contract != tested_contract
+
+
+def test_protected_direct_taxonomy_read_releases_lock_after_exception(
+    tmp_path: Path, sources: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canonical, _, taxonomy = sources
+    monkeypatch.setattr(
+        taxonomy_locking,
+        "DEFAULT_TAXONOMY_OPERATION_ROOT",
+        tmp_path / "temp" / "taxonomy",
+    )
+    with pytest.raises(RuntimeError, match="injected"):
+        with protected_direct_taxonomy_source(taxonomy, canonical, operation_id="failing-read"):
+            raise RuntimeError("injected")
+    assert not taxonomy_locking.authoritative_taxonomy_lock_path().exists()
 
 
 def test_taxonomy_direct_read_requires_authoritative_lock(
@@ -497,6 +571,25 @@ def test_taxonomy_direct_read_requires_authoritative_lock(
             canonical,
             mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
         )
+
+
+def test_taxonomy_direct_read_rejects_non_authoritative_lock_root(
+    tmp_path: Path, sources: tuple[Path, Path, Path]
+) -> None:
+    canonical, _, taxonomy = sources
+    with taxonomy_operation_lock_context(
+        deployment_id="fixture",
+        operation_type="SOURCE_BUNDLE_PROOF",
+        operation_id="wrong-root",
+        evidence_root=tmp_path / "temp" / "non-authoritative",
+    ) as lock:
+        with pytest.raises(SourceBundleError, match="TAXONOMY_AUTHORITATIVE_LOCK_PATH_MISMATCH"):
+            bind_taxonomy_source(
+                taxonomy,
+                canonical,
+                mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
+                operation_lock=lock,
+            )
 
 
 def test_refresh_test_binding_uses_real_compact_bundle_and_survives_lane_cleanup(

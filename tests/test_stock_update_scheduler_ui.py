@@ -49,6 +49,8 @@ from dev_tools.stock_update_scheduler_ui import (
     top_level_route_index,
     update_systemd_timer_on_calendar,
 )
+from rawcandle import datacenter_taxonomy_operation_log as taxonomy_locking
+from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 from rawcandle.datacenter_taxonomy_replacement import ensure_taxonomy_replacement_schema
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
@@ -1453,6 +1455,11 @@ def test_taxonomy_ui_rebuild_uses_production_services_and_operation_lock(tmp_pat
     _write_taxonomy_ui_config(config_path, db_path=db_path, current_csv=current_csv)
     monkeypatch.setattr("dev_tools.stock_update_scheduler_ui._TAXONOMY_EVIDENCE_ROOT", str(evidence_root))
     monkeypatch.setattr(
+        taxonomy_locking,
+        "DEFAULT_TAXONOMY_OPERATION_ROOT",
+        tmp_path / "temp" / "authoritative_taxonomy_lock",
+    )
+    monkeypatch.setattr(
         "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
         lambda: {
             "installed": False,
@@ -1491,12 +1498,22 @@ def test_taxonomy_ui_rebuild_uses_production_services_and_operation_lock(tmp_pat
     page.taxonomy_confirmation_state["prepared_plan_key"] = taxonomy_confirmation_key(plan)
     page.taxonomy_confirmation_state["plan_key"] = taxonomy_confirmation_key(plan)
 
+    with taxonomy_operation_lock_context(
+        deployment_id="FUNDAMENTALS",
+        operation_type="DIRECT_LOCKED_READ",
+        operation_id="protected-read",
+    ):
+        page.taxonomy_run_rebuild_button.on_click(None)
+        assert captured == {}
+        assert "taxonomy operation lock is active" in page.taxonomy_status_field.value
+
     page.taxonomy_run_rebuild_button.on_click(None)
 
     assert captured["services"] is service_sentinel
     operations = page.taxonomy_operations_column.controls
     assert any("REBUILD" in row.value and "status=OK" in row.value for row in operations)
     assert not (evidence_root / "taxonomy_operation.lock").exists()
+    assert not taxonomy_locking.authoritative_taxonomy_lock_path().exists()
 
 
 def test_taxonomy_refresh_enables_resume_and_validate_actions(tmp_path, monkeypatch):

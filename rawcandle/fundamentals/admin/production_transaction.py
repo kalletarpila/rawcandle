@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
+from rawcandle.datacenter_taxonomy_operation_log import taxonomy_lock_held_in_process
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, database_inventory, online_backup
 from rawcandle.fundamentals.admin.contracts import AdminOperationType, RunStage, utc_now
@@ -108,6 +109,8 @@ def _fsync_file(path: Path) -> None:
 @contextmanager
 def production_lock(*, lock_path: Path = ADMIN_LOCK, scheduler_log_dir: str | None = None) -> Iterator[dict[str, Any]]:
     """Kernel locks, never deleted; stale owner text has no locking authority."""
+    if taxonomy_lock_held_in_process():
+        raise RuntimeError("LOCK_ORDER_VIOLATION:TAXONOMY_BEFORE_ADMIN_PRODUCTION")
     if scheduler_log_dir is None:
         scheduler_log_dir = read_scheduler_config(str(ROOT / "scheduler_config.json")).log_dir
     lock_path.parent.mkdir(parents=True, exist_ok=True)

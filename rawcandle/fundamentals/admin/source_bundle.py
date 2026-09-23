@@ -1,8 +1,8 @@
 """Immutable market-source bundle foundation for Fundamentals rebuilds.
 
-Phase 13G.3.25 deliberately does not route runtime callers through this module.
-Taxonomy remains an external source-policy binding until its writer lock is proven
-to cover every authoritative mutation path.
+The market bundle is active for Refresh Test and Production. Phase 13G.3.30
+authorizes direct taxonomy reads under the authoritative taxonomy operation lock;
+runtime callers remain on the full-copy fallback until a separate migration.
 """
 
 from __future__ import annotations
@@ -21,7 +21,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
-from rawcandle.datacenter_taxonomy_operation_log import TaxonomyOperationLock
+from rawcandle.datacenter_taxonomy_operation_log import (
+    TaxonomyOperationLock,
+    authoritative_taxonomy_lock_path,
+    taxonomy_operation_lock_context,
+)
 from rawcandle.fundamentals.operating_income_v2.taxonomy_source import (
     load_active_dc_memberships,
 )
@@ -30,6 +34,7 @@ from rawcandle.fundamentals.operating_income_v2.taxonomy_source import (
 SOURCE_CONTRACT_VERSION = "FUNDAMENTALS_READ_ONLY_SOURCE_V1"
 MARKET_BUNDLE_SCHEMA_VERSION = 1
 TTM_MODEL_VERSION = "V4_TTM_EBIT_FIRST_V1"
+DIRECT_LOCKED_TAXONOMY_READ_RUNTIME_AUTHORIZED = True
 
 
 class ReadOnlySourceMode(str, Enum):
@@ -603,6 +608,8 @@ def bind_taxonomy_source(
             raise SourceBundleError("TAXONOMY_AUTHORITATIVE_LOCK_REQUIRED")
         lock_path = operation_lock.lock_path
         path = Path(lock_path)
+        if path.resolve() != authoritative_taxonomy_lock_path().resolve():
+            raise SourceBundleError("TAXONOMY_AUTHORITATIVE_LOCK_PATH_MISMATCH")
         if not path.is_file():
             raise SourceBundleError("TAXONOMY_AUTHORITATIVE_LOCK_NOT_ACTIVE")
         try:
@@ -621,12 +628,36 @@ def bind_taxonomy_source(
         membership_rows=int(dependency["membership_rows"]),
         lock_path=lock_path,
         lock_contract_status=(
-            "LOCK_HELD_BUT_ALL_WRITER_COVERAGE_UNPROVEN"
+            "AUTHORITATIVE_TAXONOMY_LOCK_HELD"
             if mode is TaxonomySourceMode.DIRECT_LOCKED_READ
             else "FULL_SQLITE_BACKUP_RUNTIME_AUTHORITY"
         ),
-        runtime_authorized=mode is TaxonomySourceMode.FULL_SQLITE_BACKUP,
+        runtime_authorized=(
+            DIRECT_LOCKED_TAXONOMY_READ_RUNTIME_AUTHORIZED
+            if mode is TaxonomySourceMode.DIRECT_LOCKED_READ
+            else True
+        ),
     )
+
+
+@contextmanager
+def protected_direct_taxonomy_source(
+    taxonomy_db: Path,
+    canonical_db: Path,
+    *,
+    operation_id: str,
+) -> Iterator[TaxonomySourceBinding]:
+    with taxonomy_operation_lock_context(
+        deployment_id="FUNDAMENTALS",
+        operation_type="DIRECT_LOCKED_READ",
+        operation_id=operation_id,
+    ) as lock:
+        yield bind_taxonomy_source(
+            taxonomy_db,
+            canonical_db,
+            mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
+            operation_lock=lock,
+        )
 
 
 def build_stable_read_only_source_bundle(
