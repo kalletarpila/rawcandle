@@ -431,3 +431,90 @@ def test_refresh_uses_existing_scheduler_summary_json_contract(tmp_path: Path) -
     assert payload["fundamentals_refresh_pending_changes"] is True
     assert payload["fundamentals_refresh_review_required"] is False
     assert not list(tmp_path.glob("*fundamentals*summary*.json"))
+
+def test_refresh_review_report_promotes_multiple_items_and_appends_preview(tmp_path: Path) -> None:
+    changes = [
+        {
+            "ticker": "FLWS",
+            "classification": "REVIEW_REQUIRED",
+            "review_reason": "AMBIGUOUS_SOURCE_REMOVAL",
+            "added_count": 0,
+            "changed_count": 1,
+            "removed_count": 1,
+            "source_history_action": {
+                "label": "REVIEW_REQUIRED",
+                "ambiguous_removals": 1,
+            },
+            "source_history_events": [
+                {"classification_reason": "COMPANION_DIMENSION_CONTRADICTION"},
+            ],
+        },
+        {
+            "ticker": "LOVE",
+            "classification": "REVIEW_REQUIRED",
+            "review_reason": "COMPLETE_HISTORY_NOT_TRUSTED",
+            "added_count": 0,
+            "changed_count": 0,
+            "removed_count": 0,
+        },
+    ]
+    result = run_refresh_full_workflow(
+        run_root=tmp_path,
+        preview_stage=lambda _callback: _stage(
+            tmp_path, "preview-run", mode="PREVIEW", outcome="REVIEW_REQUIRED",
+            extra={
+                "summary_counts": {"REVIEW_REQUIRED": 2, "effective_changed_known": 0},
+                "refresh_preview": {"ticker_changes": changes},
+                "recommended_next_action": "Resolve both review items before Test.",
+            },
+        ),
+        test_stage=lambda *_args: pytest.fail("Test must not run"),
+        production_stage=lambda *_args: pytest.fail("Production must not run"),
+    )
+
+    report = Path(result["artifact_dir"], "workflow_report.md").read_text(encoding="utf-8")
+    assert result["authoritative_item_evidence"]["stage"] == "Preview"
+    assert result["appendix_source"]["stage"] == "Preview"
+    assert "### FLWS - REVIEW_REQUIRED" in report
+    assert "Ambiguous Source Removal" in report
+    assert "Companion Dimension Contradiction" in report
+    assert '"ambiguous_removals": 1' in report
+    assert "### LOVE - REVIEW_REQUIRED" in report
+    assert "Complete History Not Trusted" in report
+    assert "## Appendix: Authoritative Child Operation Report" in report
+    assert "# PREVIEW" in report
+
+
+def test_malformed_structured_details_do_not_break_terminal_report(tmp_path: Path) -> None:
+    result = run_refresh_full_workflow(
+        run_root=tmp_path,
+        preview_stage=lambda _callback: _stage(
+            tmp_path,
+            "preview-run",
+            mode="PREVIEW",
+            outcome="REVIEW_REQUIRED",
+            extra={
+                "summary_counts": {"REVIEW_REQUIRED": 1},
+                "refresh_preview": {
+                    "ticker_changes": [
+                        {
+                            "ticker": "BROKEN",
+                            "classification": "REVIEW_REQUIRED",
+                            "review_reason": "MALFORMED_DETAIL_FIXTURE",
+                            "source_history_events": 7,
+                        },
+                    ],
+                },
+            },
+        ),
+        test_stage=lambda *_args: pytest.fail("Test must not run"),
+        production_stage=lambda *_args: pytest.fail("Production must not run"),
+    )
+
+    report = Path(result["artifact_dir"], "workflow_report.md").read_text(encoding="utf-8")
+    assert result["outcome"] == "STOPPED"
+    assert "## Authoritative Child Details" in report
+    assert (
+        "No structured item-level review/failure details were available "
+        "from the authoritative child."
+    ) in report

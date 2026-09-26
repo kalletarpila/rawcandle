@@ -1045,6 +1045,7 @@ def test_terminal_history_projection_does_not_read_progress_events(tmp_path: Pat
     cursor = service.history_cursor()
     entries = cursor.fill(1)
 
+    assert "operation_report.md" not in reads
     assert len(entries) == 1
     assert "progress_events.jsonl" not in reads
 

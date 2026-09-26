@@ -6,7 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from rawcandle.fundamentals.admin.full_workflow import run_full_workflow
+from rawcandle.fundamentals.admin.full_workflow import (
+    run_full_workflow,
+    run_remove_tickers_full_workflow,
+)
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 
 
@@ -19,19 +22,23 @@ def _stage_result(
     status: str | None = None,
     ticker_reporting: list[dict] | None = None,
     extra: dict | None = None,
+    operation_type: str = "ADD_TICKERS",
+    report_content: str | None = None,
 ) -> SimpleNamespace:
     run_dir = run_root / run_id
     run_dir.mkdir(parents=True)
     payload = {
         "run_id": run_id,
-        "operation_type": "ADD_TICKERS",
+        "operation_type": operation_type,
         "mode": mode,
         "outcome": outcome,
         "ticker_reporting": ticker_reporting or [],
         **(extra or {}),
     }
     (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
-    (run_dir / "operation_report.md").write_text(f"# {mode}\n", encoding="utf-8")
+    (run_dir / "operation_report.md").write_text(
+        report_content if report_content is not None else f"# {mode}\n", encoding="utf-8",
+    )
     return SimpleNamespace(
         status=status or ("COMPLETED" if outcome in {"COMPLETED", "NO_CHANGE"} else "FAILED"),
         outcome=outcome,
@@ -107,6 +114,8 @@ def test_full_workflow_happy_path_keeps_three_stage_reports_and_workflow_artifac
     assert calls == ["preview", "test", "production"]
     assert result["outcome"] == "COMPLETED"
     assert result["production_completed"] is True
+    assert result["appendix_source"]["stage"] == "Production update"
+    assert result["appendix_source"]["run_id"] == "production-run"
     assert [stage["run_id"] for stage in result["stages"]] == ["preview-run", "test-run", "production-run"]
     assert all((tmp_path / run_id / "operation_report.md").is_file() for run_id in ("preview-run", "test-run", "production-run"))
     workflow_dir = Path(result["artifact_dir"])
@@ -117,6 +126,8 @@ def test_full_workflow_happy_path_keeps_three_stage_reports_and_workflow_artifac
     assert "## Failure / Review Summary" not in report
     assert "Published/added: 1" in report
     assert "Production executed: Yes" in report
+    assert "## Appendix: Authoritative Child Operation Report" in report
+    assert "# PRODUCTION_APPLY" in report
     service = FundamentalsAdminUIService(run_root=tmp_path, operation_lock_path=tmp_path / "history.lock")
     workflow_entry = next(entry for entry in service.history_entries(include_technical=False) if entry.run_id == result["run_id"])
     assert workflow_entry.stage == "Full workflow"
@@ -179,6 +190,8 @@ def test_real_workflow_review_stop_propagates_structured_test_facts_without_mark
     terminal = result["terminal_summary"]
     assert terminal["source"] == "STRUCTURED_CHILD_RESULT"
     assert terminal["authoritative_stage"] == "Test on copies"
+    assert result["authoritative_item_evidence"]["stage"] == "Test on copies"
+    assert result["appendix_source"]["stage"] == "Test on copies"
     assert terminal["production_entered"] is False
     assert terminal["production_database_writes"] == 0
     assert [item["ticker"] for item in terminal["problem_items"]] == ["DRK", "KRSA"]
@@ -192,6 +205,7 @@ def test_real_workflow_review_stop_propagates_structured_test_facts_without_mark
         "Reporting integrity errors: 2", "Published/added: 0", "Production executed: No",
     ):
         assert expected in report
+    assert "# COPY_ONLY_APPLY" in report
     ui_result = FundamentalsAdminUIService(
         run_root=tmp_path, operation_lock_path=tmp_path / "ui.lock",
     )._finalize(result, default_message="Full workflow completed.")
@@ -215,6 +229,8 @@ def test_preview_review_stop_uses_preview_as_authoritative_terminal_stage(tmp_pa
     )
     assert calls == []
     assert result["terminal_summary"]["authoritative_stage"] == "Preview"
+    assert result["authoritative_item_evidence"]["stage"] == "Preview"
+    assert result["appendix_source"]["stage"] == "Preview"
     assert result["terminal_summary"]["problem_items"][0]["ticker"] == "DRK"
 
 
@@ -379,3 +395,87 @@ def test_shared_operation_lock_rejects_conflicting_manual_stage(tmp_path: Path) 
     with service._operation_lock():
         with pytest.raises(RuntimeError, match="ADMIN_OPERATION_ALREADY_RUNNING"):
             service.preview("ADD_TICKERS", raw_inputs="NVDA")
+
+def test_structured_details_survive_missing_authoritative_child_report(tmp_path: Path) -> None:
+    def preview(_callback):
+        child = _stage_result(
+            tmp_path, "preview-run", mode="PREVIEW", outcome="REVIEW_REQUIRED",
+            status="FAILED",
+            ticker_reporting=[_review_report("DRK", "PROVIDER_METADATA_MISSING")],
+        )
+        Path(child.artifact_dir, "operation_report.md").unlink()
+        return child
+
+    result = run_full_workflow(
+        "DRK", market="usa", run_root=tmp_path,
+        preview_stage=preview,
+        test_stage=lambda *_args: pytest.fail("Test must not run"),
+        production_stage=lambda *_args: pytest.fail("Production must not run"),
+    )
+
+    report = Path(result["artifact_dir"], "workflow_report.md").read_text(encoding="utf-8")
+    assert "## Authoritative Child Details" in report
+    assert "### DRK - REVIEW_REQUIRED" in report
+    assert "Provider Metadata Missing" in report
+    assert "## Appendix: Authoritative Child Operation Report" in report
+    assert "could not be read: FileNotFoundError" in report
+
+
+def test_recursive_child_appendix_is_not_duplicated(tmp_path: Path) -> None:
+    nested = (
+        "# Preview child\n\n"
+        "Child evidence before appendix.\n\n"
+        "## Appendix: Authoritative Child Operation Report\n\n"
+        "recursive content must not survive\n"
+    )
+    result = run_full_workflow(
+        "DRK", market="usa", run_root=tmp_path,
+        preview_stage=lambda _callback: _stage_result(
+            tmp_path, "preview-run", mode="PREVIEW", outcome="REVIEW_REQUIRED",
+            status="FAILED",
+            ticker_reporting=[_review_report("DRK", "PROVIDER_METADATA_MISSING")],
+            report_content=nested,
+        ),
+        test_stage=lambda *_args: pytest.fail("Test must not run"),
+        production_stage=lambda *_args: pytest.fail("Production must not run"),
+    )
+
+    report = Path(result["artifact_dir"], "workflow_report.md").read_text(encoding="utf-8")
+    assert report.count("## Appendix: Authoritative Child Operation Report") == 1
+    assert "Child evidence before appendix." in report
+    assert "Nested workflow appendix omitted" in report
+    assert "recursive content must not survive" not in report
+
+
+def test_remove_tickers_review_stop_promotes_structured_item_details(tmp_path: Path) -> None:
+    removal_item = {
+        "requested_ticker": "OLD",
+        "company_id": 7,
+        "security_id": 11,
+        "classification": "AMBIGUOUS_IDENTITY_REVIEW_REQUIRED",
+        "removal_eligible": False,
+        "blocking_or_review_reasons": ["HISTORICAL_ALIAS_MUST_NOT_REMOVE_CURRENT_SUCCESSOR"],
+        "canonical": {"expected_current_universe_rows_affected": 0},
+        "expected_derived_rebuild_impact": "NONE",
+    }
+    result = run_remove_tickers_full_workflow(
+        "OLD", run_root=tmp_path,
+        preview_stage=lambda _callback: _stage_result(
+            tmp_path, "preview-run", mode="PREVIEW", outcome="REVIEW_REQUIRED",
+            status="FAILED", operation_type="REMOVE_TICKERS",
+            extra={
+                "removal_plan": [removal_item],
+                "recommended_next_action": "Resolve the current successor identity before removal.",
+            },
+            report_content="# Remove Tickers Preview\n\nAuthoritative removal evidence.\n",
+        ),
+        test_stage=lambda *_args: pytest.fail("Test must not run"),
+        production_stage=lambda *_args: pytest.fail("Production must not run"),
+    )
+
+    report = Path(result["artifact_dir"], "workflow_report.md").read_text(encoding="utf-8")
+    assert result["authoritative_item_evidence"]["stage"] == "Preview"
+    assert "### OLD - AMBIGUOUS_IDENTITY_REVIEW_REQUIRED" in report
+    assert "Historical Alias Must Not Remove Current Successor" in report
+    assert '"company_id": 7' in report
+    assert "Authoritative removal evidence." in report

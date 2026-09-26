@@ -26,6 +26,8 @@ from rawcandle.fundamentals.admin.ticker_reporting import (
 
 WORKFLOW_REPORT_NAME = "workflow_report.md"
 WORKFLOW_RESULT_NAME = "workflow_result.json"
+AUTHORITATIVE_DETAILS_HEADING = "## Authoritative Child Details"
+AUTHORITATIVE_APPENDIX_HEADING = "## Appendix: Authoritative Child Operation Report"
 
 
 @dataclass(frozen=True)
@@ -83,7 +85,7 @@ def _stage_record(
     }
 
 
-def _problem_items(reports: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _ticker_reporting_problem_items(reports: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
     problems: list[dict[str, Any]] = []
     for report in reports:
         eligibility = report.get("eligibility") or {}
@@ -116,6 +118,134 @@ def _problem_items(reports: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
             "review_required": final_status == "REVIEW_REQUIRED",
         })
     return problems
+
+
+def _refresh_problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    preview = payload.get("refresh_preview")
+    changes = preview.get("ticker_changes") if isinstance(preview, Mapping) else None
+    if not isinstance(changes, list):
+        return []
+    problems: list[dict[str, Any]] = []
+    for item in changes:
+        if not isinstance(item, Mapping) or item.get("classification") != "REVIEW_REQUIRED":
+            continue
+        reason = str(item.get("review_reason") or "REVIEW_REQUIRED")
+        action = item.get("source_history_action")
+        action = action if isinstance(action, Mapping) else {}
+        event_reasons = sorted({
+            str(event.get("classification_reason"))
+            for event in (item.get("source_history_events") or [])
+            if isinstance(event, Mapping) and event.get("classification_reason")
+        })
+        problems.append({
+            "ticker": str(item.get("ticker") or "UNKNOWN"),
+            "classification": "REVIEW_REQUIRED",
+            "reason": reason,
+            "action": str(payload.get("recommended_next_action") or ""),
+            "reason_codes": [reason, *[value for value in event_reasons if value != reason]],
+            "reasons": [value.replace("_", " ").title() for value in [reason, *event_reasons]],
+            "review_required": True,
+            "reporting_integrity_error": False,
+            "affected_rows": {
+                "added": int(item.get("added_count") or 0),
+                "changed": int(item.get("changed_count") or 0),
+                "removed": int(item.get("removed_count") or 0),
+                "fiscal_identity_revisions": len(item.get("fiscal_identity_revisions") or []),
+            },
+            "source_state": {
+                key: action.get(key)
+                for key in (
+                    "label", "newly_aged_out_source_rows", "true_source_removals",
+                    "ambiguous_removals", "retained_arq", "retained_mrq",
+                )
+                if action.get(key) not in (None, 0, "")
+            },
+        })
+    return problems
+
+
+def _remove_problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    raw_items = payload.get("ticker_results") or payload.get("removal_plan") or []
+    if not isinstance(raw_items, list):
+        return []
+    problems: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, Mapping):
+            continue
+        classification = str(item.get("classification") or "UNKNOWN")
+        if classification == "ALREADY_ABSENT" or (
+            item.get("removal_eligible") is not False
+            and "BLOCKED" not in classification
+            and "REVIEW_REQUIRED" not in classification
+        ):
+            continue
+        reasons = [str(value) for value in (item.get("blocking_or_review_reasons") or [])]
+        canonical = item.get("canonical")
+        canonical = canonical if isinstance(canonical, Mapping) else {}
+        problems.append({
+            "ticker": str(item.get("requested_ticker") or item.get("ticker") or "UNKNOWN"),
+            "classification": classification,
+            "reason": reasons[0] if reasons else "No structured reason was recorded.",
+            "action": str(payload.get("recommended_next_action") or ""),
+            "reason_codes": reasons,
+            "reasons": [value.replace("_", " ").title() for value in reasons]
+            or ["No structured reason was recorded."],
+            "review_required": "REVIEW_REQUIRED" in classification,
+            "reporting_integrity_error": False,
+            "affected_rows": {
+                "current_universe_rows": int(
+                    canonical.get("expected_current_universe_rows_affected")
+                    or item.get("expected_current_universe_rows_affected")
+                    or 0
+                ),
+            },
+            "source_state": {
+                "company_id": item.get("company_id"),
+                "security_id": item.get("security_id"),
+                "expected_rebuild": item.get("expected_derived_rebuild_impact"),
+            },
+        })
+    return problems
+
+
+def _project_problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    reports = [item for item in (payload.get("ticker_reporting") or []) if isinstance(item, Mapping)]
+    if reports:
+        items = _ticker_reporting_problem_items(reports)
+        return [
+            {
+                **item,
+                "classification": item["final_status"],
+                "reason_class": item["issue_class"],
+                "reason": (item.get("reasons") or ["No structured reason was recorded."])[0],
+                "action": str(payload.get("recommended_next_action") or ""),
+                "reason_codes": item.get("issue_codes") or [],
+            }
+            for item in items
+        ]
+    operation_type = str(payload.get("operation_type") or "")
+    if operation_type == AdminOperationType.REFRESH_FUNDAMENTALS.value or payload.get("refresh_preview"):
+        return _refresh_problem_items(payload)
+    if operation_type == AdminOperationType.REMOVE_TICKERS.value or payload.get("removal_plan") or payload.get("ticker_results"):
+        return _remove_problem_items(payload)
+    return []
+
+
+def _problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    try:
+        return _project_problem_items(payload)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return []
+
+
+def _has_structured_items(payload: Mapping[str, Any]) -> bool:
+    if payload.get("ticker_reporting") or payload.get("ticker_results") or payload.get("removal_plan"):
+        return True
+    preview = payload.get("refresh_preview")
+    return bool(
+        isinstance(preview, Mapping)
+        and preview.get("ticker_changes")
+    )
 
 
 def _batch_outcome(payload: Mapping[str, Any], *, production_published: bool = False) -> dict[str, int]:
@@ -194,8 +324,7 @@ def _terminal_summary(
     evidence_stage: str | None = None,
 ) -> dict[str, Any]:
     evidence = evidence_payload or payload
-    reports = [item for item in (evidence.get("ticker_reporting") or []) if isinstance(item, Mapping)]
-    problems = _problem_items(reports)
+    problems = _problem_items(evidence)
     review_count = sum(item["review_required"] for item in problems)
     integrity_count = sum(item["reporting_integrity_error"] for item in problems)
     child_outcome = str(_value(child, "outcome") or payload.get("outcome") or "UNKNOWN")
@@ -265,6 +394,103 @@ def _preview_applyability(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "reason": eligibility.get("reason"),
             })
     return {"copy_apply_authorized": not blockers, "blocking_items": blockers}
+
+
+def _stage_for_name(result: Mapping[str, Any], stage_name: str | None) -> Mapping[str, Any] | None:
+    if not stage_name:
+        return None
+    return next(
+        (
+            stage
+            for stage in reversed(list(result.get("stages") or []))
+            if isinstance(stage, Mapping) and stage.get("stage") == stage_name
+        ),
+        None,
+    )
+
+
+def _child_reference(
+    stage: Mapping[str, Any] | None,
+    *,
+    unavailable: str,
+) -> dict[str, Any]:
+    if not stage:
+        return {
+            "stage": None,
+            "run_id": None,
+            "report": None,
+            "availability": unavailable,
+        }
+    return {
+        "stage": stage.get("stage"),
+        "run_id": stage.get("run_id"),
+        "report": stage.get("report"),
+        "availability": "REFERENCED" if stage.get("report") else "REPORT_NOT_REFERENCED",
+    }
+
+
+def _select_report_authorities(result: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    stages = [stage for stage in (result.get("stages") or []) if isinstance(stage, Mapping)]
+    terminal = result.get("terminal_summary")
+    terminal = terminal if isinstance(terminal, Mapping) else {}
+
+    item_stage_name = str(
+        terminal.get("authoritative_stage")
+        or result.get("final_completed_stage")
+        or result.get("current_stage")
+        or ""
+    )
+    item_stage = _stage_for_name(result, item_stage_name)
+    if item_stage is None and stages:
+        item_stage = stages[-1]
+
+    materially_completed_name = str(result.get("final_completed_stage") or "")
+    appendix_stage = _stage_for_name(result, materially_completed_name)
+    if terminal.get("problem_items") and item_stage is not None:
+        appendix_stage = item_stage
+    if appendix_stage is None:
+        appendix_stage = item_stage or (stages[-1] if stages else None)
+
+    return (
+        _child_reference(item_stage, unavailable="NO_ITEM_EVIDENCE_CHILD_RECORDED"),
+        _child_reference(appendix_stage, unavailable="NO_APPENDIX_CHILD_RECORDED"),
+    )
+
+
+def _read_appendix_source(result: Mapping[str, Any]) -> tuple[str | None, str]:
+    appendix = result.get("appendix_source")
+    if not isinstance(appendix, Mapping):
+        _item_authority, appendix = _select_report_authorities(result)
+    report_value = appendix.get("report")
+    if not report_value:
+        return None, "No authoritative child operation report was recorded."
+    report_path = Path(str(report_value))
+    workflow_path = Path(str(result.get("artifact_dir") or "")) / WORKFLOW_REPORT_NAME
+    try:
+        if report_path.resolve() == workflow_path.resolve():
+            return None, (
+                "The appendix source resolved to the workflow report itself; "
+                "recursive embedding was skipped."
+            )
+        content = report_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        return None, (
+            "The authoritative child operation report could not be read: "
+            f"{type(exc).__name__}."
+        )
+    if not content.strip() or "\x00" in content:
+        return None, (
+            "The authoritative child operation report was empty or malformed "
+            "and could not be embedded."
+        )
+    if AUTHORITATIVE_APPENDIX_HEADING in content:
+        content = content.split(AUTHORITATIVE_APPENDIX_HEADING, 1)[0].rstrip()
+        content += "\n\n_Nested workflow appendix omitted to prevent recursive duplication._\n"
+    return content.rstrip() + "\n", "Embedded"
+
+
+def _compact_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str)
 
 
 def workflow_ui_summary(result: Mapping[str, Any]) -> tuple[str, ...]:
@@ -360,19 +586,42 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
             f"- Reason: {terminal.get('headline') or result.get('stop_reason') or 'Not recorded'}",
             f"- Affected tickers/items: {terminal.get('affected_item_count', 0)}",
         ])
-        for item in terminal.get("problem_items") or []:
-            lines.extend([
-                "",
-                f"### {item.get('ticker', 'UNKNOWN')} - {item.get('final_status', 'UNKNOWN')}",
-                "",
-                f"- Error/review classification: {item.get('issue_class', 'UNKNOWN')}",
-                f"- Issue codes: {', '.join(item.get('issue_codes') or []) or 'Not recorded'}",
-            ])
-            lines.extend(f"- {reason}" for reason in item.get("reasons") or [])
         lines.extend([
             "",
             f"- Recommended operator action: {terminal.get('recommended_next_action') or 'Review the terminal stage evidence before retrying.'}",
         ])
+        problems = [
+            item for item in (terminal.get("problem_items") or [])
+            if isinstance(item, Mapping)
+        ]
+        item_authority = result.get("authoritative_item_evidence")
+        if not isinstance(item_authority, Mapping):
+            item_authority, _appendix = _select_report_authorities(result)
+        lines.extend([
+            "", AUTHORITATIVE_DETAILS_HEADING, "",
+            f"- Source child stage: {item_authority.get('stage') or terminal.get('authoritative_stage') or 'Not recorded'}",
+            f"- Source child run ID: {item_authority.get('run_id') or 'Not recorded'}",
+        ])
+        if not problems:
+            lines.append(
+                "- No structured item-level review/failure details were available "
+                "from the authoritative child."
+            )
+        for item in problems:
+            lines.extend([
+                "",
+                f"### {item.get('ticker', 'UNKNOWN')} - {item.get('classification', 'UNKNOWN')}",
+                "",
+                f"- Error/review classification: {item.get('classification', 'UNKNOWN')}",
+                f"- Issue codes: {', '.join(str(value) for value in (item.get('reason_codes') or [])) or 'Not recorded'}",
+            ])
+            lines.extend(f"- Reason: {reason}" for reason in item.get("reasons") or [])
+            if item.get("affected_rows"):
+                lines.append(f"- Affected rows/counts: `{_compact_json(item['affected_rows'])}`")
+            if item.get("source_state"):
+                lines.append(f"- Source/removal/revision state: `{_compact_json(item['source_state'])}`")
+            if item.get("action"):
+                lines.append(f"- Recommended action: {item['action']}")
     lines.extend([
         "", "## Stage Results", "",
         "| Stage | Result | Duration | Run ID |",
@@ -436,6 +685,21 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
     for stage in stages:
         if stage.get("report"):
             lines.append(f"- {stage.get('stage')}: `{stage['report']}`")
+    appendix = result.get("appendix_source")
+    if not isinstance(appendix, Mapping):
+        _item_authority, appendix = _select_report_authorities(result)
+    child_report, child_status = _read_appendix_source(result)
+    lines.extend([
+        "", AUTHORITATIVE_APPENDIX_HEADING, "",
+        f"- Source child stage: {appendix.get('stage') or 'Not recorded'}",
+        f"- Source child run ID: {appendix.get('run_id') or 'Not recorded'}",
+        f"- Source child report: `{appendix.get('report') or 'Not recorded'}`",
+        "",
+    ])
+    if child_report is None:
+        lines.append(f"_{child_status}_")
+    else:
+        lines.extend(["---", "", child_report.rstrip()])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -596,9 +860,7 @@ def run_operation_workflow(
             test_record = _stage_record("Test on copies", test, stage_started, stage_completed)
             result["stages"].append(test_record)
             test_batch = _batch_outcome(test_payload)
-            test_problems = _problem_items([
-                item for item in (test_payload.get("ticker_reporting") or []) if isinstance(item, Mapping)
-            ])
+            test_problems = _problem_items(test_payload)
             if adapter.operation_type == AdminOperationType.ADD_TICKERS:
                 result["test_batch_outcome"] = test_batch
                 result["final_batch_outcome"] = test_batch
@@ -612,13 +874,13 @@ def run_operation_workflow(
                     production_entered=False, production_completed=False,
                     fallback_reason="Test on copies failed.",
                     evidence_payload=(
-                        test_payload if test_payload.get("ticker_reporting")
-                        else preview_payload if preview_payload.get("ticker_reporting")
+                        test_payload if _has_structured_items(test_payload)
+                        else preview_payload if _has_structured_items(preview_payload)
                         else test_payload
                     ),
                     evidence_stage=(
-                        "Test on copies" if test_payload.get("ticker_reporting")
-                        else "Preview" if preview_payload.get("ticker_reporting")
+                        "Test on copies" if _has_structured_items(test_payload)
+                        else "Preview" if _has_structured_items(preview_payload)
                         else None
                     ),
                 )
@@ -710,15 +972,15 @@ def run_operation_workflow(
                     production_entered=True, production_completed=False,
                     fallback_reason="Production update failed or stopped.",
                     evidence_payload=(
-                        production_payload if production_payload.get("ticker_reporting")
-                        else test_payload if test_payload.get("ticker_reporting")
-                        else preview_payload if preview_payload.get("ticker_reporting")
+                        production_payload if _has_structured_items(production_payload)
+                        else test_payload if _has_structured_items(test_payload)
+                        else preview_payload if _has_structured_items(preview_payload)
                         else production_payload
                     ),
                     evidence_stage=(
-                        "Production update" if production_payload.get("ticker_reporting")
-                        else "Test on copies" if test_payload.get("ticker_reporting")
-                        else "Preview" if preview_payload.get("ticker_reporting")
+                        "Production update" if _has_structured_items(production_payload)
+                        else "Test on copies" if _has_structured_items(test_payload)
+                        else "Preview" if _has_structured_items(preview_payload)
                         else None
                     ),
                 )
@@ -738,6 +1000,9 @@ def run_operation_workflow(
         result["completed_at_utc"] = utc_now()
         if result["workflow_status"] == "RUNNING":
             stop(result["current_stage"], "Workflow ended without a terminal stage.", failed=True)
+        item_authority, appendix_source = _select_report_authorities(result)
+        result["authoritative_item_evidence"] = item_authority
+        result["appendix_source"] = appendix_source
         persist()
         report = render_workflow_report(result)
         writer.write_text(WORKFLOW_REPORT_NAME, report)
