@@ -6,6 +6,7 @@ from importlib import import_module
 import json
 from pathlib import Path
 import re
+import sqlite3
 from contextlib import contextmanager
 from typing import Any, Callable, Mapping
 
@@ -678,6 +679,36 @@ class FundamentalsAdminUIService:
         module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
         queue = module.RefreshReviewQueue(module.queue_path_for_run_root(self.run_root))
         return queue.list_items(include_resolved=include_resolved)
+
+    def list_refresh_review_queue(self, *, active_only: bool = True) -> Mapping[str, Any]:
+        module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
+        path = module.queue_path_for_run_root(self.run_root)
+        if not path.exists():
+            return {"status": "NOT_INITIALIZED", "items": []}
+        queue = module.RefreshReviewQueue(path)
+        try:
+            items = [
+                module.present_review_item(item)
+                for item in queue.list_items(include_resolved=not active_only)
+            ]
+        except (sqlite3.DatabaseError, OSError):
+            return {
+                "status": "ERROR",
+                "items": [],
+                "error": "Refresh review queue is unreadable.",
+            }
+        return {"status": "READY" if items else "EMPTY", "items": items}
+
+    def refresh_review_item(self, ticker: str) -> Mapping[str, Any] | None:
+        module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
+        path = module.queue_path_for_run_root(self.run_root)
+        if not path.exists():
+            return None
+        try:
+            item = module.RefreshReviewQueue(path).get(ticker)
+        except (sqlite3.DatabaseError, OSError):
+            return None
+        return module.present_review_item(item) if item is not None else None
 
     def resolve_refresh_review(
         self, ticker: str, action: str, *, evidence: Mapping[str, Any] | None = None,

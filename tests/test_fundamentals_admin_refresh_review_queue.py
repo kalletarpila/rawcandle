@@ -11,7 +11,9 @@ from rawcandle.fundamentals.admin.refresh_review_queue import (
     RefreshReviewQueue,
     classify_review_scope,
     partition_changes,
+    present_review_item,
     queue_path_for_run_root,
+    review_reason_explanation,
 )
 from rawcandle.fundamentals.admin.refresh_copy_runtime import _load_bound_preview
 from rawcandle.fundamentals.admin.refresh_fundamentals import CONTRACT_VERSION
@@ -232,3 +234,142 @@ def test_open_review_items_accumulate_across_multiple_refresh_runs(tmp_path: Pat
     all_items = {item["ticker"]: item for item in queue.list_items(include_resolved=True)}
     assert all_items["YYAI"]["status"] == "RESOLVED"
     assert all_items["ABC"]["status"] == "OPEN"
+
+
+def test_review_queue_presentation_uses_only_stored_evidence_and_safe_reason_text(
+    tmp_path: Path,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    stored = queue.upsert_local(
+        classify_review_scope(_yyai_review()),
+        run_id="preview-first",
+        published_binding="published-generation-7",
+    )
+
+    presented = present_review_item(stored)
+
+    assert presented["ticker"] == "YYAI"
+    assert presented["classification"] == "PROVIDER_ANOMALY_SUSPECTED"
+    assert presented["affected_source_count"] == 23
+    assert presented["affected_fiscal_identity_count"] == 23
+    assert "23 affected source observations" in presented["human_summary"]
+    assert "required 41-quarter boundary" in presented["human_summary"]
+    assert "materially shorter" in presented["human_summary"]
+    assert presented["last_published_binding"] == "published-generation-7"
+    assert presented["currently_held"] is True
+
+
+def test_unknown_review_reason_is_shown_raw_without_invented_explanation() -> None:
+    assert review_reason_explanation("UNRECOGNIZED_PROVIDER_SHAPE") == "UNRECOGNIZED_PROVIDER_SHAPE"
+
+
+def test_service_filters_resolved_history_and_reports_empty_missing_and_corrupt_states(
+    tmp_path: Path,
+) -> None:
+    missing_root = tmp_path / "missing" / "runs"
+    missing_service = FundamentalsAdminUIService(
+        run_root=missing_root,
+        recover_publication_on_startup=False,
+    )
+    assert missing_service.list_refresh_review_queue() == {
+        "status": "NOT_INITIALIZED",
+        "items": [],
+    }
+    assert not queue_path_for_run_root(missing_root).exists()
+
+    run_root = tmp_path / "active" / "runs"
+    queue = RefreshReviewQueue(queue_path_for_run_root(run_root))
+    queue.upsert_local(
+        classify_review_scope(_ticker_local_review("OPEN1", 101)),
+        run_id="run-1",
+        published_binding="published-1",
+    )
+    queue.upsert_local(
+        classify_review_scope(_ticker_local_review("WAIT1", 102)),
+        run_id="run-1",
+        published_binding="published-1",
+    )
+    queue.apply_action("WAIT1", "WAIT_FOR_PROVIDER")
+    queue.upsert_local(
+        classify_review_scope(_ticker_local_review("RETRY1", 103)),
+        run_id="run-1",
+        published_binding="published-1",
+    )
+    queue.apply_action("RETRY1", "RETRY_REEVALUATION")
+    queue.upsert_local(
+        classify_review_scope(_ticker_local_review("DONE1", 104)),
+        run_id="run-1",
+        published_binding="published-1",
+    )
+    queue.resolve_absent(["DONE1"], [], run_id="run-2")
+    service = FundamentalsAdminUIService(
+        run_root=run_root,
+        recover_publication_on_startup=False,
+    )
+
+    active = service.list_refresh_review_queue()
+    assert active["status"] == "READY"
+    assert {item["status"] for item in active["items"]} == {
+        "OPEN", "WAITING_PROVIDER", "RETRY_REEVALUATION",
+    }
+    assert "DONE1" not in {item["ticker"] for item in active["items"]}
+    with_history = service.list_refresh_review_queue(active_only=False)
+    assert "DONE1" in {item["ticker"] for item in with_history["items"]}
+
+    empty_root = tmp_path / "empty" / "runs"
+    empty_path = queue_path_for_run_root(empty_root)
+    RefreshReviewQueue(empty_path).upsert_local(
+        classify_review_scope(_ticker_local_review("DONE2", 105)),
+        run_id="run-1",
+        published_binding="published-1",
+    )
+    RefreshReviewQueue(empty_path).resolve_absent(["DONE2"], [], run_id="run-2")
+    empty_service = FundamentalsAdminUIService(
+        run_root=empty_root,
+        recover_publication_on_startup=False,
+    )
+    assert empty_service.list_refresh_review_queue()["status"] == "EMPTY"
+
+    corrupt_root = tmp_path / "corrupt" / "runs"
+    corrupt_path = queue_path_for_run_root(corrupt_root)
+    corrupt_path.parent.mkdir(parents=True)
+    corrupt_path.write_bytes(b"not a sqlite database")
+    corrupt_service = FundamentalsAdminUIService(
+        run_root=corrupt_root,
+        recover_publication_on_startup=False,
+    )
+    corrupt = corrupt_service.list_refresh_review_queue()
+    assert corrupt["status"] == "ERROR"
+    assert corrupt["error"] == "Refresh review queue is unreadable."
+    assert corrupt_path.read_bytes() == b"not a sqlite database"
+
+
+def test_review_queue_list_opens_only_the_operational_queue_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import rawcandle.fundamentals.admin.refresh_review_queue as queue_module
+
+    run_root = tmp_path / "runs"
+    queue_path = queue_path_for_run_root(run_root)
+    queue = RefreshReviewQueue(queue_path)
+    queue.upsert_local(
+        classify_review_scope(_yyai_review()),
+        run_id="run-1",
+        published_binding="published-1",
+    )
+    opened: list[Path] = []
+    original = queue_module._read_connect
+
+    def recording_connect(path: Path):
+        opened.append(path.resolve())
+        return original(path)
+
+    monkeypatch.setattr(queue_module, "_read_connect", recording_connect)
+    service = FundamentalsAdminUIService(
+        run_root=run_root,
+        recover_publication_on_startup=False,
+    )
+
+    assert service.list_refresh_review_queue()["status"] == "READY"
+    assert opened
+    assert set(opened) == {queue_path.resolve()}

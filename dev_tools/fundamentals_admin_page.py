@@ -56,6 +56,12 @@ class FundamentalsAdminPageControls:
     history_show_more_button: Any
     cleanup_status_field: Any
     cleanup_button: Any
+    review_queue_column: Any
+    review_queue_status_field: Any
+    review_queue_detail_field: Any
+    review_queue_include_resolved_checkbox: Any
+    review_queue_refresh_button: Any
+    review_queue_blocked_actions: Any
     activate: Any
     history_loader: Any
 
@@ -253,6 +259,25 @@ def build_fundamentals_admin_page(
     summary_column = ft.Column(spacing=4)
     history_column = ft.Column(spacing=6)
     show_technical_history_checkbox = ft.Checkbox(label="Show technical and legacy runs", value=False)
+    review_queue_column = ft.Column(spacing=6)
+    review_queue_status_field = ft.Text("Not loaded.")
+    review_queue_detail_field = ft.TextField(
+        label="Selected review item",
+        value="Select an item to inspect its persisted evidence.",
+        read_only=True,
+        multiline=True,
+        min_lines=5,
+        max_lines=12,
+    )
+    review_queue_include_resolved_checkbox = ft.Checkbox(label="Include resolved history", value=False)
+    review_queue_blocked_actions = ft.Row(
+        [
+            ft.OutlinedButton("Accept retained history", icon=ft.Icons.BLOCK, disabled=True),
+            ft.OutlinedButton("Confirm true source removal", icon=ft.Icons.BLOCK, disabled=True),
+        ],
+        spacing=12,
+        wrap=True,
+    )
     technical_details_column = ft.Column(spacing=4)
     preview_title = ft.Text("Preview result", size=18, weight=ft.FontWeight.BOLD)
     preview_section = ft.Column(
@@ -472,6 +497,179 @@ def build_fundamentals_admin_page(
         history_show_more_button.visible = bool(
             history_cursor is not None and not getattr(history_cursor, "exhausted", True)
         )
+
+    def review_item_details(item: dict[str, Any]) -> str:
+        reasons = item.get("reason_explanations") or item.get("reason_codes") or []
+        fiscal = []
+        for identity in item.get("fiscal_identities") or []:
+            if isinstance(identity, dict):
+                fiscal.append(
+                    f"{identity.get('fiscal_year', '?')} {identity.get('fiscal_quarter', '?')}"
+                )
+            else:
+                fiscal.append(str(identity))
+        source_keys = []
+        for source in item.get("affected_source_keys") or []:
+            if isinstance(source, dict):
+                source_keys.append(
+                    " / ".join(
+                        str(source.get(key) or "?")
+                        for key in ("ticker", "dimension", "date", "reportperiod")
+                    )
+                )
+            else:
+                source_keys.append(str(source))
+        resolution = item.get("resolution_evidence") or {}
+        return "\n".join(
+            [
+                f"Ticker: {item.get('ticker', 'UNKNOWN')}",
+                f"Status: {item.get('status', 'UNKNOWN')}",
+                f"Scope: {item.get('review_scope', 'TICKER_LOCAL_REVIEW')}",
+                f"Classification: {item.get('classification', 'UNKNOWN')}",
+                f"Summary: {item.get('human_summary', 'No additional explanation is available.')}",
+                f"Reasons: {'; '.join(str(value) for value in reasons) or 'None recorded'}",
+                f"Affected fiscal identities ({len(fiscal)}): {', '.join(fiscal) or 'None recorded'}",
+                "Affected source keys "
+                f"({len(source_keys)}): {', '.join(source_keys) or 'None recorded'}",
+                f"First seen: {item.get('first_seen_at_utc') or 'not recorded'} "
+                f"({item.get('first_seen_run_id') or 'run not recorded'})",
+                f"Last seen: {item.get('last_seen_at_utc') or 'not recorded'} "
+                f"({item.get('last_seen_run_id') or 'run not recorded'})",
+                f"Published binding: {item.get('last_published_binding') or 'not recorded'}",
+                f"Evidence fingerprint: {item.get('source_evidence_fingerprint') or 'not recorded'}",
+                f"Operator action: {item.get('operator_action') or 'none'}",
+                f"Resolution evidence: {resolution or 'none'}",
+            ]
+        )
+
+    def select_review_item(item: dict[str, Any]) -> None:
+        review_queue_detail_field.value = review_item_details(item)
+        if hasattr(page, "update"):
+            page.update()
+
+    def apply_review_action(ticker: str, action: str) -> None:
+        try:
+            admin_service.resolve_refresh_review(
+                ticker,
+                action,
+                evidence={"source": "FUNDAMENTALS_ADMIN_UI"},
+            )
+            refresh_review_queue()
+        except Exception:
+            LOGGER.exception("Refresh review queue action failed")
+            review_queue_status_field.value = f"Could not apply {action} to {ticker}."
+            if hasattr(page, "update"):
+                page.update()
+
+    def render_review_queue(items: list[dict[str, Any]]) -> None:
+        rows = []
+        for item in items:
+            ticker = str(item.get("ticker") or "UNKNOWN")
+            is_resolved = str(item.get("status") or "").upper() == "RESOLVED"
+            reason_codes = ", ".join(str(value) for value in item.get("reason_codes") or [])
+            status_lines = [str(item.get("status") or "UNKNOWN")]
+            if item.get("operator_action"):
+                status_lines.append(str(item["operator_action"]))
+            if item.get("reevaluation_pending"):
+                status_lines.append("Reevaluation pending")
+            rows.append(
+                ft.Row(
+                    [
+                        ft.Text(ticker, width=65, weight=ft.FontWeight.BOLD),
+                        ft.Text("\n".join(status_lines), width=125),
+                        ft.Text(
+                            f"{item.get('classification') or 'UNKNOWN'}\n"
+                            f"Evidence: {item.get('evidence_reference') or 'not recorded'}",
+                            width=170,
+                            tooltip=f"Published binding: {item.get('last_published_binding') or 'not recorded'}",
+                        ),
+                        ft.Text(
+                            f"{item.get('human_summary') or ''}\n{reason_codes}",
+                            width=300,
+                        ),
+                        ft.Text(
+                            f"{item.get('first_seen_at_utc') or 'not recorded'}\n"
+                            f"{item.get('first_seen_run_id') or 'run not recorded'}",
+                            width=145,
+                        ),
+                        ft.Text(
+                            f"{item.get('last_seen_at_utc') or 'not recorded'}\n"
+                            f"{item.get('last_seen_run_id') or 'run not recorded'}",
+                            width=145,
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.INFO,
+                            tooltip="View persisted review evidence",
+                            on_click=lambda _event, selected=dict(item): select_review_item(selected),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.HOURGLASS_EMPTY,
+                            tooltip="Wait for provider",
+                            disabled=is_resolved,
+                            on_click=lambda _event, selected=ticker: apply_review_action(
+                                selected, "WAIT_FOR_PROVIDER"
+                            ),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.REFRESH,
+                            tooltip="Retry reevaluation",
+                            disabled=is_resolved,
+                            on_click=lambda _event, selected=ticker: apply_review_action(
+                                selected, "RETRY_REEVALUATION"
+                            ),
+                        ),
+                    ],
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            )
+        review_queue_column.controls = rows or [ft.Text("No review items found.")]
+
+    def refresh_review_queue(_event: Any | None = None) -> None:
+        review_queue_refresh_button.disabled = True
+        review_queue_status_field.value = "Loading review queue..."
+        if hasattr(page, "update"):
+            page.update()
+        try:
+            reader = getattr(admin_service, "list_refresh_review_queue", None)
+            if callable(reader):
+                payload = dict(reader(active_only=not bool(review_queue_include_resolved_checkbox.value)))
+            else:
+                legacy_reader = getattr(admin_service, "refresh_review_queue")
+                items = legacy_reader(include_resolved=bool(review_queue_include_resolved_checkbox.value))
+                payload = {"status": "READY" if items else "EMPTY", "items": items}
+            status = str(payload.get("status") or "ERROR")
+            items = [dict(item) for item in payload.get("items") or []]
+            render_review_queue(items)
+            empty_message = (
+                "No Refresh review items are currently quarantined."
+                if not review_queue_include_resolved_checkbox.value
+                else "No Refresh review items have been recorded."
+            )
+            if status == "EMPTY":
+                review_queue_column.controls = [ft.Text(empty_message)]
+            status_message = {
+                "NOT_INITIALIZED": "Review queue has not been initialized.",
+                "EMPTY": empty_message,
+                "READY": f"{len(items)} review item(s).",
+            }.get(status, str(payload.get("error") or "Review queue could not be loaded."))
+            review_queue_status_field.value = status_message
+            if status in {"NOT_INITIALIZED", "ERROR"}:
+                review_queue_column.controls = [ft.Text(status_message)]
+        except Exception:
+            LOGGER.exception("Refresh review queue load failed")
+            review_queue_column.controls = []
+            review_queue_status_field.value = "Review queue could not be loaded."
+        finally:
+            review_queue_refresh_button.disabled = False
+            if hasattr(page, "update"):
+                page.update()
+
+    review_queue_refresh_button = ft.IconButton(
+        icon=ft.Icons.REFRESH,
+        tooltip="Load or refresh review queue",
+        on_click=refresh_review_queue,
+    )
+    review_queue_include_resolved_checkbox.on_change = refresh_review_queue
 
     def load_history() -> dict[str, Any]:
         nonlocal history_cursor
@@ -1169,6 +1367,33 @@ def build_fundamentals_admin_page(
                 ]
             ),
             ft.Divider(),
+            ft.Row(
+                [
+                    ft.Text("Refresh Review Queue", size=18, weight=ft.FontWeight.BOLD),
+                    review_queue_refresh_button,
+                    review_queue_include_resolved_checkbox,
+                ],
+                spacing=12,
+                wrap=True,
+            ),
+            review_queue_status_field,
+            ft.Row(
+                [
+                    ft.Text("Ticker", width=65, weight=ft.FontWeight.BOLD),
+                    ft.Text("Status", width=125, weight=ft.FontWeight.BOLD),
+                    ft.Text("Classification", width=170, weight=ft.FontWeight.BOLD),
+                    ft.Text("Reason", width=300, weight=ft.FontWeight.BOLD),
+                    ft.Text("First seen", width=145, weight=ft.FontWeight.BOLD),
+                    ft.Text("Last seen", width=145, weight=ft.FontWeight.BOLD),
+                    ft.Container(width=48),
+                    ft.Container(width=48),
+                    ft.Container(width=48),
+                ]
+            ),
+            review_queue_column,
+            review_queue_detail_field,
+            review_queue_blocked_actions,
+            ft.Divider(),
             ft.Text("Run history", size=18, weight=ft.FontWeight.BOLD),
             show_technical_history_checkbox,
             ft.Row(
@@ -1244,6 +1469,12 @@ def build_fundamentals_admin_page(
         history_show_more_button=history_show_more_button,
         cleanup_status_field=cleanup_status_field,
         cleanup_button=cleanup_button,
+        review_queue_column=review_queue_column,
+        review_queue_status_field=review_queue_status_field,
+        review_queue_detail_field=review_queue_detail_field,
+        review_queue_include_resolved_checkbox=review_queue_include_resolved_checkbox,
+        review_queue_refresh_button=review_queue_refresh_button,
+        review_queue_blocked_actions=review_queue_blocked_actions,
         activate=activate,
         history_loader=history_loader,
     )

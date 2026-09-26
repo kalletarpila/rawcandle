@@ -14,6 +14,20 @@ GLOBAL_BLOCKING_REVIEW = "GLOBAL_BLOCKING_REVIEW"
 OPEN_STATUSES = ("OPEN", "WAITING_PROVIDER", "RETRY_REEVALUATION")
 SUPPORTED_ACTIONS = ("WAIT_FOR_PROVIDER", "RETRY_REEVALUATION")
 BLOCKED_ACTIONS = ("ACCEPT_RETAINED_HISTORY", "CONFIRM_TRUE_SOURCE_REMOVAL")
+REASON_EXPLANATIONS = {
+    "BOUNDARY_FISCAL_WINDOW_TOO_SHORT": (
+        "Provider history is shorter than the required 41-quarter boundary."
+    ),
+    "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW": (
+        "The oldest source observation reached the expected rolling-history boundary."
+    ),
+    "COMPANION_DIMENSION_CONTRADICTION": (
+        "ARQ and MRQ companion evidence imply conflicting source-history actions."
+    ),
+    "PROVIDER_ANOMALY_SUSPECTED": (
+        "Complete provider response is materially shorter than the expected source window."
+    ),
+}
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS refresh_review_queue (
@@ -50,8 +64,27 @@ def _connect(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _read_connect(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA query_only=ON")
+    return connection
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _decode_row(row: sqlite3.Row) -> dict[str, Any]:
+    value = dict(row)
+    for key in (
+        "reason_codes_json",
+        "affected_source_keys_json",
+        "fiscal_identities_json",
+        "resolution_evidence_json",
+    ):
+        value[key.removesuffix("_json")] = json.loads(value.pop(key)) if value.get(key) else None
+    return value
 
 
 def _review_evidence(change: Mapping[str, Any]) -> dict[str, Any]:
@@ -149,6 +182,40 @@ def partition_artifact_fingerprint(value: Mapping[str, Any]) -> str:
     return fingerprint(binding)
 
 
+def review_reason_explanation(code: str) -> str:
+    return REASON_EXPLANATIONS.get(code, code)
+
+
+def present_review_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    reason_codes = [str(value) for value in item.get("reason_codes") or []]
+    source_keys = list(item.get("affected_source_keys") or [])
+    fiscal_identities = list(item.get("fiscal_identities") or [])
+    explanations = [review_reason_explanation(code) for code in reason_codes]
+    review_type = str(item.get("review_type") or "TICKER_LOCAL_REVIEW")
+    if review_type in REASON_EXPLANATIONS:
+        explanations.insert(0, REASON_EXPLANATIONS[review_type])
+    explanations = list(dict.fromkeys(explanations))
+    count_text = (
+        f"{len(source_keys)} affected source observation"
+        f"{'s' if len(source_keys) != 1 else ''}."
+        if source_keys else ""
+    )
+    summary = " ".join(value for value in (count_text, *explanations) if value)
+    status = str(item.get("status") or "UNKNOWN")
+    return {
+        **dict(item),
+        "review_scope": TICKER_LOCAL_REVIEW,
+        "classification": review_type,
+        "reason_explanations": explanations,
+        "human_summary": summary or "No additional explanation is available.",
+        "affected_source_count": len(source_keys),
+        "affected_fiscal_identity_count": len(fiscal_identities),
+        "evidence_reference": str(item.get("source_evidence_fingerprint") or "")[:12],
+        "reevaluation_pending": status == "RETRY_REEVALUATION",
+        "currently_held": status in OPEN_STATUSES,
+    }
+
+
 @dataclass(frozen=True)
 class RefreshReviewQueue:
     path: Path
@@ -156,7 +223,7 @@ class RefreshReviewQueue:
     def pending_tickers(self) -> list[str]:
         if not self.path.exists():
             return []
-        with _connect(self.path) as connection:
+        with _read_connect(self.path) as connection:
             rows = connection.execute(
                 "SELECT ticker FROM refresh_review_queue WHERE status IN (?,?,?) ORDER BY ticker",
                 OPEN_STATUSES,
@@ -220,24 +287,21 @@ class RefreshReviewQueue:
     def get(self, ticker: str) -> dict[str, Any] | None:
         if not self.path.exists():
             return None
-        with _connect(self.path) as connection:
+        with _read_connect(self.path) as connection:
             row = connection.execute("SELECT * FROM refresh_review_queue WHERE ticker=?", (ticker.upper(),)).fetchone()
         if row is None:
             return None
-        value = dict(row)
-        for key in ("reason_codes_json", "affected_source_keys_json", "fiscal_identities_json", "resolution_evidence_json"):
-            value[key.removesuffix("_json")] = json.loads(value.pop(key)) if value.get(key) else None
-        return value
+        return _decode_row(row)
 
     def list_items(self, *, include_resolved: bool = False) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
-        query = "SELECT ticker FROM refresh_review_queue"
+        query = "SELECT * FROM refresh_review_queue"
         parameters: tuple[Any, ...] = ()
         if not include_resolved:
             query += " WHERE status IN (?,?,?)"
             parameters = OPEN_STATUSES
         query += " ORDER BY ticker"
-        with _connect(self.path) as connection:
-            tickers = [str(row[0]) for row in connection.execute(query, parameters)]
-        return [item for ticker in tickers if (item := self.get(ticker)) is not None]
+        with _read_connect(self.path) as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [_decode_row(row) for row in rows]

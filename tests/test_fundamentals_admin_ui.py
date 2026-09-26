@@ -1562,3 +1562,139 @@ def test_full_workflow_test_failure_preserves_preview_for_manual_test_retry() ->
     assert controls.copy_apply_button.disabled is False
     assert controls.production_apply_button.disabled is True
     assert controls.full_workflow_button.disabled is True
+
+
+def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions() -> None:
+    active_item = {
+        "ticker": "YYAI",
+        "status": "OPEN",
+        "review_scope": "TICKER_LOCAL_REVIEW",
+        "classification": "PROVIDER_ANOMALY_SUSPECTED",
+        "reason_codes": ["BOUNDARY_FISCAL_WINDOW_TOO_SHORT"],
+        "reason_explanations": [
+            "Provider history is shorter than the required 41-quarter boundary."
+        ],
+        "human_summary": (
+            "23 affected source observations. Provider history is shorter than the "
+            "required 41-quarter boundary."
+        ),
+        "affected_source_keys": [
+            {
+                "ticker": "YYAI", "dimension": "ARQ", "date": "2017-01-01",
+                "reportperiod": "2016-12-31",
+            }
+        ],
+        "fiscal_identities": [{"fiscal_year": 2017, "fiscal_quarter": "Q1"}],
+        "first_seen_at_utc": "2026-09-24T01:00:00Z",
+        "first_seen_run_id": "preview-first",
+        "last_seen_at_utc": "2026-09-25T01:00:00Z",
+        "last_seen_run_id": "preview-latest",
+        "last_published_binding": "published-generation-7",
+        "source_evidence_fingerprint": "a" * 64,
+        "evidence_reference": "a" * 12,
+        "operator_action": None,
+        "resolution_evidence": None,
+        "reevaluation_pending": False,
+    }
+    resolved_item = {**active_item, "ticker": "DONE", "status": "RESOLVED"}
+
+    class Service:
+        def __init__(self) -> None:
+            self.queue_reads = 0
+            self.history_reads = 0
+            self.actions: list[tuple[str, str]] = []
+
+        def capabilities(self):
+            return ()
+
+        def history_entries(self, *, limit, include_technical=False):
+            self.history_reads += 1
+            return []
+
+        def list_refresh_review_queue(self, *, active_only=True):
+            self.queue_reads += 1
+            items = [active_item] if active_only else [active_item, resolved_item]
+            return {"status": "READY", "items": items}
+
+        def resolve_refresh_review(self, ticker, action, *, evidence=None):
+            self.actions.append((ticker, action))
+            active_item["status"] = (
+                "WAITING_PROVIDER" if action == "WAIT_FOR_PROVIDER" else "RETRY_REEVALUATION"
+            )
+            active_item["operator_action"] = action
+            active_item["reevaluation_pending"] = action == "RETRY_REEVALUATION"
+            return active_item
+
+    page = _Page()
+    service = Service()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+
+    assert service.history_reads == 1
+    assert service.queue_reads == 0
+    assert controls.review_queue_status_field.value == "Not loaded."
+    assert all(button.disabled for button in controls.review_queue_blocked_actions.controls)
+
+    controls.review_queue_refresh_button.on_click(None)
+    assert service.queue_reads == 1
+    assert len(controls.review_queue_column.controls) == 1
+    row = controls.review_queue_column.controls[0]
+    assert row.controls[0].value == "YYAI"
+    assert "BOUNDARY_FISCAL_WINDOW_TOO_SHORT" in row.controls[3].value
+    assert "preview-first" in row.controls[4].value
+    assert "preview-latest" in row.controls[5].value
+
+    row.controls[6].on_click(None)
+    assert "2017 Q1" in controls.review_queue_detail_field.value
+    assert "YYAI / ARQ / 2017-01-01 / 2016-12-31" in controls.review_queue_detail_field.value
+    assert "published-generation-7" in controls.review_queue_detail_field.value
+    assert "Evidence fingerprint: " + "a" * 64 in controls.review_queue_detail_field.value
+
+    row.controls[7].on_click(None)
+    assert service.actions[-1] == ("YYAI", "WAIT_FOR_PROVIDER")
+    assert "WAITING_PROVIDER" in controls.review_queue_column.controls[0].controls[1].value
+    controls.review_queue_column.controls[0].controls[8].on_click(None)
+    assert service.actions[-1] == ("YYAI", "RETRY_REEVALUATION")
+    assert "Reevaluation pending" in controls.review_queue_column.controls[0].controls[1].value
+
+    controls.review_queue_include_resolved_checkbox.value = True
+    controls.review_queue_include_resolved_checkbox.on_change(None)
+    assert service.queue_reads == 4
+    assert [row.controls[0].value for row in controls.review_queue_column.controls] == ["YYAI", "DONE"]
+    assert controls.review_queue_column.controls[1].controls[7].disabled is True
+    assert controls.review_queue_column.controls[1].controls[8].disabled is True
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (
+            {"status": "EMPTY", "items": []},
+            "No Refresh review items are currently quarantined.",
+        ),
+        (
+            {"status": "NOT_INITIALIZED", "items": []},
+            "Review queue has not been initialized.",
+        ),
+        (
+            {"status": "ERROR", "items": [], "error": "Refresh review queue is unreadable."},
+            "Refresh review queue is unreadable.",
+        ),
+    ],
+)
+def test_refresh_review_queue_ui_handles_empty_missing_and_corrupt_states(
+    payload, expected,
+) -> None:
+    class Service:
+        def capabilities(self):
+            return ()
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def list_refresh_review_queue(self, *, active_only=True):
+            return payload
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=Service())
+    controls.review_queue_refresh_button.on_click(None)
+
+    assert controls.review_queue_status_field.value == expected
