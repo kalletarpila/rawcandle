@@ -23,6 +23,10 @@ def _stage(
 ) -> SimpleNamespace:
     run_dir = root / run_id
     run_dir.mkdir(parents=True)
+    supplied = dict(extra or {})
+    refresh_preview = dict(supplied.pop("refresh_preview", {}) or {})
+    if mode == "PREVIEW":
+        refresh_preview.setdefault("future_test_authorized", True)
     payload = {
         "run_id": run_id,
         "operation_type": "REFRESH_FUNDAMENTALS",
@@ -30,7 +34,8 @@ def _stage(
         "outcome": outcome,
         "trigger_source": "MANUAL",
         "summary_counts": {"effective_changed_known": 1, "HISTORICAL_REVISION": 1},
-        **(extra or {}),
+        **supplied,
+        **({"refresh_preview": refresh_preview} if mode == "PREVIEW" else {}),
     }
     (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
     (run_dir / "operation_report.md").write_text(f"# {mode}\n", encoding="utf-8")
@@ -110,6 +115,36 @@ def test_refresh_full_workflow_happy_path_retains_child_reports(tmp_path: Path) 
     assert "# Refresh Fundamentals Full Workflow Report" in report
     assert "| Production update | COMPLETED |" in report
     assert "V2/RP/RV: READY" in report
+
+
+def test_refresh_full_workflow_stops_before_test_when_preview_is_not_authorized(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    result = run_refresh_full_workflow(
+        run_root=tmp_path,
+        preview_stage=lambda _callback: _stage(
+            tmp_path, "preview-run", mode="PREVIEW",
+            extra={
+                "refresh_preview": {
+                    "future_test_authorized": False,
+                    "publication_date_state": {
+                        "historical_bootstrap_eligible": 1015,
+                        "repair_required": 1,
+                    },
+                },
+            },
+        ),
+        test_stage=lambda *_args: calls.append("test"),
+        production_stage=lambda *_args: calls.append("production"),
+    )
+
+    assert calls == []
+    assert result["outcome"] == "STOPPED"
+    assert result["current_stage"] == "Preview"
+    assert result["final_completed_stage"] == "Preview"
+    assert "bootstrap eligible=1015" in result["stop_reason"]
+    assert "repair required=1" in result["stop_reason"]
 
 
 def test_refresh_full_workflow_preview_blocker_never_invokes_test(tmp_path: Path) -> None:

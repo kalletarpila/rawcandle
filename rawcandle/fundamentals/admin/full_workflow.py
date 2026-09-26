@@ -890,6 +890,30 @@ def run_operation_workflow(
             result["final_completed_stage"] = "Preview"
             result["final_batch_outcome"] = terminal["batch_outcome"]
             preview_record["child_summary"] = terminal
+        elif (
+            adapter.operation_type == AdminOperationType.REFRESH_FUNDAMENTALS
+            and not bool((preview_payload.get("refresh_preview") or {}).get("future_test_authorized"))
+        ):
+            publication_state = (preview_payload.get("refresh_preview") or {}).get(
+                "publication_date_state"
+            ) or {}
+            reason = (
+                "Refresh Preview did not authorize Test on copies. "
+                "Publication-date prerequisites: "
+                f"bootstrap eligible={publication_state.get('historical_bootstrap_eligible', 0)}, "
+                f"repair required={publication_state.get('repair_required', 0)}."
+            )
+            stop("Preview", reason)
+            terminal = _terminal_summary(
+                stage="Preview", child=preview, payload=preview_payload,
+                workflow_outcome=result["outcome"], requested_count=len(adapter.requested_inputs),
+                production_entered=False, production_completed=False,
+                fallback_reason=reason,
+            )
+            result["terminal_summary"] = terminal
+            result["stop_reason"] = reason
+            result["final_completed_stage"] = "Preview"
+            preview_record["child_summary"] = terminal
         else:
             result["preview_payload_path"] = _value(preview, "preview_payload_path")
             result["preview_fingerprint"] = _value(preview, "preview_fingerprint")

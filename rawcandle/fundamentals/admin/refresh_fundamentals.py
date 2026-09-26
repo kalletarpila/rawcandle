@@ -40,6 +40,8 @@ from rawcandle.fundamentals.providers.sharadar import (
     SharadarResult,
     extract_schema_fields,
 )
+from rawcandle.fundamentals.phase12d import provider_publication_date_authorities
+from rawcandle.fundamentals.publication_dates import classify_first_public_bootstrap
 from rawcandle.fundamentals.schema.sharadar_history_policy import MINIMUM_HISTORY_YEARS
 
 
@@ -1125,22 +1127,7 @@ def compare_ticker_histories(
 
 
 def _provider_winner_dates(provider_db: Path) -> dict[tuple[int, int, str], str]:
-    with _readonly(provider_db) as connection:
-        rows = connection.execute(
-            "SELECT po.company_id,po.observation_id,s.fiscalperiod,s.reportperiod,s.date,s.lastupdated "
-            "FROM sharadar_fundamental_observation s JOIN provider_observation po USING(observation_id) "
-            "WHERE s.dimension='ARQ' AND po.company_id IS NOT NULL "
-            "ORDER BY po.company_id,s.fiscalperiod,s.reportperiod DESC,COALESCE(s.lastupdated,s.date,'') DESC,po.observation_id"
-        ).fetchall()
-    winners: dict[tuple[int, int, str], str] = {}
-    for row in rows:
-        try:
-            year, quarter = fiscal_identity(row["fiscalperiod"])
-            source_date = _iso_date(row["date"], "date")
-        except HistoryValidationError:
-            continue
-        winners.setdefault((int(row["company_id"]), year, quarter), source_date)
-    return winners
+    return provider_publication_date_authorities(provider_db)
 
 
 def audit_publish_date_bootstrap(paths: BatchAddTickerPaths) -> dict[str, Any]:
@@ -1160,28 +1147,17 @@ def audit_publish_date_bootstrap(paths: BatchAddTickerPaths) -> dict[str, Any]:
         availability = str(row["source_availability_date"] or "")
         first_public = str(row["first_public_result_date"] or "")
         winner_date = winners.get(key)
-        reason = None
-        proposed = None
-        if first_public:
-            try:
-                _iso_date(first_public, "first_public_result_date")
-                counts["ALREADY_ESTABLISHED"] += 1
-            except HistoryValidationError:
-                reason = "INVALID_EXISTING_FIRST_PUBLIC_RESULT_DATE"
-        else:
-            try:
-                parsed = _iso_date(availability, "source_availability_date")
-                if parsed < str(row["period_end"]):
-                    reason = "AVAILABILITY_BEFORE_PERIOD_END"
-                elif winner_date != parsed:
-                    reason = "AVAILABILITY_DOES_NOT_MATCH_CURRENT_WINNER_DATE"
-                else:
-                    proposed = parsed
-                    counts["BOOTSTRAP_ELIGIBLE"] += 1
-            except HistoryValidationError:
-                reason = "INVALID_SOURCE_AVAILABILITY_DATE"
+        classification = classify_first_public_bootstrap(
+            first_public_result_date=first_public,
+            source_availability_date=availability,
+            period_end=row["period_end"],
+            accepted_winner_date=winner_date,
+        )
+        status = str(classification["status"])
+        reason = classification.get("reason")
+        proposed = classification.get("proposed_date")
+        counts[status] += 1
         if reason:
-            counts["REPAIR_REQUIRED"] += 1
             exceptions.append({
                 "quarter_id": int(row["quarter_id"]),
                 "company_id": key[0],
@@ -1350,6 +1326,13 @@ def _publication_date_state(
         ),
         "ticker_status_counts": dict(sorted(statuses.items())),
     }
+
+
+def publication_date_gate_authorized(publication_state: Mapping[str, Any]) -> bool:
+    return (
+        int(publication_state.get("historical_bootstrap_eligible", 0)) == 0
+        and int(publication_state.get("repair_required", 0)) == 0
+    )
 
 
 def provider_key_diagnostics(provider_db: Path) -> dict[str, Any]:
@@ -1774,8 +1757,7 @@ def run_preview(
             "future_test_authorized": (
                 trigger_source == "MANUAL" and bool(replacement) and not global_blockers
                 and discovery["status"] == "COMPLETE"
-                and publication_state["historical_bootstrap_eligible"] == 0
-                and publication_state["repair_required"] == 0
+                and publication_date_gate_authorized(publication_state)
             ),
             "published_watermark_advanced": False,
             "provider_key_diagnostics": legacy,

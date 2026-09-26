@@ -48,10 +48,11 @@ def _databases(tmp_path: Path) -> tuple[Path, Path, Path]:
 def _row(quarter: int, *, revision: int = 1, operating_income: int = 10) -> dict[str, object]:
     month_day = {1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31"}[quarter]
     period = f"2023-{month_day}"
+    filing_date = {1: "2023-04-30", 2: "2023-07-30", 3: "2023-10-30", 4: "2024-01-30"}[quarter]
     return {
         "ticker": "AAA", "permaticker": "1", "dimension": "ARQ",
         "calendardate": period, "reportperiod": period,
-        "fiscalperiod": f"2023-Q{quarter}", "date": f"2023-{quarter * 3 + 1:02d}-30",
+        "fiscalperiod": f"2023-Q{quarter}", "date": filing_date,
         "lastupdated": f"2026-01-{revision:02d}", "revenue": 100,
         "gp": 50, "opinc": operating_income, "ebit": 12, "ebitda": 14,
         "netinc": 8, "netinccmn": 7, "ncfo": 11, "capex": -2, "fcf": 9,
@@ -129,6 +130,80 @@ def test_revision_aware_canonical_rebuild_preserves_identity_and_is_idempotent(
     unchanged = phase12d.reconcile_canonical(provider, canonical, applied_at="fixed")
     assert unchanged["UNCHANGED_OVERLAP"] == 1
     assert unchanged.get("NEW_HISTORY", 0) == unchanged.get("REVISED_OVERLAP", 0) == 0
+
+
+def test_invalid_date_disqualifies_whole_financial_winner_and_initializes_new_history(
+    tmp_path: Path,
+) -> None:
+    provider, canonical, _ = _databases(tmp_path)
+    valid = _row(4, revision=1, operating_income=15)
+    valid["date"] = "2024-02-15"
+    valid["lastupdated"] = "2026-04-29"
+    invalid = dict(valid, date="2023-05-20", lastupdated="2026-09-08", opinc=99)
+    _insert(provider, valid)
+    _insert(provider, invalid)
+
+    result = phase12d.reconcile_canonical(provider, canonical, applied_at="fixed")
+
+    with sqlite3.connect(canonical) as connection:
+        row = connection.execute(
+            "SELECT q.source_availability_date,q.first_public_result_date,f.operating_income "
+            "FROM v4_quarter q JOIN v4_quarter_financials f USING(quarter_id)"
+        ).fetchone()
+    # The invalid newer observation carried opinc=99. Canonical financial values
+    # and date metadata intentionally retain one accepted observation authority.
+    assert row == ("2024-02-15", "2024-02-15", 15)
+    assert result["invalid_publication_candidates"] == 1
+
+
+def test_publication_authority_keeps_existing_precedence_for_valid_revisions(
+    tmp_path: Path,
+) -> None:
+    provider, canonical, _ = _databases(tmp_path)
+    older = _row(2, revision=1, operating_income=10)
+    newer = _row(2, revision=2, operating_income=20)
+    _insert(provider, older)
+    _insert(provider, newer)
+
+    phase12d.reconcile_canonical(provider, canonical, applied_at="fixed")
+
+    with sqlite3.connect(canonical) as connection:
+        assert connection.execute(
+            "SELECT operating_income FROM v4_quarter_financials"
+        ).fetchone()[0] == 20
+
+
+def test_all_invalid_publication_candidates_fail_closed(tmp_path: Path) -> None:
+    provider, canonical, _ = _databases(tmp_path)
+    invalid = _row(4)
+    invalid["date"] = "2023-05-20"
+    _insert(provider, invalid)
+
+    with pytest.raises(
+        phase12d.PublicationDateAuthorityError,
+        match="CANONICAL_PUBLICATION_DATE_AUTHORITY_REPAIR_REQUIRED:1:2023:Q4",
+    ):
+        phase12d.reconcile_canonical(provider, canonical, applied_at="fixed")
+    with sqlite3.connect(canonical) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM v4_quarter").fetchone()[0] == 0
+
+
+def test_reconciliation_never_overwrites_established_first_public_date(tmp_path: Path) -> None:
+    provider, canonical, _ = _databases(tmp_path)
+    _insert(provider, _row(1, revision=1, operating_income=10))
+    phase12d.reconcile_canonical(provider, canonical, applied_at="first")
+    with sqlite3.connect(canonical) as connection:
+        connection.execute(
+            "UPDATE v4_quarter SET first_public_result_date='2023-04-15'"
+        )
+    _insert(provider, _row(1, revision=2, operating_income=20))
+
+    phase12d.reconcile_canonical(provider, canonical, applied_at="second")
+
+    with sqlite3.connect(canonical) as connection:
+        assert connection.execute(
+            "SELECT first_public_result_date FROM v4_quarter"
+        ).fetchone()[0] == "2023-04-15"
 
 
 def test_canonical_and_ttm_failures_roll_back_and_ttm_replay_is_noop(tmp_path: Path) -> None:

@@ -22,6 +22,8 @@ from rawcandle.fundamentals.admin.publication_journal import (
     sqlite_verification,
 )
 from rawcandle.fundamentals.phase12d import REPORT_ROOT, ROOT
+from rawcandle.fundamentals.phase12d import provider_publication_date_authorities
+from rawcandle.fundamentals.publication_dates import classify_first_public_bootstrap
 from rawcandle.fundamentals.phase13b_foundation import online_backup
 from rawcandle.io_atomic import write_text_atomic
 
@@ -116,6 +118,89 @@ def _established_first_public_values(path: Path) -> dict[tuple[int, int, str], s
                 "FROM v4_quarter WHERE first_public_result_date IS NOT NULL"
             )
         }
+
+
+def authorized_bootstrap_plan(
+    paths: BatchAddTickerPaths,
+    *, canonical_db: Path | None = None,
+) -> dict[str, Any]:
+    canonical_path = canonical_db or paths.canonical_db
+    authorities = provider_publication_date_authorities(paths.provider_db)
+    eligible: list[dict[str, Any]] = []
+    repair: list[dict[str, Any]] = []
+    established = 0
+    with _readonly(canonical_path) as connection:
+        rows = connection.execute(
+            "SELECT quarter_id,company_id,fiscal_year,fiscal_quarter,period_end,"
+            "source_availability_date,first_public_result_date FROM v4_quarter "
+            "ORDER BY company_id,fiscal_year,fiscal_quarter"
+        ).fetchall()
+    for row in rows:
+        key = (int(row["company_id"]), int(row["fiscal_year"]), str(row["fiscal_quarter"]))
+        classification = classify_first_public_bootstrap(
+            first_public_result_date=row["first_public_result_date"],
+            source_availability_date=row["source_availability_date"],
+            period_end=row["period_end"],
+            accepted_winner_date=authorities.get(key),
+        )
+        status = str(classification["status"])
+        if status == "ALREADY_ESTABLISHED":
+            established += 1
+            continue
+        item = {
+            "quarter_id": int(row["quarter_id"]),
+            "company_id": key[0],
+            "fiscal_year": key[1],
+            "fiscal_quarter": key[2],
+            "period_end": row["period_end"],
+            "source_availability_date": row["source_availability_date"],
+            "accepted_winner_date": authorities.get(key),
+            **classification,
+        }
+        (eligible if status == "BOOTSTRAP_ELIGIBLE" else repair).append(item)
+    binding_rows = [
+        (
+            item["quarter_id"], item["company_id"], item["fiscal_year"],
+            item["fiscal_quarter"], item.get("proposed_date"),
+        )
+        for item in eligible
+    ]
+    return {
+        "total_rows": len(rows),
+        "established": established,
+        "eligible": eligible,
+        "eligible_count": len(eligible),
+        "repair_required": repair,
+        "repair_required_count": len(repair),
+        "binding_fingerprint": _hash_rows(binding_rows),
+    }
+
+
+def apply_authorized_bootstrap(
+    canonical_db: Path,
+    plan: Mapping[str, Any],
+) -> int:
+    eligible = list(plan.get("eligible") or [])
+    with sqlite3.connect(canonical_db) as connection:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("BEGIN IMMEDIATE")
+        updated = 0
+        for item in eligible:
+            changed = connection.execute(
+                "UPDATE v4_quarter SET first_public_result_date=? "
+                "WHERE quarter_id=? AND company_id=? AND fiscal_year=? AND fiscal_quarter=? "
+                "AND first_public_result_date IS NULL AND source_availability_date=?",
+                (
+                    item["proposed_date"], item["quarter_id"], item["company_id"],
+                    item["fiscal_year"], item["fiscal_quarter"],
+                    item["source_availability_date"],
+                ),
+            ).rowcount
+            if changed != 1:
+                raise StaleBootstrapPreview("AUTHORIZED_BOOTSTRAP_PLAN_STALE")
+            updated += changed
+        connection.commit()
+    return updated
 
 
 def _non_target_fingerprint(connection: sqlite3.Connection) -> str:

@@ -25,6 +25,11 @@ from rawcandle.fundamentals.operating_income_v2.readers import (
     ActiveModelRepository,
     ParallelModelRepository,
 )
+from rawcandle.fundamentals.publication_dates import (
+    PublicationDateAuthorityError,
+    select_valid_publication_winner,
+    valid_publication_authority,
+)
 from rawcandle.fundamentals.schema.contract import SHARADAR_ARQ_FIELD_MAPPING
 from rawcandle.fundamentals.schema.production_bootstrap import ProductionPaths
 from rawcandle.fundamentals.schema.provenance import (
@@ -373,7 +378,7 @@ def _provider_winners(provider_db: Path) -> tuple[list[dict[str, Any]], dict[str
             "ORDER BY s.ticker,s.fiscalperiod,s.reportperiod DESC,"
             "COALESCE(s.lastupdated,s.date,'') DESC,po.observation_id"
         )]
-    winners: dict[tuple[int, int, str], dict[str, Any]] = {}
+    candidates: dict[tuple[int, int, str], list[dict[str, Any]]] = {}
     invalid = 0
     unresolved = 0
     for row in rows:
@@ -387,7 +392,21 @@ def _provider_winners(provider_db: Path) -> tuple[list[dict[str, Any]], dict[str
             continue
         row["fiscal_year"] = fiscal_year
         row["fiscal_quarter"] = fiscal_quarter
-        winners.setdefault((int(row["company_id"]), fiscal_year, fiscal_quarter), row)
+        candidates.setdefault((int(row["company_id"]), fiscal_year, fiscal_quarter), []).append(row)
+    winners: dict[tuple[int, int, str], dict[str, Any]] = {}
+    invalid_publication_candidates = 0
+    for key, group in candidates.items():
+        try:
+            winner = dict(select_valid_publication_winner(group))
+        except PublicationDateAuthorityError as exc:
+            raise PublicationDateAuthorityError(
+                f"{exc}:{key[0]}:{key[1]}:{key[2]}"
+            ) from exc
+        invalid_publication_candidates += sum(
+            not valid_publication_authority(candidate.get("date"), candidate.get("reportperiod"))
+            for candidate in group
+        )
+        winners[key] = winner
     output = [winners[key] for key in sorted(winners)]
     payload = [
         {
@@ -403,7 +422,18 @@ def _provider_winners(provider_db: Path) -> tuple[list[dict[str, Any]], dict[str
         "provider_arq_rows": len(rows), "winner_rows": len(output),
         "superseded_or_duplicate_rows": len(rows) - len(output) - invalid - unresolved,
         "invalid_fiscal_rows": invalid, "unresolved_identity_rows": unresolved,
+        "invalid_publication_candidates": invalid_publication_candidates,
         "source_fingerprint": stable_hash(payload),
+    }
+
+
+def provider_publication_date_authorities(
+    provider_db: Path,
+) -> dict[tuple[int, int, str], str]:
+    winners, _evidence = _provider_winners(provider_db)
+    return {
+        (int(row["company_id"]), int(row["fiscal_year"]), str(row["fiscal_quarter"])): str(row["date"])
+        for row in winners
     }
 
 
@@ -468,8 +498,11 @@ def reconcile_canonical(
                     "INSERT INTO v4_quarter(company_id,fiscal_year,fiscal_quarter,period_end,source_fiscalperiod,"
                     "source_reportperiod,identity_provider,identity_status,source_availability_date,"
                     "first_public_result_date,created_at_utc,updated_at_utc) "
-                    "VALUES(?,?,?,?,?,?,'SHARADAR_ARQ','ACCEPTED',?,NULL,?,?)",
-                    (key[0], key[1], key[2], *metadata[:3], metadata[3], applied_at, applied_at),
+                    "VALUES(?,?,?,?,?,?,'SHARADAR_ARQ','ACCEPTED',?,?,?,?)",
+                    (
+                        key[0], key[1], key[2], *metadata[:3], metadata[3], metadata[3],
+                        applied_at, applied_at,
+                    ),
                 )
                 quarter_id = int(cursor.lastrowid)
                 fields = list(values)
