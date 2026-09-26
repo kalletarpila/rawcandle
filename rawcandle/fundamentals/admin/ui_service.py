@@ -252,7 +252,6 @@ class FundamentalsAdminUIService:
         return self.publication_safety_status()
 
     def _initialize_publication_safety(self) -> None:
-        from rawcandle.fundamentals.admin.production_transaction import production_lock
         from rawcandle.fundamentals.admin.publication_journal import (
             PublicationRecoveryError,
             guard_production_writes,
@@ -263,6 +262,8 @@ class FundamentalsAdminUIService:
         if not current.get("production_writes_blocked") or current.get("status") == "RECOVERY_FAILED":
             self._publication_safety = current
             return
+        from rawcandle.fundamentals.admin.production_transaction import production_lock
+
         try:
             with production_lock():
                 guard_production_writes()

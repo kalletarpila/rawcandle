@@ -95,7 +95,12 @@ def _lazy_runtime_call(module_name: str, function_name: str, *args: Any, **kwarg
 
 
 def read_scheduler_status(*args: Any, **kwargs: Any) -> Any:
-    return _lazy_runtime_call("rawcandle.scheduler.runner", "read_scheduler_status", *args, **kwargs)
+    return _lazy_runtime_call(
+        "rawcandle.scheduler.runtime_state",
+        "read_scheduler_status",
+        *args,
+        **kwargs,
+    )
 
 
 def run_scheduler_config(*args: Any, **kwargs: Any) -> Any:

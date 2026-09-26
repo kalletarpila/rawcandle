@@ -1092,6 +1092,66 @@ def test_scheduler_ui_import_does_not_eagerly_load_heavy_runtime_modules():
     assert json.loads(result.stdout) == []
 
 
+def test_scheduler_status_read_uses_lightweight_runtime_state(tmp_path):
+    status_path = tmp_path / "stock_update_scheduler_status.json"
+    status_path.write_text(
+        json.dumps({"is_running": False, "last_status": "OK"}),
+        encoding="utf-8",
+    )
+    code = (
+        "import json, sys; "
+        "from dev_tools.stock_update_scheduler_ui import read_scheduler_status; "
+        "status = read_scheduler_status(sys.argv[1]); "
+        "print(json.dumps({'status': status, "
+        "'runner_loaded': 'rawcandle.scheduler.runner' in sys.modules, "
+        "'sklearn_loaded': 'sklearn' in sys.modules}))"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(tmp_path)],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["status"]["last_status"] == "OK"
+    assert payload["runner_loaded"] is False
+    assert payload["sklearn_loaded"] is False
+
+
+def test_clear_publication_safety_does_not_load_production_runtime():
+    code = (
+        "import json, sys; "
+        "from rawcandle.fundamentals.admin import publication_journal; "
+        "publication_journal.safety_status = lambda: "
+        "{'status': 'CLEAR', 'production_writes_blocked': False}; "
+        "from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService; "
+        "service = FundamentalsAdminUIService(recover_publication_on_startup=False); "
+        "status = service.initialize_publication_safety(); "
+        "print(json.dumps({'status': status, "
+        "'production_loaded': "
+        "'rawcandle.fundamentals.admin.production_transaction' in sys.modules, "
+        "'sklearn_loaded': 'sklearn' in sys.modules}))"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["status"]["status"] == "CLEAR"
+    assert payload["production_loaded"] is False
+    assert payload["sklearn_loaded"] is False
+
+
 def test_run_app_without_summary_or_logs_shows_clear_messages(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler.json"
     _write_config(config_path)

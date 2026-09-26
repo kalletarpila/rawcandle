@@ -26,6 +26,10 @@ from rawcandle.scheduler.config import (
     read_scheduler_config,
     write_scheduler_config,
 )
+from rawcandle.scheduler.runtime_state import (
+    read_scheduler_status,
+    scheduler_status_path,
+)
 from rawcandle.technical_signal_relevance_persistence import (
     apply_technical_signal_relevance_migration,
     read_relevance_run,
@@ -360,10 +364,6 @@ class EcBridgeCatchupState:
     details: dict[str, object] = field(default_factory=dict)
 
 
-def scheduler_status_path(log_dir: str) -> str:
-    return str(Path(log_dir) / "stock_update_scheduler_status.json")
-
-
 def scheduler_lock_path(log_dir: str) -> str:
     return str(Path(log_dir) / "stock_update_scheduler.lock")
 
@@ -397,14 +397,6 @@ def write_scheduler_status(
         encoding="utf-8",
     )
     return str(status_path)
-
-
-def read_scheduler_status(log_dir: str) -> Optional[dict]:
-    status_path = Path(scheduler_status_path(log_dir))
-    if not status_path.exists():
-        return None
-    with status_path.open("r", encoding="utf-8") as status_file:
-        return json.load(status_file)
 
 
 def acquire_scheduler_lock(log_dir: str) -> IO[str]:

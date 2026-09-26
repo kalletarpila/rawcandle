@@ -10,8 +10,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from rawcandle.fundamentals.admin.artifacts import ROOT
 from rawcandle.fundamentals.admin.contracts import utc_now
-from rawcandle.fundamentals.phase12d import ROOT
 
 
 JOURNAL_FORMAT_VERSION = 1
