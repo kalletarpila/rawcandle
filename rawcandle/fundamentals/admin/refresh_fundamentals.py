@@ -671,6 +671,60 @@ def _retention_evidence(
     }
 
 
+def _is_deterministic_replacement_with_aged_companion(
+    ticker: str,
+    events: Sequence[Mapping[str, Any]],
+    source: Mapping[str, HistoryTrust],
+) -> bool:
+    if len(events) != 2 or any(
+        source[dimension].status != "COMPLETE"
+        or source[dimension].ticker != ticker.upper()
+        or source[dimension].dimension != dimension
+        for dimension in REFRESH_DIMENSIONS
+    ):
+        return False
+    replacement = [
+        event for event in events
+        if event.get("event") == TRUE_SOURCE_REMOVAL
+        and event.get("classification_reason") == "SAME_FISCAL_SOURCE_KEY_REPLACEMENT"
+    ]
+    aged = [
+        event for event in events
+        if event.get("event") == AGED_OUT_OF_SOURCE_WINDOW
+        and event.get("classification_reason") == "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW"
+    ]
+    if len(replacement) != 1 or len(aged) != 1:
+        return False
+    replacement_event = replacement[0]
+    aged_event = aged[0]
+    event_dimensions = {
+        replacement_event.get("dimension"), aged_event.get("dimension"),
+    }
+    if event_dimensions != set(REFRESH_DIMENSIONS):
+        return False
+    replacement_keys = replacement_event.get("same_fiscal_current_keys") or []
+    if len(replacement_keys) != 1:
+        return False
+    replacement_dimension = str(replacement_event["dimension"])
+    current_source_keys = {
+        source_key(row) for row in source[replacement_dimension].rows
+    }
+    replacement_key = tuple(
+        str(replacement_keys[0].get(field) or "") for field in SOURCE_PRIMARY_KEY
+    )
+    return (
+        replacement_event.get("ticker") == ticker
+        and aged_event.get("ticker") == ticker
+        and bool(replacement_event.get("was_oldest_prefix"))
+        and bool(aged_event.get("was_oldest_prefix"))
+        and bool(replacement_event.get("expected_quarterly_window_covered"))
+        and bool(aged_event.get("expected_quarterly_window_covered"))
+        and bool(aged_event.get("chronology_coherent"))
+        and not aged_event.get("same_fiscal_current_keys")
+        and replacement_key in current_source_keys
+    )
+
+
 def build_source_history_merge(
     ticker: str,
     current: Mapping[str, Mapping[str, Any]],
@@ -759,7 +813,13 @@ def build_source_history_merge(
         by_fiscal.setdefault((int(fiscal["fiscal_year"]), str(fiscal["fiscal_quarter"])), []).append(event)
     for events in by_fiscal.values():
         classes = {str(event["event"]) for event in events}
-        if len(events) > 1 and AMBIGUOUS_SOURCE_REMOVAL not in classes and len(classes) > 1:
+        deterministic_pair = _is_deterministic_replacement_with_aged_companion(
+            ticker, events, source,
+        )
+        if (
+            len(events) > 1 and AMBIGUOUS_SOURCE_REMOVAL not in classes
+            and len(classes) > 1 and not deterministic_pair
+        ):
             for event in events:
                 event["event"] = AMBIGUOUS_SOURCE_REMOVAL
                 event["classification_reason"] = "COMPANION_DIMENSION_CONTRADICTION"

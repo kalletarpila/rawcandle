@@ -164,6 +164,171 @@ def test_recent_oldest_boundary_and_companion_conflict_are_ambiguous() -> None:
     assert all(event["event"] == AMBIGUOUS_SOURCE_REMOVAL for event in result["source_history_events"])
 
 
+def aytu_style_histories(*, latest_fiscal: str = "2026-Q4"):
+    old_arq = row(date="2016-09-01", reportperiod="2016-06-30", fiscalperiod="2016-Q4")
+    replacement_arq = row(
+        date="2016-10-25", reportperiod="2016-06-30", fiscalperiod="2016-Q4", revenue=101,
+    )
+    latest_arq = row(
+        date="2026-08-15", reportperiod="2026-06-30",
+        fiscalperiod=latest_fiscal, revenue=200,
+    )
+    old_mrq = row(
+        dimension="MRQ", date="2016-06-30", reportperiod="2016-06-30",
+        fiscalperiod="2016-Q4",
+    )
+    next_mrq = row(
+        dimension="MRQ", date="2016-09-30", reportperiod="2016-09-30",
+        fiscalperiod="2017-Q1",
+    )
+    latest_mrq = paired(latest_arq)
+    current = current_history(
+        [old_arq, replacement_arq, latest_arq],
+        [old_mrq, next_mrq, latest_mrq],
+    )
+    source = source_history(
+        [replacement_arq, latest_arq],
+        [next_mrq, latest_mrq],
+    )
+    return current, source, old_arq, replacement_arq, old_mrq
+
+
+def test_aytu_style_replacement_and_aged_companion_resolve_independently() -> None:
+    current, source, old_arq, replacement_arq, old_mrq = aytu_style_histories()
+
+    result = compare_ticker_histories("TEST", current, source)
+    plan = build_source_history_merge("TEST", current, source)
+
+    assert result["classification"] == "SOURCE_REMOVAL"
+    assert result["source_history_action"]["true_source_removals"] == 1
+    assert result["source_history_action"]["newly_aged_out_source_rows"] == 1
+    assert result["source_history_action"]["ambiguous_removals"] == 0
+    events = {event["dimension"]: event for event in result["source_history_events"]}
+    assert events["ARQ"]["event"] == TRUE_SOURCE_REMOVAL
+    assert events["ARQ"]["classification_reason"] == "SAME_FISCAL_SOURCE_KEY_REPLACEMENT"
+    assert events["MRQ"]["event"] == AGED_OUT_OF_SOURCE_WINDOW
+    assert events["MRQ"]["classification_reason"] == "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW"
+    assert all(
+        event["classification_reason"] != "COMPANION_DIMENSION_CONTRADICTION"
+        for event in events.values()
+    )
+    merged_arq = {source_key(item) for item in plan["dimensions"]["ARQ"]["merged_rows"]}
+    assert source_key(old_arq) not in merged_arq
+    assert source_key(replacement_arq) in merged_arq
+    retained_mrq = next(
+        item for item in plan["dimensions"]["MRQ"]["merged_rows"]
+        if source_key(item) == source_key(old_mrq)
+    )
+    assert retained_mrq["_history_retention_status"] == RETAINED_OUTSIDE_SOURCE_WINDOW
+
+
+def test_aytu_style_exception_requires_complete_history_and_full_boundary() -> None:
+    current, source, *_rows = aytu_style_histories()
+    source["MRQ"] = validate_complete_history([], ticker="TEST", dimension="MRQ")
+    incomplete = compare_ticker_histories("TEST", current, source)
+    assert incomplete["classification"] == "REVIEW_REQUIRED"
+    assert incomplete["review_reason"] == "COMPLETE_HISTORY_NOT_TRUSTED"
+
+    current, source, *_rows = aytu_style_histories(latest_fiscal="2026-Q3")
+    short = compare_ticker_histories("TEST", current, source)
+    assert short["classification"] == "REVIEW_REQUIRED"
+    assert short["source_history_action"]["ambiguous_removals"] == 1
+    assert any(
+        event["classification_reason"] == "BOUNDARY_FISCAL_WINDOW_TOO_SHORT"
+        for event in short["source_history_events"]
+    )
+
+
+def test_aytu_style_exception_requires_explicit_current_replacement_key() -> None:
+    current, source, old_arq, _replacement_arq, _old_mrq = aytu_style_histories()
+    earlier = row(date="2015-08-15", reportperiod="2015-06-30", fiscalperiod="2015-Q4")
+    latest_arq = max(source["ARQ"].rows, key=lambda item: str(item["reportperiod"]))
+    current["ARQ"] = current_history([earlier, old_arq, latest_arq], [])["ARQ"]
+    source["ARQ"] = validate_complete_history(
+        [earlier, latest_arq], ticker="TEST", dimension="ARQ",
+    )
+
+    assert all(row["fiscalperiod"] != "2016-Q4" for row in source["ARQ"].rows)
+
+    result = compare_ticker_histories("TEST", current, source)
+
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["source_history_action"]["ambiguous_removals"] == 2
+    assert {event["classification_reason"] for event in result["source_history_events"]} == {
+        "COMPANION_DIMENSION_CONTRADICTION"
+    }
+
+
+def test_aytu_style_exception_rejects_competing_replacement_keys() -> None:
+    current, source, _old_arq, replacement_arq, _old_mrq = aytu_style_histories()
+    competing = dict(replacement_arq, date="2016-11-01", revenue=102)
+    latest_arq = max(source["ARQ"].rows, key=lambda item: str(item["reportperiod"]))
+    source["ARQ"] = validate_complete_history(
+        [replacement_arq, competing, latest_arq], ticker="TEST", dimension="ARQ",
+    )
+
+    result = compare_ticker_histories("TEST", current, source)
+
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["source_history_action"]["ambiguous_removals"] == 2
+    assert {event["classification_reason"] for event in result["source_history_events"]} == {
+        "COMPANION_DIMENSION_CONTRADICTION"
+    }
+
+
+def test_yyai_style_short_windows_remain_review_required() -> None:
+    arq_specs = [
+        ("2017-Q3", "2017-01-31", "2017-03-30"),
+        ("2017-Q4", "2017-04-30", "2017-08-03"),
+        ("2017-Q4", "2017-04-30", "2017-08-04"),
+        ("2018-Q1", "2017-07-31", "2017-09-20"),
+        ("2018-Q2", "2017-10-31", "2017-12-18"),
+        ("2018-Q3", "2018-01-31", "2018-03-20"),
+        ("2018-Q4", "2018-04-30", "2018-08-14"),
+        ("2019-Q1", "2018-07-31", "2018-09-17"),
+        ("2019-Q2", "2018-10-31", "2018-12-18"),
+        ("2019-Q3", "2019-01-31", "2019-03-15"),
+        ("2019-Q4", "2019-04-30", "2019-08-06"),
+        ("2020-Q1", "2019-07-31", "2019-09-04"),
+        ("2020-Q2", "2019-10-31", "2019-12-16"),
+    ]
+    mrq_specs = [
+        ("2017-Q1", "2016-07-31"), ("2017-Q2", "2016-10-31"),
+        ("2017-Q3", "2017-01-31"), ("2017-Q4", "2017-04-30"),
+        ("2018-Q1", "2017-07-31"), ("2018-Q2", "2017-10-31"),
+        ("2018-Q3", "2018-01-31"), ("2018-Q4", "2018-04-30"),
+        ("2019-Q1", "2018-07-31"), ("2019-Q2", "2018-10-31"),
+    ]
+    arq_missing = [
+        row(fiscalperiod=fiscal, reportperiod=reportperiod, date=filing_date)
+        for fiscal, reportperiod, filing_date in arq_specs
+    ]
+    mrq_missing = [
+        row(dimension="MRQ", fiscalperiod=fiscal, reportperiod=reportperiod, date=reportperiod)
+        for fiscal, reportperiod in mrq_specs
+    ]
+    latest_arq = row(
+        fiscalperiod="2027-Q1", reportperiod="2026-07-31", date="2026-09-15",
+    )
+    latest_mrq = row(
+        dimension="MRQ", fiscalperiod="2027-Q1",
+        reportperiod="2026-07-31", date="2026-07-31",
+    )
+    current = current_history([*arq_missing, latest_arq], [*mrq_missing, latest_mrq])
+    source = source_history([latest_arq], [latest_mrq])
+
+    result = compare_ticker_histories("TEST", current, source)
+
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert len(result["source_history_events"]) == 23
+    assert result["source_history_action"]["newly_aged_out_source_rows"] == 1
+    assert result["source_history_action"]["ambiguous_removals"] == 22
+    assert {event["classification_reason"] for event in result["source_history_events"]} == {
+        "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW",
+        "BOUNDARY_FISCAL_WINDOW_TOO_SHORT",
+    }
+
+
 def test_flws_like_week_based_boundary_uses_fiscal_span_not_calendar_days() -> None:
     old = row(date="2016-09-16", reportperiod="2016-07-03", fiscalperiod="2016-Q4")
     next_quarter = row(date="2016-11-14", reportperiod="2016-10-02", fiscalperiod="2017-Q1")
