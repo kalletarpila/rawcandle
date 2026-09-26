@@ -122,9 +122,23 @@ def _ticker_reporting_problem_items(reports: list[Mapping[str, Any]]) -> list[di
 
 def _refresh_problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     preview = payload.get("refresh_preview")
-    changes = preview.get("ticker_changes") if isinstance(preview, Mapping) else None
+    partition = (
+        preview.get("review_partition")
+        if isinstance(preview, Mapping)
+        else payload.get("review_partition")
+    ) or {}
+    held_by_ticker = {
+        str(item.get("ticker")): item
+        for item in partition.get("held") or []
+        if isinstance(item, Mapping)
+    }
+    changes = (
+        preview.get("ticker_changes")
+        if isinstance(preview, Mapping)
+        else payload.get("ticker_changes")
+    )
     if not isinstance(changes, list):
-        return []
+        changes = []
     problems: list[dict[str, Any]] = []
     for item in changes:
         if not isinstance(item, Mapping) or item.get("classification") != "REVIEW_REQUIRED":
@@ -145,6 +159,15 @@ def _refresh_problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
             "reason_codes": [reason, *[value for value in event_reasons if value != reason]],
             "reasons": [value.replace("_", " ").title() for value in [reason, *event_reasons]],
             "review_required": True,
+            "review_scope": (
+                "TICKER_LOCAL_REVIEW"
+                if str(item.get("ticker")) in held_by_ticker
+                else "GLOBAL_BLOCKING_REVIEW"
+            ),
+            "queue_status": (
+                (held_by_ticker.get(str(item.get("ticker"))) or {}).get("queue", {}).get("status")
+                or ("OPEN" if str(item.get("ticker")) in held_by_ticker else None)
+            ),
             "reporting_integrity_error": False,
             "affected_rows": {
                 "added": int(item.get("added_count") or 0),
@@ -160,6 +183,25 @@ def _refresh_problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
                 )
                 if action.get(key) not in (None, 0, "")
             },
+        })
+    represented = {item["ticker"] for item in problems}
+    for ticker, held in held_by_ticker.items():
+        if ticker in represented:
+            continue
+        reason_codes = [str(value) for value in held.get("reason_codes") or []]
+        problems.append({
+            "ticker": ticker,
+            "classification": "REVIEW_REQUIRED",
+            "reason": str(held.get("review_type") or "PROVIDER_ANOMALY_SUSPECTED"),
+            "action": "The published provider/canonical financial state remains quarantined pending reevaluation.",
+            "reason_codes": reason_codes,
+            "reasons": [value.replace("_", " ").title() for value in reason_codes],
+            "review_required": True,
+            "review_scope": "TICKER_LOCAL_REVIEW",
+            "queue_status": (held.get("queue") or {}).get("status") or "OPEN",
+            "reporting_integrity_error": False,
+            "affected_rows": {},
+            "source_state": {},
         })
     return problems
 
@@ -533,6 +575,9 @@ def _refresh_source_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
         "effective_changed_known": int(counts.get("effective_changed_known") or 0),
         "unknown_tickers": int(counts.get("NOT_IN_CANONICAL_UNIVERSE") or counts.get("unknown") or 0),
         "review_required": int(counts.get("REVIEW_REQUIRED") or counts.get("review_required") or 0),
+        "safe_changes": int(counts.get("safe_changes") or 0),
+        "held_for_review": int(counts.get("held_for_review") or 0),
+        "global_blockers": int(counts.get("global_blockers") or 0),
         "classification_counts": counts,
     }
 
@@ -920,6 +965,10 @@ def run_operation_workflow(
             result["stages"].append(production_record)
             if adapter.operation_type == AdminOperationType.REFRESH_FUNDAMENTALS:
                 result["publication_outcome"] = _refresh_publication_outcome(production_payload)
+                result["review_partition"] = production_payload.get("review_partition") or {}
+                result["completed_with_review_holds"] = bool(
+                    production_payload.get("completed_with_review_holds")
+                )
             git_state = production_payload.get("git_state") or {}
             if git_state.get("dirty"):
                 result["warnings"].append("Warning: Production ran with uncommitted Git worktree changes.")

@@ -50,6 +50,10 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     _summary_counts,
     ensure_refresh_state_schema,
 )
+from rawcandle.fundamentals.admin.refresh_review_queue import (
+    partition_artifact_fingerprint,
+    partition_changes,
+)
 from rawcandle.fundamentals.admin.source_bundle import (
     ReadOnlySourceMode,
     SOURCE_CONTRACT_VERSION,
@@ -131,10 +135,24 @@ def load_production_authorization(
     ):
         raise ValueError("REFRESH_PRODUCTION_PREVIEW_BINDING_MISMATCH")
     changes = preview.get("ticker_changes") or []
-    if not any(item.get("classification") in REPLACEMENT_CLASSES for item in changes):
+    partition = preview.get("review_partition") or {}
+    expected_partition = partition_changes(changes)
+    if (
+        partition.get("partition_fingerprint") != expected_partition["partition_fingerprint"]
+        or partition_artifact_fingerprint(partition) != partition.get("partition_fingerprint")
+    ):
+        raise ValueError("REFRESH_PRODUCTION_PARTITION_MISMATCH")
+    safe_tickers = set(partition.get("safe_tickers") or [])
+    if not any(
+        item.get("classification") in REPLACEMENT_CLASSES
+        and item.get("ticker") in safe_tickers
+        for item in changes
+    ):
         raise ValueError("REFRESH_PRODUCTION_NO_EFFECTIVE_CHANGE")
-    if any(item.get("classification") == "REVIEW_REQUIRED" for item in changes):
-        raise ValueError("REFRESH_PRODUCTION_REVIEW_REQUIRED")
+    if partition.get("global_blockers"):
+        raise ValueError("REFRESH_PRODUCTION_GLOBAL_REVIEW_REQUIRED")
+    if not partition.get("partition_fingerprint"):
+        raise ValueError("REFRESH_PRODUCTION_PARTITION_MISSING")
     if not test_run_id or Path(test_run_id).name != test_run_id or ".." in test_run_id:
         raise ValueError("REFRESH_PRODUCTION_TEST_RUN_ID_REQUIRED")
     test_dir = (root / test_run_id).resolve()
@@ -165,6 +183,8 @@ def load_production_authorization(
         raise ValueError("REFRESH_PRODUCTION_TEST_REFRESH_SET_MISMATCH")
     if source_revalidation.get("schema", {}).get("schema_fingerprint") != preview.get("schema", {}).get("schema_fingerprint"):
         raise ValueError("REFRESH_PRODUCTION_TEST_SCHEMA_MISMATCH")
+    if (source_revalidation.get("review_partition") or {}).get("partition_fingerprint") != partition.get("partition_fingerprint"):
+        raise ValueError("REFRESH_PRODUCTION_TEST_PARTITION_MISMATCH")
     source_binding_path = test_dir / "read_only_source_binding.json"
     source_binding = _load_json(source_binding_path)
     if source_binding != downstream.get("read_only_source_binding"):
@@ -765,6 +785,8 @@ def run_production_apply(
         merge_plans = {ticker: revalidated["merge_plans"][ticker] for ticker in changed_tickers}
         result["summary_counts"] = _summary_counts(revalidated["ticker_changes"])
         result["ticker_changes"] = changed
+        result["review_partition"] = revalidated["review_partition"]
+        result["completed_with_review_holds"] = bool(revalidated["review_partition"]["held"])
         result["old_refresh_state"] = revalidated["state"]
         lane_dir.mkdir(parents=True, exist_ok=False)
         provider_candidate = lane_dir / "provider_candidate.db"
@@ -801,6 +823,17 @@ def run_production_apply(
         if canonical_result["publication_date_bootstrap"]["repair_required"]:
             raise RuntimeError("REFRESH_PUBLISH_DATE_REPAIR_REQUIRED")
         result["canonical_candidate"] = canonical_result
+        result["quarantine_evidence"] = {
+            "held_tickers": [
+                item["ticker"] for item in revalidated["review_partition"]["held"]
+            ],
+            "provider_canonical_financial_state_preserved": (
+                provider_result["unrelated_state_unchanged"] is True
+                and canonical_result["impact"].get("unexplained_unaffected_changes", 0) == 0
+            ),
+            "derived_analysis_rebuild_policy": "FULL_V2_RP_RV_FROM_PRESERVED_CANONICAL_AND_SHARED_INPUTS",
+            "derived_analysis_frozen": False,
+        }
         writer.write_json("publish_date_bootstrap_summary.json", canonical_result["publication_date_bootstrap"])
         writer.write_json("removed_quarter_publication_evidence.json", canonical_result["removed_quarter_publication_evidence"])
         progress(stage, "COMPLETED", "Canonical candidate passed identity and publication-date invariants.")

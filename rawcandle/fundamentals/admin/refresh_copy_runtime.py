@@ -40,11 +40,16 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     load_current_history,
     normalize_source_row,
     provider_key_diagnostics,
-    refresh_binding_change,
+    refresh_binding,
+    review_partition_evidence,
     resolve_identity,
     resolve_refresh_state,
     source_key,
     source_schema,
+)
+from rawcandle.fundamentals.admin.refresh_review_queue import (
+    partition_artifact_fingerprint,
+    partition_changes,
 )
 from rawcandle.fundamentals.admin.structural_context import _events
 from rawcandle.fundamentals.admin.source_bundle import (
@@ -65,6 +70,16 @@ FULL_V2_READ_ONLY_SOURCE_ROLES = ("market", "taxonomy")
 
 class StaleRefreshPreview(RefreshPreviewError):
     pass
+
+
+def _binding(
+    *, state: Any, schema: Mapping[str, Any], discovery: Mapping[str, Any],
+    changes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    return refresh_binding(
+        state=state, schema=schema, discovery=discovery, changes=changes,
+        review_partition=partition_changes(changes),
+    )
 
 
 def prepare_full_v2_read_only_copies(
@@ -152,33 +167,29 @@ def _load_bound_preview(path: Path, expected_fingerprint: str, run_root: Path) -
     if payload.get("refresh_set_fingerprint") != expected_fingerprint:
         raise ValueError("REFRESH_PREVIEW_FINGERPRINT_MISMATCH")
     changes = payload.get("ticker_changes") or []
-    changed = [item for item in changes if item.get("classification") in REPLACEMENT_CLASSES]
+    partition = payload.get("review_partition") or {}
+    expected_partition = partition_changes(changes)
+    if (
+        partition.get("partition_fingerprint") != expected_partition["partition_fingerprint"]
+        or partition_artifact_fingerprint(partition) != partition.get("partition_fingerprint")
+    ):
+        raise ValueError("REFRESH_PREVIEW_PARTITION_MISMATCH")
+    changed = [
+        item for item in changes
+        if item.get("classification") in REPLACEMENT_CLASSES
+        and item.get("ticker") in set(partition.get("safe_tickers") or [])
+    ]
     if not payload.get("future_test_authorized") or payload.get("discovery", {}).get("status") != "COMPLETE":
         raise ValueError("REFRESH_PREVIEW_NOT_AUTHORIZED")
-    if any(item.get("classification") == "REVIEW_REQUIRED" for item in changes):
-        raise ValueError("REFRESH_PREVIEW_HAS_REVIEW_REQUIRED")
+    if partition.get("global_blockers"):
+        raise ValueError("REFRESH_PREVIEW_HAS_GLOBAL_BLOCKER")
+    if not partition.get("partition_fingerprint"):
+        raise ValueError("REFRESH_PREVIEW_PARTITION_MISSING")
     if not changed:
         raise ValueError("REFRESH_PREVIEW_NO_CHANGE_NOT_TESTABLE")
     if not payload.get("schema", {}).get("schema_fingerprint"):
         raise ValueError("REFRESH_PREVIEW_SOURCE_SCHEMA_EVIDENCE_MISSING")
     return payload
-
-
-def _binding(
-    *, state: Any, schema: Mapping[str, Any], discovery: Mapping[str, Any], changes: Sequence[Mapping[str, Any]],
-) -> dict[str, Any]:
-    return {
-        "contract_version": CONTRACT_VERSION,
-        "dataset": "SHARADAR",
-        "table": "fundamentals",
-        "schema_fingerprint": schema["schema_fingerprint"],
-        "state_mode": state.mode,
-        "published_watermark": state.published_watermark,
-        "derived_watermark": state.derived_watermark,
-        "query_start_date": state.query_start_date,
-        "observed_source_max_lastupdated": discovery["observed_source_max_lastupdated"],
-        "ticker_changes": [refresh_binding_change(item) for item in changes],
-    }
 
 
 def revalidate_bound_source(
@@ -193,11 +204,17 @@ def revalidate_bound_source(
     if schema["schema_fingerprint"] != preview["schema"]["schema_fingerprint"]:
         raise StaleRefreshPreview("STALE_REFRESH_PREVIEW")
     discovery = discover_changed_tickers(client, query_start_date=state.query_start_date)
-    identities = {ticker: resolve_identity(paths, ticker) for ticker in discovery["changed_tickers"]}
+    held_tickers = {
+        str(item.get("ticker")) for item in (preview.get("review_partition") or {}).get("held") or []
+    }
+    evaluation_tickers = sorted(set(discovery["changed_tickers"]) | held_tickers)
+    discovery["queued_tickers_reevaluated"] = sorted(held_tickers)
+    discovery["evaluation_tickers"] = evaluation_tickers
+    identities = {ticker: resolve_identity(paths, ticker) for ticker in evaluation_tickers}
     histories: dict[str, dict[str, HistoryTrust]] = {}
     merge_plans: dict[str, dict[str, Any]] = {}
     changes: list[dict[str, Any]] = []
-    for ticker in discovery["changed_tickers"]:
+    for ticker in evaluation_tickers:
         identity = identities[ticker]
         if identity["status"] != "KNOWN":
             changes.append({
@@ -213,18 +230,28 @@ def revalidate_bound_source(
         item["identity"] = identity
         changes.append(item)
     changes.sort(key=lambda item: str(item["ticker"]))
-    if any(item["classification"] == "REVIEW_REQUIRED" for item in changes):
+    partition = partition_changes(changes)
+    if partition["global_blockers"]:
         raise StaleRefreshPreview("STALE_REFRESH_PREVIEW")
-    actual = fingerprint(_binding(state=state, schema=schema, discovery=discovery, changes=changes))
+    actual = fingerprint(refresh_binding(
+        state=state, schema=schema, discovery=discovery, changes=changes,
+        review_partition=partition,
+    ))
     if actual != preview["refresh_set_fingerprint"]:
         raise StaleRefreshPreview("STALE_REFRESH_PREVIEW")
-    changed = [item for item in changes if item["classification"] in REPLACEMENT_CLASSES]
+    if partition["partition_fingerprint"] != (preview.get("review_partition") or {}).get("partition_fingerprint"):
+        raise StaleRefreshPreview("STALE_REFRESH_PREVIEW_PARTITION")
+    changed = [
+        item for item in partition["safe_changes"]
+        if item["classification"] in REPLACEMENT_CLASSES
+    ]
     if not changed:
         raise StaleRefreshPreview("STALE_REFRESH_PREVIEW")
     return {
         "state": state.as_dict(), "schema": schema, "discovery": discovery,
         "ticker_changes": changes, "histories": histories, "merge_plans": merge_plans,
         "changed_tickers": [item["ticker"] for item in changed],
+        "review_partition": review_partition_evidence(partition),
         "refresh_set_fingerprint": actual,
     }
 
@@ -1113,6 +1140,8 @@ def run_apply(
             "artifact_dir": str(writer.run_dir), "bound_preview_run_id": preview_run_id,
             "trigger_source": "MANUAL",
             "production_writes": 0, "database_safety": "COPY_ONLY",
+            "review_partition": revalidated["review_partition"],
+            "completed_with_review_holds": bool(revalidated["review_partition"]["held"]),
         }
         after_files = _production_file_state(source_paths)
         result["production_file_state_unchanged"] = before_files == after_files

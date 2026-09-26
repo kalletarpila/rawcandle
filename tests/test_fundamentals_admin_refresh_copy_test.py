@@ -575,6 +575,12 @@ def test_stale_preview_stops_before_candidate_copy(tmp_path: Path, monkeypatch: 
         "discovery": {"status": "COMPLETE"},
         "schema": {"schema_fingerprint": "schema"},
         "ticker_changes": [{"ticker": "TEST", "classification": "HISTORICAL_REVISION"}],
+        "review_partition": {
+            "safe_tickers": ["TEST"], "held": [], "global_blockers": [],
+            "partition_fingerprint": refresh_copy_runtime.partition_changes([
+                {"ticker": "TEST", "classification": "HISTORICAL_REVISION"}
+            ])["partition_fingerprint"],
+        },
     }
     preview_path = preview_dir / "refresh_preview.json"
     preview_path.write_text(json.dumps(preview), encoding="utf-8")

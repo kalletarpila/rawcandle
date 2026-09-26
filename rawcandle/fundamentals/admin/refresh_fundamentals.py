@@ -30,6 +30,11 @@ from rawcandle.fundamentals.admin.progress import (
     ProgressStage,
     ProgressTracker,
 )
+from rawcandle.fundamentals.admin.refresh_review_queue import (
+    RefreshReviewQueue,
+    partition_changes,
+    queue_path_for_run_root,
+)
 from rawcandle.fundamentals.providers.sharadar import (
     SharadarClient,
     SharadarResult,
@@ -38,7 +43,7 @@ from rawcandle.fundamentals.providers.sharadar import (
 from rawcandle.fundamentals.schema.sharadar_history_policy import MINIMUM_HISTORY_YEARS
 
 
-CONTRACT_VERSION = "PHASE13G3_10_RETENTION_BOUNDARY_SEMANTICS_V1"
+CONTRACT_VERSION = "PHASE13G3_44_REFRESH_REVIEW_QUARANTINE_V1"
 SOURCE_DATASET = "SHARADAR"
 SOURCE_TABLE = "fundamentals"
 SOURCE_ENDPOINT = "/data/fundamentals"
@@ -1445,6 +1450,41 @@ def refresh_binding_change(item: Mapping[str, Any]) -> dict[str, Any]:
     return {key: item.get(key) for key in REFRESH_BINDING_FIELDS}
 
 
+def refresh_binding(
+    *, state: RefreshState, schema: Mapping[str, Any], discovery: Mapping[str, Any],
+    changes: Sequence[Mapping[str, Any]], review_partition: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "contract_version": CONTRACT_VERSION,
+        "dataset": SOURCE_DATASET,
+        "table": SOURCE_TABLE,
+        "schema_fingerprint": schema["schema_fingerprint"],
+        "state_mode": state.mode,
+        "published_watermark": state.published_watermark,
+        "derived_watermark": state.derived_watermark,
+        "query_start_date": state.query_start_date,
+        "observed_source_max_lastupdated": discovery["observed_source_max_lastupdated"],
+        "ticker_changes": [refresh_binding_change(item) for item in changes],
+        "review_partition": review_partition["binding"],
+        "review_partition_fingerprint": review_partition["partition_fingerprint"],
+    }
+
+
+def review_partition_evidence(partition: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "safe_tickers": partition["binding"]["safe_tickers"],
+        "held": [
+            {key: value for key, value in item.items() if key != "change"}
+            for item in partition["held"]
+        ],
+        "global_blockers": [
+            {key: value for key, value in item.items() if key != "change"}
+            for item in partition["global_blockers"]
+        ],
+        "partition_fingerprint": partition["partition_fingerprint"],
+    }
+
+
 def _render_refresh_report(result: Mapping[str, Any]) -> str:
     counts = result.get("summary_counts") or {}
     discovery = result.get("refresh_preview", {}).get("discovery", {})
@@ -1462,6 +1502,9 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         f"- Known tickers with effective changes: `{counts.get('effective_changed_known', 0)}`",
         f"- Unknown tickers: `{counts.get('NOT_IN_CANONICAL_UNIVERSE', 0)}`",
         f"- Review required: `{counts.get('REVIEW_REQUIRED', 0)}`",
+        f"- Safe changes: `{counts.get('safe_changes', 0)}`",
+        f"- Held for review: `{counts.get('held_for_review', 0)}`",
+        f"- Global blockers: `{counts.get('global_blockers', 0)}`",
         f"- Fiscal identity revisions: `{counts.get('fiscal_identity_revisions', 0)}`",
         f"- Fiscal identity revisions requiring review: `{counts.get('fiscal_identity_revisions_requiring_review', 0)}`",
         "",
@@ -1572,7 +1615,8 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         "",
         "## Safety",
         "",
-        "- This run was read-only for every production database.",
+        "- This run was read-only for every production financial database; only the operational review queue was updated.",
+        "- Held tickers preserve their published provider/canonical financial state. Full V2/RP/RV may recompute derived outputs from that preserved state and shared inputs.",
         "- No refresh state or watermark was advanced.",
         f"- Refresh-set fingerprint: `{result.get('preview_fingerprint')}`",
     ])
@@ -1629,7 +1673,11 @@ def run_preview(
         )
 
         failed_stage = ProgressStage.IDENTITY_RESOLUTION
-        tickers = discovery["changed_tickers"]
+        review_queue = RefreshReviewQueue(queue_path_for_run_root(run_root))
+        queued_tickers = review_queue.pending_tickers()
+        tickers = sorted(set(discovery["changed_tickers"]) | set(queued_tickers))
+        discovery["queued_tickers_reevaluated"] = sorted(set(queued_tickers))
+        discovery["evaluation_tickers"] = tickers
         progress.running(ProgressStage.IDENTITY_RESOLUTION, "Resolving changed tickers to stable canonical identities.", processed_items=0, total_items=len(tickers))
         identities = {ticker: resolve_identity(source_paths, ticker) for ticker in tickers}
         progress.completed(ProgressStage.IDENTITY_RESOLUTION, "Canonical identity resolution completed.", processed_items=len(tickers), total_items=len(tickers))
@@ -1685,21 +1733,25 @@ def run_preview(
         bootstrap = audit_publish_date_bootstrap(source_paths)
         publication_state = _publication_date_state(bootstrap, changes)
         legacy = provider_key_diagnostics(source_paths.provider_db)
-        replacement = [item for item in changes if item.get("classification") in REFRESH_REPLACEMENT_CLASSES]
+        partition = partition_changes(changes)
+        replacement = [item for item in partition["safe_changes"] if item.get("classification") in REFRESH_REPLACEMENT_CLASSES]
         review = [item for item in changes if item.get("classification") == "REVIEW_REQUIRED"]
+        held = partition["held"]
+        global_blockers = partition["global_blockers"]
+        for item in held:
+            item["queue"] = review_queue.upsert_local(
+                item, run_id=run_id, published_binding=state.successful_run_id,
+            )
+        review_queue.resolve_absent(tickers, [item["ticker"] for item in held], run_id=run_id)
+        queue_items = review_queue.list_items()
+        counts["safe_changes"] = len(replacement)
+        counts["held_for_review"] = len(held)
+        counts["global_blockers"] = len(global_blockers)
         unknown = [item for item in changes if item.get("classification") == "NOT_IN_CANONICAL_UNIVERSE"]
-        binding = {
-            "contract_version": CONTRACT_VERSION,
-            "dataset": SOURCE_DATASET,
-            "table": SOURCE_TABLE,
-            "schema_fingerprint": schema["schema_fingerprint"],
-            "state_mode": state.mode,
-            "published_watermark": state.published_watermark,
-            "derived_watermark": state.derived_watermark,
-            "query_start_date": state.query_start_date,
-            "observed_source_max_lastupdated": discovery["observed_source_max_lastupdated"],
-            "ticker_changes": [refresh_binding_change(item) for item in changes],
-        }
+        binding = refresh_binding(
+            state=state, schema=schema, discovery=discovery, changes=changes,
+            review_partition=partition,
+        )
         refresh_set_fingerprint = fingerprint(binding)
         progress.completed(ProgressStage.CLASSIFICATION, "Classifications and deterministic binding evidence completed.")
 
@@ -1712,13 +1764,18 @@ def run_preview(
             "schema": schema,
             "discovery": discovery,
             "ticker_changes": changes,
+            "review_partition": review_partition_evidence(partition),
+            "review_queue": {
+                "path": str(review_queue.path),
+                "open_items": queue_items,
+                "open_count": len(queue_items),
+            },
             "refresh_set_fingerprint": refresh_set_fingerprint,
             "future_test_authorized": (
-                trigger_source == "MANUAL" and bool(replacement) and not review
+                trigger_source == "MANUAL" and bool(replacement) and not global_blockers
                 and discovery["status"] == "COMPLETE"
                 and publication_state["historical_bootstrap_eligible"] == 0
                 and publication_state["repair_required"] == 0
-                and counts.get("ambiguous_removals", 0) == 0
             ),
             "published_watermark_advanced": False,
             "provider_key_diagnostics": legacy,
@@ -1737,7 +1794,12 @@ def run_preview(
         unknown_path = writer.write_json("refresh_unknown_tickers.json", unknown)
         review_path = writer.write_json("refresh_review_required.json", review)
         bootstrap_path = writer.write_json("publish_date_bootstrap_exceptions.json", bootstrap)
-        outcome = AdminStatus.NO_CHANGE if not replacement and not review else (AdminStatus.REVIEW_REQUIRED if review else AdminStatus.COMPLETED)
+        outcome = (
+            AdminStatus.REVIEW_REQUIRED if global_blockers
+            else AdminStatus.COMPLETED if replacement
+            else AdminStatus.REVIEW_REQUIRED if held
+            else AdminStatus.NO_CHANGE
+        )
         decisions = tuple(
             AdminItemDecision(
                 item_key=str(item["ticker"]),
@@ -1777,8 +1839,10 @@ def run_preview(
             recommended_next_action=(
                 "No relevant Sharadar fundamentals changes since the previous successful refresh."
                 if outcome == AdminStatus.NO_CHANGE
-                else "Resolve review items before a future Test on copies."
-                if review
+                else "Resolve global review items before a future Test on copies."
+                if global_blockers
+                else "Safe changes may continue; held ticker financial state remains quarantined and visible in the review queue."
+                if held and replacement
                 else "Review the read-only Preview. Use only this exact manual Preview for a separately approved Test on copies."
                 if trigger_source == "MANUAL"
                 else "Scheduler Preview is informational only; run a fresh manual Preview before Test on copies."
@@ -1790,7 +1854,7 @@ def run_preview(
             "refresh_preview": preview,
             "network_used": True,
             "trigger_source": trigger_source,
-            "database_safety": "NO_DATABASE_WRITES",
+            "database_safety": "NO_PRODUCTION_DATABASE_WRITES; OPERATIONAL_REVIEW_QUEUE_UPDATED",
         }
         after = _production_file_state(source_paths)
         result["production_file_state_unchanged"] = before == after
@@ -1808,8 +1872,8 @@ def run_preview(
         return result
     except Exception as exc:
         writer.write_error(exc)
-        progress.failed(failed_stage, "Refresh Fundamentals Preview failed before any database write.", errors=(f"{type(exc).__name__}: {exc}",))
-        writer.checkpoint(RunStage.FAILED_BEFORE_WRITE, message="Refresh Fundamentals Preview failed before any write boundary.")
+        progress.failed(failed_stage, "Refresh Fundamentals Preview failed; production financial databases remained unchanged.", errors=(f"{type(exc).__name__}: {exc}",))
+        writer.checkpoint(RunStage.FAILED_BEFORE_WRITE, message="Refresh Fundamentals Preview failed before any production financial write boundary.")
         result = AdminFinalResult(
             run_id=run_id,
             operation_type=AdminOperationType.REFRESH_FUNDAMENTALS,
@@ -1828,7 +1892,7 @@ def run_preview(
             "artifact_dir": str(writer.run_dir),
             "trigger_source": trigger_source,
             "failed_stage": failed_stage.value,
-            "database_safety": "NO_DATABASE_WRITES",
+            "database_safety": "NO_PRODUCTION_DATABASE_WRITES; OPERATIONAL_REVIEW_QUEUE_MAY_BE_UPDATED",
             "production_file_state_unchanged": before == _production_file_state(source_paths),
         }
         writer.write_json("result.json", result)

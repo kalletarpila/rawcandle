@@ -674,6 +674,19 @@ class FundamentalsAdminUIService:
             module = import_module("rawcandle.fundamentals.admin.run_acceptance_cleanup")
             return module.accept_run_and_cleanup_backups(run_id, run_root=self.run_root)
 
+    def refresh_review_queue(self, *, include_resolved: bool = False) -> list[Mapping[str, Any]]:
+        module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
+        queue = module.RefreshReviewQueue(module.queue_path_for_run_root(self.run_root))
+        return queue.list_items(include_resolved=include_resolved)
+
+    def resolve_refresh_review(
+        self, ticker: str, action: str, *, evidence: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any]:
+        module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
+        with self._operation_lock():
+            queue = module.RefreshReviewQueue(module.queue_path_for_run_root(self.run_root))
+            return queue.apply_action(ticker, action, evidence=evidence)
+
     def history_result_summary(
         self,
         run_id: str,

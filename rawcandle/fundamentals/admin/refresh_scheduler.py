@@ -111,6 +111,7 @@ def run_scheduler_refresh_discovery(
     new_quarter = int(counts.get("NEW_QUARTER") or 0)
     revision = int(counts.get("HISTORICAL_REVISION") or 0)
     combined = int(counts.get("NEW_QUARTER_AND_REVISION") or 0)
+    held = int(counts.get("held_for_review") or 0)
     return {
         "operation_type": "REFRESH_FUNDAMENTALS",
         "mode": "SCHEDULER_DISCOVERY",
@@ -140,6 +141,7 @@ def run_scheduler_refresh_discovery(
             f"Refresh Fundamentals: {known} known tickers have pending changes: "
             f"{new_quarter} new quarters, {revision} revisions, "
             f"{combined} new-quarter + revision. Manual refresh pending."
+            + (f" {held} ticker(s) held in the review queue." if held else "")
             if pending
             else f"Refresh Fundamentals: {review_count} ticker(s) require review. Manual review pending."
             if review_required

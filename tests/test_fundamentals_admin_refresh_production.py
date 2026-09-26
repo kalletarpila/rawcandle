@@ -41,6 +41,7 @@ from rawcandle.fundamentals.admin.refresh_production import (
     render_report,
     run_production_apply as _run_production_apply,
 )
+from rawcandle.fundamentals.admin.refresh_review_queue import partition_changes
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.contracts import AdminOperationType
 from rawcandle.fundamentals.admin.production_transaction import ProductionOperation, run_transaction
@@ -508,11 +509,18 @@ def _authorization_fixture(tmp_path: Path) -> tuple[Path, Path, str, str]:
     test_dir.mkdir()
     fingerprint = "f" * 64
     preview_path = preview_dir / "refresh_preview.json"
+    partition = {
+        "safe_tickers": ["TEST"], "held": [], "global_blockers": [],
+        "partition_fingerprint": partition_changes([
+            {"ticker": "TEST", "classification": "HISTORICAL_REVISION"}
+        ])["partition_fingerprint"],
+    }
     preview_path.write_text(json.dumps({
         "contract_version": CONTRACT_VERSION, "refresh_set_fingerprint": fingerprint,
         "future_test_authorized": True, "discovery": {"status": "COMPLETE"},
         "schema": {"schema_fingerprint": "schema"},
         "ticker_changes": [{"ticker": "TEST", "classification": "HISTORICAL_REVISION"}],
+        "review_partition": partition,
     }), encoding="utf-8")
     source_binding = _source_binding()
     (test_dir / "result.json").write_text(json.dumps({
@@ -533,6 +541,7 @@ def _authorization_fixture(tmp_path: Path) -> tuple[Path, Path, str, str]:
     )
     (test_dir / "source_revalidation.json").write_text(json.dumps({
         "refresh_set_fingerprint": fingerprint, "schema": {"schema_fingerprint": "schema"},
+        "review_partition": partition,
     }), encoding="utf-8")
     return run_root, preview_path, fingerprint, test_id
 
@@ -547,6 +556,21 @@ def test_production_authorization_requires_exact_bound_successful_test(tmp_path:
     assert test["bound_preview_run_id"] == preview_path.parent.name
     assert test["_authorized_source_binding"]["market"]["mode"] == "STABLE_SOURCE_BUNDLE"
     assert Path(test["_authorized_source_binding_path"]).name == "read_only_source_binding.json"
+
+
+def test_production_authorization_rejects_tampered_safe_held_partition(tmp_path: Path) -> None:
+    run_root, preview_path, fingerprint, test_id = _authorization_fixture(tmp_path)
+    preview = json.loads(preview_path.read_text(encoding="utf-8"))
+    preview["review_partition"]["safe_tickers"] = []
+    preview_path.write_text(json.dumps(preview), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="REFRESH_PRODUCTION_PARTITION_MISMATCH"):
+        load_production_authorization(
+            preview_payload_path=preview_path,
+            preview_fingerprint=fingerprint,
+            test_run_id=test_id,
+            run_root=run_root,
+        )
 
 
 def test_production_authorization_rejects_mismatched_binding_artifact(tmp_path: Path) -> None:
@@ -724,6 +748,10 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
         "histories": {"TEST": {"ARQ": object(), "MRQ": object()}},
         "merge_plans": {"TEST": {}},
         "refresh_set_fingerprint": "f" * 64,
+        "review_partition": {
+            "safe_tickers": ["TEST"], "held": [], "global_blockers": [],
+            "partition_fingerprint": "p" * 64,
+        },
     }
     monkeypatch.setattr(
         "rawcandle.fundamentals.admin.refresh_production.revalidate_bound_source",
@@ -1065,6 +1093,12 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
         }],
         "histories": histories, "merge_plans": {"TEST": merge_plan},
         "refresh_set_fingerprint": fingerprint,
+        "review_partition": {
+            "safe_tickers": ["TEST"], "held": [], "global_blockers": [],
+            "partition_fingerprint": partition_changes([
+                {"ticker": "TEST", "classification": "HISTORICAL_REVISION"}
+            ])["partition_fingerprint"],
+        },
     }
     validation_calls: list[dict[str, object]] = []
 
@@ -1201,6 +1235,12 @@ def test_final_source_recheck_rejects_stale_candidate_before_backup(
             "histories": {"TEST": {"ARQ": object(), "MRQ": object()}},
             "merge_plans": {"TEST": {}},
             "refresh_set_fingerprint": fingerprint if calls == 1 else "a" * 64,
+            "review_partition": {
+                "safe_tickers": ["TEST"], "held": [], "global_blockers": [],
+                "partition_fingerprint": partition_changes([
+                    {"ticker": "TEST", "classification": "HISTORICAL_REVISION"}
+                ])["partition_fingerprint"],
+            },
         }
         return value
 
