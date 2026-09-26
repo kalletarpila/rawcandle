@@ -32,8 +32,18 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     source_key,
     validate_complete_history,
 )
+from rawcandle.fundamentals.admin.refresh_review_queue import (
+    ACCEPT_RETAINED_HISTORY,
+    RefreshReviewQueue,
+    classify_review_scope,
+    match_retained_history_approval,
+    queue_path_for_run_root,
+)
 from rawcandle.fundamentals.admin.refresh_scheduler import (
     run_scheduler_refresh_discovery,
+)
+from rawcandle.fundamentals.admin.refresh_copy_runtime import (
+    revalidate_bound_source,
 )
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 from rawcandle.fundamentals.providers.sharadar import AUTH_OK, STATUS_SUCCESS, SharadarResult
@@ -110,7 +120,8 @@ class PreviewClient:
         if kwargs.get("ticker"):
             return result(self.source_arq if dimension == "ARQ" else self.source_mrq)
         updated = max(str(item["lastupdated"]) for item in self.source_arq + self.source_mrq)
-        return result([{"ticker": "TEST", "dimension": dimension, "lastupdated": updated}])
+        ticker = str((self.source_arq or self.source_mrq)[0]["ticker"])
+        return result([{"ticker": ticker, "dimension": dimension, "lastupdated": updated}])
 
 
 def test_source_key_is_true_sharadar_key_and_stable_across_lastupdated() -> None:
@@ -310,6 +321,84 @@ def test_short_oldest_boundary_removal_fails_closed_but_same_fiscal_replacement_
     assert result["source_history_action"]["true_source_removals"] == 1
 
 
+def test_yyai_style_exact_approval_retains_23_rows_without_weakening_boundary(
+    tmp_path: Path,
+) -> None:
+    def quarter_row(year: int, quarter: int, dimension: str) -> dict[str, object]:
+        month = quarter * 3
+        return row(
+            ticker="YYAI",
+            dimension=dimension,
+            filing_date=f"{year}-{month:02d}-28",
+            reportperiod=f"{year}-{month:02d}-28",
+            fiscalperiod=f"{year}-Q{quarter}",
+            lastupdated=f"{year}-{month:02d}-28",
+        )
+
+    arq_missing = [
+        quarter_row(2016 + offset // 4, offset % 4 + 1, "ARQ")
+        for offset in range(3, 16)
+    ]
+    mrq_missing = [
+        quarter_row(2020 + offset // 4, offset % 4 + 1, "MRQ")
+        for offset in range(10)
+    ]
+    source_rows = {
+        "ARQ": [quarter_row(2026, 4, "ARQ")],
+        "MRQ": [quarter_row(2026, 4, "MRQ")],
+    }
+    current = {}
+    source = {}
+    for dimension, missing in (("ARQ", arq_missing), ("MRQ", mrq_missing)):
+        existing = [*missing, *source_rows[dimension]]
+        current[dimension] = {
+            "rows": tuple(normalize_source_row(item) for item in existing),
+            "current_row_count": len(existing),
+            "legacy_versions_collapsed": 0,
+            "invalid_rows": [],
+            **history_fingerprints(existing),
+        }
+        source[dimension] = validate_complete_history(
+            source_rows[dimension], ticker="YYAI", dimension=dimension,
+        )
+
+    initial = compare_ticker_histories("YYAI", current, source)
+    initial["identity"] = {
+        "status": "KNOWN",
+        "ticker": "YYAI",
+        "company_id": 77,
+        "security_id": 770,
+    }
+    assert initial["classification"] == "REVIEW_REQUIRED"
+    assert initial["source_history_action"]["newly_aged_out_source_rows"] == 1
+    assert initial["source_history_action"]["ambiguous_removals"] == 22
+    scope = classify_review_scope(initial)
+    assert len(scope["affected_source_keys"]) == 23
+    assert scope["locality_proof"]["affected_arq_count"] == 13
+    assert scope["locality_proof"]["affected_mrq_count"] == 10
+
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    queue.upsert_local(scope, run_id="preview-1", published_binding="published-1")
+    approved_item = queue.apply_action("YYAI", ACCEPT_RETAINED_HISTORY)
+    approval = match_retained_history_approval(
+        approved_item, scope, published_binding="published-1",
+    )
+    accepted = compare_ticker_histories(
+        "YYAI", current, source, retained_history_approval=approval,
+    )
+
+    assert accepted["classification"] == "SOURCE_HISTORY_CHANGE"
+    assert accepted["source_history_action"]["newly_aged_out_source_rows"] == 23
+    assert accepted["source_history_action"]["retained_arq"] == 13
+    assert accepted["source_history_action"]["retained_mrq"] == 10
+    assert accepted["source_history_action"]["ambiguous_removals"] == 0
+    assert accepted["source_history_action"]["true_source_removals"] == 0
+    assert all(
+        event["classification_reason"] == "OPERATOR_REVIEWED_RETAINED_HISTORY"
+        for event in accepted["source_history_events"]
+    )
+
+
 def _create_preview_databases(root: Path) -> BatchAddTickerPaths:
     root.mkdir(parents=True, exist_ok=True)
     provider = root / "provider.db"
@@ -507,6 +596,134 @@ def test_realistic_preview_writes_artifacts_but_not_databases(tmp_path: Path) ->
         assert (run_dir / name).is_file()
     preview = json.loads((run_dir / "refresh_preview.json").read_text(encoding="utf-8"))
     assert preview["refresh_set_fingerprint"] == output["preview_fingerprint"]
+
+
+def test_preview_consumes_matching_retained_history_approval_and_preserves_financial_dbs(
+    tmp_path: Path,
+) -> None:
+    paths = _create_preview_databases(tmp_path / "dbs")
+
+    def qrow(year: int, quarter: int, dimension: str) -> dict[str, object]:
+        month = quarter * 3
+        return row(
+            ticker="YYAI",
+            dimension=dimension,
+            filing_date=f"{year}-{month:02d}-28",
+            reportperiod=f"{year}-{month:02d}-28",
+            fiscalperiod=f"{year}-Q{quarter}",
+            lastupdated=f"{year}-{month:02d}-28",
+        )
+
+    missing = {
+        "ARQ": [
+            qrow(2016 + offset // 4, offset % 4 + 1, "ARQ")
+            for offset in range(3, 16)
+        ],
+        "MRQ": [
+            qrow(2020 + offset // 4, offset % 4 + 1, "MRQ")
+            for offset in range(10)
+        ],
+    }
+    source_rows = {
+        "ARQ": [qrow(2026, 4, "ARQ")],
+        "MRQ": [qrow(2026, 4, "MRQ")],
+    }
+    with sqlite3.connect(paths.provider_db) as connection:
+        connection.execute("DELETE FROM provider_observation")
+        connection.execute("DELETE FROM sharadar_fundamental_observation")
+        connection.execute("DELETE FROM sharadar_ticker_metadata")
+        fields = ["observation_id", *REFRESH_REQUEST_FIELDS]
+        for dimension in ("ARQ", "MRQ"):
+            for index, item in enumerate([*missing[dimension], *source_rows[dimension]]):
+                observation = f"{dimension.lower()}-{index}"
+                connection.execute(
+                    "INSERT INTO provider_observation VALUES(?,?,77,770)",
+                    (observation, f"provider-{observation}"),
+                )
+                connection.execute(
+                    f"INSERT INTO sharadar_fundamental_observation"
+                    f"({','.join(fields)}) VALUES({','.join('?' for _ in fields)})",
+                    [observation, *[item.get(field) for field in REFRESH_REQUEST_FIELDS]],
+                )
+        connection.execute(
+            "INSERT INTO sharadar_ticker_metadata "
+            "VALUES('fundamentals','YYAI','770','N',NULL,'2026-12-28')"
+        )
+        ensure_refresh_state_schema(connection)
+        connection.execute(
+            "INSERT INTO sharadar_refresh_state VALUES"
+            "(1,'SHARADAR','fundamentals','2026-09-20','provider','schema',"
+            "'published-1','2026-09-20T12:00:00Z')"
+        )
+    with sqlite3.connect(paths.canonical_db) as connection:
+        connection.execute(
+            "UPDATE security SET security_id=770,company_id=77,current_ticker='YYAI'"
+        )
+        connection.execute(
+            "UPDATE provider_security_identity SET provider_security_id='770',"
+            "security_id=770,provider_ticker='YYAI'"
+        )
+        connection.execute(
+            "UPDATE v4_quarter SET company_id=77,"
+            "first_public_result_date=source_availability_date"
+        )
+
+    run_root = tmp_path / "operational" / "admin_runs"
+    client = PreviewClient(source_rows["ARQ"], source_rows["MRQ"])
+    first = run_preview(source_paths=paths, run_root=run_root, client=client)
+    first_change = first["refresh_preview"]["ticker_changes"][0]
+    assert first_change["classification"] == "REVIEW_REQUIRED"
+    assert first["refresh_preview"]["review_partition"]["held"][0]["ticker"] == "YYAI"
+    queue = RefreshReviewQueue(queue_path_for_run_root(run_root))
+    assert queue.get("YYAI")["status"] == "OPEN"
+
+    before_action = {
+        name: (path.stat().st_size, path.stat().st_mtime_ns)
+        for name, path in paths.as_dict().items()
+    }
+    queue.apply_action(
+        "YYAI",
+        ACCEPT_RETAINED_HISTORY,
+        evidence={"source": "fixture", "comment": "reviewed exact YYAI evidence"},
+    )
+    after_action = {
+        name: (path.stat().st_size, path.stat().st_mtime_ns)
+        for name, path in paths.as_dict().items()
+    }
+    assert after_action == before_action
+    assert queue.get("YYAI")["status"] == "RETRY_REEVALUATION"
+
+    second = run_preview(source_paths=paths, run_root=run_root, client=client)
+    second_change = second["refresh_preview"]["ticker_changes"][0]
+
+    assert second_change["classification"] == "SOURCE_HISTORY_CHANGE"
+    assert second_change["source_history_action"]["newly_aged_out_source_rows"] == 23
+    assert second_change["source_history_action"]["ambiguous_removals"] == 0
+    assert second["refresh_preview"]["review_partition"]["held"] == []
+    assert second["refresh_preview"]["review_queue"][
+        "retained_history_approvals_applied"
+    ][0]["approved_source_count"] == 23
+    revalidated = revalidate_bound_source(
+        second["refresh_preview"], paths, client,
+    )
+    assert revalidated["changed_tickers"] == ["YYAI"]
+    assert revalidated["merge_plans"]["YYAI"]["action"][
+        "newly_aged_out_source_rows"
+    ] == 23
+    consumed = queue.get("YYAI")
+    assert consumed["status"] == "RESOLVED"
+    assert consumed["resolution_evidence"]["consumption_status"] == (
+        "EXACT_EVIDENCE_MATCH_APPLIED"
+    )
+    assert {
+        name: (path.stat().st_size, path.stat().st_mtime_ns)
+        for name, path in paths.as_dict().items()
+    } == before_action
+    report = (Path(second["artifact_dir"]) / "operation_report.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Operator-Reviewed Retention" in report
+    assert "exact approval" in report
 
 
 def test_scheduler_dispatch_uses_real_read_only_preview_with_fake_provider(

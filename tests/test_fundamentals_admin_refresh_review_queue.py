@@ -6,13 +6,16 @@ from pathlib import Path
 import pytest
 
 from rawcandle.fundamentals.admin.refresh_review_queue import (
+    ACCEPT_RETAINED_HISTORY,
     GLOBAL_BLOCKING_REVIEW,
     TICKER_LOCAL_REVIEW,
     RefreshReviewQueue,
     classify_review_scope,
+    match_retained_history_approval,
     partition_changes,
     present_review_item,
     queue_path_for_run_root,
+    retained_history_approval_eligibility,
     review_reason_explanation,
 )
 from rawcandle.fundamentals.admin.refresh_copy_runtime import _load_bound_preview
@@ -145,8 +148,23 @@ def test_queue_operator_actions_never_edit_financial_state_and_resolution_is_ree
     assert waiting["status"] == "WAITING_PROVIDER"
     retry = queue.apply_action("YYAI", "RETRY_REEVALUATION")
     assert retry["status"] == "RETRY_REEVALUATION"
-    with pytest.raises(ValueError, match="NOT_IMPLEMENTED"):
-        queue.apply_action("YYAI", "ACCEPT_RETAINED_HISTORY")
+    financial_paths = [
+        tmp_path / name
+        for name in ("provider.db", "canonical.db", "analysis.db")
+    ]
+    for index, path in enumerate(financial_paths):
+        path.write_bytes(f"unchanged-{index}".encode())
+    before = {path: path.read_bytes() for path in financial_paths}
+    accepted = queue.apply_action(
+        "YYAI",
+        ACCEPT_RETAINED_HISTORY,
+        evidence={"source": "fixture", "comment": "reviewed"},
+    )
+    assert accepted["status"] == "RETRY_REEVALUATION"
+    assert accepted["operator_action"] == ACCEPT_RETAINED_HISTORY
+    assert accepted["resolution_evidence"]["binding"]["ticker"] == "YYAI"
+    assert accepted["resolution_evidence"]["operator_evidence"]["comment"] == "reviewed"
+    assert {path: path.read_bytes() for path in financial_paths} == before
     with pytest.raises(ValueError, match="NOT_IMPLEMENTED"):
         queue.apply_action("YYAI", "CONFIRM_TRUE_SOURCE_REMOVAL")
 
@@ -155,6 +173,129 @@ def test_queue_operator_actions_never_edit_financial_state_and_resolution_is_ree
     assert resolved is not None
     assert resolved["status"] == "RESOLVED"
     assert queue.pending_tickers() == []
+
+
+def test_retained_history_approval_is_exact_idempotent_and_consumed_only_by_matching_evidence(
+    tmp_path: Path,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_yyai_review())
+    stored = queue.upsert_local(
+        scope, run_id="preview-1", published_binding="published-1",
+    )
+    eligibility = retained_history_approval_eligibility(stored)
+    assert eligibility == {
+        "eligible": True,
+        "reason": "Exact ticker-local retained-history evidence is eligible.",
+        "affected_source_count": 23,
+    }
+
+    first = queue.apply_action(
+        "YYAI",
+        ACCEPT_RETAINED_HISTORY,
+        evidence={"source": "fixture", "comment": "accept exact history"},
+    )
+    second = queue.apply_action(
+        "YYAI",
+        ACCEPT_RETAINED_HISTORY,
+        evidence={"source": "fixture", "comment": "duplicate"},
+    )
+    assert second == first
+    assert len(queue.audit_history("YYAI")) == 1
+
+    matched = match_retained_history_approval(
+        second, scope, published_binding="published-1",
+    )
+    assert matched["applied"] is True
+    assert len(matched["approved_source_keys"]) == 23
+    consumed = queue.mark_approval_consumed("YYAI", run_id="preview-2")
+    assert consumed["status"] == "RESOLVED"
+    assert consumed["resolution_evidence"]["consumed_run_id"] == "preview-2"
+    assert [item["event_type"] for item in queue.audit_history("YYAI")] == [
+        "RETAINED_HISTORY_APPROVED",
+        "RETAINED_HISTORY_APPROVAL_CONSUMED",
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda scope: scope["affected_source_keys"][0].update(date="2017-01-99"),
+        lambda scope: scope["fiscal_identities"][0].update(fiscal_quarter="Q4"),
+        lambda scope: scope["identity_binding"].update(company_id=999),
+        lambda scope: scope.update(scope=GLOBAL_BLOCKING_REVIEW),
+    ],
+)
+def test_retained_history_approval_fails_closed_on_material_evidence_drift(
+    tmp_path: Path, mutation,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_yyai_review())
+    queue.upsert_local(scope, run_id="preview-1", published_binding="published-1")
+    approved = queue.apply_action("YYAI", ACCEPT_RETAINED_HISTORY)
+    changed = json.loads(json.dumps(scope))
+    mutation(changed)
+
+    result = match_retained_history_approval(
+        approved, changed, published_binding="published-1",
+    )
+
+    assert result["applied"] is False
+    assert result["reason"] == "RETAINED_HISTORY_APPROVAL_EVIDENCE_DRIFT"
+
+
+def test_retained_history_approval_fails_closed_on_published_binding_drift(
+    tmp_path: Path,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_yyai_review())
+    queue.upsert_local(scope, run_id="preview-1", published_binding="published-1")
+    approved = queue.apply_action("YYAI", ACCEPT_RETAINED_HISTORY)
+
+    result = match_retained_history_approval(
+        approved, scope, published_binding="published-2",
+    )
+
+    assert result["applied"] is False
+
+
+def test_new_review_evidence_invalidates_old_approval_but_preserves_audit(
+    tmp_path: Path,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_yyai_review())
+    queue.upsert_local(scope, run_id="preview-1", published_binding="published-1")
+    queue.apply_action("YYAI", ACCEPT_RETAINED_HISTORY)
+    changed_scope = classify_review_scope(_yyai_review(evidence_suffix="-changed"))
+
+    reopened = queue.upsert_local(
+        changed_scope, run_id="preview-2", published_binding="published-1",
+    )
+
+    assert reopened["status"] == "OPEN"
+    assert reopened["operator_action"] is None
+    assert reopened["resolution_evidence"] is None
+    assert [item["event_type"] for item in queue.audit_history("YYAI")] == [
+        "RETAINED_HISTORY_APPROVED",
+        "RETAINED_HISTORY_APPROVAL_INVALIDATED",
+    ]
+
+
+def test_global_or_publication_blocked_item_is_not_eligible(tmp_path: Path) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_yyai_review())
+    stored = queue.upsert_local(
+        scope, run_id="preview-1", published_binding="published-1",
+    )
+    assert retained_history_approval_eligibility(
+        stored, publication_blocked=True,
+    )["eligible"] is False
+    global_item = dict(stored)
+    global_item["review_context"] = {
+        **dict(stored["review_context"]),
+        "scope": GLOBAL_BLOCKING_REVIEW,
+    }
+    assert retained_history_approval_eligibility(global_item)["eligible"] is False
 
 
 def test_ui_service_exposes_queue_status_and_safe_operator_actions(tmp_path: Path) -> None:
@@ -199,6 +340,25 @@ def test_test_binding_rejects_tampered_safe_held_partition(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="REFRESH_PREVIEW_PARTITION_MISMATCH"):
         _load_bound_preview(path, "f" * 64, tmp_path / "runs")
+
+
+def test_refresh_binding_projects_retained_history_approval() -> None:
+    from rawcandle.fundamentals.admin.refresh_fundamentals import (
+        refresh_binding_change,
+    )
+
+    approval = {
+        "applied": True,
+        "approval_evidence_fingerprint": "a" * 64,
+        "approved_binding": {"ticker": "YYAI", "queue_item_id": "item-1"},
+    }
+    projected = refresh_binding_change({
+        "ticker": "YYAI",
+        "classification": "SOURCE_HISTORY_CHANGE",
+        "retained_history_approval": approval,
+    })
+
+    assert projected["retained_history_approval"] == approval
 
 
 def test_open_review_items_accumulate_across_multiple_refresh_runs(tmp_path: Path) -> None:

@@ -48,6 +48,9 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     source_schema,
 )
 from rawcandle.fundamentals.admin.refresh_review_queue import (
+    ACCEPT_RETAINED_HISTORY,
+    classify_review_scope,
+    match_retained_history_approval,
     partition_artifact_fingerprint,
     partition_changes,
 )
@@ -207,7 +210,17 @@ def revalidate_bound_source(
     held_tickers = {
         str(item.get("ticker")) for item in (preview.get("review_partition") or {}).get("held") or []
     }
-    evaluation_tickers = sorted(set(discovery["changed_tickers"]) | held_tickers)
+    preview_changes = {
+        str(item.get("ticker")): item
+        for item in preview.get("ticker_changes") or []
+    }
+    approved_tickers = {
+        ticker for ticker, item in preview_changes.items()
+        if (item.get("retained_history_approval") or {}).get("applied")
+    }
+    evaluation_tickers = sorted(
+        set(discovery["changed_tickers"]) | held_tickers | approved_tickers
+    )
     discovery["queued_tickers_reevaluated"] = sorted(held_tickers)
     discovery["evaluation_tickers"] = evaluation_tickers
     identities = {ticker: resolve_identity(paths, ticker) for ticker in evaluation_tickers}
@@ -225,8 +238,51 @@ def revalidate_bound_source(
         histories[ticker] = {dimension: fetch_complete_history(client, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
         current = {dimension: load_current_history(paths.provider_db, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
         item = compare_ticker_histories(ticker, current, histories[ticker])
+        item["identity"] = identity
+        preview_approval = (
+            preview_changes.get(ticker, {}).get("retained_history_approval") or {}
+        )
+        applied_approval: Mapping[str, Any] | None = None
+        if preview_approval.get("applied"):
+            approved_binding = preview_approval.get("approved_binding") or {}
+            synthetic_queue_item = {
+                "ticker": ticker,
+                "queue_item_id": approved_binding.get("queue_item_id"),
+                "status": "RETRY_REEVALUATION",
+                "operator_action": ACCEPT_RETAINED_HISTORY,
+                "resolution_evidence": {
+                    "resolution_action": ACCEPT_RETAINED_HISTORY,
+                    "resolution_contract_version": preview_approval.get(
+                        "resolution_contract_version"
+                    ),
+                    "binding": approved_binding,
+                    "approval_evidence_fingerprint": preview_approval.get(
+                        "approval_evidence_fingerprint"
+                    ),
+                },
+            }
+            applied_approval = match_retained_history_approval(
+                synthetic_queue_item,
+                classify_review_scope(item),
+                published_binding=state.successful_run_id,
+            )
+            if not applied_approval["applied"]:
+                raise StaleRefreshPreview(
+                    "STALE_RETAINED_HISTORY_APPROVAL_EVIDENCE"
+                )
+            item = compare_ticker_histories(
+                ticker,
+                current,
+                histories[ticker],
+                retained_history_approval=applied_approval,
+            )
         if all("rows" in current.get(dimension, {}) for dimension in REFRESH_DIMENSIONS):
-            merge_plans[ticker] = build_source_history_merge(ticker, current, histories[ticker])
+            merge_plans[ticker] = build_source_history_merge(
+                ticker,
+                current,
+                histories[ticker],
+                retained_history_approval=applied_approval,
+            )
         item["identity"] = identity
         changes.append(item)
     changes.sort(key=lambda item: str(item["ticker"]))

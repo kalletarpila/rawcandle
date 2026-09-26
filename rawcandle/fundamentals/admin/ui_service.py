@@ -683,13 +683,19 @@ class FundamentalsAdminUIService:
 
     def list_refresh_review_queue(self, *, active_only: bool = True) -> Mapping[str, Any]:
         module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
+        journal = import_module("rawcandle.fundamentals.admin.publication_journal")
         path = module.queue_path_for_run_root(self.run_root)
         if not path.exists():
             return {"status": "NOT_INITIALIZED", "items": []}
         queue = module.RefreshReviewQueue(path)
+        publication_blocked = bool(
+            journal.safety_status().get("production_writes_blocked")
+        )
         try:
             items = [
-                module.present_review_item(item)
+                module.present_review_item(
+                    item, publication_blocked=publication_blocked,
+                )
                 for item in queue.list_items(include_resolved=not active_only)
             ]
         except (sqlite3.DatabaseError, OSError):
@@ -702,6 +708,7 @@ class FundamentalsAdminUIService:
 
     def refresh_review_item(self, ticker: str) -> Mapping[str, Any] | None:
         module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
+        journal = import_module("rawcandle.fundamentals.admin.publication_journal")
         path = module.queue_path_for_run_root(self.run_root)
         if not path.exists():
             return None
@@ -709,15 +716,31 @@ class FundamentalsAdminUIService:
             item = module.RefreshReviewQueue(path).get(ticker)
         except (sqlite3.DatabaseError, OSError):
             return None
-        return module.present_review_item(item) if item is not None else None
+        return (
+            module.present_review_item(
+                item,
+                publication_blocked=bool(
+                    journal.safety_status().get("production_writes_blocked")
+                ),
+            )
+            if item is not None else None
+        )
 
     def resolve_refresh_review(
         self, ticker: str, action: str, *, evidence: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
+        journal = import_module("rawcandle.fundamentals.admin.publication_journal")
         with self._operation_lock():
             queue = module.RefreshReviewQueue(module.queue_path_for_run_root(self.run_root))
-            return queue.apply_action(ticker, action, evidence=evidence)
+            return queue.apply_action(
+                ticker,
+                action,
+                evidence=evidence,
+                publication_blocked=bool(
+                    journal.safety_status().get("production_writes_blocked")
+                ),
+            )
 
     def history_result_summary(
         self,

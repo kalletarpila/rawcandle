@@ -12,8 +12,10 @@ from rawcandle.fundamentals.admin.contracts import fingerprint, utc_now
 TICKER_LOCAL_REVIEW = "TICKER_LOCAL_REVIEW"
 GLOBAL_BLOCKING_REVIEW = "GLOBAL_BLOCKING_REVIEW"
 OPEN_STATUSES = ("OPEN", "WAITING_PROVIDER", "RETRY_REEVALUATION")
-SUPPORTED_ACTIONS = ("WAIT_FOR_PROVIDER", "RETRY_REEVALUATION")
-BLOCKED_ACTIONS = ("ACCEPT_RETAINED_HISTORY", "CONFIRM_TRUE_SOURCE_REMOVAL")
+ACCEPT_RETAINED_HISTORY = "ACCEPT_RETAINED_HISTORY"
+RETAINED_HISTORY_APPROVAL_VERSION = "REFRESH_RETAINED_HISTORY_APPROVAL_V1"
+SUPPORTED_ACTIONS = ("WAIT_FOR_PROVIDER", "RETRY_REEVALUATION", ACCEPT_RETAINED_HISTORY)
+BLOCKED_ACTIONS = ("CONFIRM_TRUE_SOURCE_REMOVAL",)
 REASON_EXPLANATIONS = {
     "BOUNDARY_FISCAL_WINDOW_TOO_SHORT": (
         "Provider history is shorter than the required 41-quarter boundary."
@@ -45,8 +47,20 @@ CREATE TABLE IF NOT EXISTS refresh_review_queue (
     last_published_binding TEXT,
     operator_action TEXT,
     resolution_at_utc TEXT,
-    resolution_evidence_json TEXT
-)
+    resolution_evidence_json TEXT,
+    queue_item_id TEXT,
+    review_context_json TEXT
+);
+CREATE TABLE IF NOT EXISTS refresh_review_queue_audit (
+    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    occurred_at_utc TEXT NOT NULL,
+    run_id TEXT,
+    evidence_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_review_queue_audit_ticker
+ON refresh_review_queue_audit(ticker, audit_id)
 """
 
 
@@ -60,7 +74,15 @@ def _connect(path: Path) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=FULL")
-    connection.execute(SCHEMA_SQL)
+    connection.executescript(SCHEMA_SQL)
+    columns = {
+        str(row[1])
+        for row in connection.execute("PRAGMA table_info(refresh_review_queue)").fetchall()
+    }
+    if "queue_item_id" not in columns:
+        connection.execute("ALTER TABLE refresh_review_queue ADD COLUMN queue_item_id TEXT")
+    if "review_context_json" not in columns:
+        connection.execute("ALTER TABLE refresh_review_queue ADD COLUMN review_context_json TEXT")
     return connection
 
 
@@ -82,9 +104,23 @@ def _decode_row(row: sqlite3.Row) -> dict[str, Any]:
         "affected_source_keys_json",
         "fiscal_identities_json",
         "resolution_evidence_json",
+        "review_context_json",
     ):
         value[key.removesuffix("_json")] = json.loads(value.pop(key)) if value.get(key) else None
     return value
+
+
+def _ordered_evidence(values: Sequence[Any]) -> list[Any]:
+    return sorted((dict(value) if isinstance(value, Mapping) else value for value in values), key=_json)
+
+
+def _identity_binding(identity: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "status": identity.get("status"),
+        "ticker": str(identity.get("ticker") or "").upper(),
+        "company_id": identity.get("company_id"),
+        "security_id": identity.get("security_id"),
+    }
 
 
 def _review_evidence(change: Mapping[str, Any]) -> dict[str, Any]:
@@ -129,21 +165,172 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
         and all(not item.get("same_fiscal_current_keys") for item in events)
         and all(not item.get("companion_dimension_conflict") for item in events)
     )
+    affected_source_keys = [
+        item.get("source_identity") for item in events if item.get("source_identity")
+    ]
+    fiscal_identities = [
+        item.get("fiscal_identity") for item in events if item.get("fiscal_identity")
+    ]
     return {
         "ticker": ticker,
         "scope": TICKER_LOCAL_REVIEW if local else GLOBAL_BLOCKING_REVIEW,
         "review_type": "PROVIDER_ANOMALY_SUSPECTED" if local else str(change.get("review_reason") or "REVIEW_REQUIRED"),
         "reason_codes": reasons or [str(change.get("review_reason") or "REVIEW_REQUIRED")],
-        "affected_source_keys": [item.get("source_identity") for item in events if item.get("source_identity")],
-        "fiscal_identities": [item.get("fiscal_identity") for item in events if item.get("fiscal_identity")],
+        "affected_source_keys": affected_source_keys,
+        "fiscal_identities": fiscal_identities,
         "source_evidence_fingerprint": fingerprint(evidence),
+        "identity_binding": _identity_binding(identity),
         "locality_proof": {
             "known_unique_identity": identity.get("status") == "KNOWN",
             "complete_arq_mrq": all((completeness.get(d) or {}).get("status") == "COMPLETE" for d in ("ARQ", "MRQ")),
             "single_ticker_events": event_tickers == {ticker},
             "oldest_prefix_only": bool(events) and all(item.get("was_oldest_prefix") is True for item in events),
             "no_cross_ticker_or_companion_conflict": bool(events) and all(not item.get("companion_dimension_conflict") for item in events),
+            "no_same_fiscal_replacement_conflict": bool(events) and all(not item.get("same_fiscal_current_keys") for item in events),
+            "short_window_is_ticker_local": bool(events) and all(
+                item.get("classification_reason") in allowed_reasons for item in events
+            ),
+            "affected_observation_count": len(affected_source_keys),
+            "affected_arq_count": sum(
+                str(item.get("dimension")) == "ARQ" for item in events
+            ),
+            "affected_mrq_count": sum(
+                str(item.get("dimension")) == "MRQ" for item in events
+            ),
         },
+    }
+
+
+def _review_context(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "scope": item.get("scope"),
+        "review_type": item.get("review_type"),
+        "reason_codes": sorted(str(value) for value in item.get("reason_codes") or []),
+        "identity_binding": dict(item.get("identity_binding") or {}),
+        "locality_proof": dict(item.get("locality_proof") or {}),
+    }
+
+
+def _approval_binding(item: Mapping[str, Any]) -> dict[str, Any]:
+    context = dict(item.get("review_context") or {})
+    return {
+        "ticker": str(item.get("ticker") or "").upper(),
+        "queue_item_id": item.get("queue_item_id"),
+        "source_evidence_fingerprint": item.get("source_evidence_fingerprint"),
+        "affected_source_keys": _ordered_evidence(item.get("affected_source_keys") or []),
+        "fiscal_identities": _ordered_evidence(item.get("fiscal_identities") or []),
+        "published_binding": item.get("last_published_binding"),
+        "review_scope": context.get("scope"),
+        "review_type": context.get("review_type") or item.get("review_type"),
+        "reason_codes": sorted(
+            str(value)
+            for value in (context.get("reason_codes") or item.get("reason_codes") or [])
+        ),
+        "identity_binding": dict(context.get("identity_binding") or {}),
+        "locality_proof": dict(context.get("locality_proof") or {}),
+    }
+
+
+def retained_history_approval_eligibility(
+    item: Mapping[str, Any], *, publication_blocked: bool = False,
+) -> dict[str, Any]:
+    context = dict(item.get("review_context") or {})
+    locality = dict(context.get("locality_proof") or {})
+    identity = dict(context.get("identity_binding") or {})
+    reasons = set(context.get("reason_codes") or item.get("reason_codes") or [])
+    checks = (
+        (not publication_blocked, "Publication or recovery safety blocks review actions."),
+        (str(item.get("status")) in OPEN_STATUSES, "Review item is not unresolved."),
+        (context.get("scope") == TICKER_LOCAL_REVIEW, "Review scope is not ticker-local."),
+        (identity.get("status") == "KNOWN", "Ticker identity is not uniquely known."),
+        (bool(identity.get("company_id")) and bool(identity.get("security_id")), "Stable company/security identity is missing."),
+        (bool(item.get("queue_item_id")), "Durable queue item identity is missing."),
+        (bool(item.get("affected_source_keys")), "Affected source keys are missing."),
+        (bool(item.get("fiscal_identities")), "Affected fiscal identities are missing."),
+        (bool(item.get("source_evidence_fingerprint")), "Evidence fingerprint is missing."),
+        (bool(item.get("last_published_binding")), "Published-state binding is missing."),
+        (
+            reasons.issubset({
+                "BOUNDARY_FISCAL_WINDOW_TOO_SHORT",
+                "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW",
+            })
+            and "BOUNDARY_FISCAL_WINDOW_TOO_SHORT" in reasons,
+            "Review reasons are not retained-history compatible.",
+        ),
+        (locality.get("complete_arq_mrq") is True, "Complete ARQ/MRQ evidence is missing."),
+        (locality.get("single_ticker_events") is True, "Evidence is not limited to one ticker."),
+        (locality.get("oldest_prefix_only") is True, "Missing observations are not a clean oldest prefix."),
+        (
+            locality.get("no_cross_ticker_or_companion_conflict") is True,
+            "Companion or cross-ticker evidence is conflicting.",
+        ),
+        (
+            locality.get("no_same_fiscal_replacement_conflict") is True,
+            "Same-fiscal replacement evidence is conflicting.",
+        ),
+        (
+            locality.get("short_window_is_ticker_local") is True,
+            "Short-window evidence is not proven ticker-local.",
+        ),
+    )
+    for passed, reason in checks:
+        if not passed:
+            return {"eligible": False, "reason": reason}
+    return {
+        "eligible": True,
+        "reason": "Exact ticker-local retained-history evidence is eligible.",
+        "affected_source_count": len(item.get("affected_source_keys") or []),
+    }
+
+
+def match_retained_history_approval(
+    queue_item: Mapping[str, Any] | None,
+    current_scope: Mapping[str, Any],
+    *,
+    published_binding: str | None,
+) -> dict[str, Any]:
+    if not queue_item or queue_item.get("operator_action") != ACCEPT_RETAINED_HISTORY:
+        return {"applied": False, "reason": "NO_ACTIVE_RETAINED_HISTORY_APPROVAL"}
+    if queue_item.get("status") != "RETRY_REEVALUATION":
+        return {"applied": False, "reason": "APPROVAL_NOT_PENDING_REEVALUATION"}
+    approval = queue_item.get("resolution_evidence") or {}
+    if (
+        approval.get("resolution_action") != ACCEPT_RETAINED_HISTORY
+        or approval.get("resolution_contract_version")
+        != RETAINED_HISTORY_APPROVAL_VERSION
+    ):
+        return {"applied": False, "reason": "APPROVAL_EVIDENCE_MISSING"}
+    approved_binding = approval.get("binding")
+    if (
+        not isinstance(approved_binding, Mapping)
+        or approval.get("approval_evidence_fingerprint")
+        != fingerprint(approved_binding)
+    ):
+        return {"applied": False, "reason": "APPROVAL_FINGERPRINT_INVALID"}
+    current_item = {
+        **dict(queue_item),
+        "source_evidence_fingerprint": current_scope.get("source_evidence_fingerprint"),
+        "affected_source_keys": current_scope.get("affected_source_keys"),
+        "fiscal_identities": current_scope.get("fiscal_identities"),
+        "last_published_binding": published_binding,
+        "review_context": _review_context(current_scope),
+    }
+    current_binding = _approval_binding(current_item)
+    if dict(approved_binding) != current_binding:
+        return {
+            "applied": False,
+            "reason": "RETAINED_HISTORY_APPROVAL_EVIDENCE_DRIFT",
+            "current_binding_fingerprint": fingerprint(current_binding),
+        }
+    return {
+        "applied": True,
+        "reason": "EXACT_RETAINED_HISTORY_APPROVAL_MATCH",
+        "approval_evidence_fingerprint": approval.get("approval_evidence_fingerprint"),
+        "approved_binding": dict(approved_binding),
+        "approved_source_keys": current_binding["affected_source_keys"],
+        "approved_fiscal_identities": current_binding["fiscal_identities"],
+        "operator_reviewed": True,
+        "resolution_contract_version": RETAINED_HISTORY_APPROVAL_VERSION,
     }
 
 
@@ -186,7 +373,9 @@ def review_reason_explanation(code: str) -> str:
     return REASON_EXPLANATIONS.get(code, code)
 
 
-def present_review_item(item: Mapping[str, Any]) -> dict[str, Any]:
+def present_review_item(
+    item: Mapping[str, Any], *, publication_blocked: bool = False,
+) -> dict[str, Any]:
     reason_codes = [str(value) for value in item.get("reason_codes") or []]
     source_keys = list(item.get("affected_source_keys") or [])
     fiscal_identities = list(item.get("fiscal_identities") or [])
@@ -202,6 +391,10 @@ def present_review_item(item: Mapping[str, Any]) -> dict[str, Any]:
     )
     summary = " ".join(value for value in (count_text, *explanations) if value)
     status = str(item.get("status") or "UNKNOWN")
+    eligibility = retained_history_approval_eligibility(
+        item, publication_blocked=publication_blocked,
+    )
+    approval = item.get("resolution_evidence") or {}
     return {
         **dict(item),
         "review_scope": TICKER_LOCAL_REVIEW,
@@ -213,6 +406,18 @@ def present_review_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_reference": str(item.get("source_evidence_fingerprint") or "")[:12],
         "reevaluation_pending": status == "RETRY_REEVALUATION",
         "currently_held": status in OPEN_STATUSES,
+        "accept_retained_history_eligible": eligibility["eligible"],
+        "accept_retained_history_reason": eligibility["reason"],
+        "approval_timestamp_utc": approval.get("operator_timestamp_utc"),
+        "approval_operator_evidence": approval.get("operator_evidence"),
+        "approved_source_count": len(
+            (approval.get("binding") or {}).get("affected_source_keys") or []
+        ),
+        "approval_evidence_fingerprint": approval.get(
+            "approval_evidence_fingerprint"
+        ),
+        "approval_consumed": bool(approval.get("consumed_at_utc")),
+        "approval_consumed_run_id": approval.get("consumed_run_id"),
     }
 
 
@@ -235,21 +440,72 @@ class RefreshReviewQueue:
         ticker = str(item["ticker"])
         with _connect(self.path) as connection:
             prior = connection.execute("SELECT * FROM refresh_review_queue WHERE ticker=?", (ticker,)).fetchone()
-            status = str(prior["status"]) if prior and prior["status"] in {"OPEN", "WAITING_PROVIDER"} else "OPEN"
+            prior_item = _decode_row(prior) if prior else None
+            queue_item_id = (
+                str(prior_item.get("queue_item_id"))
+                if prior_item and prior_item.get("queue_item_id")
+                else fingerprint({
+                    "ticker": ticker,
+                    "first_seen_run_id": prior_item.get("first_seen_run_id") if prior_item else run_id,
+                    "first_seen_at_utc": prior_item.get("first_seen_at_utc") if prior_item else now,
+                })
+            )
+            context = _review_context(item)
+            material = {
+                "source_evidence_fingerprint": item["source_evidence_fingerprint"],
+                "affected_source_keys": _ordered_evidence(item["affected_source_keys"]),
+                "fiscal_identities": _ordered_evidence(item["fiscal_identities"]),
+                "published_binding": published_binding,
+                "review_context": context,
+            }
+            prior_material = {
+                "source_evidence_fingerprint": prior_item.get("source_evidence_fingerprint"),
+                "affected_source_keys": _ordered_evidence(prior_item.get("affected_source_keys") or []),
+                "fiscal_identities": _ordered_evidence(prior_item.get("fiscal_identities") or []),
+                "published_binding": prior_item.get("last_published_binding"),
+                "review_context": dict(prior_item.get("review_context") or {}),
+            } if prior_item else None
+            evidence_drift = bool(prior_material and prior_material != material)
+            status = (
+                str(prior_item["status"])
+                if prior_item and prior_item["status"] in OPEN_STATUSES and not evidence_drift
+                else "OPEN"
+            )
             first_seen_at = str(prior["first_seen_at_utc"]) if prior else now
             first_seen_run = str(prior["first_seen_run_id"]) if prior else run_id
+            operator_action = prior_item.get("operator_action") if prior_item and not evidence_drift else None
+            resolution_at = prior_item.get("resolution_at_utc") if prior_item and not evidence_drift else None
+            resolution_evidence = prior_item.get("resolution_evidence") if prior_item and not evidence_drift else None
             connection.execute(
-                "INSERT OR REPLACE INTO refresh_review_queue VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO refresh_review_queue "
+                "(ticker,review_type,reason_codes_json,affected_source_keys_json,"
+                "fiscal_identities_json,source_evidence_fingerprint,first_seen_at_utc,"
+                "first_seen_run_id,last_seen_at_utc,last_seen_run_id,status,"
+                "last_published_binding,operator_action,resolution_at_utc,"
+                "resolution_evidence_json,queue_item_id,review_context_json) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     ticker, item["review_type"], _json(item["reason_codes"]),
                     _json(item["affected_source_keys"]), _json(item["fiscal_identities"]),
                     item["source_evidence_fingerprint"], first_seen_at, first_seen_run,
                     now, run_id, status, published_binding,
-                    prior["operator_action"] if prior else None,
-                    prior["resolution_at_utc"] if prior else None,
-                    prior["resolution_evidence_json"] if prior else None,
+                    operator_action, resolution_at,
+                    _json(resolution_evidence) if resolution_evidence else None,
+                    queue_item_id, _json(context),
                 ),
             )
+            if evidence_drift and prior_item.get("operator_action") == ACCEPT_RETAINED_HISTORY:
+                self._append_audit(
+                    connection,
+                    ticker=ticker,
+                    event_type="RETAINED_HISTORY_APPROVAL_INVALIDATED",
+                    run_id=run_id,
+                    evidence={
+                        "reason": "MATERIAL_EVIDENCE_DRIFT",
+                        "prior_approval": prior_item.get("resolution_evidence"),
+                        "current_material_fingerprint": fingerprint(material),
+                    },
+                )
             connection.commit()
         return self.get(ticker) or {}
 
@@ -267,22 +523,158 @@ class RefreshReviewQueue:
                 )
             connection.commit()
 
-    def apply_action(self, ticker: str, action: str, *, evidence: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    @staticmethod
+    def _append_audit(
+        connection: sqlite3.Connection,
+        *,
+        ticker: str,
+        event_type: str,
+        run_id: str | None,
+        evidence: Mapping[str, Any],
+    ) -> None:
+        connection.execute(
+            "INSERT INTO refresh_review_queue_audit"
+            "(ticker,event_type,occurred_at_utc,run_id,evidence_json) VALUES(?,?,?,?,?)",
+            (ticker, event_type, utc_now(), run_id, _json(dict(evidence))),
+        )
+
+    def apply_action(
+        self,
+        ticker: str,
+        action: str,
+        *,
+        evidence: Mapping[str, Any] | None = None,
+        publication_blocked: bool = False,
+    ) -> dict[str, Any]:
         normalized = action.strip().upper()
         if normalized in BLOCKED_ACTIONS:
             raise ValueError(f"REFRESH_REVIEW_ACTION_NOT_IMPLEMENTED:{normalized}")
         if normalized not in SUPPORTED_ACTIONS:
             raise ValueError(f"REFRESH_REVIEW_ACTION_INVALID:{normalized}")
-        status = "WAITING_PROVIDER" if normalized == "WAIT_FOR_PROVIDER" else "RETRY_REEVALUATION"
+        ticker = ticker.upper()
         with _connect(self.path) as connection:
+            row = connection.execute(
+                "SELECT * FROM refresh_review_queue WHERE ticker=?", (ticker,)
+            ).fetchone()
+            if row is None or str(row["status"]) == "RESOLVED":
+                raise ValueError("REFRESH_REVIEW_ITEM_NOT_OPEN")
+            item = _decode_row(row)
+            if normalized == ACCEPT_RETAINED_HISTORY:
+                eligibility = retained_history_approval_eligibility(
+                    item, publication_blocked=publication_blocked,
+                )
+                if not eligibility["eligible"]:
+                    raise ValueError(
+                        "REFRESH_RETAINED_HISTORY_NOT_ELIGIBLE:"
+                        + str(eligibility["reason"])
+                    )
+                binding = _approval_binding(item)
+                approval_fingerprint = fingerprint(binding)
+                prior_approval = item.get("resolution_evidence") or {}
+                if (
+                    item.get("operator_action") == normalized
+                    and item.get("status") == "RETRY_REEVALUATION"
+                    and prior_approval.get("approval_evidence_fingerprint")
+                    == approval_fingerprint
+                ):
+                    return item
+                now = utc_now()
+                resolution_evidence = {
+                    "resolution_action": normalized,
+                    "resolution_contract_version": RETAINED_HISTORY_APPROVAL_VERSION,
+                    "operator_timestamp_utc": now,
+                    "operator_evidence": dict(evidence or {}),
+                    "originating_review_run": item.get("last_seen_run_id"),
+                    "queue_status_at_approval": item.get("status"),
+                    "binding": binding,
+                    "approval_evidence_fingerprint": approval_fingerprint,
+                }
+                status = "RETRY_REEVALUATION"
+                resolution_at = now
+                self._append_audit(
+                    connection,
+                    ticker=ticker,
+                    event_type="RETAINED_HISTORY_APPROVED",
+                    run_id=str(item.get("last_seen_run_id") or "") or None,
+                    evidence=resolution_evidence,
+                )
+            else:
+                status = (
+                    "WAITING_PROVIDER"
+                    if normalized == "WAIT_FOR_PROVIDER"
+                    else "RETRY_REEVALUATION"
+                )
+                resolution_at = None
+                resolution_evidence = dict(evidence or {})
             changed = connection.execute(
                 "UPDATE refresh_review_queue SET status=?,operator_action=?,resolution_at_utc=NULL,resolution_evidence_json=? WHERE ticker=? AND status!='RESOLVED'",
-                (status, normalized, _json(dict(evidence or {})), ticker.upper()),
+                (
+                    status,
+                    normalized,
+                    _json(resolution_evidence),
+                    ticker,
+                ),
             ).rowcount
+            if normalized == ACCEPT_RETAINED_HISTORY:
+                connection.execute(
+                    "UPDATE refresh_review_queue SET resolution_at_utc=? WHERE ticker=?",
+                    (resolution_at, ticker),
+                )
             connection.commit()
         if changed != 1:
             raise ValueError("REFRESH_REVIEW_ITEM_NOT_OPEN")
-        return self.get(ticker.upper()) or {}
+        return self.get(ticker) or {}
+
+    def mark_approval_consumed(self, ticker: str, *, run_id: str) -> dict[str, Any]:
+        ticker = ticker.upper()
+        with _connect(self.path) as connection:
+            row = connection.execute(
+                "SELECT * FROM refresh_review_queue WHERE ticker=?", (ticker,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("REFRESH_REVIEW_ITEM_NOT_OPEN")
+            item = _decode_row(row)
+            approval = dict(item.get("resolution_evidence") or {})
+            if item.get("operator_action") != ACCEPT_RETAINED_HISTORY:
+                raise ValueError("REFRESH_RETAINED_HISTORY_APPROVAL_MISSING")
+            now = utc_now()
+            approval.update({
+                "consumed_at_utc": now,
+                "consumed_run_id": run_id,
+                "consumption_status": "EXACT_EVIDENCE_MATCH_APPLIED",
+            })
+            connection.execute(
+                "UPDATE refresh_review_queue SET status='RESOLVED',"
+                "resolution_at_utc=?,resolution_evidence_json=?,"
+                "last_seen_run_id=?,last_seen_at_utc=? WHERE ticker=?",
+                (now, _json(approval), run_id, now, ticker),
+            )
+            self._append_audit(
+                connection,
+                ticker=ticker,
+                event_type="RETAINED_HISTORY_APPROVAL_CONSUMED",
+                run_id=run_id,
+                evidence=approval,
+            )
+            connection.commit()
+        return self.get(ticker) or {}
+
+    def audit_history(self, ticker: str) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        with _read_connect(self.path) as connection:
+            rows = connection.execute(
+                "SELECT * FROM refresh_review_queue_audit "
+                "WHERE ticker=? ORDER BY audit_id",
+                (ticker.upper(),),
+            ).fetchall()
+        return [
+            {
+                **dict(row),
+                "evidence": json.loads(str(row["evidence_json"])),
+            }
+            for row in rows
+        ]
 
     def get(self, ticker: str) -> dict[str, Any] | None:
         if not self.path.exists():

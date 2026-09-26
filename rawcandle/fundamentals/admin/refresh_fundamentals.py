@@ -32,6 +32,8 @@ from rawcandle.fundamentals.admin.progress import (
 )
 from rawcandle.fundamentals.admin.refresh_review_queue import (
     RefreshReviewQueue,
+    classify_review_scope,
+    match_retained_history_approval,
     partition_changes,
     queue_path_for_run_root,
 )
@@ -108,6 +110,7 @@ REFRESH_BINDING_FIELDS = (
     "current_generation_fingerprint", "merged_generation_fingerprint",
     "retention_plan_fingerprint", "source_history_action",
     "fiscal_identity_revisions",
+    "retained_history_approval",
 )
 
 REFRESH_STATE_SCHEMA_SQL = """
@@ -660,7 +663,7 @@ def _retention_evidence(
     row: Mapping[str, Any], *, event: Mapping[str, Any],
 ) -> dict[str, Any]:
     year, quarter = fiscal_identity(row["fiscalperiod"])
-    return {
+    evidence = {
         "classification": AGED_OUT_OF_SOURCE_WINDOW,
         "classification_reason": event["classification_reason"],
         "source_identity": source_key_evidence(row),
@@ -676,6 +679,17 @@ def _retention_evidence(
         },
         "previously_accepted_source": "SHARADAR",
     }
+    if event.get("operator_reviewed_retention"):
+        evidence["operator_reviewed_retention"] = {
+            "action": "ACCEPT_RETAINED_HISTORY",
+            "approval_evidence_fingerprint": event.get(
+                "approval_evidence_fingerprint"
+            ),
+            "resolution_contract_version": event.get(
+                "resolution_contract_version"
+            ),
+        }
+    return evidence
 
 
 def _is_deterministic_replacement_with_aged_companion(
@@ -736,6 +750,8 @@ def build_source_history_merge(
     ticker: str,
     current: Mapping[str, Mapping[str, Any]],
     source: Mapping[str, HistoryTrust],
+    *,
+    retained_history_approval: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Classify absent source keys and build the deterministic provider generation."""
     dimensions: dict[str, dict[str, Any]] = {}
@@ -831,6 +847,33 @@ def build_source_history_merge(
                 event["event"] = AMBIGUOUS_SOURCE_REMOVAL
                 event["classification_reason"] = "COMPANION_DIMENSION_CONTRADICTION"
                 event["companion_dimension_conflict"] = True
+
+    if retained_history_approval and retained_history_approval.get("applied"):
+        approved_keys = {
+            tuple(str(item.get(field) or "") for field in SOURCE_PRIMARY_KEY)
+            for item in retained_history_approval.get("approved_source_keys") or []
+        }
+        event_keys = {
+            tuple(
+                str(event["source_identity"].get(field) or "")
+                for field in SOURCE_PRIMARY_KEY
+            )
+            for event in missing_events
+        }
+        if approved_keys != event_keys:
+            raise ValueError("RETAINED_HISTORY_APPROVAL_SOURCE_KEYS_MISMATCH")
+        for event in missing_events:
+            if event["event"] == TRUE_SOURCE_REMOVAL:
+                raise ValueError("RETAINED_HISTORY_APPROVAL_TRUE_REMOVAL_BLOCKED")
+            event["event"] = AGED_OUT_OF_SOURCE_WINDOW
+            event["classification_reason"] = "OPERATOR_REVIEWED_RETAINED_HISTORY"
+            event["operator_reviewed_retention"] = True
+            event["approval_evidence_fingerprint"] = retained_history_approval.get(
+                "approval_evidence_fingerprint"
+            )
+            event["resolution_contract_version"] = retained_history_approval.get(
+                "resolution_contract_version"
+            )
 
     event_by_key = {
         tuple(event["source_identity"][field] for field in SOURCE_PRIMARY_KEY): event
@@ -961,6 +1004,8 @@ def compare_ticker_histories(
     ticker: str,
     current: Mapping[str, Mapping[str, Any]],
     source: Mapping[str, HistoryTrust],
+    *,
+    retained_history_approval: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if any(source[dimension].status != "COMPLETE" for dimension in REFRESH_DIMENSIONS):
         return {
@@ -988,7 +1033,12 @@ def compare_ticker_histories(
             "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
         }
     fiscal_revisions = detect_fiscal_identity_revisions(ticker, current, source)
-    merge = build_source_history_merge(ticker, current, source)
+    merge = build_source_history_merge(
+        ticker,
+        current,
+        source,
+        retained_history_approval=retained_history_approval,
+    )
     if fiscal_revisions:
         return {
             "ticker": ticker,
@@ -1087,7 +1137,7 @@ def compare_ticker_histories(
         classification = "SOURCE_REMOVAL"
     else:
         classification = "HISTORICAL_REVISION"
-    return {
+    result = {
         "ticker": ticker,
         "classification": classification,
         "old_latest_fiscal_quarter": _fiscal_label(old_latest),
@@ -1124,6 +1174,9 @@ def compare_ticker_histories(
         "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
         "legacy_versions_collapsed": sum(int(current[dimension]["legacy_versions_collapsed"]) for dimension in REFRESH_DIMENSIONS),
     }
+    if retained_history_approval and retained_history_approval.get("applied"):
+        result["retained_history_approval"] = dict(retained_history_approval)
+    return result
 
 
 def _provider_winner_dates(provider_db: Path) -> dict[tuple[int, int, str], str]:
@@ -1530,6 +1583,8 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         f"- Already-retained rows carried forward: `{counts.get('already_retained_carry_forward', 0)}`",
         f"- True source removals: `{counts.get('true_source_removals', 0)}`",
         f"- Ambiguous removals: `{counts.get('ambiguous_removals', 0)}`",
+        "- Operator-reviewed retained-history approvals applied: "
+        f"`{len(result.get('refresh_preview', {}).get('review_queue', {}).get('retained_history_approvals_applied') or [])}`",
         "",
         "`RETAINED_OUTSIDE_SOURCE_WINDOW` means that RawCandle preserves the last authoritative "
         "version it observed before the row aged outside the accessible source window. It is not "
@@ -1559,6 +1614,27 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         })) or "None"
         lines.append(
             f"| {item.get('ticker')} | {missing} | {action.get('label')} | {reasons} | {canonical} |"
+        )
+    applied_approvals = (
+        result.get("refresh_preview", {})
+        .get("review_queue", {})
+        .get("retained_history_approvals_applied")
+        or []
+    )
+    if applied_approvals:
+        lines.extend([
+            "",
+            "### Operator-Reviewed Retention",
+            "",
+        ])
+        lines.extend(
+            "- `{ticker}`: exact approval `{fingerprint}` applied to "
+            "`{count}` retained source observations.".format(
+                ticker=item.get("ticker"),
+                fingerprint=item.get("approval_evidence_fingerprint"),
+                count=item.get("approved_source_count"),
+            )
+            for item in applied_approvals
         )
     lines.extend([
         "",
@@ -1686,6 +1762,21 @@ def run_preview(
             current = {dimension: load_current_history(source_paths.provider_db, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
             comparison = compare_ticker_histories(ticker, current, histories[ticker])
             comparison["identity"] = identities[ticker]
+            if comparison["classification"] == "REVIEW_REQUIRED":
+                current_scope = classify_review_scope(comparison)
+                approval = match_retained_history_approval(
+                    review_queue.get(ticker),
+                    current_scope,
+                    published_binding=state.successful_run_id,
+                )
+                if approval["applied"]:
+                    comparison = compare_ticker_histories(
+                        ticker,
+                        current,
+                        histories[ticker],
+                        retained_history_approval=approval,
+                    )
+                    comparison["identity"] = identities[ticker]
             if comparison["classification"] != "REVIEW_REQUIRED":
                 comparison["publish_date_impact"] = publish_date_impact(
                     source_paths,
@@ -1725,6 +1816,14 @@ def run_preview(
             item["queue"] = review_queue.upsert_local(
                 item, run_id=run_id, published_binding=state.successful_run_id,
             )
+        applied_approvals = [
+            item for item in changes
+            if (item.get("retained_history_approval") or {}).get("applied")
+        ]
+        for item in applied_approvals:
+            item["review_queue_resolution"] = review_queue.mark_approval_consumed(
+                str(item["ticker"]), run_id=run_id,
+            )
         review_queue.resolve_absent(tickers, [item["ticker"] for item in held], run_id=run_id)
         queue_items = review_queue.list_items()
         counts["safe_changes"] = len(replacement)
@@ -1752,6 +1851,20 @@ def run_preview(
                 "path": str(review_queue.path),
                 "open_items": queue_items,
                 "open_count": len(queue_items),
+                "retained_history_approvals_applied": [
+                    {
+                        "ticker": item["ticker"],
+                        "approval_evidence_fingerprint": item[
+                            "retained_history_approval"
+                        ].get("approval_evidence_fingerprint"),
+                        "approved_source_count": len(
+                            item["retained_history_approval"].get(
+                                "approved_source_keys"
+                            ) or []
+                        ),
+                    }
+                    for item in applied_approvals
+                ],
             },
             "refresh_set_fingerprint": refresh_set_fingerprint,
             "future_test_authorized": (

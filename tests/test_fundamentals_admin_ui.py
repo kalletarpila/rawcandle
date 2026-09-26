@@ -1595,8 +1595,19 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
         "operator_action": None,
         "resolution_evidence": None,
         "reevaluation_pending": False,
+        "affected_source_count": 23,
+        "accept_retained_history_eligible": True,
+        "accept_retained_history_reason": (
+            "Exact ticker-local retained-history evidence is eligible."
+        ),
     }
-    resolved_item = {**active_item, "ticker": "DONE", "status": "RESOLVED"}
+    resolved_item = {
+        **active_item,
+        "ticker": "DONE",
+        "status": "RESOLVED",
+        "accept_retained_history_eligible": False,
+        "accept_retained_history_reason": "Review item is not unresolved.",
+    }
 
     class Service:
         def __init__(self) -> None:
@@ -1649,6 +1660,14 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     assert "published-generation-7" in controls.review_queue_detail_field.value
     assert "Evidence fingerprint: " + "a" * 64 in controls.review_queue_detail_field.value
 
+    assert row.controls[9].disabled is False
+    row.controls[9].on_click(None)
+    assert "Affected source rows: 23" in page.dialog.content.controls[0].value
+    assert "published-generation-7" in page.dialog.content.controls[0].value
+    page.dialog.content.controls[1].value = "Reviewed exact history"
+    page.dialog.actions[1].on_click(None)
+    assert service.actions[-1] == ("YYAI", "ACCEPT_RETAINED_HISTORY")
+
     row.controls[7].on_click(None)
     assert service.actions[-1] == ("YYAI", "WAIT_FOR_PROVIDER")
     assert "WAITING_PROVIDER" in controls.review_queue_column.controls[0].controls[1].value
@@ -1658,10 +1677,11 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
 
     controls.review_queue_include_resolved_checkbox.value = True
     controls.review_queue_include_resolved_checkbox.on_change(None)
-    assert service.queue_reads == 4
+    assert service.queue_reads == 5
     assert [row.controls[0].value for row in controls.review_queue_column.controls] == ["YYAI", "DONE"]
     assert controls.review_queue_column.controls[1].controls[7].disabled is True
     assert controls.review_queue_column.controls[1].controls[8].disabled is True
+    assert controls.review_queue_column.controls[1].controls[9].disabled is True
 
 
 @pytest.mark.parametrize(

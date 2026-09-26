@@ -272,7 +272,6 @@ def build_fundamentals_admin_page(
     review_queue_include_resolved_checkbox = ft.Checkbox(label="Include resolved history", value=False)
     review_queue_blocked_actions = ft.Row(
         [
-            ft.OutlinedButton("Accept retained history", icon=ft.Icons.BLOCK, disabled=True),
             ft.OutlinedButton("Confirm true source removal", icon=ft.Icons.BLOCK, disabled=True),
         ],
         spacing=12,
@@ -520,6 +519,8 @@ def build_fundamentals_admin_page(
             else:
                 source_keys.append(str(source))
         resolution = item.get("resolution_evidence") or {}
+        consumed_run = item.get("approval_consumed_run_id")
+        consumed_suffix = f" ({consumed_run})" if consumed_run else ""
         return "\n".join(
             [
                 f"Ticker: {item.get('ticker', 'UNKNOWN')}",
@@ -538,6 +539,14 @@ def build_fundamentals_admin_page(
                 f"Published binding: {item.get('last_published_binding') or 'not recorded'}",
                 f"Evidence fingerprint: {item.get('source_evidence_fingerprint') or 'not recorded'}",
                 f"Operator action: {item.get('operator_action') or 'none'}",
+                f"Approval timestamp: {item.get('approval_timestamp_utc') or 'not approved'}",
+                f"Approved source rows: {item.get('approved_source_count') or 0}",
+                "Approval evidence fingerprint: "
+                f"{item.get('approval_evidence_fingerprint') or 'not approved'}",
+                "Approval consumed: "
+                f"{'yes' if item.get('approval_consumed') else 'no'}"
+                f"{consumed_suffix}",
+                f"Operator evidence: {item.get('approval_operator_evidence') or 'none'}",
                 f"Resolution evidence: {resolution or 'none'}",
             ]
         )
@@ -547,12 +556,17 @@ def build_fundamentals_admin_page(
         if hasattr(page, "update"):
             page.update()
 
-    def apply_review_action(ticker: str, action: str) -> None:
+    def apply_review_action(
+        ticker: str,
+        action: str,
+        *,
+        evidence: dict[str, Any] | None = None,
+    ) -> None:
         try:
             admin_service.resolve_refresh_review(
                 ticker,
                 action,
-                evidence={"source": "FUNDAMENTALS_ADMIN_UI"},
+                evidence=evidence or {"source": "FUNDAMENTALS_ADMIN_UI"},
             )
             refresh_review_queue()
         except Exception:
@@ -560,6 +574,70 @@ def build_fundamentals_admin_page(
             review_queue_status_field.value = f"Could not apply {action} to {ticker}."
             if hasattr(page, "update"):
                 page.update()
+
+    def open_retained_history_confirmation(item: dict[str, Any]) -> None:
+        if not item.get("accept_retained_history_eligible"):
+            review_queue_status_field.value = str(
+                item.get("accept_retained_history_reason")
+                or "Retained-history approval is not eligible."
+            )
+            if hasattr(page, "update"):
+                page.update()
+            return
+        ticker = str(item.get("ticker") or "UNKNOWN")
+        comment = ft.TextField(
+            label="Operator comment (optional)",
+            max_length=240,
+            multiline=True,
+            min_lines=1,
+            max_lines=3,
+        )
+
+        def confirm(_event: Any) -> None:
+            close_dialog()
+            apply_review_action(
+                ticker,
+                "ACCEPT_RETAINED_HISTORY",
+                evidence={
+                    "source": "FUNDAMENTALS_ADMIN_UI",
+                    "comment": str(comment.value or "").strip(),
+                },
+            )
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Accept retained history?"),
+            content=ft.Column(
+                [
+                    ft.Text(
+                        f"Ticker: {ticker}\n"
+                        f"Affected source rows: {item.get('affected_source_count') or 0}\n"
+                        f"Classification: {item.get('classification') or 'UNKNOWN'}\n"
+                        f"Evidence: {item.get('source_evidence_fingerprint') or 'not recorded'}\n"
+                        f"Published binding: {item.get('last_published_binding') or 'not recorded'}\n\n"
+                        "Preserve these exact previously published historical observations "
+                        "if the next Preview sees the same missing-source evidence."
+                    ),
+                    comment,
+                ],
+                tight=True,
+            ),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda _event: close_dialog()),
+                ft.ElevatedButton(
+                    "Accept retained history",
+                    icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
+                    on_click=confirm,
+                ),
+            ],
+        )
+        setattr(page, "dialog", dialog)
+        if hasattr(page, "open"):
+            page.open(dialog)
+        else:
+            dialog.open = True
+        if hasattr(page, "update"):
+            page.update()
 
     def render_review_queue(items: list[dict[str, Any]]) -> None:
         rows = []
@@ -616,6 +694,23 @@ def build_fundamentals_admin_page(
                             disabled=is_resolved,
                             on_click=lambda _event, selected=ticker: apply_review_action(
                                 selected, "RETRY_REEVALUATION"
+                            ),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
+                            tooltip=(
+                                "Accept exact retained-history evidence"
+                                if item.get("accept_retained_history_eligible")
+                                else str(
+                                    item.get("accept_retained_history_reason")
+                                    or "Retained-history approval unavailable"
+                                )
+                            ),
+                            disabled=not bool(
+                                item.get("accept_retained_history_eligible")
+                            ),
+                            on_click=lambda _event, selected=dict(item): (
+                                open_retained_history_confirmation(selected)
                             ),
                         ),
                     ],
@@ -1385,6 +1480,7 @@ def build_fundamentals_admin_page(
                     ft.Text("Reason", width=300, weight=ft.FontWeight.BOLD),
                     ft.Text("First seen", width=145, weight=ft.FontWeight.BOLD),
                     ft.Text("Last seen", width=145, weight=ft.FontWeight.BOLD),
+                    ft.Container(width=48),
                     ft.Container(width=48),
                     ft.Container(width=48),
                     ft.Container(width=48),
