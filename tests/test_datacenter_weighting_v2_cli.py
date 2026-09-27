@@ -43,7 +43,7 @@ def test_candidate_build_passes_explicit_v2_scope(monkeypatch, tmp_path) -> None
     assert result == 0
     assert captured["analysis_db"] == database
     assert captured["validated_chain_start_date"] == "2025-08-01"
-    assert str(captured["created_at_utc"]).endswith("+00:00")
+    assert str(captured["created_at_utc"]).endswith("Z")
 
 
 def test_ec_projection_requires_exact_target_and_v2_confirmation(tmp_path) -> None:

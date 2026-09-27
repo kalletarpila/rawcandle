@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
         market=args.market,
         requested_end_date=args.end_date,
         validated_chain_start_date=args.chain_start_date,
-        created_at_utc=datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        created_at_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     )
     for key in sorted(summary):
         if key != "stages":
