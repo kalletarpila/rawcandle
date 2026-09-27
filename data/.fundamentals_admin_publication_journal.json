@@ -1,0 +1,49 @@
+{
+  "created_at_utc": "2026-09-27T07:24:39Z",
+  "current_publication_step": "COMPLETED",
+  "journal_format_version": 1,
+  "new_source_watermark": "2026-09-27",
+  "old_source_watermark": "2026-09-26",
+  "operation_type": "REFRESH_FUNDAMENTALS",
+  "postflight_state": "PASSED",
+  "preview_run_id": "20260927T064253Z_refresh_fundamentals_73ab4d62f002",
+  "production_run_id": "20260927T071236Z_refresh_fundamentals_8cc763960741_production_612e8bb8",
+  "refresh_set_fingerprint": "08b3e5e7e61974655fce42a6a5a14ff2fefa284adee1971099d05154d8bc6be2",
+  "roles": {
+    "analysis": {
+      "backup_path": "/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20260927T071236Z_refresh_fundamentals_8cc763960741_production_612e8bb8/analysis.db",
+      "candidate_fingerprint": "012e18dc9811c99912af151c88321ed75eae1a9c1a3a00ce7ec23f002d5cfcb9",
+      "candidate_path": "/home/kalle/projects/rawcandle/temp/fundamentals_admin_phase13g1/20260927T071236Z_refresh_fundamentals_8cc763960741_production_612e8bb8/analysis_rebuild/analysis_candidate.db",
+      "candidate_replacement_verified": true,
+      "old_production_fingerprint": "29e97bdf16435376e9ce771f134f2bd3a2f5ea9d8827d7661bcca3ff0c75fdb6",
+      "production_path": "/home/kalle/projects/rawcandle/data/fundamentals_analysis.db",
+      "replacement_state": "REPLACED_AND_VERIFIED",
+      "verified_backup_fingerprint": "86f8523bd6bdb57bf058347ba52a80c6957a10112ea7f01b9dee07767276313e"
+    },
+    "canonical": {
+      "backup_path": "/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20260927T071236Z_refresh_fundamentals_8cc763960741_production_612e8bb8/canonical.db",
+      "candidate_fingerprint": "f6dab1729430cab779e32e008ed8060abe5237ec76d65536436794006f168a80",
+      "candidate_path": "/home/kalle/projects/rawcandle/temp/fundamentals_admin_phase13g1/20260927T071236Z_refresh_fundamentals_8cc763960741_production_612e8bb8/canonical_candidate.db",
+      "candidate_replacement_verified": true,
+      "old_production_fingerprint": "28778b335420db8e814e564ea985209805aca37879a5e13665eaa6d4b43cba3c",
+      "production_path": "/home/kalle/projects/rawcandle/data/fundamentals_v4.db",
+      "replacement_state": "REPLACED_AND_VERIFIED",
+      "verified_backup_fingerprint": "89b578474c2616f24aee650bf38d34ca4c5b2f3247e2d20451893795103355fe"
+    },
+    "provider": {
+      "backup_path": "/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20260927T071236Z_refresh_fundamentals_8cc763960741_production_612e8bb8/provider.db",
+      "candidate_fingerprint": "dd2b54be483c520fbb94f4e871ded4d6dbe41cd8854d1fcecf338fd075170e7e",
+      "candidate_path": "/home/kalle/projects/rawcandle/temp/fundamentals_admin_phase13g1/20260927T071236Z_refresh_fundamentals_8cc763960741_production_612e8bb8/provider_candidate.db",
+      "candidate_replacement_verified": true,
+      "old_production_fingerprint": "47c66161e07603c161e2c0eed68daddc4c2cad12af3cd913b70c5ed3810c4163",
+      "production_path": "/home/kalle/projects/rawcandle/data/fundamentals_provider.db",
+      "replacement_state": "REPLACED_AND_VERIFIED",
+      "verified_backup_fingerprint": "088b661073ebbce9291d1cb026fe0630c5411d7278ff0849e828b3a63a01e2fe"
+    }
+  },
+  "rollback_recovery_state": "NOT_REQUIRED",
+  "source_schema_fingerprint": "f13e84efeb5758665581db6303a31ac6b8953dbbe96017ff1ae5c1d2f103fe79",
+  "state": "COMPLETED",
+  "test_run_id": "20260927T064532Z_refresh_fundamentals_8cc763960741_test",
+  "updated_at_utc": "2026-09-27T07:25:24Z"
+}
