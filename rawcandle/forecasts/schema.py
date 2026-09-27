@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = "forecasts_v1"
+SCHEMA_VERSION = "forecasts_v2_fiscal_links"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS forecast_schema_version (
@@ -147,6 +147,57 @@ CREATE TABLE IF NOT EXISTS forecast_earnings_history_reference (
     UNIQUE(snapshot_id, occurrence_index)
 );
 
+CREATE TABLE IF NOT EXISTS forecast_identity_resolution (
+    resolution_id TEXT PRIMARY KEY,
+    resolution_hash TEXT NOT NULL UNIQUE,
+    fetch_id TEXT NOT NULL REFERENCES forecast_fetch(fetch_id),
+    provider TEXT NOT NULL,
+    provider_symbol TEXT NOT NULL,
+    acquisition_timestamp_utc TEXT NOT NULL,
+    resolved_at_utc TEXT NOT NULL,
+    identity_status TEXT NOT NULL CHECK (
+        identity_status IN ('RESOLVED','AMBIGUOUS','UNRESOLVED')
+    ),
+    company_id INTEGER,
+    security_id INTEGER,
+    resolution_method TEXT,
+    reason_codes_json TEXT NOT NULL,
+    identity_rule_version TEXT NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS forecast_fiscal_link (
+    link_id TEXT PRIMARY KEY,
+    link_hash TEXT NOT NULL UNIQUE,
+    fetch_id TEXT NOT NULL REFERENCES forecast_fetch(fetch_id),
+    snapshot_id TEXT NOT NULL REFERENCES forecast_snapshot(snapshot_id),
+    resolution_id TEXT NOT NULL REFERENCES forecast_identity_resolution(resolution_id),
+    occurrence_index INTEGER NOT NULL CHECK (occurrence_index >= 0),
+    provider_horizon TEXT NOT NULL,
+    provider_end_date TEXT NOT NULL,
+    company_id INTEGER,
+    security_id INTEGER,
+    target_type TEXT CHECK (target_type IN ('FISCAL_QUARTER','FISCAL_YEAR')),
+    expected_fiscal_year INTEGER,
+    expected_fiscal_quarter TEXT CHECK (
+        expected_fiscal_quarter IS NULL OR
+        expected_fiscal_quarter IN ('Q1','Q2','Q3','Q4')
+    ),
+    canonical_quarter_id INTEGER,
+    link_status TEXT NOT NULL CHECK (
+        link_status IN ('LINKED','AMBIGUOUS','UNRESOLVED')
+    ),
+    reason_codes_json TEXT NOT NULL,
+    link_rule_version TEXT NOT NULL,
+    knowledge_mode TEXT NOT NULL CHECK (
+        knowledge_mode IN ('AS_KNOWN','CURRENT_RECONCILED')
+    ),
+    fundamentals_as_of_utc TEXT NOT NULL,
+    linked_at_utc TEXT NOT NULL,
+    supersedes_link_id TEXT REFERENCES forecast_fiscal_link(link_id),
+    evidence_json TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_forecast_fetch_asof
     ON forecast_fetch(provider, forecast_family, identity_key, fetched_at_utc, fetch_id);
 CREATE INDEX IF NOT EXISTS idx_forecast_fetch_run ON forecast_fetch(run_id, status);
@@ -158,6 +209,17 @@ CREATE INDEX IF NOT EXISTS idx_forecast_price_target_snapshot
     ON forecast_price_target(snapshot_id, statistic);
 CREATE INDEX IF NOT EXISTS idx_forecast_history_snapshot
     ON forecast_earnings_history_reference(snapshot_id, occurrence_index);
+CREATE INDEX IF NOT EXISTS idx_forecast_identity_fetch
+    ON forecast_identity_resolution(fetch_id, identity_rule_version, resolved_at_utc);
+CREATE INDEX IF NOT EXISTS idx_forecast_fiscal_link_fetch
+    ON forecast_fiscal_link(
+        fetch_id, link_rule_version, knowledge_mode, occurrence_index, linked_at_utc
+    );
+CREATE INDEX IF NOT EXISTS idx_forecast_fiscal_link_target
+    ON forecast_fiscal_link(
+        company_id, target_type, expected_fiscal_year, expected_fiscal_quarter,
+        link_status
+    );
 """
 
 
