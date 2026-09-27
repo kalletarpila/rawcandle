@@ -6,6 +6,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
+from analysis.datacenter_indices.swing_group_synthetic_ohlc import (
+    LEGACY_EQUAL_CALC_VERSION,
+    WEIGHTED_CALC_VERSION,
+)
 from analysis.datacenter_indices.taxonomy import load_datacenter_taxonomy_csv
 
 
@@ -39,6 +43,7 @@ _OPTIONAL_CONFIG_KEYS.update(
         "datacenter_enrichment_enabled",
         "datacenter_taxonomy_csv",
         "datacenter_taxonomy_version",
+        "datacenter_ohlc_calc_version",
         "datacenter_stage2_incremental_enabled",
         "datacenter_stage2_overlap_trading_days",
         "datacenter_v3_reports_ecosystem",
@@ -80,6 +85,7 @@ class StockUpdateSchedulerConfig:
     datacenter_enrichment_enabled: bool = False
     datacenter_taxonomy_csv: str = DEFAULT_DATACENTER_TAXONOMY_CSV
     datacenter_taxonomy_version: str = DEFAULT_DATACENTER_TAXONOMY_VERSION
+    datacenter_ohlc_calc_version: str = LEGACY_EQUAL_CALC_VERSION
     datacenter_stage2_incremental_enabled: bool = False
     datacenter_stage2_overlap_trading_days: int = 5
     datacenter_v3_reports_ecosystem: str = "DATACENTER"
@@ -159,6 +165,13 @@ def validate_scheduler_config(
         raise ValueError("datacenter_taxonomy_csv must be non-empty")
     if not config.datacenter_taxonomy_version:
         raise ValueError("datacenter_taxonomy_version must be non-empty")
+    if config.datacenter_ohlc_calc_version not in {
+        LEGACY_EQUAL_CALC_VERSION,
+        WEIGHTED_CALC_VERSION,
+    }:
+        raise ValueError(
+            "datacenter_ohlc_calc_version must be a supported synthetic OHLC version"
+        )
     taxonomy_csv_path = Path(config.datacenter_taxonomy_csv)
     if not taxonomy_csv_path.exists() or not taxonomy_csv_path.is_file():
         raise ValueError(f"datacenter_taxonomy_csv must exist and be a file: {config.datacenter_taxonomy_csv}")
@@ -230,6 +243,7 @@ def validate_scheduler_config(
         datacenter_enrichment_enabled=config.datacenter_enrichment_enabled,
         datacenter_taxonomy_csv=config.datacenter_taxonomy_csv,
         datacenter_taxonomy_version=config.datacenter_taxonomy_version,
+        datacenter_ohlc_calc_version=config.datacenter_ohlc_calc_version,
         datacenter_stage2_incremental_enabled=(
             config.datacenter_stage2_incremental_enabled
         ),
@@ -312,6 +326,9 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         datacenter_taxonomy_version=data.get(
             "datacenter_taxonomy_version", DEFAULT_DATACENTER_TAXONOMY_VERSION
         ),
+        datacenter_ohlc_calc_version=data.get(
+            "datacenter_ohlc_calc_version", LEGACY_EQUAL_CALC_VERSION
+        ),
         datacenter_stage2_incremental_enabled=data.get(
             "datacenter_stage2_incremental_enabled", False
         ),
@@ -383,6 +400,7 @@ def create_default_scheduler_config(
         datacenter_enrichment_enabled=False,
         datacenter_taxonomy_csv=DEFAULT_DATACENTER_TAXONOMY_CSV,
         datacenter_taxonomy_version=DEFAULT_DATACENTER_TAXONOMY_VERSION,
+        datacenter_ohlc_calc_version=LEGACY_EQUAL_CALC_VERSION,
         datacenter_stage2_incremental_enabled=False,
         datacenter_stage2_overlap_trading_days=5,
         datacenter_v3_reports_ecosystem="DATACENTER",

@@ -544,17 +544,24 @@ def _fetch_group_signal_target_rows(
     return {_row_key(row, key_fields): row for row in rows}
 
 
-def _fetch_synth_source_rows(conn: sqlite3.Connection, signal_date: str, taxonomy_version_code: str) -> dict[tuple[object, ...], sqlite3.Row]:
-    rows = conn.execute(
-        """
+def _fetch_synth_source_rows(
+    conn: sqlite3.Connection,
+    signal_date: str,
+    taxonomy_version_code: str,
+    ohlc_calc_version: str | None = None,
+) -> dict[tuple[object, ...], sqlite3.Row]:
+    sql = """
         SELECT *
         FROM dc_group_synthetic_ohlc_daily
         WHERE ohlc_date = ?
           AND taxonomy_version = ?
-        ORDER BY group_type, group_name, calc_version
-        """,
-        (signal_date, taxonomy_version_code),
-    ).fetchall()
+    """
+    params: list[object] = [signal_date, taxonomy_version_code]
+    if ohlc_calc_version is not None:
+        sql += " AND calc_version = ?"
+        params.append(ohlc_calc_version)
+    sql += " ORDER BY group_type, group_name, calc_version"
+    rows = conn.execute(sql, params).fetchall()
     key_fields = ("group_type", "group_name", "ohlc_date", "calc_version")
     return {_row_key(row, key_fields): row for row in rows}
 
@@ -565,9 +572,9 @@ def _fetch_synth_target_rows(
     ecosystem_id: int,
     taxonomy_version_id: int,
     signal_date: str,
+    ohlc_calc_version: str | None = None,
 ) -> dict[tuple[object, ...], sqlite3.Row]:
-    rows = conn.execute(
-        """
+    sql = """
         SELECT t.*,
                CASE
                    WHEN t.entity_type = 'GROUP_L1' THEN 'layer'
@@ -581,10 +588,13 @@ def _fetch_synth_target_rows(
         WHERE t.ecosystem_id = ?
           AND t.taxonomy_version_id = ?
           AND t.signal_date = ?
-        ORDER BY group_type, group_name, calc_version
-        """,
-        (ecosystem_id, taxonomy_version_id, signal_date),
-    ).fetchall()
+    """
+    params: list[object] = [ecosystem_id, taxonomy_version_id, signal_date]
+    if ohlc_calc_version is not None:
+        sql += " AND t.ohlc_calc_version = ?"
+        params.append(ohlc_calc_version)
+    sql += " ORDER BY group_type, group_name, calc_version"
+    rows = conn.execute(sql, params).fetchall()
     key_fields = ("group_type", "group_name", "ohlc_date", "calc_version")
     return {_row_key(row, key_fields): row for row in rows}
 
@@ -856,13 +866,20 @@ def _synthetic_ohlc_parity(
     signal_date: str,
     numeric_tolerance: float,
     parity_policy: str,
+    ohlc_calc_version: str | None = None,
 ) -> dict[str, object]:
-    source_rows = _fetch_synth_source_rows(source_conn, signal_date, taxonomy_version_code)
+    source_rows = _fetch_synth_source_rows(
+        source_conn,
+        signal_date,
+        taxonomy_version_code,
+        ohlc_calc_version,
+    )
     target_rows = _fetch_synth_target_rows(
         target_conn,
         ecosystem_id=ecosystem_id,
         taxonomy_version_id=taxonomy_version_id,
         signal_date=signal_date,
+        ohlc_calc_version=ohlc_calc_version,
     )
     return _build_section_result(
         section_name="synthetic_ohlc",
@@ -920,6 +937,70 @@ def _synthetic_ohlc_parity(
         numeric_tolerance=numeric_tolerance,
         parity_policy=parity_policy,
     )
+
+
+def audit_dc_ec_synthetic_ohlc_parity(
+    *,
+    source_db_path: str,
+    target_db_path: str,
+    ecosystem_code: str,
+    taxonomy_version_code: str,
+    signal_date: str,
+    ohlc_calc_version: str,
+    numeric_tolerance: float = 1e-9,
+    parity_policy: str = PARITY_POLICY_STRICT,
+) -> dict[str, object]:
+    if parity_policy not in {PARITY_POLICY_STRICT, PARITY_POLICY_RSO_REVALIDATION_METADATA}:
+        raise ValueError(f"unsupported parity policy: {parity_policy}")
+    source_conn = _connect_readonly(source_db_path)
+    target_conn = _connect_readonly(target_db_path)
+    try:
+        _require_table(source_conn, "dc_group_synthetic_ohlc_daily", "source")
+        _require_tables(
+            target_conn,
+            (
+                "ec_ecosystem",
+                "ec_taxonomy_version",
+                "ec_entity",
+                "ec_group_synthetic_ohlc_daily",
+            ),
+            "target",
+        )
+        ecosystem_id, taxonomy_version_id = _resolve_target_context(
+            target_conn,
+            ecosystem_code=ecosystem_code,
+            taxonomy_version_code=taxonomy_version_code,
+        )
+        result = _synthetic_ohlc_parity(
+            source_conn,
+            target_conn,
+            ecosystem_id=ecosystem_id,
+            taxonomy_version_id=taxonomy_version_id,
+            taxonomy_version_code=taxonomy_version_code,
+            signal_date=signal_date,
+            numeric_tolerance=numeric_tolerance,
+            parity_policy=parity_policy,
+            ohlc_calc_version=ohlc_calc_version,
+        )
+        return {
+            "status": result["status"],
+            "signal_date": signal_date,
+            "taxonomy_version_code": taxonomy_version_code,
+            "ohlc_calc_version": ohlc_calc_version,
+            "parity_policy": parity_policy,
+            "synthetic_ohlc_parity": result,
+            "total_mismatch_count": (
+                len(result["missing_in_target"])
+                + len(result["extra_in_target"])
+                + int(result["field_mismatch_count"])
+            ),
+            "total_blocking_mismatch_count": int(
+                result.get("total_blocking_mismatch_count") or 0
+            ),
+        }
+    finally:
+        source_conn.close()
+        target_conn.close()
 
 
 def _group_index_parity(

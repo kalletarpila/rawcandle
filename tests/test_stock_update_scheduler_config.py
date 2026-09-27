@@ -47,6 +47,7 @@ def test_default_scheduler_config_uses_omxh_and_omxs_not_usa():
     assert config.enabled_markets == ["omxh", "omxs"]
     assert config.skip_next_run is False
     assert config.technical_relevance_enabled is False
+    assert config.datacenter_ohlc_calc_version == "DC_SWING_OHLC_V1"
     assert config.datacenter_stage2_incremental_enabled is False
     assert config.datacenter_stage2_overlap_trading_days == 5
     assert config.ec_source_layer_enabled is False
@@ -64,6 +65,25 @@ def test_market_validation_normalizes_case_whitespace_and_deduplicates():
 def test_unsupported_market_raises_value_error():
     with pytest.raises(ValueError):
         validate_market_list(["omxh", "lse"])
+
+
+def test_scheduler_config_accepts_explicit_weighted_v2(tmp_path):
+    taxonomy = tmp_path / "taxonomy.csv"
+    taxonomy.write_text(
+        "taxonomy_version,ticker,layer,subindustry,report_group_status,is_primary,role_weight,notes\n"
+        "DC_TAXONOMY_FULL_V1,AAA,Power,UPS,CORE,1,1.0,\n",
+        encoding="utf-8",
+    )
+    config = StockUpdateSchedulerConfig(
+        enabled_markets=["usa"],
+        osakedata_db_path="/tmp/osakedata.db",
+        analysis_db_path="/tmp/analysis.db",
+        log_dir="/tmp/logs",
+        datacenter_taxonomy_csv=str(taxonomy),
+        datacenter_ohlc_calc_version="DC_SWING_OHLC_V2",
+    )
+
+    assert validate_scheduler_config(config).datacenter_ohlc_calc_version == "DC_SWING_OHLC_V2"
 
 
 @pytest.mark.parametrize("run_time", ["05:30", "00:00", "23:59"])

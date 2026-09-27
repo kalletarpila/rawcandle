@@ -13,6 +13,7 @@ from analysis.ecosystem_group_weighting import (
     GroupMembershipRoute,
     MembershipWeightPolicy,
     build_canonical_groups,
+    equal_membership_weight,
     effective_membership_weight_v1,
     weighted_mean,
 )
@@ -21,12 +22,27 @@ from .persistence import resolve_created_at_utc
 from .taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
 
 
-DEFAULT_CALC_VERSION = "DC_SWING_OHLC_V1"
+LEGACY_EQUAL_CALC_VERSION = "DC_SWING_OHLC_V1"
+WEIGHTED_CALC_VERSION = "DC_SWING_OHLC_V2"
+DEFAULT_CALC_VERSION = LEGACY_EQUAL_CALC_VERSION
 DEFAULT_RELATIVE_BASE_WINDOW = 20
 DEFAULT_GROUP_SUBINDUSTRY_PIVOT_RADIUS = 5
 DEFAULT_GROUP_LAYER_PIVOT_RADIUS = 10
 DEFAULT_MIN_ELIGIBLE_COUNT = 3
 DEFAULT_MIN_COVERAGE_RATIO = 0.60
+
+
+def membership_weight_policy_for_calc_version(
+    calc_version: str,
+) -> MembershipWeightPolicy:
+    if calc_version == LEGACY_EQUAL_CALC_VERSION:
+        return equal_membership_weight
+    if calc_version == WEIGHTED_CALC_VERSION:
+        return effective_membership_weight_v1
+    raise ValueError(
+        "Unsupported synthetic OHLC calc_version for membership semantics: "
+        f"{calc_version!r}"
+    )
 
 SYNTHETIC_OHLC_SUMMARY_ORDER = [
     "start_date",
@@ -431,7 +447,7 @@ def build_group_synthetic_ohlc_rows(
     created_at_utc: str,
     min_eligible_count: int = DEFAULT_MIN_ELIGIBLE_COUNT,
     min_coverage_ratio: float = DEFAULT_MIN_COVERAGE_RATIO,
-    membership_weight_policy: MembershipWeightPolicy = effective_membership_weight_v1,
+    membership_weight_policy: MembershipWeightPolicy | None = None,
 ) -> tuple[list[DatacenterGroupSyntheticOhlcRow], dict[str, int | str]]:
     normalized_start_date = _parse_iso_date(start_date, "start_date")
     normalized_end_date = _parse_iso_date(end_date, "end_date")
@@ -450,7 +466,10 @@ def build_group_synthetic_ohlc_rows(
         ]
         group_definitions = _build_group_definitions(
             version_rows,
-            weight_policy=membership_weight_policy,
+            weight_policy=(
+                membership_weight_policy
+                or membership_weight_policy_for_calc_version(calc_version)
+            ),
         )
         relevant_tickers = sorted({_normalize_ticker(row.ticker) for row in version_rows})
         price_rows = _load_price_rows(
@@ -769,7 +788,10 @@ def build_group_relative_ohlc_updates(
         version_rows = [
             row for row in taxonomy_rows if str(row.taxonomy_version) == taxonomy_version
         ]
-        group_definitions = _build_group_definitions(version_rows)
+        group_definitions = _build_group_definitions(
+            version_rows,
+            weight_policy=membership_weight_policy_for_calc_version(calc_version),
+        )
         relevant_tickers = sorted({_normalize_ticker(row.ticker) for row in version_rows})
         price_rows = _load_price_rows(
             price_db_path=price_db_path,

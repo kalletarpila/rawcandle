@@ -7,7 +7,10 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-from analysis.ecosystem_group_weighting import weight_concentration
+from analysis.ecosystem_group_weighting import (
+    effective_membership_weight_v1,
+    weight_concentration,
+)
 from analysis.datacenter_indices.swing_group_synthetic_ohlc import (
     DEFAULT_CALC_VERSION,
     _build_group_definitions,
@@ -153,6 +156,7 @@ def run_shadow_comparison(
         calc_version=calc_version,
         run_id="MEMBERSHIP_WEIGHTED_SHADOW",
         created_at_utc="1970-01-01T00:00:00Z",
+        membership_weight_policy=effective_membership_weight_v1,
     )
     weighted_rows = [
         row for row in weighted_rows if start_date <= row.ohlc_date <= end_date

@@ -1610,6 +1610,8 @@ def test_scheduler_runner_runs_datacenter_post_step_once_for_usa_success(
     assert "--analysis-db" in command and command[command.index("--analysis-db") + 1] == str(analysis_db)
     assert "--taxonomy-csv" in command and command[command.index("--taxonomy-csv") + 1] == "data/datacenter_ecosystem_taxonomy_full_v1.csv"
     assert "--taxonomy-version" in command and command[command.index("--taxonomy-version") + 1] == "DC_TAXONOMY_FULL_V1"
+    assert "--ohlc-calc-version" in command
+    assert command[command.index("--ohlc-calc-version") + 1] == "DC_SWING_OHLC_V1"
     assert "--start-date" in command and command[command.index("--start-date") + 1] == "2025-08-01"
     assert "--index-base-date" in command and command[command.index("--index-base-date") + 1] == "2020-01-01"
     assert "--output-dir" in command and command[command.index("--output-dir") + 1] == "/home/kalle/projects/rawcandle/swing_reports"

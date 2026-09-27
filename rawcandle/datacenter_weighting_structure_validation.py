@@ -12,6 +12,7 @@ from typing import Iterable
 
 from analysis.database_manager import DatabaseManager
 from analysis.ecosystem_group_weighting import (
+    effective_membership_weight_v1,
     equal_membership_weight,
     weight_concentration,
 )
@@ -275,6 +276,7 @@ def run_structure_validation(
     weighted_rows, _ = build_group_synthetic_ohlc_rows(
         **common,
         run_id="MEMBERSHIP_WEIGHTED_STRUCTURE_SHADOW",
+        membership_weight_policy=effective_membership_weight_v1,
     )
     equal_structure = _structure_updates(
         equal_rows,
