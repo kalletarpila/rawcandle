@@ -1162,7 +1162,12 @@ def build_fundamentals_admin_page(
             if result.status == "FAILED":
                 progress_summary.value = "Operation failed"
             elif last_progress_count:
-                progress_summary.value = f"{last_progress_count[0]} of {last_progress_count[1]} stages completed"
+                completed_count = (
+                    last_progress_count[1]
+                    if result.status == "COMPLETED"
+                    else last_progress_count[0]
+                )
+                progress_summary.value = f"{completed_count} of {last_progress_count[1]} stages completed"
             else:
                 progress_summary.value = "Preview completed" if is_preview else "Operation completed"
             progress_summary.visible = True

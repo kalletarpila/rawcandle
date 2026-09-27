@@ -1275,6 +1275,37 @@ def test_progress_details_retain_lines_and_respect_manual_scroll() -> None:
     assert controls.progress_details.controls[0].expanded is True
 
 
+def test_completed_result_closes_stale_progress_counter() -> None:
+    class Service:
+        def capabilities(self):
+            return (AdminOperationCapability("ADD_TICKERS", True, True, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def preview(self, operation_type, **kwargs):
+            kwargs["progress_callback"]({
+                "current_stage_number": 14,
+                "total_declared_stages": 16,
+                "current_stage_id": "JOURNAL_COMMIT",
+                "stage_state": "COMPLETED",
+                "message": "Publication journal committed.",
+            })
+            return AdminUIRunResult(
+                status="COMPLETED", message="Preview completed.", run_id="legacy-progress-run",
+                outcome="COMPLETED", mode="PREVIEW", preview_fingerprint="f" * 64,
+                preview_payload_path="/tmp/legacy-progress.json", summary_rows=("Preview completed",),
+            )
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=Service())
+    controls.tickers_field.value = "NVDA"
+    controls.tickers_field.on_change(None)
+    controls.preview_button.on_click(None)
+
+    assert controls.progress_summary.value == "16 of 16 stages completed"
+    assert "JOURNAL_COMMIT" in controls.progress_field.value
+
+
 def test_add_tickers_reports_use_stage_and_user_facing_language() -> None:
     preview = {
         "run_id": "preview-run", "operation_type": "ADD_TICKERS", "mode": "PREVIEW",

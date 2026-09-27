@@ -1101,6 +1101,7 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
         },
     }
     validation_calls: list[dict[str, object]] = []
+    progress_events: list[dict[str, object]] = []
 
     def raw_full_rebuild(target, _sources, **_kwargs):
         _database(target, "new")
@@ -1135,6 +1136,7 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
         backup_root=tmp_path / "backups", journal_path=tmp_path / "journal.json",
         confirm_production=True, rehearsal=True, lock_path=tmp_path / "admin.lock",
         scheduler_log_dir=str(tmp_path / "scheduler"), client=object(), as_of_date="2026-09-22",
+        progress_callback=progress_events.append,
     )
     assert result["outcome"] == "COMPLETED"
     assert result["analysis_candidate"]["active_taxonomy"] == dependency
@@ -1156,6 +1158,13 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
     assert validation_calls[1]["sources"]["market"] == prepared_source_pairs[0]["market"]
     assert validation_calls[1]["sources"]["taxonomy"] == prepared_source_pairs[0]["taxonomy"]
     assert result["journal"]["state"] == "COMPLETED"
+    assert [(event["current_stage_id"], event["stage_state"]) for event in progress_events[-3:]] == [
+        ("CLEANUP", "RUNNING"),
+        ("CLEANUP", "COMPLETED"),
+        ("COMPLETED", "COMPLETED"),
+    ]
+    assert progress_events[-1]["current_stage_number"] == len(refresh_production.PRODUCTION_STAGES)
+    assert progress_events[-1]["total_declared_stages"] == len(refresh_production.PRODUCTION_STAGES)
     assert result["refresh_state"]["published_source_watermark"] == "2026-09-20"
     with sqlite3.connect(paths.provider_db) as connection:
         assert connection.execute(

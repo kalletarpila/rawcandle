@@ -1042,10 +1042,15 @@ def run_production_apply(
                 "Production candidates did not pass validation. No production databases were modified."
             )
     finally:
+        successful = result.get("outcome") == "COMPLETED"
+        if successful:
+            progress("CLEANUP", "RUNNING", "Removing terminal phase-owned candidate artifacts.")
         try:
             result["cleanup"] = _cleanup_candidate_lane(lane_dir, journal)
         finally:
             locks.close()
+        if successful:
+            progress("CLEANUP", "COMPLETED", "Terminal phase-owned candidate artifacts were removed.")
         if result.get("production_file_state_before"):
             result["production_file_state_after"] = _production_file_state(source_paths)
             result["production_file_state_unchanged"] = (
@@ -1065,5 +1070,7 @@ def run_production_apply(
         except ValueError:
             pass
         writer.write_exit_code(0 if result.get("outcome") == "COMPLETED" else 3)
+        if successful:
+            progress("COMPLETED", "COMPLETED", "Refresh Production completed successfully.")
         writer.write_manifest()
     return result
