@@ -184,6 +184,20 @@ def test_v2_rehearsal_isolates_versions_and_proves_projection(tmp_path, monkeypa
     )
     assert v1_rows and len(v1_rows) == len(v2_rows)
     assert any(v1 != v2 for v1, v2 in zip(v1_rows, v2_rows))
+    with sqlite3.connect(candidate) as connection:
+        watermarks = dict(
+            connection.execute(
+                """
+                SELECT component_name, row_count
+                FROM dc_pipeline_watermark
+                WHERE taxonomy_version=? AND calc_version=?
+                """,
+                (TAXONOMY_VERSION, WEIGHTED_CALC_VERSION),
+            ).fetchall()
+        )
+    assert watermarks["SYNTHETIC_OHLC_BASE"] == len(v2_rows)
+    assert watermarks["SYNTHETIC_OHLC_RELATIVE"] == len(v2_rows)
+    assert watermarks["SYNTHETIC_OHLC_STRUCTURE"] > 0
 
     repeat_projection = project_v2_to_ec_range(
         source_db=candidate,

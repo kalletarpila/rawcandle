@@ -222,9 +222,11 @@ def _persist_v2_stages(
         raise RuntimeError("Injected rehearsal failure after structure")
 
     for component, stage_summary in zip(REBUILD_COMPONENTS, summaries):
-        row_count = stage_summary.get("upserted_count")
-        if row_count is None:
-            row_count = stage_summary.get("updated_count")
+        row_count = max(
+            int(stage_summary.get("inserted_count") or 0),
+            int(stage_summary.get("updated_count") or 0),
+            int(stage_summary.get("upserted_count") or 0),
+        )
         upsert_pipeline_watermark(
             analysis_db_path=candidate_db,
             component_name=component,
@@ -233,7 +235,7 @@ def _persist_v2_stages(
             calc_version=WEIGHTED_CALC_VERSION,
             start_date=start_date,
             end_date=end_date,
-            row_count=int(row_count or 0),
+            row_count=row_count,
             status="OK",
             last_successful_run_id=run_id,
             last_successful_at_utc=created_at_utc,
