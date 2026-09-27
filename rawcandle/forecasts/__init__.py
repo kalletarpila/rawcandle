@@ -1,0 +1,1 @@
+"""Yahoo forecast-history domain."""

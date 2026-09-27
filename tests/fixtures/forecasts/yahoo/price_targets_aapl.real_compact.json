@@ -1,0 +1,18 @@
+{
+  "quoteSummary": {
+    "result": [
+      {
+        "financialData": {
+          "maxAge": 86400,
+          "currentPrice": 341.07,
+          "targetLowPrice": 215.0,
+          "targetHighPrice": 405.0,
+          "targetMeanPrice": 328.22205,
+          "targetMedianPrice": 340.0,
+          "financialCurrency": "USD"
+        }
+      }
+    ],
+    "error": null
+  }
+}

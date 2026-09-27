@@ -1,0 +1,25 @@
+{
+  "quoteSummary": {
+    "result": [
+      {
+        "earningsHistory": {
+          "maxAge": 1,
+          "defaultMethodology": "gaap",
+          "history": [
+            {
+              "maxAge": 1,
+              "period": "-1q",
+              "quarter": {"raw": 1782777600, "fmt": "2026-06-30"},
+              "epsEstimate": {"raw": 1.89243, "fmt": "1.89"},
+              "epsActual": {"raw": 2.02, "fmt": "2.02"},
+              "epsDifference": {"raw": 0.13, "fmt": "0.13"},
+              "surprisePercent": {"raw": 0.0674, "fmt": "6.74%"},
+              "currency": "USD"
+            }
+          ]
+        }
+      }
+    ],
+    "error": null
+  }
+}
