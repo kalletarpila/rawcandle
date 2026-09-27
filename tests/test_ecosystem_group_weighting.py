@@ -7,6 +7,7 @@ from analysis.ecosystem_group_weighting import (
     build_canonical_groups,
     canonicalize_group_memberships,
     effective_membership_weight_v1,
+    weight_concentration,
     weighted_mean,
 )
 
@@ -99,6 +100,14 @@ def test_canonicalization_keeps_distinct_subindustries():
         ("Switchgear", 1),
         ("UPS", 1),
     ]
+
+
+def test_weight_concentration_reuses_normalized_weight_diagnostics():
+    result = weight_concentration([1.0, 0.25, 0.0])
+
+    assert result.effective_member_count == pytest.approx(1.4705882353)
+    assert result.largest_normalized_weight == pytest.approx(0.8)
+    assert result.top3_normalized_weight_share == pytest.approx(1.0)
 
 
 def test_weighted_mean_normalizes_positive_weights_only():

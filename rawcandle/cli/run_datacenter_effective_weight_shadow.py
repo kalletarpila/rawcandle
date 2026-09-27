@@ -7,6 +7,7 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
+from analysis.ecosystem_group_weighting import weight_concentration
 from analysis.datacenter_indices.swing_group_synthetic_ohlc import (
     DEFAULT_CALC_VERSION,
     _build_group_definitions,
@@ -230,17 +231,8 @@ def run_shadow_comparison(
                     if membership.is_primary == 1
                 )
                 secondary_weight = eligible_weight - primary_weight
-                normalized = sorted(
-                    (
-                        membership.effective_weight / eligible_weight
-                        for membership in eligible_positive
-                    ),
-                    reverse=True,
-                ) if eligible_weight > 0 else []
-                effective_member_count = (
-                    1.0 / sum(weight * weight for weight in normalized)
-                    if normalized
-                    else 0.0
+                concentration = weight_concentration(
+                    [membership.effective_weight for membership in eligible_positive]
                 )
                 key = (
                     taxonomy_version,
@@ -285,9 +277,9 @@ def run_shadow_comparison(
                         "secondary_effective_weight": secondary_weight,
                         "primary_effective_weight_share": primary_weight / eligible_weight if eligible_weight else 0.0,
                         "secondary_effective_weight_share": secondary_weight / eligible_weight if eligible_weight else 0.0,
-                        "largest_normalized_weight": normalized[0] if normalized else 0.0,
-                        "top3_normalized_weight_share": sum(normalized[:3]),
-                        "effective_member_count": effective_member_count,
+                        "largest_normalized_weight": concentration.largest_normalized_weight,
+                        "top3_normalized_weight_share": concentration.top3_normalized_weight_share,
+                        "effective_member_count": concentration.effective_member_count,
                         "equal_synthetic_close": equal_close,
                         "weighted_synthetic_close": weighted_close,
                         "close_delta": close_delta,

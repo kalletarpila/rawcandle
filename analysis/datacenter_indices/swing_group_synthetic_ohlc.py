@@ -11,7 +11,9 @@ from analysis.database_manager import DatabaseManager
 from analysis.ecosystem_group_weighting import (
     CanonicalGroup,
     GroupMembershipRoute,
+    MembershipWeightPolicy,
     build_canonical_groups,
+    effective_membership_weight_v1,
     weighted_mean,
 )
 
@@ -223,6 +225,8 @@ def _load_taxonomy_rows(taxonomy_csv_path: str | Path) -> list[DatacenterTaxonom
 
 def _build_group_definitions(
     taxonomy_rows: Sequence[DatacenterTaxonomyRow],
+    *,
+    weight_policy: MembershipWeightPolicy = effective_membership_weight_v1,
 ) -> tuple[CanonicalGroup, ...]:
     routes: list[GroupMembershipRoute] = []
     for row in taxonomy_rows:
@@ -245,7 +249,7 @@ def _build_group_definitions(
                 **common,
             )
         )
-    return build_canonical_groups(routes)
+    return build_canonical_groups(routes, weight_policy=weight_policy)
 
 
 def _load_price_rows(
@@ -427,6 +431,7 @@ def build_group_synthetic_ohlc_rows(
     created_at_utc: str,
     min_eligible_count: int = DEFAULT_MIN_ELIGIBLE_COUNT,
     min_coverage_ratio: float = DEFAULT_MIN_COVERAGE_RATIO,
+    membership_weight_policy: MembershipWeightPolicy = effective_membership_weight_v1,
 ) -> tuple[list[DatacenterGroupSyntheticOhlcRow], dict[str, int | str]]:
     normalized_start_date = _parse_iso_date(start_date, "start_date")
     normalized_end_date = _parse_iso_date(end_date, "end_date")
@@ -443,7 +448,10 @@ def build_group_synthetic_ohlc_rows(
         version_rows = [
             row for row in taxonomy_rows if str(row.taxonomy_version) == taxonomy_version
         ]
-        group_definitions = _build_group_definitions(version_rows)
+        group_definitions = _build_group_definitions(
+            version_rows,
+            weight_policy=membership_weight_policy,
+        )
         relevant_tickers = sorted({_normalize_ticker(row.ticker) for row in version_rows})
         price_rows = _load_price_rows(
             price_db_path=price_db_path,

@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable, Protocol, Sequence
 
 
 SUPPORTED_GROUP_TYPES = frozenset({"layer", "subindustry"})
 SUPPORTED_REPORT_GROUP_STATUSES = frozenset(
     {"CORE", "EXTENDED", "WATCH_ONLY", "TOO_SMALL"}
 )
+
+
+class MembershipWeightPolicy(Protocol):
+    def __call__(
+        self,
+        *,
+        group_type: str,
+        is_primary: int,
+        report_group_status: str,
+    ) -> float: ...
 
 
 @dataclass(frozen=True)
@@ -45,6 +55,13 @@ class WeightedMean:
     positive_weight_count: int
 
 
+@dataclass(frozen=True)
+class WeightConcentration:
+    effective_member_count: float
+    largest_normalized_weight: float
+    top3_normalized_weight_share: float
+
+
 def effective_membership_weight_v1(
     *,
     group_type: str,
@@ -68,8 +85,24 @@ def effective_membership_weight_v1(
     return 0.25
 
 
+def equal_membership_weight(
+    *,
+    group_type: str,
+    is_primary: int,
+    report_group_status: str,
+) -> float:
+    effective_membership_weight_v1(
+        group_type=group_type,
+        is_primary=is_primary,
+        report_group_status=report_group_status,
+    )
+    return 1.0
+
+
 def canonicalize_group_memberships(
     routes: Iterable[GroupMembershipRoute],
+    *,
+    weight_policy: MembershipWeightPolicy = effective_membership_weight_v1,
 ) -> tuple[CanonicalGroupMembership, ...]:
     grouped: dict[tuple[str, str, str], list[tuple[GroupMembershipRoute, float]]] = {}
     for route in routes:
@@ -79,7 +112,7 @@ def canonicalize_group_memberships(
             raise ValueError("Membership ticker must not be empty")
         if not group_name:
             raise ValueError("Membership group_name must not be empty")
-        weight = effective_membership_weight_v1(
+        weight = weight_policy(
             group_type=route.group_type,
             is_primary=route.is_primary,
             report_group_status=route.report_group_status,
@@ -134,9 +167,14 @@ def canonicalize_group_memberships(
 
 def build_canonical_groups(
     routes: Iterable[GroupMembershipRoute],
+    *,
+    weight_policy: MembershipWeightPolicy = effective_membership_weight_v1,
 ) -> tuple[CanonicalGroup, ...]:
     grouped: dict[tuple[str, str], list[CanonicalGroupMembership]] = {}
-    for membership in canonicalize_group_memberships(routes):
+    for membership in canonicalize_group_memberships(
+        routes,
+        weight_policy=weight_policy,
+    ):
         grouped.setdefault(
             (membership.group_type, membership.group_name), []
         ).append(membership)
@@ -147,6 +185,25 @@ def build_canonical_groups(
             memberships=tuple(sorted(memberships, key=lambda item: item.ticker)),
         )
         for (group_type, group_name), memberships in sorted(grouped.items())
+    )
+
+
+def weight_concentration(weights: Sequence[float]) -> WeightConcentration:
+    if any(weight < 0 for weight in weights):
+        raise ValueError("Weights must be non-negative")
+    total_weight = sum(weight for weight in weights if weight > 0)
+    normalized = sorted(
+        (float(weight) / total_weight for weight in weights if weight > 0),
+        reverse=True,
+    ) if total_weight else []
+    return WeightConcentration(
+        effective_member_count=(
+            1.0 / sum(weight * weight for weight in normalized)
+            if normalized
+            else 0.0
+        ),
+        largest_normalized_weight=normalized[0] if normalized else 0.0,
+        top3_normalized_weight_share=sum(normalized[:3]),
     )
 
 
