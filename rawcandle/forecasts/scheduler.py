@@ -8,10 +8,9 @@ from typing import Any
 FORECAST_SCHEDULER_NAME = "rawcandle-forecast-daily"
 FORECAST_SCHEDULE_LOCAL = "07:30"
 FORECAST_TIMEZONE = "Europe/Helsinki"
-FORECAST_INITIAL_MAX_SYMBOLS = 100
-FORECAST_TIMEOUT_SECONDS = 1800
+FORECAST_TIMEOUT_SECONDS = 9000
 FORECAST_DAILY_COMMAND = (
-    "/usr/bin/python3 -m rawcandle.cli.forecasts daily --max-symbols 100"
+    "/usr/bin/python3 -m rawcandle.cli.forecasts daily --full-bounded-universe"
 )
 
 
@@ -61,7 +60,7 @@ def install_scheduler(
         "timezone": FORECAST_TIMEZONE,
         "command": FORECAST_DAILY_COMMAND,
         "timeout_seconds": FORECAST_TIMEOUT_SECONDS,
-        "max_symbols": FORECAST_INITIAL_MAX_SYMBOLS,
+        "full_bounded_universe": True,
         "independent_from_stock_scheduler": True,
         "automatic_retry": False,
     }

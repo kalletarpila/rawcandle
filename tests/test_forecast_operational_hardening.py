@@ -254,6 +254,51 @@ def test_universe_preview_and_bounded_daily_workflow(tmp_path: Path) -> None:
     assert "INDIVIDUAL_FAILURE_PARTIAL" in result["failure_policy"]
 
 
+def test_full_bounded_daily_workflow_requires_explicit_mode(tmp_path: Path) -> None:
+    forecast = tmp_path / "forecasts.db"
+    fundamentals = _fundamentals(tmp_path)
+    _universe(fundamentals)
+    migrate_database(forecast)
+
+    result = daily_workflow(
+        full_bounded_universe=True,
+        forecast_db=forecast,
+        fundamentals_db=fundamentals,
+        backup_dir=tmp_path / "backups",
+        transport=FakeTransport(),
+    )
+
+    assert result["terminal_status"] == "SUCCESS"
+    assert result["universe"]["full_bounded_universe"] is True
+    assert result["universe"]["max_symbols"] is None
+    assert result["universe"]["universe_version_id"] == "u1"
+    with connect_forecasts_db(forecast) as connection:
+        scope = json.loads(connection.execute(
+            "SELECT scope_json FROM forecast_run WHERE run_id=?", (result["run_id"],)
+        ).fetchone()[0])
+    assert scope["universe"] == {
+        "authority": (
+            "fundamentals_v4."
+            "fundamentals_operational_universe_active_version/member"
+        ),
+        "eligible_symbol_count": 1,
+        "selected_symbol_count": 1,
+        "selection_mode": "FULL_BOUNDED_UNIVERSE",
+        "version_id": "u1",
+    }
+
+
+def test_daily_workflow_rejects_implicit_or_conflicting_scope(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        daily_workflow(forecast_db=tmp_path / "forecasts.db")
+    with pytest.raises(ValueError, match="exactly one"):
+        daily_workflow(
+            max_symbols=1,
+            full_bounded_universe=True,
+            forecast_db=tmp_path / "forecasts.db",
+        )
+
+
 def test_daily_workflow_fails_closed_when_preflight_fails(tmp_path: Path) -> None:
     with pytest.raises(DailyWorkflowError) as caught:
         daily_workflow(

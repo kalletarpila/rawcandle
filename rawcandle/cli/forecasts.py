@@ -109,9 +109,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     daily = subparsers.add_parser("daily", help="Run the bounded forecast daily workflow")
     _paths(daily, fundamentals=True)
-    daily.add_argument(
-        "--max-symbols", type=int, required=True,
+    daily_scope = daily.add_mutually_exclusive_group(required=True)
+    daily_scope.add_argument(
+        "--max-symbols", type=int,
         help="Required safety bound over the canonical active universe",
+    )
+    daily_scope.add_argument(
+        "--full-bounded-universe", action="store_true",
+        help="Use the complete canonical active bounded universe",
     )
     daily.add_argument("--backup-dir", default=str(DEFAULT_BACKUP_DIR))
 
@@ -268,10 +273,11 @@ def main(argv: list[str] | None = None) -> int:
             preview.pop("symbols", None)
             print(f"UNIVERSE {_compact(preview)}")
         elif args.command == "daily":
-            if args.max_symbols < 1:
+            if args.max_symbols is not None and args.max_symbols < 1:
                 raise ValueError("--max-symbols must be positive")
             result = daily_workflow(
                 max_symbols=args.max_symbols, forecast_db=Path(args.db),
+                full_bounded_universe=args.full_bounded_universe,
                 fundamentals_db=Path(args.fundamentals_db),
                 backup_dir=Path(args.backup_dir),
             )

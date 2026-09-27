@@ -517,16 +517,20 @@ def universe_preview(
 
 def _daily_workflow_locked(
     *, symbols: Iterable[str] | None = None, max_symbols: int | None = None,
+    full_bounded_universe: bool = False,
     forecast_db: str | Path = DEFAULT_FORECAST_DB,
     fundamentals_db: str | Path = DEFAULT_FUNDAMENTALS_DB,
     backup_dir: str | Path = DEFAULT_BACKUP_DIR, transport: Any = None,
 ) -> dict[str, Any]:
     started_at = datetime.now(timezone.utc)
     started_monotonic = time.monotonic()
-    if symbols is None and (max_symbols is None or max_symbols < 1):
+    selection_modes = sum((symbols is not None, max_symbols is not None, full_bounded_universe))
+    if selection_modes != 1:
+        raise ValueError(
+            "exactly one of symbols, max_symbols, or full_bounded_universe is required"
+        )
+    if max_symbols is not None and max_symbols < 1:
         raise ValueError("daily workflow requires a positive universe bound")
-    if symbols is not None and max_symbols is not None:
-        raise ValueError("symbols and max_symbols are mutually exclusive")
     database = Path(forecast_db)
     size_before = database.stat().st_size if database.exists() else 0
     try:
@@ -543,7 +547,11 @@ def _daily_workflow_locked(
             universe = universe_preview(fundamentals_db=fundamentals_db)
         except Exception as exc:
             raise DailyWorkflowError("UNIVERSE_RESOLUTION_FAILED", str(exc)) from exc
-        selected = tuple(universe["symbols"][:max_symbols])
+        selected = tuple(
+            universe["symbols"]
+            if full_bounded_universe
+            else universe["symbols"][:max_symbols]
+        )
     else:
         selected = tuple(dict.fromkeys(
             str(item).strip().upper() for item in symbols if str(item).strip()
@@ -554,6 +562,18 @@ def _daily_workflow_locked(
     outcome = acquire_run(
         forecast_db=forecast_db, fundamentals_db=fundamentals_db,
         symbols=selected, transport=transport,
+        scope_metadata=None if universe is None else {
+            "universe": {
+                "authority": universe["authority"],
+                "version_id": universe["universe_version_id"],
+                "eligible_symbol_count": universe["symbols_count"],
+                "selection_mode": (
+                    "FULL_BOUNDED_UNIVERSE"
+                    if full_bounded_universe else "MAX_SYMBOLS"
+                ),
+                "selected_symbol_count": len(selected),
+            }
+        },
     )
     acquisition_finished = time.monotonic()
     errors: dict[str, str] = {}
@@ -643,6 +663,8 @@ def _daily_workflow_locked(
             "available_symbols": universe["symbols_count"],
             "selected_symbols": len(selected),
             "max_symbols": max_symbols,
+            "full_bounded_universe": full_bounded_universe,
+            "universe_version_id": universe["universe_version_id"],
         },
         "failure_policy": "INDIVIDUAL_FAILURE_PARTIAL_DB_OR_BACKUP_FAIL_CLOSED_LINK_FAILURE_ACQUISITION_PRESERVED",
     }
@@ -650,13 +672,15 @@ def _daily_workflow_locked(
 
 def daily_workflow(
     *, symbols: Iterable[str] | None = None, max_symbols: int | None = None,
+    full_bounded_universe: bool = False,
     forecast_db: str | Path = DEFAULT_FORECAST_DB,
     fundamentals_db: str | Path = DEFAULT_FUNDAMENTALS_DB,
     backup_dir: str | Path = DEFAULT_BACKUP_DIR, transport: Any = None,
 ) -> dict[str, Any]:
     with forecast_daily_lock(forecast_db):
         return _daily_workflow_locked(
-            symbols=symbols, max_symbols=max_symbols, forecast_db=forecast_db,
+            symbols=symbols, max_symbols=max_symbols,
+            full_bounded_universe=full_bounded_universe, forecast_db=forecast_db,
             fundamentals_db=fundamentals_db, backup_dir=backup_dir,
             transport=transport,
         )

@@ -131,6 +131,7 @@ def acquire_run(
     transport: YahooForecastTransport | None = None,
     run_id: str | None = None,
     resume_run_id: str | None = None,
+    scope_metadata: Mapping[str, Any] | None = None,
 ) -> AcquisitionOutcome:
     database = Path(forecast_db)
     verify_database(database)
@@ -149,6 +150,8 @@ def acquire_run(
     if resume_run_id is not None:
         if run_id is not None:
             raise ValueError("run_id and resume_run_id are mutually exclusive")
+        if scope_metadata is not None:
+            raise ValueError("scope_metadata cannot change a resumed run")
         with connect_forecasts_db(database) as connection:
             existing = connection.execute(
                 "SELECT scope_json FROM forecast_run WHERE run_id=?", (resume_run_id,)
@@ -176,10 +179,17 @@ def acquire_run(
         selected_symbols = _normalized_symbols(
             DEFAULT_PILOT_SYMBOLS if symbols is None else symbols
         )
-        active_run = repository.start_run(
-            run_id=run_id,
-            scope={"symbols": selected_symbols, "families": selected_families, "mode": "OPERATOR"},
-        )
+        scope = {
+            "symbols": selected_symbols,
+            "families": selected_families,
+            "mode": "OPERATOR",
+        }
+        if scope_metadata:
+            overlap = set(scope).intersection(scope_metadata)
+            if overlap:
+                raise ValueError(f"scope metadata uses reserved keys: {sorted(overlap)}")
+            scope.update(scope_metadata)
+        active_run = repository.start_run(run_id=run_id, scope=scope)
     for symbol in selected_symbols:
         identity = resolver.resolve(symbol, utc_now())
         company_id = identity.company_id if identity.identity_status == IDENTITY_RESOLVED else None

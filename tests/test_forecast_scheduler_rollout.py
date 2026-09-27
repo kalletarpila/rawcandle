@@ -7,7 +7,6 @@ import pytest
 from rawcandle.cli import forecasts as cli
 from rawcandle.forecasts.scheduler import (
     FORECAST_DAILY_COMMAND,
-    FORECAST_INITIAL_MAX_SYMBOLS,
     FORECAST_SCHEDULE_LOCAL,
     FORECAST_TIMEOUT_SECONDS,
     install_scheduler,
@@ -17,12 +16,12 @@ from rawcandle.forecasts.scheduler import (
 from rawcandle.forecasts.hardening import forecast_daily_lock
 
 
-def test_registration_uses_exact_bounded_independent_command(tmp_path: Path) -> None:
+def test_registration_uses_exact_full_bounded_independent_command(tmp_path: Path) -> None:
     service = service_unit_text(tmp_path)
     timer = timer_unit_text()
 
     assert FORECAST_DAILY_COMMAND == (
-        "/usr/bin/python3 -m rawcandle.cli.forecasts daily --max-symbols 100"
+        "/usr/bin/python3 -m rawcandle.cli.forecasts daily --full-bounded-universe"
     )
     assert f"ExecStart={FORECAST_DAILY_COMMAND}" in service
     assert "stock-update-scheduler" not in service
@@ -31,9 +30,8 @@ def test_registration_uses_exact_bounded_independent_command(tmp_path: Path) -> 
     assert "Unit=rawcandle-forecast-daily.service" in timer
 
 
-def test_initial_bound_timeout_and_no_automatic_retry() -> None:
-    assert FORECAST_INITIAL_MAX_SYMBOLS == 100
-    assert FORECAST_TIMEOUT_SECONDS == 1800
+def test_full_universe_timeout_and_no_automatic_retry() -> None:
+    assert FORECAST_TIMEOUT_SECONDS == 9000
     assert "Restart=" not in service_unit_text("/tmp/repo")
 
 
@@ -43,7 +41,7 @@ def test_scheduler_install_dry_run_does_not_write(tmp_path: Path) -> None:
     )
 
     assert result["mode"] == "DRY_RUN"
-    assert result["max_symbols"] == 100
+    assert result["full_bounded_universe"] is True
     assert result["automatic_retry"] is False
     assert not (tmp_path / "units").exists()
 
@@ -59,9 +57,16 @@ def test_scheduler_registration_writes_units_without_activation(tmp_path: Path) 
     assert (units / "rawcandle-forecast-daily.timer").read_text() == timer_unit_text()
 
 
-def test_daily_cli_requires_explicit_max_symbols() -> None:
+def test_daily_cli_requires_explicit_scope() -> None:
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(["daily"])
+
+
+def test_daily_cli_rejects_both_scope_modes() -> None:
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args([
+            "daily", "--max-symbols", "100", "--full-bounded-universe",
+        ])
 
 
 @pytest.mark.parametrize(
@@ -77,6 +82,22 @@ def test_daily_cli_terminal_status_mapping(
     )
 
     assert cli.main(["daily", "--max-symbols", "100"]) == exit_code
+
+
+def test_daily_cli_passes_explicit_full_bounded_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+
+    def workflow(**kwargs):
+        captured.update(kwargs)
+        return {"terminal_status": "SUCCESS"}
+
+    monkeypatch.setattr(cli, "daily_workflow", workflow)
+
+    assert cli.main(["daily", "--full-bounded-universe"]) == 0
+    assert captured["full_bounded_universe"] is True
+    assert captured["max_symbols"] is None
 
 
 def test_daily_cli_failure_maps_to_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
