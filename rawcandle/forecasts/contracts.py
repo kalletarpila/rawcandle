@@ -182,6 +182,88 @@ def _drift(prefix: str, mapping: Mapping[str, Any], expected: set[str]) -> list[
     return [f"{prefix}.{key}" for key in mapping if key not in expected]
 
 
+def _is_zero_placeholder(value: Any) -> bool:
+    raw = value.get("raw") if isinstance(value, Mapping) else None
+    return (
+        isinstance(value, Mapping)
+        and set(value) == {"raw", "fmt", "longFmt"}
+        and isinstance(raw, (int, float))
+        and not isinstance(raw, bool)
+        and raw == 0
+        and value.get("fmt") is None
+        and value.get("longFmt") == "0"
+    )
+
+
+def _is_empty_earnings_trend_row(row: Any) -> bool:
+    if not isinstance(row, Mapping):
+        return False
+    expected_row = {
+        "maxAge", "period", "endDate", "growth", *EARNINGS_TREND_SECTION_FIELDS
+    }
+    if not set(row) <= expected_row or row.get("growth") != {}:
+        return False
+    earnings = row.get("earningsEstimate")
+    revenue = row.get("revenueEstimate")
+    eps_trend = row.get("epsTrend")
+    revisions = row.get("epsRevisions")
+    if not all(isinstance(value, Mapping) for value in (
+        earnings, revenue, eps_trend, revisions
+    )):
+        return False
+    if set(earnings) != set(EARNINGS_TREND_SECTION_FIELDS["earningsEstimate"]):
+        return False
+    if set(revenue) != set(EARNINGS_TREND_SECTION_FIELDS["revenueEstimate"]):
+        return False
+    if set(eps_trend) != set(EARNINGS_TREND_SECTION_FIELDS["epsTrend"]):
+        return False
+    if set(revisions) != set(EARNINGS_TREND_SECTION_FIELDS["epsRevisions"]):
+        return False
+    if any(
+        earnings[field] != {}
+        for field in EARNINGS_TREND_SECTION_FIELDS["earningsEstimate"]
+        if field != "earningsCurrency"
+    ) or earnings["earningsCurrency"] is not None:
+        return False
+    if not all(
+        _is_zero_placeholder(revenue[field])
+        for field in ("avg", "low", "high", "numberOfAnalysts")
+    ):
+        return False
+    if revenue["yearAgoRevenue"] != {} or revenue["growth"] != {}:
+        return False
+    if revenue["revenueCurrency"] is not None:
+        return False
+    if any(
+        eps_trend[field] != {}
+        for field in EARNINGS_TREND_SECTION_FIELDS["epsTrend"]
+        if field != "epsTrendCurrency"
+    ) or eps_trend["epsTrendCurrency"] is not None:
+        return False
+    if any(
+        revisions[field] != {}
+        for field in EARNINGS_TREND_SECTION_FIELDS["epsRevisions"]
+        if field != "epsRevisionsCurrency"
+    ) or revisions["epsRevisionsCurrency"] is not None:
+        return False
+    return True
+
+
+def _is_empty_earnings_trend_payload(payload: Mapping[str, Any]) -> bool:
+    try:
+        module = _quote_module(payload, "earningsTrend")
+    except ForecastContractError:
+        return False
+    if not set(module) <= {"maxAge", "defaultMethodology", "trend"}:
+        return False
+    trend = module.get("trend")
+    return (
+        isinstance(trend, list)
+        and bool(trend)
+        and all(_is_empty_earnings_trend_row(row) for row in trend)
+    )
+
+
 def canonicalize_earnings_trend(payload: Mapping[str, Any]) -> CanonicalForecast:
     module = _quote_module(payload, "earningsTrend")
     trend = module.get("trend")
@@ -356,6 +438,8 @@ def parse_payload(family: str, payload: Any) -> ParsedPayload:
             else STATUS_MALFORMED
         )
         return ParsedPayload(status, error_code=code, error_message=message)
+    if family == FAMILY_FISCAL_ESTIMATE and _is_empty_earnings_trend_payload(payload):
+        return ParsedPayload(STATUS_VALID_NO_DATA)
     try:
         forecast = canonicalize_family(family, payload)
     except (ForecastContractError, OverflowError, OSError) as exc:
