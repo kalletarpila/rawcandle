@@ -1,0 +1,8 @@
+{
+  "fixture_kind": "synthetic_field_state_cases",
+  "FIELD_ABSENT": {},
+  "EMPTY_OBJECT": {"field": {}},
+  "EXPLICIT_NULL": {"field": null},
+  "NUMERIC_ZERO": {"field": {"raw": 0, "fmt": null, "longFmt": "0"}},
+  "NUMERIC_VALUE": {"field": {"raw": 1.25, "fmt": "1.25"}}
+}

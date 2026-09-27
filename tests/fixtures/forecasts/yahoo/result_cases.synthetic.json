@@ -1,0 +1,34 @@
+{
+  "fixture_kind": "synthetic_contract_cases",
+  "cases": [
+    {
+      "name": "VALID_NO_DATA",
+      "transport": {"http_status": 200},
+      "payload": {"quoteSummary": {"result": [{"earningsTrend": {"maxAge": 1, "defaultMethodology": "gaap", "trend": []}}], "error": null}}
+    },
+    {
+      "name": "PROVIDER_SYMBOL_UNAVAILABLE",
+      "source": "observed Yahoo 404 body for RAWCANDLE_INVALID_9Z9Z; compacted",
+      "transport": {"http_status": 404},
+      "payload": {"quoteSummary": {"result": null, "error": {"code": "Not Found", "description": "Quote not found for symbol: REDACTED_INVALID_SYMBOL"}}}
+    },
+    {
+      "name": "RATE_LIMITED",
+      "source": "synthetic from yfinance YFRateLimitError contract",
+      "transport": {"http_status": 429, "exception_type": "YFRateLimitError"},
+      "payload": null
+    },
+    {
+      "name": "TRANSIENT_5XX",
+      "source": "synthetic transport contract",
+      "transport": {"http_status": 503, "exception_type": "HTTPError"},
+      "payload": null
+    },
+    {
+      "name": "MALFORMED_OR_SCHEMA_MISMATCH",
+      "source": "synthetic wrong trend container type",
+      "transport": {"http_status": 200},
+      "payload": {"quoteSummary": {"result": [{"earningsTrend": {"trend": {"unexpected": "object"}}}], "error": null}}
+    }
+  ]
+}
