@@ -8,6 +8,12 @@ from statistics import pstdev
 from typing import Sequence
 
 from analysis.database_manager import DatabaseManager
+from analysis.ecosystem_group_weighting import (
+    CanonicalGroup,
+    GroupMembershipRoute,
+    build_canonical_groups,
+    weighted_mean,
+)
 
 from .persistence import resolve_created_at_utc
 from .taxonomy import DatacenterTaxonomyRow, load_datacenter_taxonomy_csv
@@ -217,23 +223,29 @@ def _load_taxonomy_rows(taxonomy_csv_path: str | Path) -> list[DatacenterTaxonom
 
 def _build_group_definitions(
     taxonomy_rows: Sequence[DatacenterTaxonomyRow],
-) -> list[tuple[str, str, tuple[str, ...]]]:
-    layer_map: dict[str, set[str]] = {}
-    subindustry_map: dict[str, set[str]] = {}
+) -> tuple[CanonicalGroup, ...]:
+    routes: list[GroupMembershipRoute] = []
     for row in taxonomy_rows:
-        ticker = _normalize_ticker(row.ticker)
-        layer_map.setdefault(str(row.layer), set()).add(ticker)
-        subindustry_map.setdefault(str(row.subindustry), set()).add(ticker)
-    groups: list[tuple[str, str, tuple[str, ...]]] = []
-    groups.extend(
-        ("layer", layer, tuple(sorted(tickers)))
-        for layer, tickers in sorted(layer_map.items())
-    )
-    groups.extend(
-        ("subindustry", subindustry, tuple(sorted(tickers)))
-        for subindustry, tickers in sorted(subindustry_map.items())
-    )
-    return groups
+        common = {
+            "ticker": _normalize_ticker(row.ticker),
+            "is_primary": int(row.is_primary),
+            "report_group_status": str(row.report_group_status),
+        }
+        routes.append(
+            GroupMembershipRoute(
+                group_type="layer",
+                group_name=str(row.layer),
+                **common,
+            )
+        )
+        routes.append(
+            GroupMembershipRoute(
+                group_type="subindustry",
+                group_name=str(row.subindustry),
+                **common,
+            )
+        )
+    return build_canonical_groups(routes)
 
 
 def _load_price_rows(
@@ -446,52 +458,90 @@ def build_group_synthetic_ohlc_rows(
             end_date=normalized_end_date,
         )
 
-        for group_type, group_name, member_tickers in group_definitions:
+        for group in group_definitions:
+            group_type = group.group_type
+            group_name = group.group_name
+            memberships = group.memberships
             previous_valid_close: float | None = None
             valid_close_history: list[float] = []
             valid_return_history: list[float] = []
             group_rows: list[DatacenterGroupSyntheticOhlcRow] = []
 
             for current_date in in_range_dates:
-                member_count = len(set(member_tickers))
-                eligible_inputs = [
-                    ticker_inputs[ticker][current_date]
-                    for ticker in member_tickers
-                    if ticker in ticker_inputs and current_date in ticker_inputs[ticker]
+                member_count = len(memberships)
+                eligible_members = [
+                    (membership, ticker_inputs[membership.ticker][current_date])
+                    for membership in memberships
+                    if membership.ticker in ticker_inputs
+                    and current_date in ticker_inputs[membership.ticker]
                 ]
-                eligible_count = len(eligible_inputs)
+                eligible_count = len(eligible_members)
+                eligible_weight = sum(
+                    membership.effective_weight
+                    for membership, _item in eligible_members
+                    if membership.effective_weight > 0
+                )
                 status = _calculate_data_quality_status(
                     member_count=member_count,
                     eligible_count=eligible_count,
                     min_eligible_count=min_eligible_count,
                     min_coverage_ratio=min_coverage_ratio,
                 )
+                if eligible_weight == 0:
+                    status = "NO_DATA"
 
                 synthetic_open: float | None = None
                 synthetic_high: float | None = None
                 synthetic_low: float | None = None
                 synthetic_close: float | None = None
-                synthetic_volume: float | None = None
+                volume_values = [
+                    item.volume
+                    for _membership, item in eligible_members
+                    if item.volume is not None
+                ]
+                synthetic_volume = sum(volume_values) if volume_values else None
 
-                if eligible_count > 0:
+                if eligible_weight > 0:
                     if previous_valid_close is None:
                         synthetic_open = 100.0
                         synthetic_high = 100.0
                         synthetic_low = 100.0
                         synthetic_close = 100.0
                     else:
-                        group_open_return = sum(item.open_return for item in eligible_inputs) / float(eligible_count)
-                        group_high_return = sum(item.high_return for item in eligible_inputs) / float(eligible_count)
-                        group_low_return = sum(item.low_return for item in eligible_inputs) / float(eligible_count)
-                        group_close_return = sum(item.close_return for item in eligible_inputs) / float(eligible_count)
+                        group_open_return = weighted_mean(
+                            [
+                                (item.open_return, membership.effective_weight)
+                                for membership, item in eligible_members
+                            ]
+                        ).value
+                        group_high_return = weighted_mean(
+                            [
+                                (item.high_return, membership.effective_weight)
+                                for membership, item in eligible_members
+                            ]
+                        ).value
+                        group_low_return = weighted_mean(
+                            [
+                                (item.low_return, membership.effective_weight)
+                                for membership, item in eligible_members
+                            ]
+                        ).value
+                        group_close_return = weighted_mean(
+                            [
+                                (item.close_return, membership.effective_weight)
+                                for membership, item in eligible_members
+                            ]
+                        ).value
+                        assert group_open_return is not None
+                        assert group_high_return is not None
+                        assert group_low_return is not None
+                        assert group_close_return is not None
                         synthetic_open = previous_valid_close * (1.0 + group_open_return)
                         synthetic_high = previous_valid_close * (1.0 + group_high_return)
                         synthetic_low = previous_valid_close * (1.0 + group_low_return)
                         synthetic_close = previous_valid_close * (1.0 + group_close_return)
                     synthetic_high = max(synthetic_high, synthetic_open, synthetic_close)
                     synthetic_low = min(synthetic_low, synthetic_open, synthetic_close)
-                    volume_values = [item.volume for item in eligible_inputs if item.volume is not None]
-                    synthetic_volume = sum(volume_values) if volume_values else None
                     previous_valid_close = synthetic_close
                     if valid_close_history:
                         valid_return_history.append((synthetic_close / valid_close_history[-1]) - 1.0)
@@ -729,7 +779,10 @@ def build_group_relative_ohlc_updates(
             end_date=normalized_end_date,
         )
 
-        for group_type, group_name, member_tickers in group_definitions:
+        for group in group_definitions:
+            group_type = group.group_type
+            group_name = group.group_name
+            memberships = group.memberships
             for current_date in in_range_dates:
                 base_key = (
                     current_date,
@@ -742,13 +795,19 @@ def build_group_relative_ohlc_updates(
                     missing_base_row_count += 1
                     continue
 
-                eligible_inputs = [
-                    ticker_inputs[ticker][current_date]
-                    for ticker in member_tickers
-                    if ticker in ticker_inputs and current_date in ticker_inputs[ticker]
+                eligible_members = [
+                    (membership, ticker_inputs[membership.ticker][current_date])
+                    for membership in memberships
+                    if membership.ticker in ticker_inputs
+                    and current_date in ticker_inputs[membership.ticker]
                 ]
-                relative_eligible_count = len(eligible_inputs)
-                if relative_eligible_count == 0:
+                relative_eligible_count = len(eligible_members)
+                eligible_weight = sum(
+                    membership.effective_weight
+                    for membership, _item in eligible_members
+                    if membership.effective_weight > 0
+                )
+                if eligible_weight == 0:
                     relative_rows_without_eligible_tickers += 1
                     updates.append(
                         {
@@ -767,29 +826,41 @@ def build_group_relative_ohlc_updates(
                             "relative_close_extension_20": None,
                             "relative_high_extension_20": None,
                             "relative_low_extension_20": None,
-                            "relative_eligible_count": 0,
+                            "relative_eligible_count": relative_eligible_count,
                             "run_id": run_id,
                             "created_at_utc": created_at_utc,
                         }
                     )
                     continue
 
-                group_relative_open = (
-                    sum(item.relative_open for item in eligible_inputs)
-                    / float(relative_eligible_count)
-                )
-                group_relative_high = (
-                    sum(item.relative_high for item in eligible_inputs)
-                    / float(relative_eligible_count)
-                )
-                group_relative_low = (
-                    sum(item.relative_low for item in eligible_inputs)
-                    / float(relative_eligible_count)
-                )
-                group_relative_close = (
-                    sum(item.relative_close for item in eligible_inputs)
-                    / float(relative_eligible_count)
-                )
+                group_relative_open = weighted_mean(
+                    [
+                        (item.relative_open, membership.effective_weight)
+                        for membership, item in eligible_members
+                    ]
+                ).value
+                group_relative_high = weighted_mean(
+                    [
+                        (item.relative_high, membership.effective_weight)
+                        for membership, item in eligible_members
+                    ]
+                ).value
+                group_relative_low = weighted_mean(
+                    [
+                        (item.relative_low, membership.effective_weight)
+                        for membership, item in eligible_members
+                    ]
+                ).value
+                group_relative_close = weighted_mean(
+                    [
+                        (item.relative_close, membership.effective_weight)
+                        for membership, item in eligible_members
+                    ]
+                ).value
+                assert group_relative_open is not None
+                assert group_relative_high is not None
+                assert group_relative_low is not None
+                assert group_relative_close is not None
                 group_relative_high = max(
                     group_relative_high,
                     group_relative_open,
