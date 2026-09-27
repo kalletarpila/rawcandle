@@ -126,14 +126,14 @@ def acquire_run(
     *,
     forecast_db: str | Path = DEFAULT_FORECAST_DB,
     fundamentals_db: str | Path = DEFAULT_FUNDAMENTALS_DB,
-    symbols: Iterable[str] = DEFAULT_PILOT_SYMBOLS,
+    symbols: Iterable[str] | None = None,
     families: Iterable[str] = FORECAST_FAMILIES,
     transport: YahooForecastTransport | None = None,
     run_id: str | None = None,
+    resume_run_id: str | None = None,
 ) -> AcquisitionOutcome:
     database = Path(forecast_db)
     verify_database(database)
-    selected_symbols = _normalized_symbols(symbols)
     selected_families = tuple(dict.fromkeys(families))
     if not selected_families or not set(selected_families) <= set(FORECAST_FAMILIES):
         raise ValueError("unsupported or empty forecast family selection")
@@ -145,15 +145,48 @@ def acquire_run(
         adapter_version=adapter_version,
         raw_retention_days=yahoo.config.raw_retention_days,
     )
-    active_run = repository.start_run(
-        run_id=run_id,
-        scope={"symbols": selected_symbols, "families": selected_families, "mode": "OPERATOR"},
-    )
+    completed_attempts: set[tuple[str, str]] = set()
+    if resume_run_id is not None:
+        if run_id is not None:
+            raise ValueError("run_id and resume_run_id are mutually exclusive")
+        with connect_forecasts_db(database) as connection:
+            existing = connection.execute(
+                "SELECT scope_json FROM forecast_run WHERE run_id=?", (resume_run_id,)
+            ).fetchone()
+            if existing is None:
+                raise LookupError(f"forecast run not found: {resume_run_id}")
+            scope = json.loads(existing["scope_json"])
+            selected_symbols = _normalized_symbols(
+                symbols if symbols is not None else scope.get("symbols", ())
+            )
+            if tuple(scope.get("symbols", ())) != selected_symbols or tuple(scope.get("families", ())) != selected_families:
+                raise ValueError("resume scope differs from the stored run scope")
+            completed_attempts = {
+                (str(row[0]), str(row[1])) for row in connection.execute(
+                    "SELECT provider_symbol,forecast_family FROM forecast_fetch WHERE run_id=?",
+                    (resume_run_id,),
+                )
+            }
+            connection.execute(
+                "UPDATE forecast_run SET status='RUNNING',completed_at_utc=NULL WHERE run_id=?",
+                (resume_run_id,),
+            )
+        active_run = resume_run_id
+    else:
+        selected_symbols = _normalized_symbols(
+            DEFAULT_PILOT_SYMBOLS if symbols is None else symbols
+        )
+        active_run = repository.start_run(
+            run_id=run_id,
+            scope={"symbols": selected_symbols, "families": selected_families, "mode": "OPERATOR"},
+        )
     for symbol in selected_symbols:
         identity = resolver.resolve(symbol, utc_now())
         company_id = identity.company_id if identity.identity_status == IDENTITY_RESOLVED else None
         security_id = identity.security_id if identity.identity_status == IDENTITY_RESOLVED else None
         for family in selected_families:
+            if (symbol, family) in completed_attempts:
+                continue
             try:
                 raw = yahoo.fetch(symbol, family)
                 repository.record_fetch(
