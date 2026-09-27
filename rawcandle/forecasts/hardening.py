@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import errno
+import fcntl
 import hashlib
 import json
 import os
 import sqlite3
 import tempfile
+import time
 from collections import Counter
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -44,6 +48,40 @@ CORE_TABLES = (
     "forecast_price_target", "forecast_earnings_history_reference",
     "forecast_identity_resolution", "forecast_fiscal_link", "forecast_raw_evidence",
 )
+
+
+class ForecastDailyAlreadyRunningError(RuntimeError):
+    code = "OVERLAP_ACTIVE"
+
+
+class DailyWorkflowError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@contextmanager
+def forecast_daily_lock(forecast_db: str | Path):
+    database_key = hashlib.sha256(
+        str(Path(forecast_db).resolve()).encode("utf-8")
+    ).hexdigest()[:16]
+    lock_path = Path(tempfile.gettempdir()) / f"rawcandle-forecast-daily-{database_key}.lock"
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EAGAIN):
+                raise ForecastDailyAlreadyRunningError(
+                    "forecast daily run is already active"
+                ) from exc
+            raise
+        yield handle
+    finally:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
 def _utc(value: str | None = None) -> str:
@@ -356,6 +394,80 @@ def restore_backup(
     return {"target": str(target_path), "quick_check": verify_database(target_path)["quick_check"], "safety_backup": safety and safety["backup_path"]}
 
 
+def _rehearsal_signature(path: Path) -> dict[str, Any]:
+    with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
+        connection.row_factory = sqlite3.Row
+        counts = _core_counts(connection)
+        observations = connection.execute(
+            "SELECT MIN(fetched_at_utc),MAX(fetched_at_utc) FROM forecast_fetch"
+        ).fetchone()
+        representative_row = connection.execute(
+            "SELECT f.fetch_id,f.provider_symbol,f.forecast_family,f.fetched_at_utc,"
+            "f.status,f.content_hash,s.canonical_payload_json "
+            "FROM forecast_fetch f LEFT JOIN forecast_snapshot s USING(snapshot_id) "
+            "ORDER BY f.fetched_at_utc,f.rowid LIMIT 1"
+        ).fetchone()
+    representative = None
+    if representative_row:
+        representative = {
+            key: representative_row[key]
+            for key in (
+                "fetch_id", "provider_symbol", "forecast_family",
+                "fetched_at_utc", "status", "content_hash",
+            )
+        }
+        payload = representative_row["canonical_payload_json"]
+        representative["canonical_payload_sha256"] = (
+            hashlib.sha256(str(payload).encode("utf-8")).hexdigest()
+            if payload is not None else None
+        )
+    return {
+        "core_counts": counts,
+        "first_observation_timestamp": observations[0],
+        "latest_observation_timestamp": observations[1],
+        "representative_pit_row": representative,
+    }
+
+
+def restore_rehearsal(
+    *, backup_dir: str | Path = DEFAULT_BACKUP_DIR,
+    target: str | Path = "/tmp/rawcandle_forecasts_restore_rehearsal.db",
+) -> dict[str, Any]:
+    directory = Path(backup_dir)
+    valid = sorted(
+        (path for path in directory.glob("forecast_*.db") if _valid_backup(path)),
+        reverse=True,
+    )
+    if not valid:
+        raise RuntimeError("no valid forecast backup available for restore rehearsal")
+    backup = valid[0]
+    target_path = Path(target)
+    if target_path.exists():
+        raise FileExistsError(f"restore rehearsal target already exists: {target_path}")
+    manifest = json.loads(backup.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+    backup_signature = _rehearsal_signature(backup)
+    restored = restore_backup(backup=backup, target=target_path, backup_dir=directory)
+    restored_signature = _rehearsal_signature(target_path)
+    passed = (
+        restored["quick_check"] == "ok"
+        and manifest["backup_fingerprint_sha256"] == _sha256(backup)
+        and backup_signature == restored_signature
+        and restored_signature["core_counts"] == manifest["core_counts"]
+    )
+    if not passed:
+        raise RuntimeError("restore rehearsal parity validation failed")
+    return {
+        "status": "RESTORE_REHEARSAL_PASS",
+        "backup_path": str(backup.resolve()),
+        "manifest_path": str(backup.with_suffix(".manifest.json").resolve()),
+        "backup_fingerprint_sha256": manifest["backup_fingerprint_sha256"],
+        "schema_version": manifest["source_schema_version"],
+        "quick_check": restored["quick_check"],
+        "target": str(target_path.resolve()),
+        **restored_signature,
+    }
+
+
 def universe_preview(
     *, fundamentals_db: str | Path = DEFAULT_FUNDAMENTALS_DB,
     minimum_interval_seconds: float = 0.5,
@@ -403,21 +515,34 @@ def universe_preview(
     }
 
 
-def daily_workflow(
+def _daily_workflow_locked(
     *, symbols: Iterable[str] | None = None, max_symbols: int | None = None,
     forecast_db: str | Path = DEFAULT_FORECAST_DB,
     fundamentals_db: str | Path = DEFAULT_FUNDAMENTALS_DB,
     backup_dir: str | Path = DEFAULT_BACKUP_DIR, transport: Any = None,
 ) -> dict[str, Any]:
+    started_at = datetime.now(timezone.utc)
+    started_monotonic = time.monotonic()
     if symbols is None and (max_symbols is None or max_symbols < 1):
         raise ValueError("daily workflow requires a positive universe bound")
     if symbols is not None and max_symbols is not None:
         raise ValueError("symbols and max_symbols are mutually exclusive")
-    verify_database(forecast_db)
-    backup = create_backup(source=forecast_db, destination=backup_dir)
+    database = Path(forecast_db)
+    size_before = database.stat().st_size if database.exists() else 0
+    try:
+        verify_database(database)
+    except Exception as exc:
+        raise DailyWorkflowError("DB_PREFLIGHT_FAILED", str(exc)) from exc
+    try:
+        backup = create_backup(source=database, destination=backup_dir)
+    except Exception as exc:
+        raise DailyWorkflowError("BACKUP_FAILED", str(exc)) from exc
     universe = None
     if symbols is None:
-        universe = universe_preview(fundamentals_db=fundamentals_db)
+        try:
+            universe = universe_preview(fundamentals_db=fundamentals_db)
+        except Exception as exc:
+            raise DailyWorkflowError("UNIVERSE_RESOLUTION_FAILED", str(exc)) from exc
         selected = tuple(universe["symbols"][:max_symbols])
     else:
         selected = tuple(dict.fromkeys(
@@ -425,16 +550,21 @@ def daily_workflow(
         ))
     if not selected:
         raise ValueError("daily workflow resolved no symbols")
+    acquisition_started = time.monotonic()
     outcome = acquire_run(
         forecast_db=forecast_db, fundamentals_db=fundamentals_db,
         symbols=selected, transport=transport,
     )
+    acquisition_finished = time.monotonic()
     errors: dict[str, str] = {}
+    link_started = time.monotonic()
     try:
         link = link_run(outcome.run_id, forecast_db=forecast_db, fundamentals_db=fundamentals_db)
     except Exception as exc:
         link = {}
         errors["link"] = f"{type(exc).__name__}: {exc}"
+    link_finished = time.monotonic()
+    reconciliation_started = time.monotonic()
     try:
         reconciliation = reconcile_run(
             outcome.run_id, forecast_db=forecast_db, fundamentals_db=fundamentals_db
@@ -442,17 +572,72 @@ def daily_workflow(
     except Exception as exc:
         reconciliation = {}
         errors["reconciliation"] = f"{type(exc).__name__}: {exc}"
+    reconciliation_finished = time.monotonic()
+    reporting_started = time.monotonic()
     try:
         report = report_run(outcome.run_id, forecast_db=forecast_db)
     except Exception as exc:
         report = None
         errors["report"] = f"{type(exc).__name__}: {exc}"
+    try:
+        health = health_report(forecast_db=forecast_db)
+    except Exception as exc:
+        health = None
+        errors["health"] = f"{type(exc).__name__}: {exc}"
+    reporting_finished = time.monotonic()
     run_status = report["run_status"] if report else "UNKNOWN"
+    terminal_status = "SUCCESS" if run_status == "SUCCESS" and not errors else "PARTIAL"
+    finished_at = datetime.now(timezone.utc)
+    provider_quality = (health or {}).get("provider_quality", {})
+    identity = (report or {}).get("identity", {})
+    fiscal = (report or {}).get("fiscal_link", {})
+    run_quality = (report or {}).get("provider_quality", {})
+    run_drift = classify_drift(run_quality.get("schema_drift_paths", ()))
+    signals = [terminal_status]
+    if outcome.counters.get("TRANSIENT_FAILURE", 0):
+        signals.append("TRANSIENT_FAILURE")
+    if outcome.counters.get("PROVIDER_SYMBOL_UNAVAILABLE", 0):
+        signals.append("PROVIDER_UNAVAILABLE")
+    if outcome.counters.get("RATE_LIMITED", 0):
+        signals.append("RATE_LIMITED")
+    if provider_quality.get("unknown_drift_count", 0):
+        signals.append("UNKNOWN_SCHEMA_DRIFT")
+    if identity.get("UNRESOLVED", 0):
+        signals.append("IDENTITY_UNRESOLVED")
+    if fiscal.get("AMBIGUOUS", 0):
+        signals.append("FISCAL_AMBIGUOUS")
     return {
         "backup": backup, "run_id": outcome.run_id, "acquisition": dict(outcome.counters),
         "link": link, "reconciliation": reconciliation,
-        "report": report, "errors": errors,
-        "terminal_status": "SUCCESS" if run_status == "SUCCESS" and not errors else "PARTIAL",
+        "report": report, "health": health, "errors": errors,
+        "run_provider_quality": {
+            "retries": int(run_quality.get("retry_count", 0)),
+            "rate_limits": int(run_quality.get("rate_limit_count", 0)),
+            **run_drift,
+        },
+        "terminal_status": terminal_status, "operational_signals": signals,
+        "runtime": {
+            "started_at_utc": _utc(started_at.isoformat()),
+            "finished_at_utc": _utc(finished_at.isoformat()),
+            "elapsed_seconds": round(time.monotonic() - started_monotonic, 3),
+            "phase_seconds": {
+                "preflight_backup_universe": round(
+                    acquisition_started - started_monotonic, 3
+                ),
+                "acquisition": round(acquisition_finished - acquisition_started, 3),
+                "link": round(link_finished - link_started, 3),
+                "reconciliation": round(
+                    reconciliation_finished - reconciliation_started, 3
+                ),
+                "reporting_health": round(
+                    reporting_finished - reporting_started, 3
+                ),
+            },
+        },
+        "database_growth": {
+            "size_before_bytes": size_before,
+            "size_after_bytes": database.stat().st_size,
+        },
         "universe": None if universe is None else {
             "authority": universe["authority"],
             "available_symbols": universe["symbols_count"],
@@ -461,3 +646,17 @@ def daily_workflow(
         },
         "failure_policy": "INDIVIDUAL_FAILURE_PARTIAL_DB_OR_BACKUP_FAIL_CLOSED_LINK_FAILURE_ACQUISITION_PRESERVED",
     }
+
+
+def daily_workflow(
+    *, symbols: Iterable[str] | None = None, max_symbols: int | None = None,
+    forecast_db: str | Path = DEFAULT_FORECAST_DB,
+    fundamentals_db: str | Path = DEFAULT_FUNDAMENTALS_DB,
+    backup_dir: str | Path = DEFAULT_BACKUP_DIR, transport: Any = None,
+) -> dict[str, Any]:
+    with forecast_daily_lock(forecast_db):
+        return _daily_workflow_locked(
+            symbols=symbols, max_symbols=max_symbols, forecast_db=forecast_db,
+            fundamentals_db=fundamentals_db, backup_dir=backup_dir,
+            transport=transport,
+        )

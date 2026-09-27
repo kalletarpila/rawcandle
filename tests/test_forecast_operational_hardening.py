@@ -10,13 +10,17 @@ import pytest
 import rawcandle.forecasts.hardening as hardening
 from rawcandle.forecasts.contracts import FORECAST_FAMILIES
 from rawcandle.forecasts.hardening import (
+    DailyWorkflowError,
+    ForecastDailyAlreadyRunningError,
     backup_retention,
     classify_drift,
     cleanup_raw_evidence,
     create_backup,
     daily_workflow,
+    forecast_daily_lock,
     health_report,
     restore_backup,
+    restore_rehearsal,
     universe_preview,
 )
 from rawcandle.forecasts.operator import acquire_run, migrate_database
@@ -251,7 +255,7 @@ def test_universe_preview_and_bounded_daily_workflow(tmp_path: Path) -> None:
 
 
 def test_daily_workflow_fails_closed_when_preflight_fails(tmp_path: Path) -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(DailyWorkflowError) as caught:
         daily_workflow(
             symbols=["TEST"],
             forecast_db=tmp_path / "missing.db",
@@ -259,7 +263,57 @@ def test_daily_workflow_fails_closed_when_preflight_fails(tmp_path: Path) -> Non
             backup_dir=tmp_path / "backups",
             transport=FakeTransport(),
         )
+    assert caught.value.code == "DB_PREFLIGHT_FAILED"
     assert not (tmp_path / "backups").exists()
+
+
+def test_daily_workflow_fails_closed_when_backup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    forecast, fundamentals = _populated(tmp_path)
+    monkeypatch.setattr(
+        hardening, "create_backup",
+        lambda **kwargs: (_ for _ in ()).throw(OSError("backup unavailable")),
+    )
+    transport = FakeTransport()
+
+    with pytest.raises(DailyWorkflowError) as caught:
+        daily_workflow(
+            symbols=["TEST"], forecast_db=forecast,
+            fundamentals_db=fundamentals, transport=transport,
+        )
+
+    assert caught.value.code == "BACKUP_FAILED"
+    assert transport.calls == []
+
+
+def test_daily_overlap_guard_rejects_second_writer(tmp_path: Path) -> None:
+    forecast = tmp_path / "forecasts.db"
+    with forecast_daily_lock(forecast):
+        with pytest.raises(ForecastDailyAlreadyRunningError):
+            with forecast_daily_lock(forecast):
+                pass
+
+
+def test_restore_rehearsal_validates_manifest_counts_and_pit_parity(tmp_path: Path) -> None:
+    forecast, _ = _populated(tmp_path)
+    backups = tmp_path / "backups"
+    created = create_backup(
+        source=forecast, destination=backups,
+        created_at_utc="2026-09-27T12:00:00Z",
+    )
+
+    result = restore_rehearsal(
+        backup_dir=backups, target=tmp_path / "rehearsal.db"
+    )
+
+    assert result["status"] == "RESTORE_REHEARSAL_PASS"
+    assert result["backup_path"] == created["backup_path"]
+    assert result["quick_check"] == "ok"
+    assert result["core_counts"]["forecast_run"] == 1
+    assert result["core_counts"]["forecast_fetch"] == 3
+    assert result["core_counts"]["forecast_snapshot"] == 3
+    assert result["representative_pit_row"] is not None
 
 
 def test_daily_link_failure_preserves_acquisition_and_returns_partial(
