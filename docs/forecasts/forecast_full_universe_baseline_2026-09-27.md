@@ -218,3 +218,25 @@ Keep raw cleanup and backup retention outside the daily service. A reasonable
 initial operator cadence is weekly dry-run review followed by separately
 approved apply, with the milestone and pre-run backups protected under the
 existing retention contract.
+
+## 14. Production Schedule Change (2026-09-28)
+
+By explicit operator decision, daily Yahoo forecast acquisition moved from
+`07:30 Europe/Helsinki` to `14:00 Europe/Helsinki`. It continues to cover the
+full bounded operational universe with this exact independent command:
+
+```text
+/usr/bin/python3 -m rawcandle.cli.forecasts daily --full-bounded-universe
+```
+
+The timeout remains 9,000 seconds. The user timer was installed through the
+repository scheduler installer and verified `enabled` and `active`. Its next
+invocation is `2026-09-28 14:00:00 EEST`.
+
+The previous 07:30 timer invocation was already running when this schedule was
+changed. It retained its original PID and start timestamp throughout the
+installation, completed at 08:32 local time, and left the oneshot service
+`failed` only because the reviewed `PARTIAL` daily result maps to exit code 2.
+Enabling the updated timer did not start a service or another acquisition. The
+installed unit has no `Restart=` policy and no stock/OHLCV or Fundamentals
+publication dependency.

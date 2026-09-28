@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CompletedProcess
 
 import pytest
 
@@ -24,9 +25,11 @@ def test_registration_uses_exact_full_bounded_independent_command(tmp_path: Path
         "/usr/bin/python3 -m rawcandle.cli.forecasts daily --full-bounded-universe"
     )
     assert f"ExecStart={FORECAST_DAILY_COMMAND}" in service
+    assert "--max-symbols 100" not in service
     assert "stock-update-scheduler" not in service
     assert "fundamental" not in service.lower()
-    assert "OnCalendar=*-*-* 07:30:00 Europe/Helsinki" in timer
+    assert FORECAST_SCHEDULE_LOCAL == "14:00"
+    assert "OnCalendar=*-*-* 14:00:00 Europe/Helsinki" in timer
     assert "Unit=rawcandle-forecast-daily.service" in timer
 
 
@@ -41,6 +44,8 @@ def test_scheduler_install_dry_run_does_not_write(tmp_path: Path) -> None:
     )
 
     assert result["mode"] == "DRY_RUN"
+    assert result["schedule_local"] == "14:00"
+    assert result["timezone"] == "Europe/Helsinki"
     assert result["full_bounded_universe"] is True
     assert result["automatic_retry"] is False
     assert not (tmp_path / "units").exists()
@@ -55,6 +60,33 @@ def test_scheduler_registration_writes_units_without_activation(tmp_path: Path) 
     assert result["activated"] is False
     assert (units / "rawcandle-forecast-daily.service").read_text() == service_unit_text(tmp_path)
     assert (units / "rawcandle-forecast-daily.timer").read_text() == timer_unit_text()
+
+
+def test_scheduler_activation_enables_timer_without_starting_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(command: list[str], *, check: bool) -> CompletedProcess[str]:
+        calls.append(command)
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr("rawcandle.forecasts.scheduler.subprocess.run", run)
+
+    result = install_scheduler(
+        repo_root=tmp_path, user_unit_dir=tmp_path / "units",
+        apply=True, activate=True,
+    )
+
+    assert result["activated"] is True
+    assert calls == [
+        ["systemctl", "--user", "daemon-reload"],
+        [
+            "systemctl", "--user", "enable", "--now",
+            "rawcandle-forecast-daily.timer",
+        ],
+    ]
+    assert all("rawcandle-forecast-daily.service" not in call for call in calls)
 
 
 def test_daily_cli_requires_explicit_scope() -> None:
