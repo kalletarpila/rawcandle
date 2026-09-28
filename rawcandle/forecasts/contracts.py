@@ -37,8 +37,14 @@ STATE_NUMERIC_VALUE = "NUMERIC_VALUE"
 STATE_TEXT_VALUE = "TEXT_VALUE"
 
 EARNINGS_TREND_CONTRACT_VERSION = "yahoo_earnings_trend_v1"
+EARNINGS_TREND_MIXED_CONTRACT_VERSION = (
+    "yahoo_earnings_trend_v2_mixed_empty_targets"
+)
 PRICE_TARGET_CONTRACT_VERSION = "yahoo_price_target_v1"
 EARNINGS_HISTORY_CONTRACT_VERSION = "yahoo_earnings_history_reference_v1"
+
+ROW_USABLE_TARGETED = "USABLE_TARGETED"
+ROW_EMPTY_PLACEHOLDER = "EMPTY_PLACEHOLDER"
 
 _ABSENT = object()
 
@@ -324,6 +330,130 @@ def canonicalize_earnings_trend(payload: Mapping[str, Any]) -> CanonicalForecast
     )
 
 
+def _mixed_semantic_row(
+    source_row: Mapping[str, Any], occurrence_index: int
+) -> tuple[dict[str, Any], list[str]]:
+    period = source_row.get("period")
+    if not isinstance(period, str):
+        raise ForecastContractError("trend row period must be a string")
+
+    end_date_value = _field(source_row, "endDate")
+    expected_row = {
+        "maxAge", "period", "endDate", "growth", *EARNINGS_TREND_SECTION_FIELDS
+    }
+    drift = _drift(f"trend[{occurrence_index}]", source_row, expected_row)
+    row: dict[str, Any] = {
+        "occurrenceIndex": occurrence_index,
+        "providerHorizon": period,
+        "providerEndDate": canonical_state(end_date_value),
+        "topLevelGrowth": canonical_state(_field(source_row, "growth")),
+    }
+    for section_name, field_names in EARNINGS_TREND_SECTION_FIELDS.items():
+        section = _field(source_row, section_name)
+        if section is not _ABSENT and not isinstance(section, Mapping):
+            raise ForecastContractError(f"{section_name} must be an object")
+        if isinstance(section, Mapping):
+            drift.extend(
+                _drift(
+                    f"trend[{occurrence_index}].{section_name}",
+                    section,
+                    set(field_names),
+                )
+            )
+        row[section_name] = {
+            field_name: canonical_state(_field(section, field_name))
+            for field_name in field_names
+        }
+    return row, drift
+
+
+def _mixed_row_has_semantic_value(row: Mapping[str, Any]) -> bool:
+    if row["topLevelGrowth"]["state"] in {
+        STATE_NUMERIC_ZERO, STATE_NUMERIC_VALUE, STATE_TEXT_VALUE
+    }:
+        return True
+    for section_name, field_names in EARNINGS_TREND_SECTION_FIELDS.items():
+        for field_name in field_names:
+            state = row[section_name][field_name]
+            if state["state"] not in {
+                STATE_NUMERIC_ZERO, STATE_NUMERIC_VALUE, STATE_TEXT_VALUE
+            }:
+                continue
+            is_empty_revenue_zero = (
+                section_name == "revenueEstimate"
+                and field_name in {"avg", "low", "high", "numberOfAnalysts"}
+                and state["state"] == STATE_NUMERIC_ZERO
+            )
+            if not is_empty_revenue_zero:
+                return True
+    return False
+
+
+def canonicalize_mixed_earnings_trend(
+    payload: Mapping[str, Any],
+) -> CanonicalForecast | None:
+    """Return V2 only for the reviewed mix of exact empty and usable rows."""
+    module = _quote_module(payload, "earningsTrend")
+    trend = module.get("trend")
+    if not isinstance(trend, list):
+        raise ForecastContractError("earningsTrend.trend must be a list")
+    if not any(_is_empty_earnings_trend_row(row) for row in trend):
+        return None
+
+    drift = _drift(
+        "earningsTrend", module, {"maxAge", "defaultMethodology", "trend"}
+    )
+    rows: list[dict[str, Any]] = []
+    usable_count = 0
+    empty_count = 0
+    for occurrence_index, source_row in enumerate(trend):
+        if not isinstance(source_row, Mapping):
+            raise ForecastContractError("each earningsTrend row must be an object")
+        row, row_drift = _mixed_semantic_row(source_row, occurrence_index)
+        drift.extend(row_drift)
+        if _is_empty_earnings_trend_row(source_row):
+            row["rowClassification"] = ROW_EMPTY_PLACEHOLDER
+            empty_count += 1
+        else:
+            if row_drift:
+                raise ForecastContractError(
+                    "mixed earningsTrend row contains unsupported fields"
+                )
+            end_date = source_row.get("endDate")
+            if not isinstance(end_date, str):
+                raise ForecastContractError(
+                    "usable trend row period and endDate are required strings"
+                )
+            try:
+                normalized_date = date.fromisoformat(end_date).isoformat()
+            except ValueError as exc:
+                raise ForecastContractError(
+                    "provider endDate must be ISO YYYY-MM-DD"
+                ) from exc
+            row["providerEndDate"] = canonical_state(normalized_date)
+            if not _mixed_row_has_semantic_value(row):
+                raise ForecastContractError(
+                    "mixed trend row is neither usable nor an exact empty placeholder"
+                )
+            row["rowClassification"] = ROW_USABLE_TARGETED
+            usable_count += 1
+        rows.append(row)
+
+    if not usable_count or not empty_count:
+        return None
+    canonical = {
+        "contractVersion": EARNINGS_TREND_MIXED_CONTRACT_VERSION,
+        "defaultMethodology": canonical_state(_field(module, "defaultMethodology")),
+        "rows": rows,
+    }
+    return _canonical_result(
+        FAMILY_FISCAL_ESTIMATE,
+        EARNINGS_TREND_MIXED_CONTRACT_VERSION,
+        canonical,
+        drift,
+    )
+
+
 def canonicalize_price_targets(payload: Mapping[str, Any]) -> CanonicalForecast:
     module = _quote_module(payload, "financialData")
     expected = {"maxAge", "financialCurrency", *PRICE_TARGET_SOURCE_FIELDS.values()}
@@ -441,7 +571,11 @@ def parse_payload(family: str, payload: Any) -> ParsedPayload:
     if family == FAMILY_FISCAL_ESTIMATE and _is_empty_earnings_trend_payload(payload):
         return ParsedPayload(STATUS_VALID_NO_DATA)
     try:
-        forecast = canonicalize_family(family, payload)
+        forecast = None
+        if family == FAMILY_FISCAL_ESTIMATE:
+            forecast = canonicalize_mixed_earnings_trend(payload)
+        if forecast is None:
+            forecast = canonicalize_family(family, payload)
     except (ForecastContractError, OverflowError, OSError) as exc:
         return ParsedPayload(
             STATUS_MALFORMED,

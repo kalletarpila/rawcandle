@@ -12,6 +12,7 @@ from rawcandle.forecasts.contracts import (
     FAMILY_FISCAL_ESTIMATE,
     FAMILY_PRICE_TARGET,
     PROVIDER,
+    ROW_EMPTY_PLACEHOLDER,
     STATE_NUMERIC_VALUE,
     STATE_NUMERIC_ZERO,
     STATE_TEXT_VALUE,
@@ -359,7 +360,16 @@ class ForecastRepository:
         self, connection: Any, snapshot_id: str, payload: Mapping[str, Any]
     ) -> None:
         methodology = payload["defaultMethodology"]
-        for row in payload["rows"]:
+        for source_row in payload["rows"]:
+            if source_row.get("rowClassification") == ROW_EMPTY_PLACEHOLDER:
+                continue
+            row = source_row
+            provider_end_date = row["providerEndDate"]
+            if isinstance(provider_end_date, Mapping):
+                normalized_end_date = _text_value(provider_end_date)
+                if normalized_end_date is None:
+                    raise ValueError("usable estimate row requires a text provider endDate")
+                row = {**row, "providerEndDate": normalized_end_date}
             earnings = row["earningsEstimate"]
             revenue = row["revenueEstimate"]
             eps_trend = row["epsTrend"]
