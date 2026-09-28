@@ -14,10 +14,14 @@ from rawcandle.fundamentals.admin.run_acceptance_cleanup import (
     accept_run_and_cleanup_backups,
     inspect_cleanup_eligibility,
 )
-from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+from rawcandle.fundamentals.admin.ui_service import (
+    AdminOperationCapability,
+    AdminUIHistoryEntry,
+    FundamentalsAdminUIService,
+)
 
 
-RUN_ID = "20260922T150000Z_add_tickers_abc123_production_deadbeef"
+RUN_ID = "20250922T150000Z_add_tickers_abc123_production_deadbeef"
 
 
 class _Page:
@@ -124,7 +128,7 @@ def _cleanup(fixture: dict[str, object]) -> dict[str, object]:
     )
 
 
-def test_completed_production_run_is_eligible(tmp_path: Path) -> None:
+def test_historical_completed_production_run_is_eligible(tmp_path: Path) -> None:
     fixture = _fixture(tmp_path)
     eligibility = _inspect(fixture)
     assert eligibility["status"] == "ELIGIBLE"
@@ -249,9 +253,27 @@ def test_partially_missing_backup_without_evidence_fails_closed(tmp_path: Path) 
     assert not (fixture["run_dir"] / "backup_cleanup.json").exists()
 
 
+def test_historical_run_with_incomplete_hash_evidence_is_not_eligible(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    fixture["result"]["backups"]["provider"].pop("verification")
+    (fixture["run_dir"] / "result.json").write_text(
+        json.dumps(fixture["result"]), encoding="utf-8"
+    )
+
+    eligibility = _inspect(fixture)
+
+    assert eligibility["status"] == "NOT_ELIGIBLE"
+    assert eligibility["reason"] == "Backup hashes or fingerprints are missing"
+    assert all(
+        (fixture["backup_dir"] / f"{role}.db").exists()
+        for role in ("provider", "canonical", "analysis")
+    )
+
+
 def test_ui_shows_action_only_for_eligible_run_and_cleaned_state_afterward(tmp_path: Path) -> None:
     fixture = _fixture(tmp_path)
     state = {"cleaned": False}
+    cleanup_calls: list[str] = []
 
     def inspect(_run_id: str) -> dict[str, object]:
         if state["cleaned"]:
@@ -259,8 +281,14 @@ def test_ui_shows_action_only_for_eligible_run_and_cleaned_state_afterward(tmp_p
         return {"eligible": True, "status": "ELIGIBLE", "backup_count": 3, "bytes_freed": 3 * 1024**3}
 
     def cleanup(_run_id: str) -> dict[str, object]:
+        cleanup_calls.append(_run_id)
         state["cleaned"] = True
-        return {"status": "COMPLETED", "cleanup_outcome": "COMPLETED", "bytes_freed": 3 * 1024**3}
+        return {
+            "status": "COMPLETED",
+            "cleanup_outcome": "COMPLETED",
+            "bytes_freed": 3 * 1024**3,
+            "files_deleted": ["provider.db", "canonical.db", "analysis.db"],
+        }
 
     service = FundamentalsAdminUIService(
         run_root=fixture["run_root"],
@@ -269,15 +297,176 @@ def test_ui_shows_action_only_for_eligible_run_and_cleaned_state_afterward(tmp_p
     )
     page = _Page()
     controls = build_fundamentals_admin_page(page=page, service=service)
-    info_button = controls.history_column.controls[0].controls[7]
-    info_button.on_click(None)
-    assert controls.cleanup_button.visible is True
-    assert "Production data is not changed" in controls.cleanup_status_field.value
+    row = controls.history_column.controls[0]
+    row_cleanup = row.controls[-1]
+    assert row_cleanup.tooltip == "Accept run and cleanup backups"
 
-    controls.cleanup_button.on_click(None)
+    row_cleanup.on_click(None)
+    assert RUN_ID in page.dialog.content.value
+    assert "3 verified rollback backup file(s)" in page.dialog.content.value
+    assert "3.000 GiB" in page.dialog.content.value
+    assert "Live Production databases will not be modified" in page.dialog.content.value
     page.dialog.actions[1].on_click(None)
-    assert controls.cleanup_button.visible is False
+    assert cleanup_calls == [RUN_ID]
+    assert controls.cleanup_status_field.value == "Accepted / backups cleaned (3.000 GiB freed)"
+    cleaned_action = controls.history_column.controls[0].controls[-1]
+    assert cleaned_action.tooltip == "Backups cleaned"
+    assert cleaned_action.disabled is True
+
+
+def test_ui_historical_already_cleaned_row_shows_terminal_indicator(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    service = FundamentalsAdminUIService(
+        run_root=fixture["run_root"],
+        cleanup_inspect=lambda _run_id: {
+            "eligible": False,
+            "status": "ALREADY_CLEANED",
+            "reason": "Accepted / backups cleaned",
+        },
+    )
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=service)
+    action = controls.history_column.controls[0].controls[-1]
+
+    assert action.tooltip == "Backups cleaned"
+    assert action.disabled is True
+
+
+@pytest.mark.parametrize(
+    ("mode", "outcome"),
+    [
+        ("PREVIEW", "COMPLETED"),
+        ("COPY_ONLY_APPLY", "COMPLETED"),
+        ("PRODUCTION_APPLY", "FAILED"),
+    ],
+)
+def test_ui_noneligible_stage_does_not_inspect_or_show_cleanup_action(
+    tmp_path: Path, mode: str, outcome: str
+) -> None:
+    fixture = _fixture(tmp_path)
+    fixture["result"]["mode"] = mode
+    fixture["result"]["outcome"] = outcome
+    (fixture["run_dir"] / "result.json").write_text(
+        json.dumps(fixture["result"]), encoding="utf-8"
+    )
+    calls: list[str] = []
+    service = FundamentalsAdminUIService(
+        run_root=fixture["run_root"],
+        cleanup_inspect=lambda run_id: calls.append(run_id) or {"eligible": True},
+    )
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=service)
+    tooltips = [getattr(control, "tooltip", None) for control in controls.history_column.controls[0].controls]
+
+    assert calls == []
+    assert "Accept run and cleanup backups" not in tooltips
+    assert "Backups cleaned" not in tooltips
+
+
+def test_ui_already_cleaned_apply_result_is_success(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    service = FundamentalsAdminUIService(
+        run_root=fixture["run_root"],
+        cleanup_inspect=lambda _run_id: {
+            "eligible": True, "status": "ELIGIBLE", "backup_count": 3, "bytes_freed": 30,
+        },
+        cleanup_apply=lambda _run_id: {
+            "status": "ALREADY_CLEANED", "cleanup_outcome": "COMPLETED", "bytes_freed": 30,
+        },
+    )
+    page = _Page()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+
+    controls.history_column.controls[0].controls[-1].on_click(None)
+    page.dialog.actions[1].on_click(None)
+
     assert controls.cleanup_status_field.value == "Accepted / backups cleaned"
+    assert controls.history_column.controls[0].controls[-1].tooltip == "Backups cleaned"
+
+
+def test_ui_revalidation_failure_shows_reason_without_cleanup(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    inspections = iter([
+        {"eligible": True, "status": "ELIGIBLE", "backup_count": 3, "bytes_freed": 30},
+        {
+            "eligible": False,
+            "status": "NOT_ELIGIBLE",
+            "reason": "Backup ownership cannot be proven",
+        },
+    ])
+    cleanup_calls: list[str] = []
+    service = FundamentalsAdminUIService(
+        run_root=fixture["run_root"],
+        cleanup_inspect=lambda _run_id: next(inspections),
+        cleanup_apply=lambda run_id: cleanup_calls.append(run_id) or {},
+    )
+    page = _Page()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+
+    controls.history_column.controls[0].controls[-1].on_click(None)
+
+    assert cleanup_calls == []
+    assert page.dialog is None
+    assert controls.cleanup_status_field.value == "Backup ownership cannot be proven"
+
+
+def test_successful_cleanup_updates_only_selected_history_row() -> None:
+    run_ids = ("historical-production-a", "historical-production-b")
+
+    class Service:
+        def __init__(self) -> None:
+            self.cleaned: set[str] = set()
+
+        def capabilities(self):
+            return (AdminOperationCapability("ADD_TICKERS", True, True, True),)
+
+        def history_entries(self, *, limit, include_technical=False):
+            return [
+                AdminUIHistoryEntry(
+                    run_id=run_id,
+                    operation_type="ADD_TICKERS",
+                    outcome="COMPLETED",
+                    status="completed",
+                    mode="PRODUCTION_APPLY",
+                    completed_at_utc="2025-09-22T15:01:00Z",
+                    report_available=True,
+                )
+                for run_id in run_ids[:limit]
+            ]
+
+        def cleanup_eligibility(self, run_id):
+            if run_id in self.cleaned:
+                return {"eligible": False, "status": "ALREADY_CLEANED"}
+            return {
+                "eligible": True,
+                "status": "ELIGIBLE",
+                "backup_count": 3,
+                "bytes_freed": 30,
+            }
+
+        def accept_run_and_cleanup_backups(self, run_id):
+            self.cleaned.add(run_id)
+            return {
+                "status": "COMPLETED",
+                "cleanup_outcome": "COMPLETED",
+                "bytes_freed": 30,
+                "files_deleted": ["provider.db", "canonical.db", "analysis.db"],
+            }
+
+    service = Service()
+    page = _Page()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+
+    controls.history_column.controls[0].controls[-1].on_click(None)
+    page.dialog.actions[1].on_click(None)
+
+    first_action = controls.history_column.controls[0].controls[-1]
+    second_action = controls.history_column.controls[1].controls[-1]
+    assert first_action.tooltip == "Backups cleaned"
+    assert first_action.disabled is True
+    assert second_action.tooltip == "Accept run and cleanup backups"
+    assert second_action.disabled is False
+    assert service.cleaned == {run_ids[0]}
 
 
 def test_history_listing_does_not_inspect_or_hash_backups(tmp_path: Path) -> None:
@@ -289,3 +478,29 @@ def test_history_listing_does_not_inspect_or_hash_backups(tmp_path: Path) -> Non
     )
     assert service.history_entries(limit=8)
     assert calls == []
+
+
+def test_history_row_eligibility_inspection_does_not_hash_backups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _fixture(tmp_path)
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.run_acceptance_cleanup.sha256_file",
+        lambda _path: (_ for _ in ()).throw(AssertionError("eligibility must not hash backups")),
+    )
+    service = FundamentalsAdminUIService(
+        run_root=fixture["run_root"],
+        cleanup_inspect=lambda run_id: inspect_cleanup_eligibility(
+            run_id,
+            run_root=fixture["run_root"],
+            backup_root=fixture["backup_root"],
+            journal_path=fixture["journal_path"],
+            live_paths=fixture["live_paths"],
+        ),
+    )
+
+    controls = build_fundamentals_admin_page(page=_Page(), service=service)
+
+    assert controls.history_column.controls[0].controls[-1].tooltip == (
+        "Accept run and cleanup backups"
+    )

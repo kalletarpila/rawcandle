@@ -314,6 +314,7 @@ def build_fundamentals_admin_page(
     selected_history_run_id: str | None = None
     history_cursor: Any = None
     history_limit = 8
+    cleanup_eligibility_cache: dict[str, dict[str, Any]] = {}
     operation_running = False
     last_progress_count: tuple[object, object] | None = None
     progress_lines: list[str] = []
@@ -438,6 +439,29 @@ def build_fundamentals_admin_page(
             ft.Text("No summary rows recorded.")
         ]
 
+    def cleanup_eligibility_state(run_id: str, *, force: bool = False) -> dict[str, Any]:
+        if not force and run_id in cleanup_eligibility_cache:
+            return cleanup_eligibility_cache[run_id]
+        reader = getattr(admin_service, "cleanup_eligibility", None)
+        if not callable(reader):
+            state = {
+                "eligible": False,
+                "status": "NOT_SUPPORTED",
+                "reason": "Backup cleanup is not available for this run.",
+            }
+        else:
+            try:
+                state = dict(reader(run_id))
+            except Exception as exc:
+                LOGGER.exception("Administration backup cleanup eligibility failed")
+                state = {
+                    "eligible": False,
+                    "status": "NOT_ELIGIBLE",
+                    "reason": str(exc) or "Backup cleanup eligibility is unavailable.",
+                }
+        cleanup_eligibility_cache[run_id] = state
+        return state
+
     def render_history(entries: Any) -> None:
         rows = []
         for item in entries:
@@ -459,36 +483,57 @@ def build_fundamentals_admin_page(
             if getattr(item, "trigger_source", "MANUAL") == "SCHEDULER":
                 operation_label += " [Scheduler]"
             weight = ft.FontWeight.BOLD if run_id == selected_history_run_id else ft.FontWeight.NORMAL
+            row_controls = [
+                ft.Text(when, width=185, weight=weight),
+                ft.Text(operation_label, width=190, weight=weight),
+                ft.Text(item.stage, width=155, weight=weight),
+                ft.Text(title, width=135, weight=weight),
+                ft.Text(count_text, width=125, weight=weight),
+                ft.Text(category, width=170, tooltip=f"run_id={item.run_id}; mode={item.mode}"),
+                ft.IconButton(
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    tooltip="Remove from run history",
+                    on_click=lambda _event, selected_run_id=run_id: open_history_delete_confirmation(
+                        selected_run_id
+                    ),
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.INFO,
+                    tooltip="View details",
+                    on_click=lambda _event, selected_run_id=run_id: select_history_run(selected_run_id),
+                ),
+                ft.IconButton(
+                    icon=ft.Icons.DOWNLOAD,
+                    tooltip="Download workflow report" if item.report_filename == WORKFLOW_REPORT_NAME else "Download operation report",
+                    disabled=not item.report_available,
+                    on_click=lambda _event, selected_run_id=run_id, filename=item.report_filename: _launch_browser_url(
+                        page, admin_report_download_url(selected_run_id, filename)
+                    ),
+                ),
+            ]
+            if item.stage == "Production update" and item.outcome == "COMPLETED":
+                cleanup_state = cleanup_eligibility_state(run_id)
+                if cleanup_state.get("eligible"):
+                    row_controls.append(
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE_SWEEP,
+                            tooltip="Accept run and cleanup backups",
+                            on_click=lambda _event, selected_run_id=run_id: (
+                                open_backup_cleanup_confirmation(_event, selected_run_id)
+                            ),
+                        )
+                    )
+                elif cleanup_state.get("status") == "ALREADY_CLEANED":
+                    row_controls.append(
+                        ft.IconButton(
+                            icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
+                            tooltip="Backups cleaned",
+                            disabled=True,
+                        )
+                    )
             rows.append(
                 ft.Row(
-                    [
-                        ft.Text(when, width=185, weight=weight),
-                        ft.Text(operation_label, width=190, weight=weight),
-                        ft.Text(item.stage, width=155, weight=weight),
-                        ft.Text(title, width=135, weight=weight),
-                        ft.Text(count_text, width=125, weight=weight),
-                        ft.Text(category, width=170, tooltip=f"run_id={item.run_id}; mode={item.mode}"),
-                        ft.IconButton(
-                            icon=ft.Icons.DELETE_OUTLINE,
-                            tooltip="Remove from run history",
-                            on_click=lambda _event, selected_run_id=run_id: open_history_delete_confirmation(
-                                selected_run_id
-                            ),
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.INFO,
-                            tooltip="View details",
-                            on_click=lambda _event, selected_run_id=run_id: select_history_run(selected_run_id),
-                        ),
-                        ft.IconButton(
-                            icon=ft.Icons.DOWNLOAD,
-                            tooltip="Download workflow report" if item.report_filename == WORKFLOW_REPORT_NAME else "Download operation report",
-                            disabled=not item.report_available,
-                            on_click=lambda _event, selected_run_id=run_id, filename=item.report_filename: _launch_browser_url(
-                                page, admin_report_download_url(selected_run_id, filename)
-                            ),
-                        ),
-                    ],
+                    row_controls,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
             )
@@ -877,13 +922,8 @@ def build_fundamentals_admin_page(
         visible=False,
     )
 
-    def apply_cleanup_eligibility(run_id: str) -> dict[str, Any]:
-        reader = getattr(admin_service, "cleanup_eligibility", None)
-        if not callable(reader):
-            cleanup_button.visible = False
-            cleanup_status_field.visible = False
-            return {}
-        state = dict(reader(run_id))
+    def apply_cleanup_eligibility(run_id: str, *, force: bool = False) -> dict[str, Any]:
+        state = cleanup_eligibility_state(run_id, force=force)
         eligible = bool(state.get("eligible"))
         cleanup_button.visible = eligible
         cleanup_button.disabled = not eligible
@@ -1010,21 +1050,33 @@ def build_fundamentals_admin_page(
             else:
                 freed = int(result.get("bytes_freed") or 0)
                 cleanup_status_field.value = f"Accepted / backups cleaned ({freed / (1024 ** 3):.3f} GiB freed)"
+            cleanup_eligibility_cache[run_id] = {
+                "run_id": run_id,
+                "status": "ALREADY_CLEANED",
+                "eligible": False,
+                "reason": "Accepted / backups cleaned",
+                "backup_count": len(result.get("files_deleted") or []),
+                "bytes_freed": int(result.get("bytes_freed") or 0),
+            }
             cleanup_button.visible = False
-            select_history_run(run_id)
+            if selected_history_run_id == run_id:
+                cleanup_status_field.visible = True
+            if history_cursor is not None:
+                render_history(history_cursor.entries[:history_limit])
         except Exception as exc:
             LOGGER.exception("Administration backup cleanup failed")
             cleanup_status_field.value = f"Backup cleanup stopped: {exc}"
+            cleanup_status_field.visible = True
             cleanup_button.visible = False
             cleanup_button.disabled = True
         if hasattr(page, "update"):
             page.update()
 
-    def open_backup_cleanup_confirmation(_event: Any) -> None:
-        run_id = selected_history_run_id
+    def open_backup_cleanup_confirmation(_event: Any, selected_run_id: str | None = None) -> None:
+        run_id = selected_run_id or selected_history_run_id
         if not run_id:
             return
-        state = apply_cleanup_eligibility(run_id)
+        state = apply_cleanup_eligibility(run_id, force=True)
         if not state.get("eligible"):
             if hasattr(page, "update"):
                 page.update()
@@ -1505,6 +1557,7 @@ def build_fundamentals_admin_page(
                     ft.Text("Result", width=135, weight=ft.FontWeight.BOLD),
                     ft.Text("Count", width=125, weight=ft.FontWeight.BOLD),
                     ft.Text("Category", width=170, weight=ft.FontWeight.BOLD),
+                    ft.Container(width=48),
                     ft.Container(width=48),
                     ft.Container(width=48),
                     ft.Container(width=48),
