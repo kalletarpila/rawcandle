@@ -13,6 +13,7 @@ from rawcandle.fundamentals.schema.provenance import (
     write_provenance,
     write_provenance_many,
 )
+from rawcandle.fundamentals.schema.result_publication import RESULT_PUBLICATION_SCHEMA_SQL
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 from rawcandle.fundamentals.schema.analysis_compat_schema import (
     DELTA_SCHEMA_SQL,
@@ -325,7 +326,7 @@ CREATE TABLE v4_ttm_contract (
 CREATE INDEX idx_v4_quarter_company_period ON v4_quarter(company_id, fiscal_year, fiscal_quarter);
 CREATE INDEX idx_v4_provenance_field ON v4_field_provenance(canonical_field, provider);
 CREATE INDEX idx_company_fiscal_year_anchor_year ON company_fiscal_year_anchor(fiscal_year, fiscal_year_start);
-"""
+""" + RESULT_PUBLICATION_SCHEMA_SQL
 
 
 ANALYSIS_SCHEMA_SQL = """

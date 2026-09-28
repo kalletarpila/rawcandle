@@ -638,6 +638,43 @@ def fresh_rebuild_canonical(
             connection.execute("UPDATE v4_quarter SET first_public_result_date=? WHERE quarter_id=?", (first_public, quarter_id))
             bootstrap["preserved"] += int(key in preserved_dates)
             bootstrap["new_dates_established"] += int(key not in preserved_dates)
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v4_result_publication_authority'"
+        ).fetchone():
+            connection.execute(
+                """
+                UPDATE v4_result_publication_authority
+                SET quarter_id=(
+                    SELECT q.quarter_id FROM v4_quarter q
+                    WHERE q.company_id=v4_result_publication_authority.company_id
+                      AND q.fiscal_year=v4_result_publication_authority.fiscal_year
+                      AND q.fiscal_quarter=v4_result_publication_authority.fiscal_quarter
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM v4_quarter q
+                    WHERE q.company_id=v4_result_publication_authority.company_id
+                      AND q.fiscal_year=v4_result_publication_authority.fiscal_year
+                      AND q.fiscal_quarter=v4_result_publication_authority.fiscal_quarter
+                )
+                """
+            )
+            connection.execute(
+                """
+                UPDATE v4_result_publication_evidence
+                SET quarter_id=(
+                    SELECT q.quarter_id FROM v4_quarter q
+                    WHERE q.company_id=v4_result_publication_evidence.company_id
+                      AND q.fiscal_year=v4_result_publication_evidence.fiscal_year
+                      AND q.fiscal_quarter=v4_result_publication_evidence.fiscal_quarter
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM v4_quarter q
+                    WHERE q.company_id=v4_result_publication_evidence.company_id
+                      AND q.fiscal_year=v4_result_publication_evidence.fiscal_year
+                      AND q.fiscal_quarter=v4_result_publication_evidence.fiscal_quarter
+                )
+                """
+            )
         connection.commit()
     ttm = rebuild_ttm(canonical_db, applied_at=applied_at)
     structural = structural_break.apply_contract(canonical_db, events=_events(), applied_at_utc=applied_at)
