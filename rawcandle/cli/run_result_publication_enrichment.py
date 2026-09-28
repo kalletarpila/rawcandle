@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--canonical-db", type=Path, default=PRODUCTION_CANONICAL)
     parser.add_argument("--from-fiscal-year", type=int, default=2025)
     parser.add_argument("--tickers", nargs="*", default=[])
+    parser.add_argument("--company-ids", nargs="*", type=int, default=[])
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--refresh-existing", action="store_true")
     parser.add_argument("--schema-only", action="store_true")
@@ -69,6 +70,7 @@ def _apply(args: argparse.Namespace) -> dict[str, object]:
                     target,
                     from_fiscal_year=args.from_fiscal_year,
                     tickers=args.tickers,
+                    company_ids=args.company_ids,
                     apply=True,
                     refresh_existing=args.refresh_existing,
                 )
@@ -84,6 +86,7 @@ def _apply(args: argparse.Namespace) -> dict[str, object]:
                 target,
                 from_fiscal_year=args.from_fiscal_year,
                 tickers=args.tickers,
+                company_ids=args.company_ids,
                 apply=True,
                 refresh_existing=args.refresh_existing,
             )
@@ -107,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.canonical_db,
                 from_fiscal_year=args.from_fiscal_year,
                 tickers=args.tickers,
+                company_ids=args.company_ids,
                 apply=False,
                 refresh_existing=args.refresh_existing,
             )

@@ -18,6 +18,7 @@ from rawcandle.fundamentals.result_publication import (
     store_secondary_evidence,
     yahoo_evidence_payload,
 )
+from rawcandle.fundamentals.result_publication_pilot import deterministic_stratified_sample
 from rawcandle.fundamentals.schema.migrations import bootstrap_all
 from rawcandle.fundamentals.schema.result_publication import ensure_result_publication_schema
 
@@ -161,6 +162,84 @@ def test_matching_requires_cik_scope_and_period_context() -> None:
     matches, unresolved = resolve_sec_filings([quarter], filings)
     assert (1, 2026, "Q2") in matches
     assert not unresolved
+
+
+@pytest.mark.parametrize(
+    ("text", "quarter", "expected"),
+    [
+        ("results for the fourth quarter and full year 2025", "Q4", "CIK_ITEM_2_02_FULL_YEAR_Q4_CONTEXT"),
+        ("announcing full-year 2025 results and the related 4Q25 summary", "Q4", "CIK_ITEM_2_02_EXPLICIT_FISCAL_QUARTER"),
+        ("announcing full-year 2025 results", "Q3", None),
+    ],
+)
+def test_ko_xom_official_q4_context_forms(text: str, quarter: str, expected: str | None) -> None:
+    row = {"fiscal_year": 2025, "fiscal_quarter": quarter, "period_end": "2025-12-31"}
+    assert match_quarter_context(text, row) == expected
+
+
+def test_pilot_sample_is_deterministic_stratified_and_keeps_required_controls() -> None:
+    records = [
+        {
+            "company_id": company_id,
+            "size_bucket": ("SMALL", "MID", "LARGE")[company_id % 3],
+            "fiscal_pattern": ("CALENDAR_YEAR", "NON_CALENDAR_YEAR")[company_id % 2],
+            "sector": ("Technology", "Energy")[company_id % 2],
+        }
+        for company_id in range(1, 31)
+    ]
+    first = deterministic_stratified_sample(records, sample_size=12, required_company_ids=[3, 7])
+    second = deterministic_stratified_sample(list(reversed(records)), sample_size=12, required_company_ids=[3, 7])
+    assert first == second
+    assert len({row["company_id"] for row in first}) == 12
+    assert [row["company_id"] for row in first[:2]] == [3, 7]
+    assert {row["size_bucket"] for row in first} == {"SMALL", "MID", "LARGE"}
+
+
+def test_sec_client_does_not_fetch_item_202_documents_older_than_scope() -> None:
+    fetched: list[str] = []
+    payload = {"filings": {"recent": {
+        "form": ["8-K", "8-K"], "items": ["2.02", "2.02"],
+        "accessionNumber": ["old", "new"],
+        "acceptanceDateTime": ["2023-01-01T12:00:00Z", "2025-01-01T12:00:00Z"],
+        "primaryDocument": ["old.htm", "new.htm"],
+    }, "files": []}}
+    client = SecClient(
+        fetch_json=lambda _url: payload,
+        fetch_text=lambda url: fetched.append(url) or "Item 2.02 Results of Operations and Financial Condition",
+        minimum_interval_seconds=0,
+    )
+    filings = client.item_2_02_filings("1", from_calendar_year=2024)
+    assert [row.accession_number for row in filings] == ["new"]
+    assert fetched[0].endswith("/new/new.htm")
+    assert client.stats["candidate_filings_outside_scope_skipped"] == 1
+
+
+def test_sec_client_retries_read_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_urlopen(*_args: object, **_kwargs: object) -> Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("read timed out")
+        return Response()
+
+    monkeypatch.setattr("rawcandle.fundamentals.result_publication.urlopen", fake_urlopen)
+    client = SecClient(minimum_interval_seconds=0)
+    assert client._request("https://data.sec.gov/submissions/test.json") == b"{}"
+    assert client.stats["network_requests"] == 2
+    assert client.stats["transient_failures"] == 1
+    assert client.stats["retries"] == 1
 
 
 def test_statuses_precedence_conflict_and_verified_restart_preservation(tmp_path: Path) -> None:

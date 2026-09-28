@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import statistics
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from rawcandle.fundamentals.admin.contracts import utc_now
@@ -73,9 +75,14 @@ def match_quarter_context(text: str, quarter: Mapping[str, Any]) -> str | None:
     patterns = (
         rf"\b{word}\s+(?:fiscal\s+)?quarter(?:\s+(?:of\s+)?(?:fiscal\s+year\s+)?)?{year}\b",
         rf"\bq{str(quarter['fiscal_quarter'])[1]}\s+(?:fy\s*)?{year}\b",
+        rf"\b{str(quarter['fiscal_quarter'])[1]}q\s*{str(year)[-2:]}\b",
     )
     if any(re.search(pattern, compact, flags=re.I) for pattern in patterns):
         return "CIK_ITEM_2_02_EXPLICIT_FISCAL_QUARTER"
+    if str(quarter["fiscal_quarter"]) == "Q4" and re.search(
+        rf"\b(?:fourth\s+quarter\s+and\s+)?full[- ]year\s+{year}\b", compact, flags=re.I
+    ):
+        return "CIK_ITEM_2_02_FULL_YEAR_Q4_CONTEXT"
     return None
 
 
@@ -110,17 +117,39 @@ class SecClient:
         self._fetch_text = fetch_text or self._get_text
         self._minimum_interval_seconds = minimum_interval_seconds
         self._last_request = 0.0
+        self._cache: dict[str, bytes] = {}
+        self.stats: Counter[str] = Counter()
 
     def _request(self, url: str) -> bytes:
-        delay = self._minimum_interval_seconds - (time.monotonic() - self._last_request)
-        if delay > 0:
-            time.sleep(delay)
-        try:
-            request = Request(url, headers={"Accept": "application/json,text/html", "User-Agent": SEC_USER_AGENT})
-            with urlopen(request, timeout=30) as response:
-                return response.read()
-        finally:
-            self._last_request = time.monotonic()
+        if url in self._cache:
+            self.stats["cache_hits"] += 1
+            return self._cache[url]
+        request_kind = "metadata_requests" if "data.sec.gov/submissions/" in url else "document_requests"
+        for attempt in range(3):
+            delay = self._minimum_interval_seconds - (time.monotonic() - self._last_request)
+            if delay > 0:
+                time.sleep(delay)
+            self.stats["network_requests"] += 1
+            self.stats[request_kind] += 1
+            try:
+                request = Request(url, headers={"Accept": "application/json,text/html", "User-Agent": SEC_USER_AGENT})
+                with urlopen(request, timeout=30) as response:
+                    payload = response.read()
+                self._cache[url] = payload
+                return payload
+            except HTTPError as exc:
+                self.stats["rate_limit_responses" if exc.code == 429 else "http_failures"] += 1
+                if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                    raise
+            except (URLError, TimeoutError):
+                self.stats["transient_failures"] += 1
+                if attempt == 2:
+                    raise
+            finally:
+                self._last_request = time.monotonic()
+            self.stats["retries"] += 1
+            time.sleep(0.5 * (attempt + 1))
+        raise RuntimeError("SEC_REQUEST_RETRY_EXHAUSTED")
 
     def _get_json(self, url: str) -> Mapping[str, Any]:
         return json.loads(self._request(url))
@@ -141,19 +170,25 @@ class SecClient:
                 items = str(recent.get("items", [""] * len(recent["form"]))[index] or "")
                 if str(form).upper() != "8-K" or "2.02" not in {part.strip() for part in items.split(",")}:
                     continue
+                accepted_raw = str(recent["acceptanceDateTime"][index])
+                if accepted_raw < f"{from_calendar_year}-01-01":
+                    self.stats["candidate_filings_outside_scope_skipped"] += 1
+                    continue
+                self.stats["candidate_filings_inspected"] += 1
                 accession = str(recent["accessionNumber"][index])
                 document = str(recent["primaryDocument"][index])
                 archive_cik = str(int(normalized))
                 accession_path = accession.replace("-", "")
                 reference = f"https://www.sec.gov/Archives/edgar/data/{archive_cik}/{accession_path}/{document}"
                 text = filing_text(self._fetch_text(reference))
+                self.stats["documents_fetched"] += 1
                 if not is_item_2_02(str(form), items, text):
                     continue
                 results.append(SecFiling(
                     accession_number=accession,
                     form=str(form),
                     items=items,
-                    acceptance_timestamp_utc=normalize_utc_timestamp(str(recent["acceptanceDateTime"][index])),
+                    acceptance_timestamp_utc=normalize_utc_timestamp(accepted_raw),
                     primary_document=document,
                     source_reference=reference,
                     text=text,
@@ -189,8 +224,21 @@ def _evidence_payload(quarter: Mapping[str, Any], filing: SecFiling, method: str
 def resolve_sec_filings(
     quarters: Sequence[Mapping[str, Any]], filings: Sequence[SecFiling]
 ) -> tuple[dict[tuple[int, int, str], list[dict[str, Any]]], set[tuple[int, int, str]]]:
+    matches, unresolved, _ = resolve_sec_filings_detailed(quarters, filings)
+    return matches, unresolved
+
+
+def resolve_sec_filings_detailed(
+    quarters: Sequence[Mapping[str, Any]], filings: Sequence[SecFiling]
+) -> tuple[
+    dict[tuple[int, int, str], list[dict[str, Any]]],
+    set[tuple[int, int, str]],
+    dict[tuple[int, int, str], dict[str, Any]],
+]:
     matches: dict[tuple[int, int, str], list[dict[str, Any]]] = defaultdict(list)
     unresolved: set[tuple[int, int, str]] = set()
+    ambiguous_context: set[tuple[int, int, str]] = set()
+    plausible_counts: Counter[tuple[int, int, str]] = Counter()
     for filing in filings:
         accepted = datetime.fromisoformat(filing.acceptance_timestamp_utc.replace("Z", "+00:00")).date()
         plausible = []
@@ -198,6 +246,7 @@ def resolve_sec_filings(
             period_end = datetime.strptime(str(quarter["period_end"]), "%Y-%m-%d").date()
             if period_end <= accepted and (accepted - period_end).days <= 180:
                 plausible.append(quarter)
+                plausible_counts[(int(quarter["company_id"]), int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"]))] += 1
         filing_matches = [(quarter, match_quarter_context(filing.text, quarter)) for quarter in plausible]
         filing_matches = [(quarter, method) for quarter, method in filing_matches if method]
         if len(filing_matches) == 1:
@@ -206,12 +255,35 @@ def resolve_sec_filings(
             matches[key].append(_evidence_payload(quarter, filing, str(method)))
         elif len(filing_matches) > 1:
             for quarter, _ in filing_matches:
-                unresolved.add((int(quarter["company_id"]), int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"])))
+                key = (int(quarter["company_id"]), int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"]))
+                unresolved.add(key)
+                ambiguous_context.add(key)
         else:
             unresolved.update(
                 (int(q["company_id"]), int(q["fiscal_year"]), str(q["fiscal_quarter"])) for q in plausible
             )
-    return matches, unresolved
+    diagnostics: dict[tuple[int, int, str], dict[str, Any]] = {}
+    for quarter in quarters:
+        key = (int(quarter["company_id"]), int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"]))
+        candidates = matches.get(key, [])
+        if len(candidates) > 1:
+            reason = "MULTIPLE_VALID_CANDIDATES"
+        elif len(candidates) == 1:
+            reason = "VERIFIED"
+        elif key in ambiguous_context:
+            reason = "UNRESOLVED_CONTEXT"
+        elif plausible_counts[key]:
+            reason = "QUARTER_MATCH_FAILED"
+        else:
+            reason = "NO_ITEM_2_02_FOUND"
+        diagnostics[key] = {
+            "reason": reason,
+            "plausible_item_2_02_filings": plausible_counts[key],
+            "matched_candidates": len(candidates),
+            "matching_methods": sorted({str(row["matching_method"]) for row in candidates}),
+            "accessions": sorted({str(row["accession_number"]) for row in candidates}),
+        }
+    return matches, unresolved, diagnostics
 
 
 def _insert_evidence(connection: sqlite3.Connection, evidence: Mapping[str, Any], disposition: str, now: str) -> None:
@@ -286,6 +358,7 @@ def apply_resolution(
     evidence: Sequence[Mapping[str, Any]],
     *,
     unresolved: bool = False,
+    reason_override: str | None = None,
     now: str | None = None,
 ) -> str:
     now = now or utc_now()
@@ -302,6 +375,8 @@ def apply_resolution(
     )
     status = "UNRESOLVED" if unresolved else "NOT_FOUND"
     reason = "ITEM_2_02_CONTEXT_DID_NOT_RESOLVE_UNIQUELY" if unresolved else "NO_AUTHORITATIVE_EVIDENCE_FOUND"
+    if reason_override:
+        reason = reason_override
     selected: Mapping[str, Any] | None = None
     if candidates:
         top_rank = SOURCE_RANK[str(candidates[0]["source_type"])]
@@ -369,12 +444,21 @@ def apply_resolution(
     return status
 
 
-def scoped_quarters(connection: sqlite3.Connection, from_fiscal_year: int, tickers: Sequence[str]) -> list[dict[str, Any]]:
+def scoped_quarters(
+    connection: sqlite3.Connection,
+    from_fiscal_year: int,
+    tickers: Sequence[str],
+    company_ids: Sequence[int] = (),
+) -> list[dict[str, Any]]:
     params: list[Any] = [from_fiscal_year]
     ticker_clause = ""
     if tickers:
         ticker_clause = f" AND UPPER(s.current_ticker) IN ({','.join('?' for _ in tickers)})"
         params.extend(ticker.upper() for ticker in tickers)
+    company_clause = ""
+    if company_ids:
+        company_clause = f" AND q.company_id IN ({','.join('?' for _ in company_ids)})"
+        params.extend(int(company_id) for company_id in company_ids)
     rows = connection.execute(
         f"""
         SELECT q.quarter_id,q.company_id,q.fiscal_year,q.fiscal_quarter,q.period_end,
@@ -382,7 +466,7 @@ def scoped_quarters(connection: sqlite3.Connection, from_fiscal_year: int, ticke
         FROM v4_quarter q
         JOIN company_cik c ON c.company_id=q.company_id AND c.status='ACTIVE'
         LEFT JOIN security s ON s.company_id=q.company_id AND s.active=1
-        WHERE q.fiscal_year>=? {ticker_clause}
+        WHERE q.fiscal_year>=? {ticker_clause} {company_clause}
         GROUP BY q.quarter_id
         HAVING COUNT(DISTINCT c.cik_normalized)=1
         ORDER BY q.company_id,q.fiscal_year,q.fiscal_quarter
@@ -399,16 +483,44 @@ def _lag_bucket(days: int) -> str:
         return "+/-1_DAY"
     if abs(days) <= 7:
         return "2_TO_7_DAYS"
-    return ">7_DAYS"
+    if abs(days) <= 30:
+        return "8_TO_30_DAYS"
+    return ">30_DAYS"
+
+
+def _percentile(values: Sequence[int], percentile: float) -> int | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, int((len(ordered) * percentile + 0.999999) - 1)))
+    return ordered[index]
+
+
+def _lag_summary(values: Sequence[int]) -> dict[str, Any]:
+    absolute = [abs(value) for value in values]
+    buckets = Counter(_lag_bucket(value) for value in values)
+    directions = Counter("NEGATIVE" if value < 0 else "POSITIVE" if value > 0 else "ZERO" for value in values)
+    return {
+        "buckets": dict(sorted(buckets.items())),
+        "directions": dict(sorted(directions.items())),
+        "median_absolute_days": statistics.median(absolute) if absolute else None,
+        "p90_absolute_days": _percentile(absolute, 0.90),
+        "p95_absolute_days": _percentile(absolute, 0.95),
+        "max_absolute_days": max(absolute) if absolute else None,
+    }
 
 
 def coverage_audit(connection: sqlite3.Connection, quarters: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     statuses: Counter[str] = Counter()
     sources: Counter[str] = Counter()
     confidence: Counter[str] = Counter()
-    lag_first: Counter[str] = Counter()
-    lag_availability: Counter[str] = Counter()
+    lag_first: list[int] = []
+    lag_availability: list[int] = []
     exact = 0
+    normalized_utc = 0
+    before_period_end = 0
+    after_window = 0
+    company_statuses: dict[int, list[str]] = defaultdict(list)
     for quarter in quarters:
         row = connection.execute(
             """SELECT * FROM v4_result_publication_authority
@@ -420,27 +532,37 @@ def coverage_audit(connection: sqlite3.Connection, quarters: Sequence[Mapping[st
             continue
         status = str(row["status"])
         statuses[status] += 1
+        company_statuses[int(quarter["company_id"])].append(status)
         if status != "VERIFIED":
             continue
         sources[str(row["result_publication_source"])] += 1
         confidence[str(row["result_publication_confidence"])] += 1
         timestamp = str(row["result_publication_timestamp_utc"])
         exact += int("T" in timestamp)
+        normalized_utc += int(timestamp.endswith("Z"))
         publication_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).date()
+        period_end = datetime.strptime(str(quarter["period_end"]), "%Y-%m-%d").date()
+        before_period_end += int(publication_date < period_end)
+        after_window += int((publication_date - period_end).days > 180)
         for field, output in (("first_public_result_date", lag_first), ("source_availability_date", lag_availability)):
             if quarter.get(field):
                 comparison = datetime.strptime(str(quarter[field]), "%Y-%m-%d").date()
-                output[_lag_bucket((publication_date - comparison).days)] += 1
+                output.append((publication_date - comparison).days)
     verified = statuses["VERIFIED"]
     return {
         "total_quarters": len(quarters),
         "status_counts": {name: statuses[name] for name in ("VERIFIED", "UNRESOLVED", "AMBIGUOUS", "NOT_FOUND")},
         "coverage_percent": round(100.0 * verified / len(quarters), 2) if quarters else 0.0,
         "timestamp_precision_percent": round(100.0 * exact / verified, 2) if verified else 0.0,
+        "utc_normalized_percent": round(100.0 * normalized_utc / verified, 2) if verified else 0.0,
+        "acceptance_before_period_end": before_period_end,
+        "acceptance_after_180_days": after_window,
+        "companies_100_percent_verified": sum(bool(values) and set(values) == {"VERIFIED"} for values in company_statuses.values()),
+        "companies_with_non_verified": sum(any(value != "VERIFIED" for value in values) for values in company_statuses.values()),
         "source_distribution": dict(sorted(sources.items())),
         "confidence_distribution": dict(sorted(confidence.items())),
-        "lag_vs_first_public_result_date": dict(sorted(lag_first.items())),
-        "lag_vs_source_availability_date": dict(sorted(lag_availability.items())),
+        "lag_vs_first_public_result_date": _lag_summary(lag_first),
+        "lag_vs_source_availability_date": _lag_summary(lag_availability),
     }
 
 
@@ -449,17 +571,19 @@ def enrich_database(
     *,
     from_fiscal_year: int = 2025,
     tickers: Sequence[str] = (),
+    company_ids: Sequence[int] = (),
     client: SecClient | None = None,
     apply: bool = False,
     refresh_existing: bool = False,
 ) -> dict[str, Any]:
     client = client or SecClient()
+    started = time.perf_counter()
     with sqlite3.connect(canonical_db) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         if apply:
             ensure_result_publication_schema(connection)
-        quarters = scoped_quarters(connection, from_fiscal_year, tickers)
+        quarters = scoped_quarters(connection, from_fiscal_year, tickers, company_ids)
         if not refresh_existing and connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v4_result_publication_authority'"
         ).fetchone():
@@ -485,23 +609,53 @@ def enrich_database(
                 filings = client.item_2_02_filings(
                     str(company_quarters[0]["cik_normalized"]), from_calendar_year=earliest_period_year
                 )
-                matches, unresolved = resolve_sec_filings(company_quarters, filings)
+                matches, unresolved, diagnostics = resolve_sec_filings_detailed(company_quarters, filings)
                 for quarter in company_quarters:
                     key = (company_id, int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"]))
                     status = "VERIFIED" if len(matches.get(key, ())) == 1 else (
                         "AMBIGUOUS" if len(matches.get(key, ())) > 1 else ("UNRESOLVED" if key in unresolved else "NOT_FOUND")
                     )
                     if apply:
-                        status = apply_resolution(connection, quarter, matches.get(key, ()), unresolved=key in unresolved)
+                        status = apply_resolution(
+                            connection, quarter, matches.get(key, ()), unresolved=key in unresolved,
+                            reason_override=str(diagnostics[key]["reason"]),
+                        )
                     counts[status] += 1
-                    preview.append({"ticker": quarter["current_ticker"], "fiscal_year": key[1], "fiscal_quarter": key[2], "status": status,
-                                    "timestamp_utc": matches.get(key, [{}])[0].get("source_timestamp_utc") if len(matches.get(key, ())) == 1 else None})
+                    preview.append({
+                        "company_id": company_id, "ticker": quarter["current_ticker"],
+                        "fiscal_year": key[1], "fiscal_quarter": key[2], "status": status,
+                        "timestamp_utc": matches.get(key, [{}])[0].get("source_timestamp_utc") if len(matches.get(key, ())) == 1 else None,
+                        **diagnostics[key],
+                    })
                 if apply:
                     connection.commit()
             except Exception as exc:
                 connection.rollback()
                 errors.append({"company_id": company_id, "ticker": company_quarters[0]["current_ticker"], "error": type(exc).__name__, "reason": str(exc)})
+                if apply:
+                    for quarter in company_quarters:
+                        status = apply_resolution(
+                            connection, quarter, (), unresolved=True,
+                            reason_override="DOCUMENT_FETCH_FAILED",
+                        )
+                        counts[status] += 1
+                        preview.append({
+                            "company_id": company_id, "ticker": quarter["current_ticker"],
+                            "fiscal_year": int(quarter["fiscal_year"]),
+                            "fiscal_quarter": str(quarter["fiscal_quarter"]),
+                            "status": status, "timestamp_utc": None,
+                            "reason": "DOCUMENT_FETCH_FAILED",
+                            "plausible_item_2_02_filings": 0,
+                            "matched_candidates": 0,
+                            "matching_methods": [], "accessions": [],
+                        })
+                    connection.commit()
         audit = coverage_audit(connection, quarters) if apply else None
+        network = dict(client.stats) if isinstance(client, SecClient) else {}
+        elapsed = time.perf_counter() - started
+        failures = Counter(
+            str(row["reason"]) for row in preview if row["status"] != "VERIFIED"
+        )
         return {
             "rule_version": RESULT_PUBLICATION_RULE_VERSION,
             "from_fiscal_year": from_fiscal_year,
@@ -513,4 +667,11 @@ def enrich_database(
             "errors": errors,
             "results": preview,
             "coverage_audit": audit,
+            "non_verified_reason_distribution": dict(sorted(failures.items())),
+            "network": {
+                **network,
+                "requests_per_company": round(network.get("network_requests", 0) / len(by_company), 3) if by_company else 0.0,
+                "requests_per_quarter": round(network.get("network_requests", 0) / len(quarters), 3) if quarters else 0.0,
+            },
+            "runtime_seconds": round(elapsed, 3),
         }
