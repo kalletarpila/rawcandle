@@ -15,6 +15,11 @@ from rawcandle.forecasts.scheduler import (
     timer_unit_text,
 )
 from rawcandle.forecasts.hardening import forecast_daily_lock
+from rawcandle.forecasts.scheduler_config import ForecastSchedulerConfig
+
+
+def _scheduler_config(tmp_path: Path) -> ForecastSchedulerConfig:
+    return ForecastSchedulerConfig(log_dir=str(tmp_path / "logs"))
 
 
 def test_registration_uses_exact_full_bounded_independent_command(tmp_path: Path) -> None:
@@ -58,13 +63,18 @@ def test_scheduler_install_dry_run_does_not_write(tmp_path: Path) -> None:
 
 def test_scheduler_registration_writes_units_without_activation(tmp_path: Path) -> None:
     units = tmp_path / "units"
+    config = _scheduler_config(tmp_path)
     result = install_scheduler(
-        repo_root=tmp_path, user_unit_dir=units, apply=True, activate=False
+        repo_root=tmp_path, user_unit_dir=units, apply=True, activate=False,
+        config=config,
     )
 
     assert result["activated"] is False
-    assert (units / "rawcandle-forecast-daily.service").read_text() == service_unit_text(tmp_path)
-    assert (units / "rawcandle-forecast-daily.timer").read_text() == timer_unit_text()
+    assert (units / "rawcandle-forecast-daily.service").read_text() == service_unit_text(
+        tmp_path, config=config
+    )
+    assert (units / "rawcandle-forecast-daily.timer").read_text() == timer_unit_text(config)
+    assert (tmp_path / "logs" / "forecast_scheduler.log").is_file()
 
 
 def test_scheduler_activation_enables_timer_without_starting_service(
@@ -77,10 +87,12 @@ def test_scheduler_activation_enables_timer_without_starting_service(
         return CompletedProcess(command, 0)
 
     monkeypatch.setattr("rawcandle.forecasts.scheduler.subprocess.run", run)
+    config = _scheduler_config(tmp_path)
 
     result = install_scheduler(
         repo_root=tmp_path, user_unit_dir=tmp_path / "units",
         apply=True, activate=True,
+        config=config,
     )
 
     assert result["activated"] is True

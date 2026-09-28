@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ import dev_tools.forecast_scheduler_page as forecast_page
 import rawcandle.forecasts.ui_service as ui_service
 from rawcandle.cli import forecasts as forecast_cli
 from rawcandle.forecasts.hardening import ForecastDailyAlreadyRunningError
+from rawcandle.forecasts.hardening import KNOWN_IGNORED_PATHS
 from rawcandle.forecasts.scheduler import FORECAST_DAILY_COMMAND
 from rawcandle.forecasts.scheduler_config import (
     ForecastSchedulerConfig,
@@ -21,6 +23,8 @@ from rawcandle.forecasts.scheduler_config import (
     validate_forecast_timezone,
     write_forecast_scheduler_config,
 )
+from rawcandle.forecasts.schema import connect_forecasts_db
+from tests.test_forecast_operational_hardening import _populated
 
 
 def _config(tmp_path: Path, **updates) -> ForecastSchedulerConfig:
@@ -123,6 +127,8 @@ def test_timer_status_uses_installed_units_and_systemd_state(
             return "active"
         if arguments[0] == "is-active":
             return "failed"
+        if "ExecMainStatus" in arguments:
+            return "2"
         return "Mon 2026-09-28 14:00:00 EEST"
 
     monkeypatch.setattr(ui_service, "_systemctl_value", value)
@@ -132,9 +138,16 @@ def test_timer_status_uses_installed_units_and_systemd_state(
     assert status["enabled"] == "enabled"
     assert status["active"] == "active"
     assert status["service_status"] == "failed"
+    assert status["service_exit_status"] == 2
     assert status["on_calendar"] == "*-*-* 14:00:00 Europe/Helsinki"
     assert status["timezone"] == "Europe/Helsinki"
     assert status["next_run_local"] == "Mon 2026-09-28 14:00:00 EEST"
+    rendered = forecast_page._timer_text(status)
+    assert "Timer enabled: enabled" in rendered
+    assert "Timer active: active" in rendered
+    assert "Systemd service state: failed" in rendered
+    assert "Next run: Mon 2026-09-28 14:00:00 EEST" in rendered
+    assert "timer=active; service=failed" not in rendered
 
 
 def test_run_now_uses_fixed_full_universe_command(
@@ -187,9 +200,15 @@ def test_forecast_logs_are_sorted_and_path_safe(tmp_path: Path) -> None:
     manual_log = log_dir / "forecast_run_20260928T080000Z.log"
     scheduler_log.write_text("scheduler", encoding="utf-8")
     manual_log.write_text("manual", encoding="utf-8")
+    os.utime(scheduler_log, (1, 1))
+    os.utime(manual_log, (2, 2))
     (log_dir / "raw_payload.json").write_text("{}", encoding="utf-8")
 
-    assert {item["filename"] for item in ui_service.list_forecast_logs(str(log_dir))} == {
+    logs = ui_service.list_forecast_logs(str(log_dir))
+    assert [item["filename"] for item in logs] == [
+        manual_log.name, scheduler_log.name,
+    ]
+    assert {item["filename"] for item in logs} == {
         scheduler_log.name, manual_log.name,
     }
     assert ui_service.resolve_forecast_log(str(log_dir), scheduler_log.name) == scheduler_log
@@ -197,6 +216,89 @@ def test_forecast_logs_are_sorted_and_path_safe(tmp_path: Path) -> None:
         ui_service.resolve_forecast_log(str(log_dir), "../forecast_scheduler.log")
     with pytest.raises(ValueError):
         ui_service.resolve_forecast_log(str(log_dir), "raw_payload.json")
+
+
+def test_missing_forecast_log_directory_is_safe(tmp_path: Path) -> None:
+    assert ui_service.list_forecast_logs(str(tmp_path / "missing")) == []
+
+
+@pytest.mark.parametrize("workflow", ["SUCCESS", "PARTIAL", "FAILED", "RUNNING"])
+def test_operator_summary_keeps_workflow_status_distinct(workflow: str) -> None:
+    text = forecast_page._operator_summary_text(
+        {
+            "overall_status": workflow,
+            "started_at": "2026-09-28T11:00:00Z",
+            "completed_at": None if workflow == "RUNNING" else "2026-09-28T12:00:00Z",
+            "elapsed_seconds": None if workflow == "RUNNING" else 3600,
+        },
+        {
+            "enabled": "enabled", "service_status": "failed",
+            "service_exit_status": 2,
+            "next_run_local": "Mon 2026-09-29 14:00:00 EEST",
+        },
+        skip_next_run=False,
+    )
+
+    assert f"Workflow status: {workflow}" in text
+    assert "Scheduler: ENABLED" in text
+    assert "Systemd service: failed" in text
+    assert ("Reason:" in text) is (workflow == "PARTIAL")
+
+
+def test_operator_summary_shows_pending_skip_instead_of_next_time() -> None:
+    text = forecast_page._operator_summary_text(
+        {"overall_status": "SUCCESS"},
+        {
+            "enabled": "enabled", "service_status": "inactive",
+            "next_run_local": "Mon 2026-09-29 14:00:00 EEST",
+        },
+        skip_next_run=True,
+    )
+
+    assert "Next run: SKIP" in text
+    assert "2026-09-29" not in text
+
+
+def test_grouped_summary_contains_operational_sections() -> None:
+    text = forecast_page._summary_text({
+        "overall_status": "SUCCESS", "acquisition": {},
+        "known_ignored_schema_drift_occurrences": 23,
+        "known_ignored_schema_drift_paths": 23,
+        "unknown_schema_drift_occurrences": 0,
+        "unknown_schema_drift_paths": 0,
+    })
+
+    for heading in (
+        "RUN", "ACQUISITION", "IDENTITY", "FISCAL LINKING",
+        "PROVIDER QUALITY", "DATABASE",
+    ):
+        assert heading in text
+    assert "Known ignored schema drift: 23 occurrences / 23 paths" in text
+    assert "Unknown schema drift: 0 occurrences / 0 paths" in text
+
+
+def test_latest_summary_classifies_known_drift_without_marking_it_unknown(
+    tmp_path: Path,
+) -> None:
+    forecast, fundamentals = _populated(tmp_path)
+    paths = sorted(KNOWN_IGNORED_PATHS)
+    with connect_forecasts_db(forecast) as connection:
+        connection.execute(
+            "UPDATE forecast_snapshot SET schema_drift_json=?",
+            (json.dumps(paths),),
+        )
+    config = _config(
+        tmp_path,
+        forecasts_db_path=str(forecast),
+        fundamentals_db_path=str(fundamentals),
+    )
+
+    summary = ui_service.read_forecast_latest_summary(config)
+
+    assert summary["known_ignored_schema_drift_paths"] == 23
+    assert summary["known_ignored_schema_drift_occurrences"] == 69
+    assert summary["unknown_schema_drift_paths"] == 0
+    assert summary["unknown_schema_drift_occurrences"] == 0
 
 
 class _Page:
@@ -225,7 +327,8 @@ def test_forecast_page_renders_partial_separately_from_failed_service(
     monkeypatch.setattr(
         forecast_page, "read_forecast_timer_status",
         lambda: {"installed": True, "enabled": "enabled", "active": "active",
-                 "service_status": "failed", "status_summary": "timer=active; service=failed"},
+                 "service_status": "failed", "service_exit_status": 2,
+                 "next_run_local": "Mon 2026-09-29 14:00:00 EEST"},
     )
     monkeypatch.setattr(forecast_page, "list_forecast_logs", lambda _d: [])
 
@@ -233,9 +336,13 @@ def test_forecast_page_renders_partial_separately_from_failed_service(
         _Page(), config_path=path
     )
 
-    assert "overall_status=PARTIAL" in controls.summary_field.value
-    assert "service_status=failed" in controls.timer_status_field.value
-    assert "overall_status=FAILED" not in controls.summary_field.value
+    assert "Status: PARTIAL" in controls.summary_field.value
+    assert "Systemd service state: failed" in controls.timer_status_field.value
+    assert "Workflow status: PARTIAL" in controls.operator_summary_field.value
+    assert "Reason: completed forecast workflow returned PARTIAL (exit code 2)" in (
+        controls.operator_summary_field.value
+    )
+    assert "Status: FAILED" not in controls.summary_field.value
     assert controls.running_status_text.value == "Scheduler status: not running"
 
 

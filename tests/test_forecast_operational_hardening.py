@@ -10,6 +10,7 @@ import pytest
 import rawcandle.forecasts.hardening as hardening
 from rawcandle.forecasts.contracts import FORECAST_FAMILIES
 from rawcandle.forecasts.hardening import (
+    KNOWN_IGNORED_PATHS,
     DailyWorkflowError,
     ForecastDailyAlreadyRunningError,
     backup_retention,
@@ -70,9 +71,23 @@ def test_known_ignored_and_unknown_drift_are_separate() -> None:
     )
 
     assert result["known_ignored_count"] == 1
+    assert result["known_ignored_distinct_count"] == 1
+    assert result["distinct_known_ignored_paths"] == ["financialData.totalCash"]
     assert result["unknown_drift_count"] == 2
+    assert result["unknown_drift_distinct_count"] == 1
     assert result["distinct_unknown_paths"] == ["financialData.brandNew"]
     assert result["policy_version"] == "yahoo_known_ignored_fields_v1"
+
+
+def test_all_23_policy_paths_are_known_and_none_are_unknown() -> None:
+    result = classify_drift(KNOWN_IGNORED_PATHS)
+
+    assert len(KNOWN_IGNORED_PATHS) == 23
+    assert result["known_ignored_count"] == 23
+    assert result["known_ignored_distinct_count"] == 23
+    assert result["unknown_drift_count"] == 0
+    assert result["unknown_drift_distinct_count"] == 0
+    assert result["distinct_unknown_paths"] == []
 
 
 def test_health_report_aggregates_database_run_and_history(tmp_path: Path) -> None:

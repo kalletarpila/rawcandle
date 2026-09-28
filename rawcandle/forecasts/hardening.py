@@ -106,7 +106,10 @@ def classify_drift(paths: Iterable[str]) -> dict[str, Any]:
     return {
         "policy_version": DRIFT_POLICY_VERSION,
         "known_ignored_count": len(known),
+        "known_ignored_distinct_count": len(set(known)),
+        "distinct_known_ignored_paths": sorted(set(known)),
         "unknown_drift_count": len(unknown),
+        "unknown_drift_distinct_count": len(set(unknown)),
         "distinct_unknown_paths": sorted(set(unknown)),
     }
 

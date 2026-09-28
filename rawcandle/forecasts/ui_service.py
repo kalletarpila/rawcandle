@@ -11,6 +11,7 @@ from typing import Any
 
 from rawcandle.forecasts.hardening import (
     ForecastDailyAlreadyRunningError,
+    classify_drift,
     forecast_daily_lock,
     health_report,
 )
@@ -71,19 +72,28 @@ def read_forecast_timer_status() -> dict[str, Any]:
         enabled = _systemctl_value("is-enabled", timer_name)
         timer_active = _systemctl_value("is-active", timer_name)
         service_active = _systemctl_value("is-active", service_name)
+        service_exit_value = _systemctl_value(
+            "show", service_name, "-p", "ExecMainStatus", "--value"
+        )
         next_run = _systemctl_value(
             "show", timer_name, "-p", "NextElapseUSecRealtime", "--value"
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         enabled = timer_active = service_active = "unknown"
+        service_exit_value = ""
         next_run = ""
         error = str(exc)
+    try:
+        service_exit_status = int(service_exit_value)
+    except (TypeError, ValueError):
+        service_exit_status = None
     return {
         "installed": timer_path.is_file() and service_path.is_file(),
         "enabled": enabled,
         "active": timer_active,
         "status_summary": f"timer={timer_active}; service={service_active}",
         "service_status": service_active,
+        "service_exit_status": service_exit_status,
         "on_calendar": _read_on_calendar(timer_path),
         "timezone": (
             (_read_on_calendar(timer_path) or "").rsplit(" ", 1)[-1] or None
@@ -176,7 +186,7 @@ def read_forecast_latest_summary(config: ForecastSchedulerConfig) -> dict[str, A
             "SELECT * FROM forecast_run ORDER BY started_at_utc DESC LIMIT 1"
         ).fetchone()
         if run is None:
-            return {"overall_status": "NO_RUNS"}
+            return {"overall_status": "NO_RUN"}
         run_id = str(run["run_id"])
         scope = json.loads(run["scope_json"])
         persisted_fetches = int(connection.execute(
@@ -189,6 +199,15 @@ def read_forecast_latest_summary(config: ForecastSchedulerConfig) -> dict[str, A
     identity = report.get("identity", {})
     fiscal = report.get("fiscal_link", {})
     quality = report.get("provider_quality", {})
+    drift_path_counts = quality.get("schema_drift_path_counts") or {
+        path: 1 for path in quality.get("schema_drift_paths", [])
+    }
+    drift_paths = [
+        path
+        for path, count in drift_path_counts.items()
+        for _ in range(int(count))
+    ]
+    drift = classify_drift(drift_paths)
     database_health = health.get("database", {})
     return {
         "overall_status": str(run["status"]),
@@ -214,7 +233,13 @@ def read_forecast_latest_summary(config: ForecastSchedulerConfig) -> dict[str, A
         "fiscal_ambiguous": int(fiscal.get("AMBIGUOUS", 0)),
         "fiscal_unresolved": int(fiscal.get("UNRESOLVED", 0)),
         "retries": int(quality.get("retry_count", 0)),
-        "unknown_schema_drift": len(quality.get("schema_drift_paths", [])),
+        "drift_policy_version": drift["policy_version"],
+        "known_ignored_schema_drift_occurrences": drift["known_ignored_count"],
+        "known_ignored_schema_drift_paths": drift[
+            "known_ignored_distinct_count"
+        ],
+        "unknown_schema_drift_occurrences": drift["unknown_drift_count"],
+        "unknown_schema_drift_paths": drift["unknown_drift_distinct_count"],
         "quick_check": database_health.get("quick_check"),
         "schema_version": database_health.get("schema_version"),
         "db_size_bytes": database_health.get("size_bytes"),

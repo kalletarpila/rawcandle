@@ -98,7 +98,9 @@ def install_scheduler(
     if not apply:
         return report
     directory.mkdir(parents=True, exist_ok=True)
-    Path(current.log_dir).mkdir(parents=True, exist_ok=True)
+    log_dir = Path(current.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "forecast_scheduler.log").touch(exist_ok=True)
     service_path.write_text(
         service_unit_text(repo_root, config=current, config_path=config_path),
         encoding="utf-8",

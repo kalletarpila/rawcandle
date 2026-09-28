@@ -106,6 +106,7 @@ swing_reports/
 fundamental_reports/
 data_backup_*/
 /scheduler_config.json
+/forecast_scheduler_config.json.lock
 
 # Local logs
 *.log

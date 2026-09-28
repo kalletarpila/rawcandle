@@ -418,6 +418,7 @@ def report_run(
             "rate_limit_count": acquisition.get("RATE_LIMITED", 0),
             "schema_drift_count": len(drift_paths),
             "schema_drift_paths": sorted(set(drift_paths)),
+            "schema_drift_path_counts": dict(sorted(Counter(drift_paths).items())),
             "raw_evidence_retained": int(raw_count),
         },
     }

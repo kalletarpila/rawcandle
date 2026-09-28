@@ -290,3 +290,36 @@ paths.
 The tab intentionally does not expose migration, restore, cleanup apply,
 backup-retention apply, log deletion/editing, Fundamentals mutation, pacing,
 retry, concurrency, timeout, or scheduler-command controls.
+
+## 16. Daily Operator Presentation (2026-09-28)
+
+The Forecast tab begins its operational area with a compact summary of the
+forecast workflow state, timer enablement, next invocation or pending skip,
+last-run timing, fixed universe, and separate systemd service state. Workflow
+`SUCCESS`, `PARTIAL`, `FAILED`, and `RUNNING` values continue to come only from
+forecast run data. A failed oneshot is not translated into a failed workflow.
+The UI explains `PARTIAL` plus systemd `failed` only when the recorded service
+exit status is 2.
+
+Latest summary is grouped into Run, Acquisition, Identity, Fiscal linking,
+Provider quality, and Database sections. Active runs retain the cheap persisted
+fetch count versus expected fetch count. Provider quality applies
+`yahoo_known_ignored_fields_v1` and reports known-ignored and unknown drift as
+separate occurrence and distinct-path counts. The 23 accepted `financialData`
+paths are never presented as unknown merely because they occur in snapshot
+diagnostics.
+
+Scheduled stdout and stderr append to
+`logs/forecasts/forecast_scheduler.log`; manual UI runs use timestamped
+`forecast_run_<UTC>.log` files in the same configured directory. Scheduler
+installation creates the scheduler log file before the first invocation so it
+is discoverable immediately. The UI lists only these names, newest first, and
+its read-only Open and Download route rejects directory traversal.
+
+`forecasts_db_path`, `fundamentals_db_path`, and `log_dir` remain editable
+because they are established scheduler config inputs and match the Stock
+Scheduler configuration convention. `timezone` and `run_time` also remain
+editable. Universe, command, timeout, and maintenance operations stay
+read-only or unavailable. The production command, 9,000-second timeout,
+forecast writer lock, timer isolation, and no-run-on-save behavior are
+unchanged.

@@ -44,6 +44,7 @@ class ForecastSchedulerControls:
     cancel_skip_button: Any
     refresh_logs_button: Any
     status_field: Any
+    operator_summary_field: Any
     summary_field: Any
     timer_status_field: Any
     running_status_text: Any
@@ -54,50 +55,116 @@ class ForecastSchedulerControls:
 def _summary_text(summary: dict[str, Any]) -> str:
     acquisition = summary.get("acquisition", {})
     lines = [
-        f"overall_status={summary.get('overall_status', '')}",
-        f"run_id={summary.get('run_id', '')}",
-        f"started_at={summary.get('started_at', '')}",
-        f"completed_at={summary.get('completed_at', '')}",
-        f"elapsed_seconds={summary.get('elapsed_seconds', '')}",
-        f"universe_version={summary.get('universe_version', '')}",
-        f"symbols_selected={summary.get('symbols_selected', 0)}",
-        f"requests_attempted={summary.get('requests_attempted', 0)}",
-        f"progress={summary.get('persisted_fetches', 0)}/{summary.get('expected_fetches', 0)}",
+        "RUN",
+        f"Status: {summary.get('overall_status', '')}",
+        f"Run ID: {summary.get('run_id', '')}",
+        f"Started: {summary.get('started_at', '')}",
+        f"Completed: {summary.get('completed_at', '')}",
+        f"Elapsed: {summary.get('elapsed_seconds', '')} s",
+        f"Universe version: {summary.get('universe_version', '')}",
+        f"Symbols selected: {summary.get('symbols_selected', 0)}",
+        f"Requests attempted: {summary.get('requests_attempted', 0)}",
+        f"Progress: {summary.get('persisted_fetches', 0)} / {summary.get('expected_fetches', 0)}",
+        "",
+        "ACQUISITION",
+        f"Changed: {int(acquisition.get('SUCCESS_CHANGED', 0))}",
+        f"Unchanged: {int(acquisition.get('SUCCESS_UNCHANGED', 0))}",
+        f"Valid no data: {int(acquisition.get('VALID_NO_DATA', 0))}",
+        f"Provider unavailable: {int(acquisition.get('PROVIDER_SYMBOL_UNAVAILABLE', 0))}",
+        f"Transient failure: {int(acquisition.get('TRANSIENT_FAILURE', 0))}",
+        f"Rate limited: {int(acquisition.get('RATE_LIMITED', 0))}",
+        "Malformed/schema mismatch: "
+        f"{int(acquisition.get('MALFORMED_OR_SCHEMA_MISMATCH', 0))}",
+        "",
+        "IDENTITY",
+        f"Resolved: {summary.get('identity_resolved', 0)}",
+        f"Ambiguous: {summary.get('identity_ambiguous', 0)}",
+        f"Unresolved: {summary.get('identity_unresolved', 0)}",
+        "",
+        "FISCAL LINKING",
+        f"Linked: {summary.get('fiscal_linked', 0)}",
+        f"Ambiguous: {summary.get('fiscal_ambiguous', 0)}",
+        f"Unresolved: {summary.get('fiscal_unresolved', 0)}",
+        "",
+        "PROVIDER QUALITY",
+        f"Retries: {summary.get('retries', 0)}",
+        "Known ignored schema drift: "
+        f"{summary.get('known_ignored_schema_drift_occurrences', 0)} occurrences / "
+        f"{summary.get('known_ignored_schema_drift_paths', 0)} paths",
+        "Unknown schema drift: "
+        f"{summary.get('unknown_schema_drift_occurrences', 0)} occurrences / "
+        f"{summary.get('unknown_schema_drift_paths', 0)} paths",
+        f"Drift policy: {summary.get('drift_policy_version', '')}",
+        f"Rate limits: {summary.get('rate_limits', 0)}",
+        "",
+        "DATABASE",
+        f"Quick check: {summary.get('quick_check', '')}",
+        f"Schema version: {summary.get('schema_version', '')}",
+        f"DB size: {summary.get('db_size_bytes', 0)} bytes",
+        f"Snapshots: {summary.get('snapshot_count', 0)}",
+        f"Raw evidence: {summary.get('raw_evidence_bytes', 0)} bytes",
     ]
-    for status in (
-        "SUCCESS_CHANGED", "SUCCESS_UNCHANGED", "VALID_NO_DATA",
-        "PROVIDER_SYMBOL_UNAVAILABLE", "TRANSIENT_FAILURE", "RATE_LIMITED",
-        "MALFORMED_OR_SCHEMA_MISMATCH",
-    ):
-        lines.append(f"{status}={int(acquisition.get(status, 0))}")
-    lines.extend([
-        f"identity_resolved={summary.get('identity_resolved', 0)}",
-        f"identity_ambiguous={summary.get('identity_ambiguous', 0)}",
-        f"identity_unresolved={summary.get('identity_unresolved', 0)}",
-        f"fiscal_linked={summary.get('fiscal_linked', 0)}",
-        f"fiscal_ambiguous={summary.get('fiscal_ambiguous', 0)}",
-        f"fiscal_unresolved={summary.get('fiscal_unresolved', 0)}",
-        f"retries={summary.get('retries', 0)}",
-        f"unknown_schema_drift={summary.get('unknown_schema_drift', 0)}",
-        f"rate_limits={summary.get('rate_limits', 0)}",
-        f"quick_check={summary.get('quick_check', '')}",
-        f"schema_version={summary.get('schema_version', '')}",
-        f"db_size_bytes={summary.get('db_size_bytes', 0)}",
-        f"snapshot_count={summary.get('snapshot_count', 0)}",
-        f"raw_evidence_bytes={summary.get('raw_evidence_bytes', 0)}",
-    ])
     return "\n".join(lines)
 
 
 def _timer_text(timer: dict[str, Any]) -> str:
-    return "\n".join(
-        f"{key}={timer.get(key, '')}"
-        for key in (
-            "installed", "enabled", "active", "status_summary",
-            "service_status", "on_calendar", "timezone", "timer_path",
-            "service_path", "next_run_local", "timeout_seconds", "command", "error",
-        )
+    return "\n".join([
+        f"Installed: {timer.get('installed', '')}",
+        f"Timer enabled: {timer.get('enabled', '')}",
+        f"Timer active: {timer.get('active', '')}",
+        f"Systemd service state: {timer.get('service_status', '')}",
+        f"Systemd service exit status: {timer.get('service_exit_status', '')}",
+        f"Calendar: {timer.get('on_calendar', '')}",
+        f"Timezone: {timer.get('timezone', '')}",
+        f"Next run: {timer.get('next_run_local', '')}",
+        f"Timeout: {timer.get('timeout_seconds', '')} s",
+        f"Command: {timer.get('command', '')}",
+        f"Timer path: {timer.get('timer_path', '')}",
+        f"Service path: {timer.get('service_path', '')}",
+        f"Error: {timer.get('error', '')}",
+    ])
+
+
+def _operator_summary_text(
+    summary: dict[str, Any], timer: dict[str, Any], *, skip_next_run: bool
+) -> str:
+    workflow = str(summary.get("overall_status", "NO_RUN"))
+    enabled = str(timer.get("enabled", "unknown"))
+    scheduler = (
+        "ENABLED" if enabled == "enabled"
+        else "DISABLED" if enabled == "disabled"
+        else enabled.upper()
     )
+    if skip_next_run:
+        next_run = "SKIP"
+    else:
+        next_run = str(timer.get("next_run_local") or "unknown")
+    started = summary.get("started_at") or "-"
+    completed = summary.get("completed_at")
+    elapsed = summary.get("elapsed_seconds")
+    if workflow == "RUNNING":
+        last_run = f"{started} (running)"
+    elif completed:
+        last_run = f"{started} -> {completed} ({elapsed} s)"
+    else:
+        last_run = str(started)
+    lines = [
+        f"Workflow status: {workflow}",
+        f"Scheduler: {scheduler}",
+        f"Next run: {next_run}",
+        f"Last run: {last_run}",
+        "Universe: Full bounded operational universe",
+        f"Systemd service: {timer.get('service_status', 'unknown')}",
+    ]
+    if (
+        workflow == "PARTIAL"
+        and timer.get("service_status") == "failed"
+        and timer.get("service_exit_status") == 2
+    ):
+        lines.append(
+            "Reason: completed forecast workflow returned PARTIAL (exit code 2)"
+        )
+    return "\n".join(lines)
 
 
 def build_forecast_scheduler_page(
@@ -117,11 +184,17 @@ def build_forecast_scheduler_page(
     timezone_field = ft.TextField(label="timezone", value=current.timezone)
     run_time_field = ft.TextField(label="run_time", value=current.run_time)
     status_field = ft.TextField(label="Status", read_only=True, multiline=True)
+    operator_summary_field = ft.TextField(
+        label="Operator summary", read_only=True, multiline=True,
+        min_lines=6, max_lines=7,
+    )
     summary_field = ft.TextField(
-        label="Latest summary", read_only=True, multiline=True
+        label="Latest summary", read_only=True, multiline=True,
+        min_lines=10, max_lines=16,
     )
     timer_status_field = ft.TextField(
-        label="Forecast Timer status", read_only=True, multiline=True
+        label="Forecast Timer status", read_only=True, multiline=True,
+        min_lines=8, max_lines=13,
     )
     running_status_text = ft.Text("Scheduler status: UNKNOWN")
     skip_status_text = ft.Text(forecast_skip_label(current))
@@ -160,6 +233,9 @@ def build_forecast_scheduler_page(
         timer = read_forecast_timer_status()
         summary_field.value = _summary_text(summary)
         timer_status_field.value = _timer_text(timer)
+        operator_summary_field.value = _operator_summary_text(
+            summary, timer, skip_next_run=config.skip_next_run
+        )
         workflow_running = summary.get("overall_status") == "RUNNING"
         running_status_text.value = (
             "Scheduler status: running" if workflow_running
@@ -260,8 +336,7 @@ def build_forecast_scheduler_page(
             ft.Text("Universe: Full bounded operational universe"),
             ft.Row([save_button, reload_button]),
             ft.Row([run_now_button, skip_button, cancel_skip_button, refresh_logs_button]),
-            running_status_text,
-            skip_status_text,
+            operator_summary_field,
             status_field,
             summary_field,
             timer_status_field,
@@ -284,6 +359,7 @@ def build_forecast_scheduler_page(
         cancel_skip_button=cancel_skip_button,
         refresh_logs_button=refresh_logs_button,
         status_field=status_field,
+        operator_summary_field=operator_summary_field,
         summary_field=summary_field,
         timer_status_field=timer_status_field,
         running_status_text=running_status_text,
