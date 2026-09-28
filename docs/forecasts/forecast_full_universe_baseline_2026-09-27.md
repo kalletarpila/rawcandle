@@ -240,3 +240,53 @@ installation, completed at 08:32 local time, and left the oneshot service
 Enabling the updated timer did not start a service or another acquisition. The
 installed unit has no `Restart=` policy and no stock/OHLCV or Fundamentals
 publication dependency.
+
+## 15. Scheduler UI Forecast Tab (2026-09-28)
+
+The existing RawCandle scheduler UI has a separate `Forecast` tab at
+`/forecast`. It follows the Stock Scheduler layout: configuration, scheduler
+controls, status, latest summary, actual timer/service state, and logs. Stock
+Scheduler behavior and configuration remain independent and unchanged.
+
+The editable forecast configuration is stored in
+`forecast_scheduler_config.json` and contains `forecasts_db_path`,
+`fundamentals_db_path`, `log_dir`, `timezone`, and `run_time`. Time uses strict
+24-hour `HH:MM` validation and timezone uses the IANA timezone database. Scope
+is read-only `Full bounded operational universe`; the UI cannot edit a command,
+symbol count, or watchlist.
+
+`Save config` atomically writes the forecast config, renders the existing
+`rawcandle-forecast-daily.service/.timer` units, reloads user systemd, preserves
+the timer's enabled state, and never starts the service directly. `Reload
+config` discards unsaved field edits. The installed command remains:
+
+```text
+/usr/bin/python3 -m rawcandle.cli.forecasts daily --full-bounded-universe
+```
+
+`Run now` launches exactly that fixed CLI workflow in the background. Existing
+preflight, backup, acquisition, identity, fiscal-link, reconciliation, health,
+and forecast writer-lock contracts remain authoritative. An active writer is
+reported as `OVERLAP_ACTIVE`; the UI does not reproduce workflow logic.
+
+`Skip next run` persists a forecast-only one-shot flag. The service
+`ExecCondition` atomically consumes it at the next invocation, skips that one
+occurrence, and returns future daily invocations to normal. `Cancel skip`
+clears a pending flag without starting a run. Neither action affects Stock or
+other schedulers.
+
+The latest summary reads forecast run/report/health data. Application workflow
+states `SUCCESS`, `PARTIAL`, and `FAILED` remain distinct. Systemd timer/service
+state is displayed separately, because a reviewed `PARTIAL` maps to CLI exit 2
+and can leave a oneshot service looking `failed` without making the workflow
+`FAILED`.
+
+Forecast logs are limited to `forecast_scheduler.log` and timestamped
+`forecast_run_<UTC>.log` files under the configured forecast log directory.
+The UI supports refresh, read-only Open, and Download through a filename- and
+directory-constrained route. It never exposes raw Yahoo payloads or arbitrary
+paths.
+
+The tab intentionally does not expose migration, restore, cleanup apply,
+backup-retention apply, log deletion/editing, Fundamentals mutation, pacing,
+retry, concurrency, timeout, or scheduler-command controls.

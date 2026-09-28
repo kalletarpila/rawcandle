@@ -25,9 +25,14 @@ def test_registration_uses_exact_full_bounded_independent_command(tmp_path: Path
         "/usr/bin/python3 -m rawcandle.cli.forecasts daily --full-bounded-universe"
     )
     assert f"ExecStart={FORECAST_DAILY_COMMAND}" in service
+    assert "ExecCondition=/usr/bin/python3 -m rawcandle.cli.forecasts scheduler-allow-run" in service
     assert "--max-symbols 100" not in service
     assert "stock-update-scheduler" not in service
-    assert "fundamental" not in service.lower()
+    assert "Requires=" not in service
+    assert "fundamentals" not in "\n".join(
+        line.lower() for line in service.splitlines()
+        if line.startswith(("Wants=", "After="))
+    )
     assert FORECAST_SCHEDULE_LOCAL == "14:00"
     assert "OnCalendar=*-*-* 14:00:00 Europe/Helsinki" in timer
     assert "Unit=rawcandle-forecast-daily.service" in timer
@@ -79,13 +84,10 @@ def test_scheduler_activation_enables_timer_without_starting_service(
     )
 
     assert result["activated"] is True
-    assert calls == [
-        ["systemctl", "--user", "daemon-reload"],
-        [
-            "systemctl", "--user", "enable", "--now",
-            "rawcandle-forecast-daily.timer",
-        ],
-    ]
+    assert calls == [[
+        "systemctl", "--user", "enable", "--now",
+        "rawcandle-forecast-daily.timer",
+    ]]
     assert all("rawcandle-forecast-daily.service" not in call for call in calls)
 
 

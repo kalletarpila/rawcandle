@@ -28,6 +28,10 @@ from rawcandle.forecasts.operator import (
     report_run,
 )
 from rawcandle.forecasts.scheduler import install_scheduler
+from rawcandle.forecasts.scheduler_config import (
+    DEFAULT_FORECAST_SCHEDULER_CONFIG,
+    consume_forecast_skip_next_run,
+)
 
 
 def _paths(parser: argparse.ArgumentParser, *, fundamentals: bool = False) -> None:
@@ -124,6 +128,16 @@ def build_parser() -> argparse.ArgumentParser:
         "scheduler-install", help="Install the independent forecast systemd user timer"
     )
     scheduler.add_argument("--apply", action="store_true")
+    scheduler.add_argument(
+        "--config", default=str(DEFAULT_FORECAST_SCHEDULER_CONFIG)
+    )
+
+    scheduler_gate = subparsers.add_parser(
+        "scheduler-allow-run", help="Consume a one-shot scheduled-run skip"
+    )
+    scheduler_gate.add_argument(
+        "--config", default=str(DEFAULT_FORECAST_SCHEDULER_CONFIG)
+    )
     return parser
 
 
@@ -283,11 +297,16 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"DAILY {_compact(_compact_daily(result))}")
             return 0 if result["terminal_status"] == "SUCCESS" else 2
-        else:
+        elif args.command == "scheduler-install":
             result = install_scheduler(
-                repo_root=Path(__file__).resolve().parents[2], apply=args.apply
+                repo_root=Path(__file__).resolve().parents[2], apply=args.apply,
+                config_path=Path(args.config),
             )
             print(f"SCHEDULER_INSTALL {_compact(result)}")
+        else:
+            skipped = consume_forecast_skip_next_run(Path(args.config))
+            print("FORECAST_SCHEDULED_RUN_SKIP" if skipped else "FORECAST_SCHEDULED_RUN_ALLOW")
+            return 1 if skipped else 0
         return 0
     except Exception as exc:
         code = getattr(exc, "code", "FAILED")

@@ -1,0 +1,8 @@
+{
+  "forecasts_db_path": "/home/kalle/projects/rawcandle/data/forecasts.db",
+  "fundamentals_db_path": "/home/kalle/projects/rawcandle/data/fundamentals_v4.db",
+  "log_dir": "/home/kalle/projects/rawcandle/logs/forecasts",
+  "run_time": "14:00",
+  "skip_next_run": false,
+  "timezone": "Europe/Helsinki"
+}

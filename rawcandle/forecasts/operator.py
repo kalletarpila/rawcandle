@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass
@@ -22,8 +23,12 @@ from rawcandle.forecasts.transport import YahooForecastTransport, YahooRawResult
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_FORECAST_DB = ROOT / "data" / "forecasts.db"
-DEFAULT_FUNDAMENTALS_DB = ROOT / "data" / "fundamentals_v4.db"
+DEFAULT_FORECAST_DB = Path(
+    os.environ.get("RAWCANDLE_FORECAST_DB", ROOT / "data" / "forecasts.db")
+)
+DEFAULT_FUNDAMENTALS_DB = Path(
+    os.environ.get("RAWCANDLE_FUNDAMENTALS_DB", ROOT / "data" / "fundamentals_v4.db")
+)
 DEFAULT_PILOT_SYMBOLS = ("AAPL", "ADBE", "AMZN", "BB", "NVDA", "NUE")
 EXPECTED_TABLES = {
     "forecast_schema_version", "forecast_run", "forecast_raw_evidence",

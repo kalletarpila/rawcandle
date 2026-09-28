@@ -38,6 +38,10 @@ from dev_tools.fundamentals_admin_page import (
     FUNDAMENTALS_ADMIN_ROUTE,
     build_fundamentals_admin_page,
 )
+from dev_tools.forecast_scheduler_page import (
+    FORECAST_ROUTE,
+    build_forecast_scheduler_page,
+)
 from rawcandle.scheduler.config import (
     StockUpdateSchedulerConfig,
     read_scheduler_config,
@@ -53,6 +57,14 @@ from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
     WORKFLOW_REPORT_NAME,
     resolve_operation_report_download,
+)
+from rawcandle.forecasts.scheduler_config import (
+    DEFAULT_FORECAST_SCHEDULER_CONFIG,
+    read_forecast_scheduler_config,
+)
+from rawcandle.forecasts.ui_service import (
+    FORECAST_LOG_DOWNLOAD_ROUTE,
+    resolve_forecast_log,
 )
 SCHEDULER_UI_PORT = 8555
 DEFAULT_DATACENTER_PRICE_DB = "data/osakedata.db"
@@ -81,7 +93,10 @@ _EC_SOURCE_LAYER_LOG_FILENAME_RE = re.compile(
 )
 _TIMER_PATH = Path.home() / ".config/systemd/user/stock-update-scheduler.timer"
 _TAXONOMY_EVIDENCE_ROOT = "temp/datacenter_taxonomy_changes"
-TOP_LEVEL_ROUTES = ("/scheduler", "/taxonomy", FUNDAMENTALS_ROUTE, FUNDAMENTALS_ADMIN_ROUTE)
+TOP_LEVEL_ROUTES = (
+    "/scheduler", FORECAST_ROUTE, "/taxonomy", FUNDAMENTALS_ROUTE,
+    FUNDAMENTALS_ADMIN_ROUTE,
+)
 FUNDAMENTALS_ADMIN_ROUTE_ALIAS = "/fundamentals-admin"
 DATACENTER_ECOSYSTEM_CODE = "DATACENTER"
 REBUILD_MODE_AUTO = "AUTO"
@@ -179,12 +194,14 @@ def top_level_route_index(route: str | None) -> int:
     normalized = str(route or "").split("?", 1)[0].rstrip("/") or "/"
     if normalized in {"/", "/scheduler"}:
         return 0
-    if normalized == "/taxonomy":
+    if normalized == FORECAST_ROUTE:
         return 1
-    if normalized == FUNDAMENTALS_ROUTE:
+    if normalized == "/taxonomy":
         return 2
-    if normalized in {FUNDAMENTALS_ADMIN_ROUTE, FUNDAMENTALS_ADMIN_ROUTE_ALIAS}:
+    if normalized == FUNDAMENTALS_ROUTE:
         return 3
+    if normalized in {FUNDAMENTALS_ADMIN_ROUTE, FUNDAMENTALS_ADMIN_ROUTE_ALIAS}:
+        return 4
     return 0
 
 
@@ -2008,6 +2025,9 @@ def run_app(
         service=getattr(page, "fundamentals_admin_service", None),
         defer_initial_load=defer_initial_load,
     )
+    forecast_controls = build_forecast_scheduler_page(
+        page, defer_initial_load=defer_initial_load
+    )
 
     if not defer_initial_load:
         refresh_logs_view(config.log_dir)
@@ -2097,10 +2117,13 @@ def run_app(
     page.fundamentals_admin_history_column = fundamentals_admin_controls.history_column
     page.fundamentals_admin_history_show_more_button = fundamentals_admin_controls.history_show_more_button
     page.fundamentals_admin_history_loader = fundamentals_admin_controls.history_loader
+    page.forecast_content = forecast_controls.content
+    page.forecast_controls = forecast_controls
 
     tabs = ft.Tabs(
         tabs=[
             ft.Tab(text="Scheduler", content=scheduler_content),
+            ft.Tab(text="Forecast", content=forecast_controls.content),
             ft.Tab(text="Taxonomy", content=taxonomy_content),
             ft.Tab(text="Fundamentals", content=fundamentals_controls.content),
             ft.Tab(text="Fundamentals Admin", content=fundamentals_admin_controls.content),
@@ -2111,6 +2134,7 @@ def run_app(
 
     route_activators = {
         "/scheduler": lambda: scheduler_loader.start(),
+        FORECAST_ROUTE: forecast_controls.activate,
         "/taxonomy": lambda: taxonomy_loader.start(),
         FUNDAMENTALS_ROUTE: fundamentals_controls.activate,
         FUNDAMENTALS_ADMIN_ROUTE: fundamentals_admin_controls.activate,
@@ -2185,6 +2209,7 @@ def create_scheduler_web_app(
         run_app(page, config_path, defer_initial_load=True)
 
     application = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    add_forecast_log_route(application)
     add_fundamentals_download_route(application, report_dir=report_dir)
     add_fundamentals_admin_download_route(application)
 
@@ -2194,6 +2219,26 @@ def create_scheduler_web_app(
     )
     application.mount("/", flet_application)
     return application
+
+
+def add_forecast_log_route(
+    application: FastAPI,
+    *,
+    config_path: str | Path = DEFAULT_FORECAST_SCHEDULER_CONFIG,
+) -> None:
+    @application.get(f"{FORECAST_LOG_DOWNLOAD_ROUTE}" + "/{filename:path}")
+    async def forecast_log(filename: str, download: bool = True) -> FileResponse:
+        try:
+            config = read_forecast_scheduler_config(config_path)
+            log_path = resolve_forecast_log(config.log_dir, filename)
+        except (ValueError, FileNotFoundError):
+            raise HTTPException(status_code=404, detail="Forecast log not found.")
+        return FileResponse(
+            log_path,
+            media_type="text/plain",
+            filename=log_path.name,
+            content_disposition_type="attachment" if download else "inline",
+        )
 
 
 def add_fundamentals_download_route(

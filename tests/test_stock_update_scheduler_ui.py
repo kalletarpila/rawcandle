@@ -541,7 +541,7 @@ def test_deferred_fundamentals_route_commits_shell_before_selected_loader(tmp_pa
     run_app(page, str(config_path), defer_initial_load=True)
 
     assert len(page.controls) == 1
-    assert page.top_level_tabs.selected_index == 2
+    assert page.top_level_tabs.selected_index == 3
     assert report_calls == []
     assert scheduler_calls == []
     assert taxonomy_calls == []
@@ -592,7 +592,7 @@ def test_fundamentals_admin_route_alias_selects_and_loads_only_admin(tmp_path, m
 
     run_app(page, str(config_path), defer_initial_load=True)
 
-    assert page.top_level_tabs.selected_index == 3
+    assert page.top_level_tabs.selected_index == 4
     assert len(page.tasks) == 1
     assert scheduler_calls == []
     assert taxonomy_calls == []
@@ -911,10 +911,13 @@ def test_run_app_exposes_scheduler_taxonomy_and_fundamentals_top_level_tabs(tmp_
     assert page.title == "RawCandle stock update scheduler"
     assert page.technical_relevance_checkbox.value is False
     tabs = page.top_level_tabs
-    assert [tab.text for tab in tabs.tabs] == ["Scheduler", "Taxonomy", "Fundamentals", "Fundamentals Admin"]
+    assert [tab.text for tab in tabs.tabs] == [
+        "Scheduler", "Forecast", "Taxonomy", "Fundamentals", "Fundamentals Admin",
+    ]
     assert tabs.selected_index == 0
-    assert page.fundamentals_content is tabs.tabs[2].content
-    assert page.fundamentals_admin_content is tabs.tabs[3].content
+    assert page.forecast_content is tabs.tabs[1].content
+    assert page.fundamentals_content is tabs.tabs[3].content
+    assert page.fundamentals_admin_content is tabs.tabs[4].content
     assert page.fundamentals_overwrite_checkbox.value is False
     assert page.taxonomy_prepare_button is not None
     assert not hasattr(page, "datacenter_plan_button")
@@ -927,10 +930,11 @@ def test_run_app_exposes_scheduler_taxonomy_and_fundamentals_top_level_tabs(tmp_
     (
         ("/", 0),
         ("/scheduler", 0),
-        ("/taxonomy", 1),
-        ("/fundamentals", 2),
-        ("/fundamentals/admin", 3),
-        ("/fundamentals-admin", 3),
+        ("/forecast", 1),
+        ("/taxonomy", 2),
+        ("/fundamentals", 3),
+        ("/fundamentals/admin", 4),
+        ("/fundamentals-admin", 4),
         ("/unknown", 0),
     ),
 )
@@ -950,18 +954,18 @@ def test_run_app_fundamentals_route_is_active_without_affecting_other_tabs(tmp_p
 
     run_app(page, str(config_path))
 
-    assert page.top_level_tabs.selected_index == 2
+    assert page.top_level_tabs.selected_index == 3
     assert page.scheduler_content is page.top_level_tabs.tabs[0].content
-    assert page.taxonomy_content is page.top_level_tabs.tabs[1].content
-    assert page.fundamentals_content is page.top_level_tabs.tabs[2].content
+    assert page.taxonomy_content is page.top_level_tabs.tabs[2].content
+    assert page.fundamentals_content is page.top_level_tabs.tabs[3].content
 
     page.on_route_change(SimpleNamespace(route="/taxonomy"))
-    assert page.top_level_tabs.selected_index == 1
+    assert page.top_level_tabs.selected_index == 2
 
-    page.top_level_tabs.selected_index = 2
+    page.top_level_tabs.selected_index = 3
     page.top_level_tabs.on_change(SimpleNamespace(control=page.top_level_tabs))
     assert page.route == "/fundamentals"
-    assert page.top_level_tabs.selected_index == 2
+    assert page.top_level_tabs.selected_index == 3
 
 
 def test_run_app_loads_current_style_local_config_with_legacy_dashboard_keys(
