@@ -51,8 +51,6 @@ class DailyResearchResult:
 class TradingCalendar:
     def __init__(self, trading_dates: Sequence[str | date]) -> None:
         self.dates = tuple(sorted({_as_date(value) for value in trading_dates}))
-        if not self.dates:
-            raise ValueError("TRADING_CALENDAR_EMPTY")
         self._positions = {value: index for index, value in enumerate(self.dates)}
 
     def contains(self, value: date) -> bool:
@@ -245,6 +243,15 @@ def project_daily_research(
             status="EXACT",
             confidence="EXACT",
             method="CANONICAL_VERIFIED",
+        )
+
+    if not calendar.dates and candidates:
+        return _base_result(
+            authority,
+            candidates,
+            status="UNUSABLE",
+            confidence="NONE",
+            method="OHLC_CALENDAR_UNAVAILABLE",
         )
 
     boundaries = {
