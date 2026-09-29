@@ -47,7 +47,11 @@ class ResultPublicationResearchRow:
     ticker: str
     first_full_post_result_trading_date: str | None
     research_status: str
+    research_confidence: str
     research_method: str
+    canonical_authority_status: str
+    research_publication_date: str | None
+    research_publication_session: str | None
     is_canonical: bool
     rule_version: str
     warning: str | None
@@ -103,6 +107,9 @@ class ResultPublicationResearchDataset:
 
     def __len__(self) -> int:
         return len(self._rows)
+
+    def rows(self) -> tuple[ResultPublicationResearchRow, ...]:
+        return tuple(self._rows[key] for key in sorted(self._rows))
 
     def get(self, company_id: int, fiscal_year: int, fiscal_quarter: str) -> ResultPublicationResearchRow | None:
         return self._rows.get(ResearchQuarterKey(company_id, fiscal_year, fiscal_quarter))
@@ -201,7 +208,11 @@ def _parse_row(raw: dict[str, str | None], line_number: int) -> ResultPublicatio
         ticker=ticker,
         first_full_post_result_trading_date=boundary,
         research_status=status,
+        research_confidence=raw.get("research_confidence") or "",
         research_method=method,
+        canonical_authority_status=raw.get("canonical_authority_status") or "",
+        research_publication_date=_optional(raw.get("research_publication_date")),
+        research_publication_session=_optional(raw.get("research_publication_session")),
         is_canonical=canonical_value == "True",
         rule_version=rule_version,
         warning=_optional(raw.get("warning")),
