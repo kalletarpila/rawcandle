@@ -205,7 +205,6 @@ def _service(
             lock_path=fixture.base.root / "remove-test.lock",
             source_context=source_context,
             downstream_runner=downstream_runner,
-            as_of_date="2026-09-23",
             progress_callback=kwargs.get("progress_callback"),
         )
         fixture.stage_results["test"] = result

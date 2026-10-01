@@ -163,7 +163,15 @@ def test_real_full_workflow_publishes_three_reviewed_identity_patterns(
     assert test_tickers["PSQL"]["after"]["analysis"]["score"]["status"] == "SCORE_NOT_READY"
     assert test_tickers["PSQL"]["after"]["analysis"]["integrity_status"] == "READY"
     assert test_tickers["QVCG"]["after"]["analysis"]["score"]["status"] == "SCORE_FULL"
-    assert test_tickers["QVCG"]["after"]["analysis"]["rv"]["status"] == "VALUATION_FULL"
+    assert test_tickers["QVCG"]["after"]["analysis"]["valuation"] == {
+        "status": "VALUATION_NOT_READY",
+        "reason": "PRICE_FALLBACK_TOO_OLD",
+    }
+    assert test_tickers["QVCG"]["after"]["analysis"]["rv"] == {
+        "included": True,
+        "status": "VALUATION_NOT_READY",
+        "reason": "CURRENT_PRICE_FALLBACK_TOO_OLD",
+    }
     assert production_result["outcome"] == "COMPLETED"
     assert production_result["lock_owner"]
     assert set(production_result["backups"]) == {"provider", "canonical", "analysis"}

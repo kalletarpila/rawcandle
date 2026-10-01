@@ -73,6 +73,12 @@ def _copied_snapshot_paths(tmp_path_factory: pytest.TempPathFactory, label: str)
         destination = target / name
         shutil.copy2(source, destination)
         copied.append(destination)
+    # Keep a deterministic stale-current-price presentation case in the
+    # copied legacy fixture without depending on quarantined LEG TTM rows.
+    with sqlite3.connect(target / "osakedata.db") as connection:
+        connection.execute(
+            "DELETE FROM osakedata WHERE osake='HLX' AND pvm>'2026-08-20'"
+        )
     return SnapshotPaths(*copied)
 
 
@@ -97,7 +103,7 @@ def phase9j_edge_reports(tmp_path_factory: pytest.TempPathFactory) -> dict[str, 
     paths = _copied_snapshot_paths(tmp_path_factory, "phase9j-edge-dbs")
     output = tmp_path_factory.mktemp("phase9j-edges")
     reports = {}
-    for ticker in ("A", "CRMD", "APD", "AIV", "LEG", "AAT", "AGEN", "BNC", "AAOI", "ILLR"):
+    for ticker in ("A", "CRMD", "APD", "AIV", "HLX", "AAT", "AGEN", "AIOT", "AAOI", "ILLR"):
         result = generate_active_company_snapshot(
             paths, ticker=ticker, report_date="2026-09-07", output_dir=output
         )
@@ -337,11 +343,11 @@ def test_phase9j_2_zero_flag_wording_preserves_readiness_scope(
     assert CANDIDATE_ALL_DIAGNOSTICS_CLEAR_TEXT in phase9j_edge_reports["A"]
     assert CANDIDATE_INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT not in phase9j_edge_reports["A"]
 
-    for ticker in ("BNC", "AAT"):
+    for ticker in ("AIOT", "AAT"):
         assert CANDIDATE_INCOMPLETE_DIAGNOSTIC_COVERAGE_TEXT in phase9j_edge_reports[ticker]
         assert ALL_DIAGNOSTICS_CLEAR_TEXT not in phase9j_edge_reports[ticker]
-    assert "FLAG_NOT_READY" in phase9j_edge_reports["BNC"]
-    assert "EVALUATED_CLEAR" in phase9j_edge_reports["BNC"]
+    assert "FLAG_NOT_READY" in phase9j_edge_reports["AIOT"]
+    assert "EVALUATED_CLEAR" in phase9j_edge_reports["AIOT"]
     assert "FLAG_NOT_APPLICABLE" in phase9j_edge_reports["AAT"]
 
 
@@ -496,8 +502,8 @@ def test_phase9i_edge_reports_preserve_na_nm_stale_and_not_applicable(
     assert "| Reported Common Earnings TTM | −47.30M | −47.30M | 2.11B |" in phase9j_edge_reports["APD"]
     assert "| P/E (Reported Common Earnings) | N/M | N/M | 31.71x |" in phase9j_edge_reports["APD"]
     assert "| Reported Common Earnings TTM | N/A | N/A | 554.01M |" in phase9j_edge_reports["AIV"]
-    assert "CURRENT_PRICE_FALLBACK_TOO_OLD" in phase9j_edge_reports["LEG"]
-    assert "| Market cap used | N/A | 1.31B | 1.41B |" in phase9j_edge_reports["LEG"]
+    assert "CURRENT_PRICE_FALLBACK_TOO_OLD" in phase9j_edge_reports["HLX"]
+    assert "| Market cap used | N/A | 1.45B | 1.46B |" in phase9j_edge_reports["HLX"]
     assert "VALUATION_NOT_APPLICABLE" in phase9j_edge_reports["AAT"]
     for report in phase9j_edge_reports.values():
         assert "company_id" not in report
@@ -622,10 +628,10 @@ def test_phase9j_explanations_keep_diagnostic_statuses_distinct(
     assert "Käyttöpääoman muutos jäi tarkastusrajan alle." in phase9j_edge_reports["CRMD"]
     assert "Käyttöpääoman muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas." in phase9j_edge_reports["AGEN"]
     assert "CAPEX-intensiteetin muutoksen tarkastusraja täyttyi; havainto on tarkastettava ehdokas." in phase9j_edge_reports["AAOI"]
-    assert "Vähintään yksi lipun vaatima lähdearvo puuttuu." in phase9j_edge_reports["BNC"]
+    assert "Vähintään yksi lipun vaatima lähdearvo puuttuu." in phase9j_edge_reports["AIOT"]
     assert "Fiscal-ketju ei ole katkeamaton." in phase9j_edge_reports["ILLR"]
     assert "Lippu ei sovellu tähän tuettujen mallien ulkopuoliseen kirjanpitoluokkaan." in phase9j_edge_reports["AAT"]
     assert "EVALUATED_CLEAR" in phase9j_edge_reports["CRMD"]
     assert "EVALUATED_FLAGGED" in phase9j_edge_reports["AGEN"]
-    assert "FLAG_NOT_READY" in phase9j_edge_reports["BNC"]
+    assert "FLAG_NOT_READY" in phase9j_edge_reports["AIOT"]
     assert "FLAG_NOT_APPLICABLE" in phase9j_edge_reports["AAT"]

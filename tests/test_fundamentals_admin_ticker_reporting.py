@@ -75,6 +75,9 @@ def _item(ticker: str, *, source: str, canonical: bool = False, v2: bool = True,
         "market": {"markets": ["usa"]},
         "classification": {"status": "READY", "sector": "Technology", "industry": "Semiconductors"},
         "canonical": {"exists": canonical, "company_id": 1 if canonical and v2 else None},
+        "acquisition": {
+            "authoritative": source not in {"network_required", "network_unavailable"},
+        },
         "rows": list(rows),
     }
 
@@ -100,6 +103,7 @@ def test_preview_contract_preserves_before_source_coverage_classification_and_ta
         "v2_analysis": True,
     }
     assert report["acquisition"] == {
+        "authoritative": True,
         "source": "Verified local archive",
         "source_category": "verified_archive",
         "network_requested": False,
@@ -151,7 +155,7 @@ def test_before_state_and_acquisition_categories_cover_new_local_canonical_and_c
     assert reports["LOCAL"]["before"]["category"] == "Provider data already present"
     assert reports["CANON"]["before"]["category"] == "Canonical identity already present"
     assert reports["FULL"]["before"]["category"] == "Already fully present"
-    assert reports["MISS"]["acquisition"]["source"] == "No usable fundamentals found"
+    assert reports["MISS"]["acquisition"]["source"] == "Provider acquisition failed"
     assert reports["MISS"]["acquisition"]["network_requested"] is True
     assert reports["NET"]["acquisition"]["source"] == "Network"
     assert reports["NET"]["acquisition"]["network_used"] is True
