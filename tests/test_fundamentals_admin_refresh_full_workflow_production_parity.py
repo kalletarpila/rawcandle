@@ -115,7 +115,8 @@ def _yyai_histories(*, current: bool) -> dict[str, list[dict[str, object]]]:
 
 
 def _histories(
-    *, revised: bool, include_yyai: bool = False, revise_bbb: bool = False,
+    *, revised: bool, include_yyai: bool = False, include_trug: bool = False,
+    revise_bbb: bool = False,
 ) -> dict[str, dict[str, list[dict[str, object]]]]:
     output: dict[str, dict[str, list[dict[str, object]]]] = {}
     for ticker in ("AAA", "BBB"):
@@ -137,6 +138,15 @@ def _histories(
             output[ticker][dimension] = rows
     if include_yyai:
         output["YYAI"] = _yyai_histories(current=revised)
+    if include_trug:
+        output["TRUG"] = {}
+        for dimension in ("ARQ", "MRQ"):
+            rows = [_source_row("TRUG", dimension, 2025, quarter) for quarter in range(1, 5)]
+            if dimension == "MRQ" and not revised:
+                rows[0] = dict(rows[0], fiscalperiod="2024-Q4")
+            if dimension == "MRQ" and revised:
+                rows[0] = dict(rows[0], lastupdated="2026-09-20", revenue=777.0)
+            output["TRUG"][dimension] = rows
     return output
 
 
@@ -193,11 +203,15 @@ class FakeSharadarClient:
         return self._result(records)
 
 
-def _insert_identities(canonical: Path, *, include_yyai: bool = False) -> None:
+def _insert_identities(
+    canonical: Path, *, include_yyai: bool = False, include_trug: bool = False,
+) -> None:
     with sqlite3.connect(canonical) as connection:
         identities = [(1, "AAA"), (2, "BBB")]
         if include_yyai:
             identities.append((3, "YYAI"))
+        if include_trug:
+            identities.append((4, "TRUG"))
         for company_id, ticker in identities:
             security_id = company_id * 10
             provider_id = str(company_id * 100)
@@ -223,7 +237,9 @@ def _insert_identities(canonical: Path, *, include_yyai: bool = False) -> None:
             )
 
 
-def _create_market(path: Path, *, include_yyai: bool = False) -> None:
+def _create_market(
+    path: Path, *, include_yyai: bool = False, include_trug: bool = False,
+) -> None:
     with sqlite3.connect(path) as connection:
         connection.executescript(
             """
@@ -261,9 +277,24 @@ def _create_market(path: Path, *, include_yyai: bool = False) -> None:
                     for value in [12 + index / 100]
                 ],
             )
+        if include_trug:
+            connection.execute(
+                "INSERT INTO ticker_meta VALUES('TRUG','usa','Technology','Software')"
+            )
+            connection.executemany(
+                "INSERT INTO osakedata VALUES(?,?,?,?,?,?,?,?)",
+                [
+                    (20_000 + index, "TRUG", "usa", (start + timedelta(days=index)).isoformat(), value, value + 1, value - 1, value + 0.5)
+                    for index in range(630)
+                    for value in [14 + index / 100]
+                ],
+            )
 
 
-def _create_taxonomy(path: Path, *, version: str = "DC_FIXTURE_V1", include_yyai: bool = False) -> None:
+def _create_taxonomy(
+    path: Path, *, version: str = "DC_FIXTURE_V1", include_yyai: bool = False,
+    include_trug: bool = False,
+) -> None:
     with sqlite3.connect(path) as connection:
         connection.executescript(
             f"""
@@ -304,6 +335,13 @@ def _create_taxonomy(path: Path, *, version: str = "DC_FIXTURE_V1", include_yyai
                 INSERT INTO ec_membership VALUES(1003,1,10,110,140,'CONTAINS','ADJACENT',1,1,'ACTIVE','fixture');
                 """
             )
+        if include_trug:
+            connection.executescript(
+                """
+                INSERT INTO ec_entity VALUES(150,1,'TICKER','TRUG','TRUG','TRUG','ACTIVE',3);
+                INSERT INTO ec_membership VALUES(1004,1,10,110,150,'CONTAINS','ADJACENT',1,1,'ACTIVE','fixture');
+                """
+            )
 
 
 @dataclass
@@ -328,6 +366,7 @@ def _semantic_fingerprint(path: Path) -> str:
 
 def _fixture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, include_yyai_hold: bool = False,
+    include_trug_hold: bool = False,
 ) -> WorkflowFixture:
     monkeypatch.setattr(
         taxonomy_locking,
@@ -339,8 +378,16 @@ def _fixture(
     paths = BatchAddTickerPaths(*(db_root / f"{role}.db" for role in ("provider", "canonical", "analysis", "market", "taxonomy")))
     bootstrap_database(paths.provider_db, "fundamentals_provider", PROVIDER_SCHEMA_SQL, NOW)
     bootstrap_database(paths.canonical_db, "fundamentals_v4", CANONICAL_SCHEMA_SQL, NOW)
-    _insert_identities(paths.canonical_db, include_yyai=include_yyai_hold)
-    baseline = _histories(revised=False, include_yyai=include_yyai_hold)
+    _insert_identities(
+        paths.canonical_db,
+        include_yyai=include_yyai_hold,
+        include_trug=include_trug_hold,
+    )
+    baseline = _histories(
+        revised=False,
+        include_yyai=include_yyai_hold,
+        include_trug=include_trug_hold,
+    )
     trusted = {
         ticker: {
             dimension: validate_complete_history(rows, ticker=ticker, dimension=dimension)
@@ -356,11 +403,17 @@ def _fixture(
         identities["YYAI"] = {
             "company_id": 3, "security_id": 30, "provider_security_id": "300",
         }
+    if include_trug_hold:
+        identities["TRUG"] = {
+            "company_id": 4, "security_id": 40, "provider_security_id": "400",
+        }
     replace_provider_histories(paths.provider_db, trusted, identities, applied_at=NOW)
     with sqlite3.connect(paths.provider_db) as connection:
         metadata = [("AAA", "100"), ("BBB", "200")]
         if include_yyai_hold:
             metadata.append(("YYAI", "300"))
+        if include_trug_hold:
+            metadata.append(("TRUG", "400"))
         for ticker, provider_id in metadata:
             connection.execute(
                 "INSERT INTO sharadar_ticker_metadata(table_name,ticker,permaticker,payload_json,fetched_at_utc) "
@@ -372,10 +425,18 @@ def _fixture(
         paths.provider_db,
         paths.canonical_db,
         applied_at=NOW,
-        affected_company_ids=(1, 2, 3) if include_yyai_hold else (1, 2),
+        affected_company_ids=(1, 2, *([3] if include_yyai_hold else []), *([4] if include_trug_hold else [])),
     )
-    _create_market(paths.market_db, include_yyai=include_yyai_hold)
-    _create_taxonomy(paths.taxonomy_db, include_yyai=include_yyai_hold)
+    _create_market(
+        paths.market_db,
+        include_yyai=include_yyai_hold,
+        include_trug=include_trug_hold,
+    )
+    _create_taxonomy(
+        paths.taxonomy_db,
+        include_yyai=include_yyai_hold,
+        include_trug=include_trug_hold,
+    )
     initial = run_full_v2_downstream(
         paths.as_dict(),
         output=tmp_path / "initial-analysis-build",
@@ -385,7 +446,8 @@ def _fixture(
     client = FakeSharadarClient(_histories(
         revised=True,
         include_yyai=include_yyai_hold,
-        revise_bbb=include_yyai_hold,
+        include_trug=include_trug_hold,
+        revise_bbb=include_yyai_hold or include_trug_hold,
     ))
     copied_sources: list[Path] = []
     copy_runtime_backup = refresh_copy_runtime.online_backup
@@ -496,12 +558,15 @@ def _workflow_payload(result: Any) -> dict[str, Any]:
     return json.loads((Path(result.artifact_dir) / "workflow_result.json").read_text(encoding="utf-8"))
 
 
-def _yyai_published_financial_fingerprint(paths: BatchAddTickerPaths) -> dict[str, str]:
+def _published_financial_fingerprint(
+    paths: BatchAddTickerPaths, *, ticker: str, company_id: int,
+) -> dict[str, str]:
     with sqlite3.connect(f"file:{paths.provider_db.resolve()}?mode=ro", uri=True) as connection:
         provider = connection.execute(
             "SELECT s.ticker,s.dimension,s.date,s.reportperiod,s.lastupdated,po.content_hash "
             "FROM provider_observation po JOIN sharadar_fundamental_observation s USING(observation_id) "
-            "WHERE s.ticker='YYAI' ORDER BY s.dimension,s.date,s.reportperiod,s.lastupdated"
+            "WHERE s.ticker=? ORDER BY s.dimension,s.date,s.reportperiod,s.lastupdated",
+            (ticker,),
         ).fetchall()
     with sqlite3.connect(f"file:{paths.canonical_db.resolve()}?mode=ro", uri=True) as connection:
         canonical = connection.execute(
@@ -511,12 +576,17 @@ def _yyai_published_financial_fingerprint(paths: BatchAddTickerPaths) -> dict[st
             "f.total_debt,f.shares_outstanding,f.accounts_receivable,f.inventory,f.accounts_payable,"
             "f.deferred_revenue,f.total_assets "
             "FROM v4_quarter q JOIN v4_quarter_financials f USING(quarter_id) "
-            "WHERE q.company_id=3 ORDER BY q.fiscal_year,q.fiscal_quarter"
+            "WHERE q.company_id=? ORDER BY q.fiscal_year,q.fiscal_quarter",
+            (company_id,),
         ).fetchall()
     return {
         "provider": hashlib.sha256(repr(provider).encode()).hexdigest(),
         "canonical": hashlib.sha256(repr(canonical).encode()).hexdigest(),
     }
+
+
+def _yyai_published_financial_fingerprint(paths: BatchAddTickerPaths) -> dict[str, str]:
+    return _published_financial_fingerprint(paths, ticker="YYAI", company_id=3)
 
 
 def test_refresh_full_workflow_quarantines_yyai_and_publishes_two_safe_tickers(
@@ -574,6 +644,52 @@ def test_refresh_full_workflow_quarantines_yyai_and_publishes_two_safe_tickers(
     assert later["refresh_preview"]["discovery"]["queued_tickers_reevaluated"] == ["YYAI"]
     assert [item["ticker"] for item in later["refresh_preview"]["review_partition"]["held"]] == ["YYAI"]
     assert later["refresh_preview"]["review_queue"]["open_count"] == 1
+    _assert_terminal_lane_cleanup(fixture)
+
+
+def test_refresh_full_workflow_quarantines_local_mrq_fiscal_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch, include_trug_hold=True)
+    held_before = _published_financial_fingerprint(
+        fixture.paths, ticker="TRUG", company_id=4,
+    )
+
+    result = _service(fixture).full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    )
+    workflow = _workflow_payload(result)
+    preview = _stage_payload(workflow, "Preview")
+    test = _stage_payload(workflow, "Test on copies")
+    production = _stage_payload(workflow, "Production update")
+
+    assert result.outcome == "COMPLETED"
+    assert workflow["completed_with_review_holds"] is True
+    assert preview["summary_counts"]["safe_changes"] == 2
+    assert preview["summary_counts"]["held_for_review"] == 1
+    assert preview["summary_counts"]["global_blockers"] == 0
+    held = preview["refresh_preview"]["review_partition"]["held"]
+    assert [item["ticker"] for item in held] == ["TRUG"]
+    assert held[0]["review_type"] == "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION"
+    assert held[0]["locality_proof"]["proven_local_shape"] == "MRQ_FISCAL_REVISION_WITH_ARQ_COMPANION"
+    assert {item["ticker"] for item in test["downstream"]["ticker_changes"]} == {"AAA", "BBB"}
+    assert {item["ticker"] for item in production["ticker_changes"]} == {"AAA", "BBB"}
+    assert production["provider_candidate"]["ticker_count"] == 2
+    assert production["analysis_candidate"]["status"] == "READY"
+    assert production["analysis_candidate"]["invocation_counts"] == {
+        "full_v2_rebuild": 1, "package": 1,
+        "relative_position": 1, "relative_valuation": 1,
+    }
+    assert production["quarantine_evidence"]["held_tickers"] == ["TRUG"]
+    assert _published_financial_fingerprint(
+        fixture.paths, ticker="TRUG", company_id=4,
+    ) == held_before
+    queue_item = _service(fixture).refresh_review_queue()[0]
+    assert queue_item["ticker"] == "TRUG"
+    assert queue_item["status"] == "OPEN"
+    assert queue_item["fiscal_identities"][0]["old_fiscal_identity"]
+    assert queue_item["fiscal_identities"][0]["current_fiscal_identity"]
+    assert queue_item["operator_action"] is None
     _assert_terminal_lane_cleanup(fixture)
 
 

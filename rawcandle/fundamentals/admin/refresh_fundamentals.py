@@ -503,6 +503,13 @@ def resolve_identity(paths: BatchAddTickerPaths, ticker: str) -> dict[str, Any]:
             "WHERE provider='SHARADAR' AND security_id=?",
             (match["security_id"],),
         ).fetchall()
+        has_company = canonical.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='company'"
+        ).fetchone() is not None
+        company_key_row = canonical.execute(
+            "SELECT company_key FROM company WHERE company_id=?",
+            (match["company_id"],),
+        ).fetchone() if has_company else None
     with _readonly(paths.provider_db) as provider:
         metadata = provider.execute(
             "SELECT permaticker,isdelisted,relatedtickers,lastupdated FROM sharadar_ticker_metadata "
@@ -511,6 +518,11 @@ def resolve_identity(paths: BatchAddTickerPaths, ticker: str) -> dict[str, Any]:
         ).fetchall()
     metadata_ids = {str(row["permaticker"]) for row in metadata if row["permaticker"]}
     canonical_ids = {str(row["provider_security_id"]) for row in provider_ids if row["provider_security_id"]}
+    provider_tickers = {
+        str(row["provider_ticker"]).upper()
+        for row in provider_ids
+        if row["provider_ticker"]
+    }
     if len(canonical_ids) != 1:
         return {
             "status": "REVIEW_REQUIRED",
@@ -532,8 +544,10 @@ def resolve_identity(paths: BatchAddTickerPaths, ticker: str) -> dict[str, Any]:
         "ticker": ticker,
         "company_id": int(match["company_id"]),
         "security_id": int(match["security_id"]),
+        "company_key": str(company_key_row["company_key"]) if company_key_row else None,
         "current_ticker": str(match["current_ticker"]),
         "provider_security_id": next(iter(canonical_ids)),
+        "provider_ticker": next(iter(provider_tickers), None),
         "metadata_available": bool(metadata),
     }
 
@@ -950,6 +964,54 @@ def _row_maps(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str, str, st
     return {source_key(row): row for row in rows}
 
 
+def _fiscal_identity_evidence(value: tuple[int, str]) -> dict[str, Any]:
+    return {"fiscal_year": value[0], "fiscal_quarter": value[1]}
+
+
+def _arq_companion_identity_proof(
+    *,
+    reportperiod: str,
+    proposed_identity: tuple[int, str],
+    current: Mapping[str, Mapping[str, Any]],
+    source: Mapping[str, HistoryTrust],
+) -> dict[str, Any]:
+    current_rows = [
+        row for row in current["ARQ"]["rows"]
+        if str(row.get("reportperiod")) == reportperiod
+    ]
+    source_rows = [
+        row for row in source["ARQ"].rows
+        if str(row.get("reportperiod")) == reportperiod
+    ]
+
+    def identities(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        values = sorted({fiscal_identity(row["fiscalperiod"]) for row in rows})
+        return [_fiscal_identity_evidence(value) for value in values]
+
+    def keys(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+        return sorted((source_key_evidence(row) for row in rows), key=lambda item: tuple(item.values()))
+
+    def fingerprints(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+        return sorted(fingerprint(_raw_row(row)) for row in rows)
+
+    expected = _fiscal_identity_evidence(proposed_identity)
+    current_identities = identities(current_rows)
+    source_identities = identities(source_rows)
+    agrees = bool(current_rows and source_rows) and current_identities == [expected] and source_identities == [expected]
+    return {
+        "status": "AGREES" if agrees else "MISSING_OR_CONFLICTING",
+        "dimension": "ARQ",
+        "reportperiod": reportperiod,
+        "proposed_mrq_fiscal_identity": expected,
+        "published_fiscal_identities": current_identities,
+        "source_fiscal_identities": source_identities,
+        "published_source_keys": keys(current_rows),
+        "source_source_keys": keys(source_rows),
+        "published_source_fingerprints": fingerprints(current_rows),
+        "source_source_fingerprints": fingerprints(source_rows),
+    }
+
+
 def detect_fiscal_identity_revisions(
     ticker: str,
     current: Mapping[str, Mapping[str, Any]],
@@ -969,14 +1031,19 @@ def detect_fiscal_identity_revisions(
             if old_fiscal == new_fiscal:
                 continue
             target_keys = source_fiscal_keys.get(new_fiscal, [])
+            old_source_identity = source_key_evidence(old_row)
+            current_source_identity = source_key_evidence(new_row)
             revisions.append({
                 "event": FISCAL_IDENTITY_REVISION,
                 "review_status": REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION,
                 "ticker": ticker,
                 "dimension": dimension,
-                "source_identity": source_key_evidence(new_row),
-                "old_fiscal_identity": {"fiscal_year": old_fiscal[0], "fiscal_quarter": old_fiscal[1]},
-                "current_fiscal_identity": {"fiscal_year": new_fiscal[0], "fiscal_quarter": new_fiscal[1]},
+                "source_identity": current_source_identity,
+                "old_source_identity": old_source_identity,
+                "current_source_identity": current_source_identity,
+                "stable_source_key": old_source_identity == current_source_identity,
+                "old_fiscal_identity": _fiscal_identity_evidence(old_fiscal),
+                "current_fiscal_identity": _fiscal_identity_evidence(new_fiscal),
                 "old_source_fingerprint": fingerprint(_raw_row(old_row)),
                 "current_source_fingerprint": fingerprint(_raw_row(new_row)),
                 "old_lastupdated": old_row.get("lastupdated"),
@@ -985,8 +1052,14 @@ def detect_fiscal_identity_revisions(
                 != fingerprint({field: new_row.get(field) for field in FINANCIAL_FIELDS}),
                 "target_fiscal_identity_already_exists": len(target_keys) > 1,
                 "duplicate_target_source_keys": target_keys if len(target_keys) > 1 else [],
-                "canonical_old_identity": {"fiscal_year": old_fiscal[0], "fiscal_quarter": old_fiscal[1]},
-                "canonical_target_identity": {"fiscal_year": new_fiscal[0], "fiscal_quarter": new_fiscal[1]},
+                "canonical_old_identity": _fiscal_identity_evidence(old_fiscal),
+                "canonical_target_identity": _fiscal_identity_evidence(new_fiscal),
+                "arq_companion_identity_proof": _arq_companion_identity_proof(
+                    reportperiod=str(new_row["reportperiod"]),
+                    proposed_identity=new_fiscal,
+                    current=current,
+                    source=source,
+                ) if dimension == "MRQ" else None,
             })
     return revisions
 

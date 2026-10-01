@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -83,6 +84,140 @@ def _ticker_local_review(ticker: str, company_id: int) -> dict[str, object]:
     for dimension in ("ARQ", "MRQ"):
         review["source_completeness"][dimension]["ticker"] = ticker
     return review
+
+
+def _trug_fiscal_review() -> dict[str, object]:
+    source_identity = {
+        "ticker": "TRUG", "dimension": "MRQ",
+        "date": "2022-03-31", "reportperiod": "2022-03-31",
+    }
+    proposed = {"fiscal_year": 2022, "fiscal_quarter": "Q4"}
+    arq_key = {
+        "ticker": "TRUG", "dimension": "ARQ",
+        "date": "2022-06-24", "reportperiod": "2022-03-31",
+    }
+    event = {
+        "ticker": "TRUG",
+        "dimension": "MRQ",
+        "event": "FISCAL_IDENTITY_REVISION",
+        "review_status": "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION",
+        "source_identity": dict(source_identity),
+        "old_source_identity": dict(source_identity),
+        "current_source_identity": dict(source_identity),
+        "stable_source_key": True,
+        "old_fiscal_identity": {"fiscal_year": 2022, "fiscal_quarter": "Q1"},
+        "current_fiscal_identity": proposed,
+        "old_source_fingerprint": "old-source-fingerprint",
+        "current_source_fingerprint": "new-source-fingerprint",
+        "target_fiscal_identity_already_exists": True,
+        "arq_companion_identity_proof": {
+            "status": "AGREES",
+            "dimension": "ARQ",
+            "reportperiod": "2022-03-31",
+            "proposed_mrq_fiscal_identity": proposed,
+            "published_fiscal_identities": [proposed],
+            "source_fiscal_identities": [proposed],
+            "published_source_keys": [arq_key],
+            "source_source_keys": [arq_key],
+            "published_source_fingerprints": ["published-arq-fingerprint"],
+            "source_source_fingerprints": ["source-arq-fingerprint"],
+        },
+    }
+    return {
+        "ticker": "TRUG",
+        "classification": "REVIEW_REQUIRED",
+        "review_reason": "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION",
+        "identity": {
+            "status": "KNOWN", "ticker": "TRUG", "company_id": 2212,
+            "security_id": 2222, "company_key": "SEC_CIK:0001857086",
+            "current_ticker": "TRUG", "provider_security_id": "636515",
+            "provider_ticker": "TRUG",
+        },
+        "source_completeness": {
+            "ARQ": {"status": "COMPLETE", "ticker": "TRUG", "dimension": "ARQ"},
+            "MRQ": {"status": "COMPLETE", "ticker": "TRUG", "dimension": "MRQ"},
+        },
+        "source_history_action": {"ambiguous_removals": 0},
+        "fiscal_identity_revisions": [event],
+        "source_history_events": [event],
+    }
+
+
+def test_trug_shaped_fiscal_revision_is_local_and_persists_complete_queue_evidence(tmp_path: Path) -> None:
+    scope = classify_review_scope(_trug_fiscal_review())
+    partition = partition_changes([
+        {"ticker": "SAFE", "classification": "HISTORICAL_REVISION"},
+        _trug_fiscal_review(),
+    ])
+
+    assert scope["scope"] == TICKER_LOCAL_REVIEW
+    assert scope["review_type"] == "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION"
+    assert scope["locality_proof"]["proven_local_shape"] == "MRQ_FISCAL_REVISION_WITH_ARQ_COMPANION"
+    assert partition["binding"]["safe_tickers"] == ["SAFE"]
+    assert [item["ticker"] for item in partition["held"]] == ["TRUG"]
+    assert partition["global_blockers"] == []
+
+    stored = RefreshReviewQueue(tmp_path / "review.db").upsert_local(
+        scope, run_id="preview-1", published_binding="published-1",
+    )
+    assert stored["queue_item_id"]
+    assert stored["first_seen_run_id"] == stored["last_seen_run_id"] == "preview-1"
+    assert stored["last_published_binding"] == "published-1"
+    assert stored["review_context"]["identity_binding"]["provider_security_id"] == "636515"
+    fiscal = stored["fiscal_identities"][0]
+    assert fiscal["old_fiscal_identity"] == {"fiscal_year": 2022, "fiscal_quarter": "Q1"}
+    assert fiscal["current_fiscal_identity"] == {"fiscal_year": 2022, "fiscal_quarter": "Q4"}
+    assert fiscal["old_source_identity"] == fiscal["current_source_identity"]
+    assert fiscal["arq_companion_identity_proof"]["status"] == "AGREES"
+    assert present_review_item(stored)["accept_retained_history_eligible"] is False
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value["source_history_events"][0].update(dimension="ARQ"),
+        lambda value: value["source_history_events"][0]["arq_companion_identity_proof"].update(status="MISSING_OR_CONFLICTING"),
+        lambda value: value["source_completeness"]["ARQ"].update(status="INCOMPLETE"),
+        lambda value: value["source_completeness"]["MRQ"].update(status="INCOMPLETE"),
+        lambda value: value["identity"].update(status="REVIEW_REQUIRED"),
+        lambda value: value["identity"].pop("provider_security_id"),
+        lambda value: value["source_history_events"][0].update(ticker="OTHER"),
+        lambda value: value["source_history_events"][0].pop("old_fiscal_identity"),
+        lambda value: value["source_history_events"][0].update(stable_source_key=False),
+        lambda value: value["source_history_events"].append({"event": "UNRELATED", "ticker": "TRUG"}),
+    ],
+)
+def test_unproven_fiscal_revision_shapes_remain_global(mutation) -> None:
+    review = _trug_fiscal_review()
+    mutation(review)
+    assert classify_review_scope(review)["scope"] == GLOBAL_BLOCKING_REVIEW
+
+
+def test_fiscal_partition_fingerprint_rejects_evidence_drift() -> None:
+    first = partition_changes([_trug_fiscal_review()])
+    changed = _trug_fiscal_review()
+    changed["source_history_events"][0]["current_source_fingerprint"] = "drifted"
+    second = partition_changes([changed])
+
+    assert first["partition_fingerprint"] != second["partition_fingerprint"]
+    assert first["held"][0]["source_evidence_fingerprint"] != second["held"][0]["source_evidence_fingerprint"]
+
+
+def test_fiscal_queue_evidence_tamper_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "review.db"
+    queue = RefreshReviewQueue(path)
+    queue.upsert_local(
+        classify_review_scope(_trug_fiscal_review()),
+        run_id="preview-1",
+        published_binding="published-1",
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE refresh_review_queue SET fiscal_identities_json='[]' WHERE ticker='TRUG'"
+        )
+
+    with pytest.raises(ValueError, match="REFRESH_REVIEW_QUEUE_EVIDENCE_TAMPERED"):
+        queue.get("TRUG")
 
 
 def test_yyai_short_window_is_proven_ticker_local_but_aytu_safe_is_not_queued() -> None:

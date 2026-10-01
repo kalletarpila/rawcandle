@@ -14,6 +14,8 @@ GLOBAL_BLOCKING_REVIEW = "GLOBAL_BLOCKING_REVIEW"
 OPEN_STATUSES = ("OPEN", "WAITING_PROVIDER", "RETRY_REEVALUATION")
 ACCEPT_RETAINED_HISTORY = "ACCEPT_RETAINED_HISTORY"
 RETAINED_HISTORY_APPROVAL_VERSION = "REFRESH_RETAINED_HISTORY_APPROVAL_V1"
+FISCAL_IDENTITY_REVISION = "FISCAL_IDENTITY_REVISION"
+REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION = "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION"
 SUPPORTED_ACTIONS = ("WAIT_FOR_PROVIDER", "RETRY_REEVALUATION", ACCEPT_RETAINED_HISTORY)
 BLOCKED_ACTIONS = ("CONFIRM_TRUE_SOURCE_REMOVAL",)
 REASON_EXPLANATIONS = {
@@ -28,6 +30,9 @@ REASON_EXPLANATIONS = {
     ),
     "PROVIDER_ANOMALY_SUSPECTED": (
         "Complete provider response is materially shorter than the expected source window."
+    ),
+    REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION: (
+        "Provider fiscal identity changed on an existing source observation and requires operator review."
     ),
 }
 
@@ -97,6 +102,22 @@ def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
+def _queue_evidence_binding(item: Mapping[str, Any]) -> dict[str, Any]:
+    context = dict(item.get("review_context") or {})
+    return {
+        "ticker": str(item.get("ticker") or "").upper(),
+        "queue_item_id": item.get("queue_item_id"),
+        "review_type": item.get("review_type"),
+        "reason_codes": sorted(str(value) for value in item.get("reason_codes") or []),
+        "affected_source_keys": _ordered_evidence(item.get("affected_source_keys") or []),
+        "fiscal_identities": _ordered_evidence(item.get("fiscal_identities") or []),
+        "source_evidence_fingerprint": item.get("source_evidence_fingerprint"),
+        "published_binding": item.get("last_published_binding"),
+        "identity_binding": dict(context.get("identity_binding") or {}),
+        "locality_proof": dict(context.get("locality_proof") or {}),
+    }
+
+
 def _decode_row(row: sqlite3.Row) -> dict[str, Any]:
     value = dict(row)
     for key in (
@@ -107,6 +128,10 @@ def _decode_row(row: sqlite3.Row) -> dict[str, Any]:
         "review_context_json",
     ):
         value[key.removesuffix("_json")] = json.loads(value.pop(key)) if value.get(key) else None
+    context = value.get("review_context") or {}
+    expected = context.get("queue_evidence_fingerprint")
+    if expected and expected != fingerprint(_queue_evidence_binding(value)):
+        raise ValueError("REFRESH_REVIEW_QUEUE_EVIDENCE_TAMPERED")
     return value
 
 
@@ -120,6 +145,10 @@ def _identity_binding(identity: Mapping[str, Any]) -> dict[str, Any]:
         "ticker": str(identity.get("ticker") or "").upper(),
         "company_id": identity.get("company_id"),
         "security_id": identity.get("security_id"),
+        "company_key": identity.get("company_key"),
+        "current_ticker": identity.get("current_ticker"),
+        "provider_security_id": identity.get("provider_security_id"),
+        "provider_ticker": identity.get("provider_ticker"),
     }
 
 
@@ -135,20 +164,84 @@ def _review_evidence(change: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _valid_fiscal_identity(value: Any) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and isinstance(value.get("fiscal_year"), int)
+        and value.get("fiscal_quarter") in {"Q1", "Q2", "Q3", "Q4"}
+    )
+
+
+def _fiscal_event_evidence(event: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "ticker": event.get("ticker"),
+        "dimension": event.get("dimension"),
+        "source_identity": event.get("source_identity"),
+        "old_source_identity": event.get("old_source_identity"),
+        "current_source_identity": event.get("current_source_identity"),
+        "old_fiscal_identity": event.get("old_fiscal_identity"),
+        "current_fiscal_identity": event.get("current_fiscal_identity"),
+        "old_source_fingerprint": event.get("old_source_fingerprint"),
+        "current_source_fingerprint": event.get("current_source_fingerprint"),
+        "arq_companion_identity_proof": event.get("arq_companion_identity_proof"),
+    }
+
+
+def _arq_companion_agrees(event: Mapping[str, Any], ticker: str) -> bool:
+    proof = event.get("arq_companion_identity_proof")
+    source_identity = event.get("source_identity")
+    proposed = event.get("current_fiscal_identity")
+    if not isinstance(proof, Mapping) or not isinstance(source_identity, Mapping):
+        return False
+    reportperiod = source_identity.get("reportperiod")
+    published_keys = proof.get("published_source_keys")
+    source_keys = proof.get("source_source_keys")
+    published_fingerprints = proof.get("published_source_fingerprints")
+    source_fingerprints = proof.get("source_source_fingerprints")
+    expected_identities = [proposed]
+    return (
+        proof.get("status") == "AGREES"
+        and proof.get("dimension") == "ARQ"
+        and proof.get("reportperiod") == reportperiod
+        and proof.get("proposed_mrq_fiscal_identity") == proposed
+        and proof.get("published_fiscal_identities") == expected_identities
+        and proof.get("source_fiscal_identities") == expected_identities
+        and isinstance(published_keys, list) and bool(published_keys)
+        and isinstance(source_keys, list) and bool(source_keys)
+        and all(
+            isinstance(key, Mapping)
+            and str(key.get("ticker") or "").upper() == ticker
+            and key.get("dimension") == "ARQ"
+            and key.get("reportperiod") == reportperiod
+            for key in [*published_keys, *source_keys]
+        )
+        and isinstance(published_fingerprints, list)
+        and len(published_fingerprints) == len(published_keys)
+        and all(isinstance(value, str) and bool(value) for value in published_fingerprints)
+        and isinstance(source_fingerprints, list)
+        and len(source_fingerprints) == len(source_keys)
+        and all(isinstance(value, str) and bool(value) for value in source_fingerprints)
+    )
+
+
 def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
-    """Prove the narrow, single-ticker short-window shape; fail closed otherwise."""
+    """Prove supported ticker-local review shapes; fail closed otherwise."""
     ticker = str(change.get("ticker") or "").upper()
     evidence = _review_evidence(change)
     events = evidence["events"]
     completeness = evidence.get("source_completeness") or {}
     identity = evidence.get("identity") or {}
-    reasons = sorted({str(item.get("classification_reason") or "") for item in events})
+    reasons = sorted({str(item.get("classification_reason")) for item in events if item.get("classification_reason")})
     event_tickers = {str(item.get("ticker") or "").upper() for item in events}
     allowed_reasons = {
         "BOUNDARY_FISCAL_WINDOW_TOO_SHORT",
         "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW",
     }
-    local = (
+    complete_arq_mrq = (
+        set(completeness) == {"ARQ", "MRQ"}
+        and all((completeness.get(dimension) or {}).get("status") == "COMPLETE" for dimension in ("ARQ", "MRQ"))
+    )
+    source_window_local = (
         change.get("classification") == "REVIEW_REQUIRED"
         and change.get("review_reason") == "AMBIGUOUS_SOURCE_REMOVAL"
         and identity.get("status") == "KNOWN"
@@ -156,8 +249,7 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
         and bool(identity.get("security_id"))
         and events
         and event_tickers == {ticker}
-        and set(completeness) == {"ARQ", "MRQ"}
-        and all((completeness.get(dimension) or {}).get("status") == "COMPLETE" for dimension in ("ARQ", "MRQ"))
+        and complete_arq_mrq
         and set(reasons).issubset(allowed_reasons)
         and "BOUNDARY_FISCAL_WINDOW_TOO_SHORT" in reasons
         and all(item.get("was_oldest_prefix") is True for item in events)
@@ -165,16 +257,62 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
         and all(not item.get("same_fiscal_current_keys") for item in events)
         and all(not item.get("companion_dimension_conflict") for item in events)
     )
+    fiscal_events = [item for item in events if item.get("event") == FISCAL_IDENTITY_REVISION]
+    fiscal_identity_binding = (
+        identity.get("status") == "KNOWN"
+        and str(identity.get("ticker") or "").upper() == ticker
+        and bool(identity.get("company_id"))
+        and bool(identity.get("security_id"))
+        and bool(identity.get("company_key"))
+        and bool(identity.get("current_ticker"))
+        and bool(identity.get("provider_security_id"))
+        and bool(identity.get("provider_ticker"))
+    )
+    fiscal_event_evidence_complete = bool(fiscal_events) and all(
+        item.get("dimension") == "MRQ"
+        and item.get("review_status") == REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION
+        and item.get("stable_source_key") is True
+        and item.get("source_identity") == item.get("old_source_identity")
+        and item.get("source_identity") == item.get("current_source_identity")
+        and isinstance(item.get("source_identity"), Mapping)
+        and str(item["source_identity"].get("ticker") or "").upper() == ticker
+        and item["source_identity"].get("dimension") == "MRQ"
+        and bool(item["source_identity"].get("date"))
+        and bool(item["source_identity"].get("reportperiod"))
+        and _valid_fiscal_identity(item.get("old_fiscal_identity"))
+        and _valid_fiscal_identity(item.get("current_fiscal_identity"))
+        and item.get("old_fiscal_identity") != item.get("current_fiscal_identity")
+        and bool(item.get("old_source_fingerprint"))
+        and bool(item.get("current_source_fingerprint"))
+        and _arq_companion_agrees(item, ticker)
+        for item in fiscal_events
+    )
+    fiscal_revision_local = (
+        change.get("classification") == "REVIEW_REQUIRED"
+        and change.get("review_reason") == REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION
+        and fiscal_identity_binding
+        and complete_arq_mrq
+        and len(fiscal_events) == len(events)
+        and event_tickers == {ticker}
+        and fiscal_event_evidence_complete
+    )
+    local = source_window_local or fiscal_revision_local
     affected_source_keys = [
         item.get("source_identity") for item in events if item.get("source_identity")
     ]
-    fiscal_identities = [
-        item.get("fiscal_identity") for item in events if item.get("fiscal_identity")
-    ]
+    fiscal_identities = (
+        [_fiscal_event_evidence(item) for item in fiscal_events]
+        if fiscal_events
+        else [item.get("fiscal_identity") for item in events if item.get("fiscal_identity")]
+    )
     return {
         "ticker": ticker,
         "scope": TICKER_LOCAL_REVIEW if local else GLOBAL_BLOCKING_REVIEW,
-        "review_type": "PROVIDER_ANOMALY_SUSPECTED" if local else str(change.get("review_reason") or "REVIEW_REQUIRED"),
+        "review_type": (
+            "PROVIDER_ANOMALY_SUSPECTED"
+            if source_window_local
+            else str(change.get("review_reason") or "REVIEW_REQUIRED")
+        ),
         "reason_codes": reasons or [str(change.get("review_reason") or "REVIEW_REQUIRED")],
         "affected_source_keys": affected_source_keys,
         "fiscal_identities": fiscal_identities,
@@ -182,8 +320,20 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
         "identity_binding": _identity_binding(identity),
         "locality_proof": {
             "known_unique_identity": identity.get("status") == "KNOWN",
-            "complete_arq_mrq": all((completeness.get(d) or {}).get("status") == "COMPLETE" for d in ("ARQ", "MRQ")),
+            "complete_arq_mrq": complete_arq_mrq,
             "single_ticker_events": event_tickers == {ticker},
+            "proven_local_shape": (
+                "MRQ_FISCAL_REVISION_WITH_ARQ_COMPANION"
+                if fiscal_revision_local else "OLDEST_PREFIX_SOURCE_WINDOW"
+                if source_window_local else None
+            ),
+            "fiscal_identity_binding_complete": fiscal_identity_binding,
+            "mrq_fiscal_revisions_only": bool(fiscal_events) and len(fiscal_events) == len(events)
+            and all(item.get("dimension") == "MRQ" for item in fiscal_events),
+            "stable_fiscal_source_keys": bool(fiscal_events)
+            and all(item.get("stable_source_key") is True for item in fiscal_events),
+            "arq_companion_identities_agree": bool(fiscal_events)
+            and all(_arq_companion_agrees(item, ticker) for item in fiscal_events),
             "oldest_prefix_only": bool(events) and all(item.get("was_oldest_prefix") is True for item in events),
             "no_cross_ticker_or_companion_conflict": bool(events) and all(not item.get("companion_dimension_conflict") for item in events),
             "no_same_fiscal_replacement_conflict": bool(events) and all(not item.get("same_fiscal_current_keys") for item in events),
@@ -451,6 +601,17 @@ class RefreshReviewQueue:
                 })
             )
             context = _review_context(item)
+            context["queue_evidence_fingerprint"] = fingerprint(_queue_evidence_binding({
+                "ticker": ticker,
+                "queue_item_id": queue_item_id,
+                "review_type": item["review_type"],
+                "reason_codes": item["reason_codes"],
+                "affected_source_keys": item["affected_source_keys"],
+                "fiscal_identities": item["fiscal_identities"],
+                "source_evidence_fingerprint": item["source_evidence_fingerprint"],
+                "last_published_binding": published_binding,
+                "review_context": context,
+            }))
             material = {
                 "source_evidence_fingerprint": item["source_evidence_fingerprint"],
                 "affected_source_keys": _ordered_evidence(item["affected_source_keys"]),

@@ -278,6 +278,23 @@ def test_fiscal_and_financial_revision_are_both_reported() -> None:
     assert event["financial_payload_changed"] is True
 
 
+def test_mrq_fiscal_revision_carries_stable_key_and_matching_arq_companion_proof() -> None:
+    arq = row(fiscalperiod="2026-Q4")
+    old_mrq = row(dimension="MRQ", fiscalperiod="2026-Q1")
+    new_mrq = dict(old_mrq, fiscalperiod="2026-Q4", lastupdated="2026-09-15")
+    current, source = histories(arq, dict(arq), old_mrq=old_mrq, new_mrq=new_mrq)
+
+    event = compare_ticker_histories("TEST", current, source)["fiscal_identity_revisions"][0]
+
+    assert event["dimension"] == "MRQ"
+    assert event["stable_source_key"] is True
+    assert event["old_source_identity"] == event["current_source_identity"]
+    assert event["arq_companion_identity_proof"]["status"] == "AGREES"
+    assert event["arq_companion_identity_proof"]["published_fiscal_identities"] == [
+        {"fiscal_year": 2026, "fiscal_quarter": "Q4"}
+    ]
+
+
 def test_fiscal_revision_reports_duplicate_target_but_still_reviews_coherent_case() -> None:
     old = row(fiscalperiod="2026-Q1")
     target = row(filing_date="2026-05-20", reportperiod="2026-04-30", fiscalperiod="2026-Q4")
