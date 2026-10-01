@@ -547,8 +547,17 @@ def build_fundamentals_admin_page(
         fiscal = []
         for identity in item.get("fiscal_identities") or []:
             if isinstance(identity, dict):
+                old = identity.get("old_fiscal_identity") or identity
+                current = identity.get("current_fiscal_identity") or identity
+                source = identity.get("source_identity") or {}
+                proof = identity.get("arq_companion_identity_proof") or {}
                 fiscal.append(
-                    f"{identity.get('fiscal_year', '?')} {identity.get('fiscal_quarter', '?')}"
+                    f"{identity.get('dimension') or source.get('dimension') or '?'} "
+                    f"{old.get('fiscal_year', '?')} {old.get('fiscal_quarter', '?')} -> "
+                    f"{current.get('fiscal_year', '?')} {current.get('fiscal_quarter', '?')} "
+                    f"({source.get('reportperiod') or source.get('date') or '?'}, "
+                    f"financial payload changed: {identity.get('financial_payload_changed', '?')}, "
+                    f"ARQ companion: {proof.get('status') or '?'})"
                 )
             else:
                 fiscal.append(str(identity))
@@ -684,6 +693,67 @@ def build_fundamentals_admin_page(
         if hasattr(page, "update"):
             page.update()
 
+    def open_fiscal_revision_confirmation(item: dict[str, Any]) -> None:
+        if not item.get("accept_fiscal_revision_eligible"):
+            review_queue_status_field.value = str(
+                item.get("accept_fiscal_revision_reason")
+                or "Fiscal-revision approval is not eligible."
+            )
+            if hasattr(page, "update"):
+                page.update()
+            return
+        ticker = str(item.get("ticker") or "UNKNOWN")
+        events = item.get("fiscal_revision_events") or []
+        event_lines = []
+        for event in events:
+            old = event.get("old_fiscal_identity") or {}
+            current = event.get("current_fiscal_identity") or {}
+            source = event.get("source_identity") or {}
+            proof = event.get("arq_companion_identity_proof") or {}
+            event_lines.append(
+                f"{event.get('dimension') or '?'} {source.get('reportperiod') or source.get('date') or '?'}: "
+                f"{old.get('fiscal_year', '?')} {old.get('fiscal_quarter', '?')} -> "
+                f"{current.get('fiscal_year', '?')} {current.get('fiscal_quarter', '?')}; "
+                f"financial payload changed: {event.get('financial_payload_changed', '?')}; "
+                f"ARQ companion: {proof.get('status') or '?'}"
+            )
+        comment = ft.TextField(label="Operator comment (optional)", max_length=240, multiline=True, min_lines=1, max_lines=3)
+
+        def confirm(_event: Any) -> None:
+            close_dialog()
+            apply_review_action(
+                ticker,
+                "ACCEPT_FISCAL_IDENTITY_REVISION",
+                evidence={"source": "FUNDAMENTALS_ADMIN_UI", "comment": str(comment.value or "").strip()},
+            )
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Accept fiscal revision?"),
+            content=ft.Column([
+                ft.Text(
+                    f"Ticker: {ticker}\nFiscal revision events: {len(events)}\n"
+                    f"Review reason: {item.get('classification') or 'UNKNOWN'}\n"
+                    + "\n".join(event_lines)
+                    + "\n\nThis does not modify Production immediately. The next Refresh will re-fetch "
+                    "and revalidate source evidence. Publication occurs only through normal "
+                    "Preview -> Test -> Production. Any evidence drift invalidates this approval."
+                ),
+                comment,
+            ], tight=True),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda _event: close_dialog()),
+                ft.ElevatedButton("Accept fiscal revision", icon=ft.Icons.CHECK_CIRCLE_OUTLINE, on_click=confirm),
+            ],
+        )
+        setattr(page, "dialog", dialog)
+        if hasattr(page, "open"):
+            page.open(dialog)
+        else:
+            dialog.open = True
+        if hasattr(page, "update"):
+            page.update()
+
     def render_review_queue(items: list[dict[str, Any]]) -> None:
         rows = []
         for item in items:
@@ -757,6 +827,16 @@ def build_fundamentals_admin_page(
                             on_click=lambda _event, selected=dict(item): (
                                 open_retained_history_confirmation(selected)
                             ),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.RULE,
+                            tooltip=(
+                                "Accept fiscal revision"
+                                if item.get("accept_fiscal_revision_eligible")
+                                else str(item.get("accept_fiscal_revision_reason") or "Fiscal-revision approval unavailable")
+                            ),
+                            disabled=not bool(item.get("accept_fiscal_revision_eligible")),
+                            on_click=lambda _event, selected=dict(item): open_fiscal_revision_confirmation(selected),
                         ),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,

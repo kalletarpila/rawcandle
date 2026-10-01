@@ -698,7 +698,7 @@ class FundamentalsAdminUIService:
                 )
                 for item in queue.list_items(include_resolved=not active_only)
             ]
-        except (sqlite3.DatabaseError, OSError):
+        except (sqlite3.DatabaseError, OSError, ValueError):
             return {
                 "status": "ERROR",
                 "items": [],
@@ -714,7 +714,7 @@ class FundamentalsAdminUIService:
             return None
         try:
             item = module.RefreshReviewQueue(path).get(ticker)
-        except (sqlite3.DatabaseError, OSError):
+        except (sqlite3.DatabaseError, OSError, ValueError):
             return None
         return (
             module.present_review_item(

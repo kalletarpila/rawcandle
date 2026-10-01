@@ -48,8 +48,10 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     source_schema,
 )
 from rawcandle.fundamentals.admin.refresh_review_queue import (
+    ACCEPT_FISCAL_IDENTITY_REVISION,
     ACCEPT_RETAINED_HISTORY,
     classify_review_scope,
+    match_fiscal_revision_approval,
     match_retained_history_approval,
     partition_artifact_fingerprint,
     partition_changes,
@@ -216,7 +218,10 @@ def revalidate_bound_source(
     }
     approved_tickers = {
         ticker for ticker, item in preview_changes.items()
-        if (item.get("retained_history_approval") or {}).get("applied")
+        if (
+            (item.get("retained_history_approval") or {}).get("applied")
+            or (item.get("fiscal_revision_approval") or {}).get("applied")
+        )
     }
     evaluation_tickers = sorted(
         set(discovery["changed_tickers"]) | held_tickers | approved_tickers
@@ -239,42 +244,49 @@ def revalidate_bound_source(
         current = {dimension: load_current_history(paths.provider_db, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
         item = compare_ticker_histories(ticker, current, histories[ticker])
         item["identity"] = identity
-        preview_approval = (
-            preview_changes.get(ticker, {}).get("retained_history_approval") or {}
-        )
+        preview_change = preview_changes.get(ticker, {})
+        preview_approval = preview_change.get("retained_history_approval") or {}
+        fiscal_preview_approval = preview_change.get("fiscal_revision_approval") or {}
         applied_approval: Mapping[str, Any] | None = None
-        if preview_approval.get("applied"):
-            approved_binding = preview_approval.get("approved_binding") or {}
+        applied_fiscal_approval: Mapping[str, Any] | None = None
+        selected_approval = preview_approval if preview_approval.get("applied") else fiscal_preview_approval
+        if selected_approval.get("applied"):
+            is_fiscal = selected_approval is fiscal_preview_approval
+            action = ACCEPT_FISCAL_IDENTITY_REVISION if is_fiscal else ACCEPT_RETAINED_HISTORY
+            approved_binding = selected_approval.get("approved_binding") or {}
             synthetic_queue_item = {
                 "ticker": ticker,
                 "queue_item_id": approved_binding.get("queue_item_id"),
                 "status": "RETRY_REEVALUATION",
-                "operator_action": ACCEPT_RETAINED_HISTORY,
+                "operator_action": action,
                 "resolution_evidence": {
-                    "resolution_action": ACCEPT_RETAINED_HISTORY,
-                    "resolution_contract_version": preview_approval.get(
+                    "resolution_action": action,
+                    "resolution_contract_version": selected_approval.get(
                         "resolution_contract_version"
                     ),
                     "binding": approved_binding,
-                    "approval_evidence_fingerprint": preview_approval.get(
+                    "approval_evidence_fingerprint": selected_approval.get(
                         "approval_evidence_fingerprint"
                     ),
                 },
             }
-            applied_approval = match_retained_history_approval(
-                synthetic_queue_item,
-                classify_review_scope(item),
-                published_binding=state.successful_run_id,
-            )
-            if not applied_approval["applied"]:
+            matcher = match_fiscal_revision_approval if is_fiscal else match_retained_history_approval
+            matched = matcher(synthetic_queue_item, classify_review_scope(item), published_binding=state.successful_run_id)
+            if not matched["applied"]:
                 raise StaleRefreshPreview(
-                    "STALE_RETAINED_HISTORY_APPROVAL_EVIDENCE"
+                    "STALE_FISCAL_REVISION_APPROVAL_EVIDENCE"
+                    if is_fiscal else "STALE_RETAINED_HISTORY_APPROVAL_EVIDENCE"
                 )
+            if is_fiscal:
+                applied_fiscal_approval = matched
+            else:
+                applied_approval = matched
             item = compare_ticker_histories(
                 ticker,
                 current,
                 histories[ticker],
                 retained_history_approval=applied_approval,
+                fiscal_revision_approval=applied_fiscal_approval,
             )
         if all("rows" in current.get(dimension, {}) for dimension in REFRESH_DIMENSIONS):
             merge_plans[ticker] = build_source_history_merge(

@@ -7,11 +7,14 @@ from pathlib import Path
 import pytest
 
 from rawcandle.fundamentals.admin.refresh_review_queue import (
+    ACCEPT_FISCAL_IDENTITY_REVISION,
     ACCEPT_RETAINED_HISTORY,
     GLOBAL_BLOCKING_REVIEW,
     TICKER_LOCAL_REVIEW,
     RefreshReviewQueue,
     classify_review_scope,
+    fiscal_revision_approval_eligibility,
+    match_fiscal_revision_approval,
     match_retained_history_approval,
     partition_changes,
     present_review_item,
@@ -109,6 +112,7 @@ def _trug_fiscal_review() -> dict[str, object]:
         "current_fiscal_identity": proposed,
         "old_source_fingerprint": "old-source-fingerprint",
         "current_source_fingerprint": "new-source-fingerprint",
+        "financial_payload_changed": False,
         "target_fiscal_identity_already_exists": True,
         "arq_companion_identity_proof": {
             "status": "AGREES",
@@ -170,6 +174,113 @@ def test_trug_shaped_fiscal_revision_is_local_and_persists_complete_queue_eviden
     assert fiscal["old_source_identity"] == fiscal["current_source_identity"]
     assert fiscal["arq_companion_identity_proof"]["status"] == "AGREES"
     assert present_review_item(stored)["accept_retained_history_eligible"] is False
+    presented = present_review_item(stored)
+    assert presented["accept_fiscal_revision_eligible"] is True
+    assert presented["fiscal_revision_event_count"] == 1
+
+
+def test_fiscal_revision_approval_is_exact_idempotent_and_writes_no_financial_db(
+    tmp_path: Path,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_trug_fiscal_review())
+    stored = queue.upsert_local(scope, run_id="preview-1", published_binding="published-1")
+    assert fiscal_revision_approval_eligibility(stored)["eligible"] is True
+    financial_paths = [tmp_path / name for name in ("provider.db", "canonical.db", "analysis.db")]
+    for index, path in enumerate(financial_paths):
+        path.write_bytes(f"unchanged-{index}".encode())
+    before = {path: path.read_bytes() for path in financial_paths}
+
+    first = queue.apply_action(
+        "TRUG", ACCEPT_FISCAL_IDENTITY_REVISION,
+        evidence={"source": "fixture", "comment": "reviewed"},
+    )
+    second = queue.apply_action("TRUG", ACCEPT_FISCAL_IDENTITY_REVISION)
+
+    assert second == first
+    assert first["status"] == "RETRY_REEVALUATION"
+    assert first["resolution_evidence"]["binding"]["queue_evidence_fingerprint"]
+    assert first["resolution_evidence"]["binding"]["fiscal_identities"][0]["old_source_fingerprint"]
+    assert {path: path.read_bytes() for path in financial_paths} == before
+    matched = match_fiscal_revision_approval(first, scope, published_binding="published-1")
+    assert matched["applied"] is True
+    consumed = queue.mark_approval_consumed("TRUG", run_id="preview-2")
+    assert consumed["status"] == "RESOLVED"
+    assert [item["event_type"] for item in queue.audit_history("TRUG")] == [
+        "FISCAL_REVISION_APPROVED", "FISCAL_REVISION_APPROVAL_CONSUMED",
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda scope: scope["affected_source_keys"][0].update(date="2022-04-01"),
+        lambda scope: scope["fiscal_identities"][0]["current_fiscal_identity"].update(fiscal_quarter="Q3"),
+        lambda scope: scope["fiscal_identities"][0].update(current_source_fingerprint="drifted"),
+        lambda scope: scope["fiscal_identities"][0]["arq_companion_identity_proof"].update(status="MISSING_OR_CONFLICTING"),
+        lambda scope: scope["identity_binding"].update(company_id=999),
+        lambda scope: scope.update(scope=GLOBAL_BLOCKING_REVIEW),
+    ],
+)
+def test_fiscal_revision_approval_fails_closed_on_exact_evidence_drift(
+    tmp_path: Path, mutation,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_trug_fiscal_review())
+    queue.upsert_local(scope, run_id="preview-1", published_binding="published-1")
+    approved = queue.apply_action("TRUG", ACCEPT_FISCAL_IDENTITY_REVISION)
+    changed = json.loads(json.dumps(scope))
+    mutation(changed)
+
+    result = match_fiscal_revision_approval(
+        approved, changed, published_binding="published-1",
+    )
+    assert result["applied"] is False
+    assert result["reason"] == "FISCAL_REVISION_APPROVAL_EVIDENCE_DRIFT"
+
+
+def test_fiscal_revision_drift_reopens_queue_and_preserves_audit(tmp_path: Path) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_trug_fiscal_review())
+    queue.upsert_local(scope, run_id="preview-1", published_binding="published-1")
+    queue.apply_action("TRUG", ACCEPT_FISCAL_IDENTITY_REVISION)
+    changed = json.loads(json.dumps(scope))
+    changed["fiscal_identities"][0]["current_source_fingerprint"] = "drifted"
+
+    reopened = queue.upsert_local(
+        changed, run_id="preview-2", published_binding="published-1",
+    )
+
+    assert reopened["status"] == "OPEN"
+    assert reopened["operator_action"] is None
+    assert reopened["resolution_evidence"] is None
+    assert [item["event_type"] for item in queue.audit_history("TRUG")] == [
+        "FISCAL_REVISION_APPROVED", "FISCAL_REVISION_APPROVAL_INVALIDATED",
+    ]
+
+
+def test_fiscal_revision_action_is_ineligible_for_wrong_or_incomplete_scope(
+    tmp_path: Path,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    source_window = queue.upsert_local(
+        classify_review_scope(_yyai_review()),
+        run_id="preview-1",
+        published_binding="published-1",
+    )
+    assert fiscal_revision_approval_eligibility(source_window)["eligible"] is False
+
+    fiscal = RefreshReviewQueue(tmp_path / "fiscal.db").upsert_local(
+        classify_review_scope(_trug_fiscal_review()),
+        run_id="preview-1",
+        published_binding="published-1",
+    )
+    incomplete = json.loads(json.dumps(fiscal))
+    incomplete["fiscal_identities"][0]["arq_companion_identity_proof"] = None
+    assert fiscal_revision_approval_eligibility(incomplete)["eligible"] is False
+    global_item = json.loads(json.dumps(fiscal))
+    global_item["review_context"]["scope"] = GLOBAL_BLOCKING_REVIEW
+    assert fiscal_revision_approval_eligibility(global_item)["eligible"] is False
 
 
 @pytest.mark.parametrize(
@@ -204,7 +315,8 @@ def test_fiscal_partition_fingerprint_rejects_evidence_drift() -> None:
 
 
 def test_fiscal_queue_evidence_tamper_is_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "review.db"
+    run_root = tmp_path / "runs"
+    path = queue_path_for_run_root(run_root)
     queue = RefreshReviewQueue(path)
     queue.upsert_local(
         classify_review_scope(_trug_fiscal_review()),
@@ -218,6 +330,12 @@ def test_fiscal_queue_evidence_tamper_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="REFRESH_REVIEW_QUEUE_EVIDENCE_TAMPERED"):
         queue.get("TRUG")
+    service = FundamentalsAdminUIService(
+        run_root=run_root,
+        recover_publication_on_startup=False,
+        operation_lock_path=tmp_path / "ui.lock",
+    )
+    assert service.list_refresh_review_queue()["status"] == "ERROR"
 
 
 def test_yyai_short_window_is_proven_ticker_local_but_aytu_safe_is_not_queued() -> None:

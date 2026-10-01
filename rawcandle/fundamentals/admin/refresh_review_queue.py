@@ -14,9 +14,14 @@ GLOBAL_BLOCKING_REVIEW = "GLOBAL_BLOCKING_REVIEW"
 OPEN_STATUSES = ("OPEN", "WAITING_PROVIDER", "RETRY_REEVALUATION")
 ACCEPT_RETAINED_HISTORY = "ACCEPT_RETAINED_HISTORY"
 RETAINED_HISTORY_APPROVAL_VERSION = "REFRESH_RETAINED_HISTORY_APPROVAL_V1"
+ACCEPT_FISCAL_IDENTITY_REVISION = "ACCEPT_FISCAL_IDENTITY_REVISION"
+FISCAL_REVISION_APPROVAL_VERSION = "REFRESH_FISCAL_REVISION_APPROVAL_V1"
 FISCAL_IDENTITY_REVISION = "FISCAL_IDENTITY_REVISION"
 REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION = "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION"
-SUPPORTED_ACTIONS = ("WAIT_FOR_PROVIDER", "RETRY_REEVALUATION", ACCEPT_RETAINED_HISTORY)
+SUPPORTED_ACTIONS = (
+    "WAIT_FOR_PROVIDER", "RETRY_REEVALUATION", ACCEPT_RETAINED_HISTORY,
+    ACCEPT_FISCAL_IDENTITY_REVISION,
+)
 BLOCKED_ACTIONS = ("CONFIRM_TRUE_SOURCE_REMOVAL",)
 REASON_EXPLANATIONS = {
     "BOUNDARY_FISCAL_WINDOW_TOO_SHORT": (
@@ -183,6 +188,7 @@ def _fiscal_event_evidence(event: Mapping[str, Any]) -> dict[str, Any]:
         "current_fiscal_identity": event.get("current_fiscal_identity"),
         "old_source_fingerprint": event.get("old_source_fingerprint"),
         "current_source_fingerprint": event.get("current_source_fingerprint"),
+        "financial_payload_changed": event.get("financial_payload_changed"),
         "arq_companion_identity_proof": event.get("arq_companion_identity_proof"),
     }
 
@@ -361,6 +367,24 @@ def _review_context(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _review_context_with_integrity(
+    item: Mapping[str, Any], *, queue_item_id: str, published_binding: str | None,
+) -> dict[str, Any]:
+    context = _review_context(item)
+    context["queue_evidence_fingerprint"] = fingerprint(_queue_evidence_binding({
+        "ticker": item.get("ticker"),
+        "queue_item_id": queue_item_id,
+        "review_type": item.get("review_type"),
+        "reason_codes": item.get("reason_codes"),
+        "affected_source_keys": item.get("affected_source_keys"),
+        "fiscal_identities": item.get("fiscal_identities"),
+        "source_evidence_fingerprint": item.get("source_evidence_fingerprint"),
+        "last_published_binding": published_binding,
+        "review_context": context,
+    }))
+    return context
+
+
 def _approval_binding(item: Mapping[str, Any]) -> dict[str, Any]:
     context = dict(item.get("review_context") or {})
     return {
@@ -370,6 +394,7 @@ def _approval_binding(item: Mapping[str, Any]) -> dict[str, Any]:
         "affected_source_keys": _ordered_evidence(item.get("affected_source_keys") or []),
         "fiscal_identities": _ordered_evidence(item.get("fiscal_identities") or []),
         "published_binding": item.get("last_published_binding"),
+        "queue_evidence_fingerprint": context.get("queue_evidence_fingerprint"),
         "review_scope": context.get("scope"),
         "review_type": context.get("review_type") or item.get("review_type"),
         "reason_codes": sorted(
@@ -463,7 +488,11 @@ def match_retained_history_approval(
         "affected_source_keys": current_scope.get("affected_source_keys"),
         "fiscal_identities": current_scope.get("fiscal_identities"),
         "last_published_binding": published_binding,
-        "review_context": _review_context(current_scope),
+        "review_context": _review_context_with_integrity(
+            current_scope,
+            queue_item_id=str(queue_item.get("queue_item_id") or ""),
+            published_binding=published_binding,
+        ),
     }
     current_binding = _approval_binding(current_item)
     if dict(approved_binding) != current_binding:
@@ -481,6 +510,117 @@ def match_retained_history_approval(
         "approved_fiscal_identities": current_binding["fiscal_identities"],
         "operator_reviewed": True,
         "resolution_contract_version": RETAINED_HISTORY_APPROVAL_VERSION,
+    }
+
+
+def fiscal_revision_approval_eligibility(
+    item: Mapping[str, Any], *, publication_blocked: bool = False,
+) -> dict[str, Any]:
+    context = dict(item.get("review_context") or {})
+    locality = dict(context.get("locality_proof") or {})
+    identity = dict(context.get("identity_binding") or {})
+    events = list(item.get("fiscal_identities") or [])
+    affected = _ordered_evidence(item.get("affected_source_keys") or [])
+    expected_queue_fingerprint = context.get("queue_evidence_fingerprint")
+    required_identity = (
+        "company_id", "security_id", "company_key", "current_ticker",
+        "provider_security_id", "provider_ticker",
+    )
+    event_evidence_complete = bool(events) and all(
+        isinstance(event, Mapping)
+        and event.get("dimension") == "MRQ"
+        and event.get("source_identity") == event.get("old_source_identity")
+        and event.get("source_identity") == event.get("current_source_identity")
+        and _valid_fiscal_identity(event.get("old_fiscal_identity"))
+        and _valid_fiscal_identity(event.get("current_fiscal_identity"))
+        and event.get("old_fiscal_identity") != event.get("current_fiscal_identity")
+        and bool(event.get("old_source_fingerprint"))
+        and bool(event.get("current_source_fingerprint"))
+        and isinstance(event.get("financial_payload_changed"), bool)
+        and _arq_companion_agrees(event, str(item.get("ticker") or "").upper())
+        for event in events
+    )
+    event_keys = _ordered_evidence(
+        event.get("source_identity") for event in events if isinstance(event, Mapping)
+    )
+    checks = (
+        (not publication_blocked, "Publication or recovery safety blocks review actions."),
+        (str(item.get("status")) in OPEN_STATUSES, "Review item is not unresolved."),
+        (item.get("review_type") == REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION, "Review item is not a fiscal-identity revision."),
+        (context.get("scope") == TICKER_LOCAL_REVIEW, "Review scope is not ticker-local."),
+        (context.get("review_type") == REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION, "Review context is not a fiscal-identity revision."),
+        (locality.get("proven_local_shape") == "MRQ_FISCAL_REVISION_WITH_ARQ_COMPANION", "Fiscal locality shape is not proven."),
+        (locality.get("fiscal_identity_binding_complete") is True, "Fiscal identity binding is incomplete."),
+        (locality.get("mrq_fiscal_revisions_only") is True, "Evidence is not limited to MRQ fiscal revisions."),
+        (locality.get("stable_fiscal_source_keys") is True, "Fiscal source keys are not stable."),
+        (locality.get("arq_companion_identities_agree") is True, "ARQ companion identity does not agree."),
+        (identity.get("status") == "KNOWN" and all(identity.get(key) for key in required_identity), "Stable provider/company/security identity is incomplete."),
+        (bool(item.get("queue_item_id")), "Durable queue item identity is missing."),
+        (bool(affected), "Affected source keys are missing."),
+        (event_evidence_complete, "Fiscal revision evidence is incomplete."),
+        (affected == event_keys and len(affected) == len(events), "Affected source keys do not exactly match fiscal events."),
+        (bool(item.get("source_evidence_fingerprint")), "Evidence fingerprint is missing."),
+        (bool(item.get("last_published_binding")), "Published-state binding is missing."),
+        (bool(expected_queue_fingerprint), "Queue evidence fingerprint is missing."),
+        (expected_queue_fingerprint == fingerprint(_queue_evidence_binding(item)), "Queue evidence fingerprint is invalid."),
+    )
+    for passed, reason in checks:
+        if not passed:
+            return {"eligible": False, "reason": reason}
+    return {
+        "eligible": True,
+        "reason": "Exact ticker-local fiscal-revision evidence is eligible.",
+        "event_count": len(events),
+    }
+
+
+def match_fiscal_revision_approval(
+    queue_item: Mapping[str, Any] | None,
+    current_scope: Mapping[str, Any],
+    *,
+    published_binding: str | None,
+) -> dict[str, Any]:
+    if not queue_item or queue_item.get("operator_action") != ACCEPT_FISCAL_IDENTITY_REVISION:
+        return {"applied": False, "reason": "NO_ACTIVE_FISCAL_REVISION_APPROVAL"}
+    if queue_item.get("status") != "RETRY_REEVALUATION":
+        return {"applied": False, "reason": "APPROVAL_NOT_PENDING_REEVALUATION"}
+    approval = queue_item.get("resolution_evidence") or {}
+    if (
+        approval.get("resolution_action") != ACCEPT_FISCAL_IDENTITY_REVISION
+        or approval.get("resolution_contract_version") != FISCAL_REVISION_APPROVAL_VERSION
+    ):
+        return {"applied": False, "reason": "APPROVAL_EVIDENCE_MISSING"}
+    approved_binding = approval.get("binding")
+    if not isinstance(approved_binding, Mapping) or approval.get("approval_evidence_fingerprint") != fingerprint(approved_binding):
+        return {"applied": False, "reason": "APPROVAL_FINGERPRINT_INVALID"}
+    current_item = {
+        **dict(queue_item),
+        "source_evidence_fingerprint": current_scope.get("source_evidence_fingerprint"),
+        "affected_source_keys": current_scope.get("affected_source_keys"),
+        "fiscal_identities": current_scope.get("fiscal_identities"),
+        "last_published_binding": published_binding,
+        "review_context": _review_context_with_integrity(
+            current_scope,
+            queue_item_id=str(queue_item.get("queue_item_id") or ""),
+            published_binding=published_binding,
+        ),
+    }
+    current_binding = _approval_binding(current_item)
+    if dict(approved_binding) != current_binding:
+        return {
+            "applied": False,
+            "reason": "FISCAL_REVISION_APPROVAL_EVIDENCE_DRIFT",
+            "current_binding_fingerprint": fingerprint(current_binding),
+        }
+    return {
+        "applied": True,
+        "reason": "EXACT_FISCAL_REVISION_APPROVAL_MATCH",
+        "approval_evidence_fingerprint": approval.get("approval_evidence_fingerprint"),
+        "approved_binding": dict(approved_binding),
+        "approved_source_keys": current_binding["affected_source_keys"],
+        "approved_fiscal_identities": current_binding["fiscal_identities"],
+        "operator_reviewed": True,
+        "resolution_contract_version": FISCAL_REVISION_APPROVAL_VERSION,
     }
 
 
@@ -544,6 +684,9 @@ def present_review_item(
     eligibility = retained_history_approval_eligibility(
         item, publication_blocked=publication_blocked,
     )
+    fiscal_eligibility = fiscal_revision_approval_eligibility(
+        item, publication_blocked=publication_blocked,
+    )
     approval = item.get("resolution_evidence") or {}
     return {
         **dict(item),
@@ -558,6 +701,10 @@ def present_review_item(
         "currently_held": status in OPEN_STATUSES,
         "accept_retained_history_eligible": eligibility["eligible"],
         "accept_retained_history_reason": eligibility["reason"],
+        "accept_fiscal_revision_eligible": fiscal_eligibility["eligible"],
+        "accept_fiscal_revision_reason": fiscal_eligibility["reason"],
+        "fiscal_revision_event_count": len(fiscal_identities),
+        "fiscal_revision_events": fiscal_identities,
         "approval_timestamp_utc": approval.get("operator_timestamp_utc"),
         "approval_operator_evidence": approval.get("operator_evidence"),
         "approved_source_count": len(
@@ -600,18 +747,9 @@ class RefreshReviewQueue:
                     "first_seen_at_utc": prior_item.get("first_seen_at_utc") if prior_item else now,
                 })
             )
-            context = _review_context(item)
-            context["queue_evidence_fingerprint"] = fingerprint(_queue_evidence_binding({
-                "ticker": ticker,
-                "queue_item_id": queue_item_id,
-                "review_type": item["review_type"],
-                "reason_codes": item["reason_codes"],
-                "affected_source_keys": item["affected_source_keys"],
-                "fiscal_identities": item["fiscal_identities"],
-                "source_evidence_fingerprint": item["source_evidence_fingerprint"],
-                "last_published_binding": published_binding,
-                "review_context": context,
-            }))
+            context = _review_context_with_integrity(
+                item, queue_item_id=queue_item_id, published_binding=published_binding,
+            )
             material = {
                 "source_evidence_fingerprint": item["source_evidence_fingerprint"],
                 "affected_source_keys": _ordered_evidence(item["affected_source_keys"]),
@@ -655,11 +793,15 @@ class RefreshReviewQueue:
                     queue_item_id, _json(context),
                 ),
             )
-            if evidence_drift and prior_item.get("operator_action") == ACCEPT_RETAINED_HISTORY:
+            approval_events = {
+                ACCEPT_RETAINED_HISTORY: "RETAINED_HISTORY_APPROVAL_INVALIDATED",
+                ACCEPT_FISCAL_IDENTITY_REVISION: "FISCAL_REVISION_APPROVAL_INVALIDATED",
+            }
+            if evidence_drift and prior_item.get("operator_action") in approval_events:
                 self._append_audit(
                     connection,
                     ticker=ticker,
-                    event_type="RETAINED_HISTORY_APPROVAL_INVALIDATED",
+                    event_type=approval_events[str(prior_item.get("operator_action"))],
                     run_id=run_id,
                     evidence={
                         "reason": "MATERIAL_EVIDENCE_DRIFT",
@@ -720,13 +862,18 @@ class RefreshReviewQueue:
             if row is None or str(row["status"]) == "RESOLVED":
                 raise ValueError("REFRESH_REVIEW_ITEM_NOT_OPEN")
             item = _decode_row(row)
-            if normalized == ACCEPT_RETAINED_HISTORY:
-                eligibility = retained_history_approval_eligibility(
-                    item, publication_blocked=publication_blocked,
+            if normalized in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION):
+                is_fiscal = normalized == ACCEPT_FISCAL_IDENTITY_REVISION
+                eligibility = (
+                    fiscal_revision_approval_eligibility(
+                        item, publication_blocked=publication_blocked,
+                    ) if is_fiscal else retained_history_approval_eligibility(
+                        item, publication_blocked=publication_blocked,
+                    )
                 )
                 if not eligibility["eligible"]:
                     raise ValueError(
-                        "REFRESH_RETAINED_HISTORY_NOT_ELIGIBLE:"
+                        ("REFRESH_FISCAL_REVISION_NOT_ELIGIBLE:" if is_fiscal else "REFRESH_RETAINED_HISTORY_NOT_ELIGIBLE:")
                         + str(eligibility["reason"])
                     )
                 binding = _approval_binding(item)
@@ -742,7 +889,10 @@ class RefreshReviewQueue:
                 now = utc_now()
                 resolution_evidence = {
                     "resolution_action": normalized,
-                    "resolution_contract_version": RETAINED_HISTORY_APPROVAL_VERSION,
+                    "resolution_contract_version": (
+                        FISCAL_REVISION_APPROVAL_VERSION
+                        if is_fiscal else RETAINED_HISTORY_APPROVAL_VERSION
+                    ),
                     "operator_timestamp_utc": now,
                     "operator_evidence": dict(evidence or {}),
                     "originating_review_run": item.get("last_seen_run_id"),
@@ -755,7 +905,10 @@ class RefreshReviewQueue:
                 self._append_audit(
                     connection,
                     ticker=ticker,
-                    event_type="RETAINED_HISTORY_APPROVED",
+                    event_type=(
+                        "FISCAL_REVISION_APPROVED"
+                        if is_fiscal else "RETAINED_HISTORY_APPROVED"
+                    ),
                     run_id=str(item.get("last_seen_run_id") or "") or None,
                     evidence=resolution_evidence,
                 )
@@ -776,7 +929,7 @@ class RefreshReviewQueue:
                     ticker,
                 ),
             ).rowcount
-            if normalized == ACCEPT_RETAINED_HISTORY:
+            if normalized in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION):
                 connection.execute(
                     "UPDATE refresh_review_queue SET resolution_at_utc=? WHERE ticker=?",
                     (resolution_at, ticker),
@@ -796,8 +949,9 @@ class RefreshReviewQueue:
                 raise ValueError("REFRESH_REVIEW_ITEM_NOT_OPEN")
             item = _decode_row(row)
             approval = dict(item.get("resolution_evidence") or {})
-            if item.get("operator_action") != ACCEPT_RETAINED_HISTORY:
-                raise ValueError("REFRESH_RETAINED_HISTORY_APPROVAL_MISSING")
+            action = item.get("operator_action")
+            if action not in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION):
+                raise ValueError("REFRESH_OPERATOR_APPROVAL_MISSING")
             now = utc_now()
             approval.update({
                 "consumed_at_utc": now,
@@ -813,7 +967,11 @@ class RefreshReviewQueue:
             self._append_audit(
                 connection,
                 ticker=ticker,
-                event_type="RETAINED_HISTORY_APPROVAL_CONSUMED",
+                event_type=(
+                    "FISCAL_REVISION_APPROVAL_CONSUMED"
+                    if action == ACCEPT_FISCAL_IDENTITY_REVISION
+                    else "RETAINED_HISTORY_APPROVAL_CONSUMED"
+                ),
                 run_id=run_id,
                 evidence=approval,
             )

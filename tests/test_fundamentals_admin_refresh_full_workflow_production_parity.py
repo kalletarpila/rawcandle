@@ -32,6 +32,9 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     run_preview,
     validate_complete_history,
 )
+from rawcandle.fundamentals.admin.refresh_review_queue import (
+    ACCEPT_FISCAL_IDENTITY_REVISION,
+)
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 from rawcandle.fundamentals.providers.sharadar import AUTH_OK, STATUS_SUCCESS, SharadarResult
@@ -690,6 +693,57 @@ def test_refresh_full_workflow_quarantines_local_mrq_fiscal_revision(
     assert queue_item["fiscal_identities"][0]["old_fiscal_identity"]
     assert queue_item["fiscal_identities"][0]["current_fiscal_identity"]
     assert queue_item["operator_action"] is None
+    _assert_terminal_lane_cleanup(fixture)
+
+
+def test_trug_fiscal_revision_acceptance_revalidates_and_publishes_via_normal_workflow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch, include_trug_hold=True)
+    before = _published_financial_fingerprint(fixture.paths, ticker="TRUG", company_id=4)
+
+    quarantining_run = _service(fixture).full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    )
+    assert quarantining_run.outcome == "COMPLETED"
+    binding_preview = run_preview(
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        client=fixture.client,
+    )
+    assert binding_preview["summary_counts"]["held_for_review"] == 1
+    service = _service(fixture)
+    accepted = service.resolve_refresh_review(
+        "TRUG",
+        ACCEPT_FISCAL_IDENTITY_REVISION,
+        evidence={"source": "fixture", "comment": "accept exact fiscal revision"},
+    )
+    assert accepted["status"] == "RETRY_REEVALUATION"
+    assert _published_financial_fingerprint(
+        fixture.paths, ticker="TRUG", company_id=4,
+    ) == before
+
+    result = service.full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    )
+    workflow = _workflow_payload(result)
+    preview = _stage_payload(workflow, "Preview")
+    test = _stage_payload(workflow, "Test on copies")
+    production = _stage_payload(workflow, "Production update")
+    after = _published_financial_fingerprint(fixture.paths, ticker="TRUG", company_id=4)
+
+    assert result.outcome == "COMPLETED"
+    assert preview["summary_counts"]["held_for_review"] == 0
+    assert preview["refresh_preview"]["review_queue"]["fiscal_revision_approvals_applied"][0]["ticker"] == "TRUG"
+    assert "TRUG" in {item["ticker"] for item in test["downstream"]["ticker_changes"]}
+    assert "TRUG" in {item["ticker"] for item in production["ticker_changes"]}
+    assert after["provider"] != before["provider"]
+    assert after["canonical"] == before["canonical"]
+    resolved = service.list_refresh_review_queue(active_only=False)["items"]
+    trug = next(item for item in resolved if item["ticker"] == "TRUG")
+    assert trug["status"] == "RESOLVED"
+    assert trug["approval_consumed"] is True
+    assert production["analysis_candidate"]["status"] == "READY"
     _assert_terminal_lane_cleanup(fixture)
 
 

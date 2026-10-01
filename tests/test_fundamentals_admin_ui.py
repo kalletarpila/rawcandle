@@ -1715,6 +1715,77 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     assert controls.review_queue_column.controls[1].controls[9].disabled is True
 
 
+def test_refresh_review_queue_ui_confirms_exact_fiscal_revision() -> None:
+    fiscal_item = {
+        "ticker": "TRUG",
+        "status": "OPEN",
+        "review_scope": "TICKER_LOCAL_REVIEW",
+        "classification": "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION",
+        "reason_codes": ["REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION"],
+        "human_summary": "1 affected source observation.",
+        "affected_source_keys": [{
+            "ticker": "TRUG", "dimension": "MRQ", "date": "2022-03-31",
+            "reportperiod": "2022-03-31",
+        }],
+        "fiscal_identities": [],
+        "fiscal_revision_event_count": 1,
+        "fiscal_revision_events": [{
+            "dimension": "MRQ",
+            "source_identity": {"reportperiod": "2022-03-31"},
+            "old_fiscal_identity": {"fiscal_year": 2022, "fiscal_quarter": "Q1"},
+            "current_fiscal_identity": {"fiscal_year": 2022, "fiscal_quarter": "Q4"},
+            "financial_payload_changed": False,
+            "arq_companion_identity_proof": {"status": "AGREES"},
+        }],
+        "first_seen_at_utc": "2026-10-01T01:00:00Z",
+        "last_seen_at_utc": "2026-10-01T02:00:00Z",
+        "last_published_binding": "published-1",
+        "source_evidence_fingerprint": "b" * 64,
+        "evidence_reference": "b" * 12,
+        "accept_retained_history_eligible": False,
+        "accept_retained_history_reason": "Review reasons are not retained-history compatible.",
+        "accept_fiscal_revision_eligible": True,
+        "accept_fiscal_revision_reason": "Exact ticker-local fiscal-revision evidence is eligible.",
+    }
+
+    class Service:
+        def __init__(self) -> None:
+            self.actions = []
+
+        def capabilities(self):
+            return ()
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def list_refresh_review_queue(self, *, active_only=True):
+            return {"status": "READY", "items": [fiscal_item]}
+
+        def resolve_refresh_review(self, ticker, action, *, evidence=None):
+            self.actions.append((ticker, action))
+            fiscal_item["status"] = "RETRY_REEVALUATION"
+            return fiscal_item
+
+    page = _Page()
+    service = Service()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+    controls.review_queue_refresh_button.on_click(None)
+    row = controls.review_queue_column.controls[0]
+
+    assert row.controls[9].disabled is True
+    assert row.controls[10].disabled is False
+    row.controls[10].on_click(None)
+    summary = page.dialog.content.controls[0].value
+    assert "Fiscal revision events: 1" in summary
+    assert "2022 Q1 -> 2022 Q4" in summary
+    assert "financial payload changed: False" in summary
+    assert "ARQ companion: AGREES" in summary
+    assert "does not modify Production immediately" in summary
+    assert "Preview -> Test -> Production" in summary
+    page.dialog.actions[1].on_click(None)
+    assert service.actions == [("TRUG", "ACCEPT_FISCAL_IDENTITY_REVISION")]
+
+
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [

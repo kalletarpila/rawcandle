@@ -33,6 +33,7 @@ from rawcandle.fundamentals.admin.progress import (
 from rawcandle.fundamentals.admin.refresh_review_queue import (
     RefreshReviewQueue,
     classify_review_scope,
+    match_fiscal_revision_approval,
     match_retained_history_approval,
     partition_changes,
     queue_path_for_run_root,
@@ -110,6 +111,7 @@ REFRESH_BINDING_FIELDS = (
     "current_generation_fingerprint", "merged_generation_fingerprint",
     "retention_plan_fingerprint", "source_history_action",
     "fiscal_identity_revisions",
+    "fiscal_revision_approval",
     "retained_history_approval",
 )
 
@@ -1079,6 +1081,7 @@ def compare_ticker_histories(
     source: Mapping[str, HistoryTrust],
     *,
     retained_history_approval: Mapping[str, Any] | None = None,
+    fiscal_revision_approval: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if any(source[dimension].status != "COMPLETE" for dimension in REFRESH_DIMENSIONS):
         return {
@@ -1112,7 +1115,9 @@ def compare_ticker_histories(
         source,
         retained_history_approval=retained_history_approval,
     )
-    if fiscal_revisions:
+    if fiscal_revisions and not (
+        fiscal_revision_approval and fiscal_revision_approval.get("applied")
+    ):
         return {
             "ticker": ticker,
             "classification": "REVIEW_REQUIRED",
@@ -1249,6 +1254,9 @@ def compare_ticker_histories(
     }
     if retained_history_approval and retained_history_approval.get("applied"):
         result["retained_history_approval"] = dict(retained_history_approval)
+    if fiscal_revision_approval and fiscal_revision_approval.get("applied"):
+        result["fiscal_identity_revisions"] = fiscal_revisions
+        result["fiscal_revision_approval"] = dict(fiscal_revision_approval)
     return result
 
 
@@ -1837,8 +1845,14 @@ def run_preview(
             comparison["identity"] = identities[ticker]
             if comparison["classification"] == "REVIEW_REQUIRED":
                 current_scope = classify_review_scope(comparison)
+                queue_item = review_queue.get(ticker)
                 approval = match_retained_history_approval(
-                    review_queue.get(ticker),
+                    queue_item,
+                    current_scope,
+                    published_binding=state.successful_run_id,
+                )
+                fiscal_approval = match_fiscal_revision_approval(
+                    queue_item,
                     current_scope,
                     published_binding=state.successful_run_id,
                 )
@@ -1848,6 +1862,14 @@ def run_preview(
                         current,
                         histories[ticker],
                         retained_history_approval=approval,
+                    )
+                    comparison["identity"] = identities[ticker]
+                elif fiscal_approval["applied"]:
+                    comparison = compare_ticker_histories(
+                        ticker,
+                        current,
+                        histories[ticker],
+                        fiscal_revision_approval=fiscal_approval,
                     )
                     comparison["identity"] = identities[ticker]
             if comparison["classification"] != "REVIEW_REQUIRED":
@@ -1891,7 +1913,10 @@ def run_preview(
             )
         applied_approvals = [
             item for item in changes
-            if (item.get("retained_history_approval") or {}).get("applied")
+            if (
+                (item.get("retained_history_approval") or {}).get("applied")
+                or (item.get("fiscal_revision_approval") or {}).get("applied")
+            )
         ]
         for item in applied_approvals:
             item["review_queue_resolution"] = review_queue.mark_approval_consumed(
@@ -1937,6 +1962,22 @@ def run_preview(
                         ),
                     }
                     for item in applied_approvals
+                    if (item.get("retained_history_approval") or {}).get("applied")
+                ],
+                "fiscal_revision_approvals_applied": [
+                    {
+                        "ticker": item["ticker"],
+                        "approval_evidence_fingerprint": item[
+                            "fiscal_revision_approval"
+                        ].get("approval_evidence_fingerprint"),
+                        "approved_event_count": len(
+                            item["fiscal_revision_approval"].get(
+                                "approved_fiscal_identities"
+                            ) or []
+                        ),
+                    }
+                    for item in applied_approvals
+                    if (item.get("fiscal_revision_approval") or {}).get("applied")
                 ],
             },
             "refresh_set_fingerprint": refresh_set_fingerprint,
