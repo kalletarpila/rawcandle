@@ -19,7 +19,7 @@ from rawcandle.datacenter_taxonomy_operation_log import (
     taxonomy_lock_held_in_process,
     taxonomy_operation_lock_context,
 )
-from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
+from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import (
     BatchAddTickerPaths,
     CopyLane,
@@ -48,6 +48,7 @@ from rawcandle.fundamentals.admin.publication_journal import (
     PublicationRecoveryError,
     PublicationRecoveredRetryRequired,
     fsync_directory,
+    activate_prepared_generation,
     guard_production_writes,
     prepare_journal,
     restore_old_generation,
@@ -75,6 +76,12 @@ from rawcandle.fundamentals import structural_break
 from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_active_dc_memberships
 from rawcandle.fundamentals.phase12d import PRODUCTION, rebuild_ttm
 from rawcandle.fundamentals.phase13b_foundation import universe_identity
+from rawcandle.fundamentals.generations import (
+    active_manifest_path,
+    prepare_generation_from_candidates,
+    resolve_active_generation,
+    resolved_production_paths,
+)
 
 
 CONTRACT_VERSION = "PHASE13G3_34_REMOVE_TICKERS_PREVIEW_V1"
@@ -504,13 +511,14 @@ def _render_report(result: Mapping[str, Any]) -> str:
 def run_preview(
     raw_inputs: str | Sequence[str],
     *,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    source_paths: BatchAddTickerPaths | None = None,
     run_root: Path = ADMIN_RUN_ROOT,
     temp_root: Path = ADMIN_TEMP_ROOT,
     journal_path: Path = ACTIVE_JOURNAL_PATH,
     source_context: Callable[..., Any] = _shared_sources,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
+    source_paths = source_paths or BatchAddTickerPaths()
     request = build_batch_request(
         AdminOperationType.REMOVE_TICKERS,
         raw_inputs,
@@ -966,7 +974,7 @@ def run_test(
     *,
     preview_payload_path: Path,
     preview_fingerprint: str,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    source_paths: BatchAddTickerPaths | None = None,
     run_root: Path = ADMIN_RUN_ROOT,
     temp_root: Path = ADMIN_TEMP_ROOT,
     journal_path: Path = ACTIVE_JOURNAL_PATH,
@@ -976,6 +984,7 @@ def run_test(
     as_of_date: str | None = None,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
+    source_paths = source_paths or BatchAddTickerPaths()
     preview = json.loads(preview_payload_path.read_text(encoding="utf-8"))
     if (
         preview.get("operation_type") != AdminOperationType.REMOVE_TICKERS.value
@@ -1526,7 +1535,7 @@ def run_production_apply(
     preview_payload_path: Path,
     preview_fingerprint: str,
     test_run_id: str,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    source_paths: BatchAddTickerPaths | None = None,
     run_root: Path = ADMIN_RUN_ROOT,
     temp_root: Path = ADMIN_TEMP_ROOT,
     backup_root: Path = BACKUP_ROOT,
@@ -1545,7 +1554,13 @@ def run_production_apply(
 ) -> dict[str, Any]:
     if not confirm_production:
         raise PermissionError("REMOVE_TICKERS_PRODUCTION_CONFIRMATION_REQUIRED")
-    production_paths = {role: path.resolve() for role, path in PRODUCTION.items()}
+    source_paths = source_paths or BatchAddTickerPaths()
+    production_paths = {
+        role: path.resolve() for role, path in resolved_production_paths(ROOT).items()
+    }
+    configured_analysis = Path(PRODUCTION["analysis"]).resolve()
+    if not configured_analysis.is_relative_to(ROOT.resolve()):
+        production_paths = {role: Path(path).resolve() for role, path in PRODUCTION.items()}
     actual_production = source_paths.analysis_db.resolve() == production_paths["analysis"]
     if actual_production != (production_intent and not rehearsal):
         raise PermissionError("REMOVE_TICKERS_EXPLICIT_PRODUCTION_INTENT_REQUIRED")
@@ -1560,6 +1575,12 @@ def run_production_apply(
             raise PermissionError("REMOVE_TICKERS_PRODUCTION_GUARD_PATH_OVERRIDE_REJECTED")
     elif any(path.resolve() in set(production_paths.values()) for path in source_paths.as_dict().values()):
         raise PermissionError("REMOVE_TICKERS_REHEARSAL_MUST_USE_ONLY_COPIES")
+    active_generation = (
+        resolve_active_generation(ROOT, require_generation=True)
+        if actual_production
+        and production_paths["analysis"].is_relative_to(ROOT.resolve())
+        else None
+    )
     run_id = stable_run_id(
         AdminOperationType.REMOVE_TICKERS,
         preview_fingerprint,
@@ -1574,6 +1595,7 @@ def run_production_apply(
     journal: dict[str, Any] | None = None
     write_boundary_crossed = False
     before_files: dict[str, Any] | None = None
+    publication_paths = source_paths
     result: dict[str, Any] = {
         "contract_version": PRODUCTION_CONTRACT_VERSION,
         "operation_type": AdminOperationType.REMOVE_TICKERS.value,
@@ -1724,6 +1746,22 @@ def run_production_apply(
             new_source_watermark=as_of_date,
             source_schema_fingerprint=SOURCE_CONTRACT_VERSION,
             roles=roles,
+            publication_mode=(
+                "GENERATION_POINTER" if active_generation is not None
+                else "ROLE_REPLACEMENT"
+            ),
+            old_generation=(
+                active_generation.evidence()
+                | {"manifest": dict(active_generation.manifest)}
+                if active_generation is not None else None
+            ),
+            new_generation_id=(
+                f"remove_tickers_{run_id}"
+                if active_generation is not None else None
+            ),
+            active_generation_manifest_path=(
+                active_manifest_path(ROOT) if active_generation is not None else None
+            ),
         )
         result["journal"] = journal
         crash("AFTER_PREPARED")
@@ -1745,21 +1783,64 @@ def run_production_apply(
             )
         result["publication_boundary_revalidation"] = "PASSED"
 
-        for role in PUBLICATION_ROLES:
-            stage = f"PUBLISH_{role.upper()}"
-            if not write_boundary_crossed:
-                writer.checkpoint(
-                    RunStage.WRITE_BOUNDARY_CROSSED,
-                    message="Journaled Remove Tickers publication started.",
-                    preview_fingerprint=preview_fingerprint,
-                    write_boundary_crossed=True,
-                )
-                write_boundary_crossed = True
-            journal = _replace_role(role, journal, journal_path=journal_path)
+        if active_generation is not None:
+            stage = "PREPARE_GENERATION"
+            prepared_generation = prepare_generation_from_candidates(
+                candidate["candidate_paths"],
+                generation_id=str(journal["new_generation_id"]),
+                project_root=ROOT,
+                source=AdminOperationType.REMOVE_TICKERS.value,
+            )
+            journal = update_journal(
+                journal_path, journal,
+                generation_activation_state="READY",
+                new_generation_manifest=prepared_generation["manifest"],
+                new_generation_dir=prepared_generation["generation_dir"],
+                current_publication_step="NEW_GENERATION_READY",
+            )
             result["journal"] = journal
-            crash(f"AFTER_{role.upper()}_REPLACEMENT")
-            if inject_failure_at == f"AFTER_{role.upper()}_REPLACEMENT":
-                raise RuntimeError(f"INJECTED_REMOVE_TICKERS_PUBLICATION_FAILURE:{role}")
+            crash("AFTER_NEW_GENERATION_READY")
+            stage = "ACTIVATE_GENERATION"
+            writer.checkpoint(
+                RunStage.WRITE_BOUNDARY_CROSSED,
+                message="Atomic Remove Tickers generation activation started.",
+                preview_fingerprint=preview_fingerprint,
+                write_boundary_crossed=True,
+            )
+            write_boundary_crossed = True
+            journal = activate_prepared_generation(
+                journal,
+                new_manifest=prepared_generation["manifest"],
+                journal_path=journal_path,
+            )
+            result["journal"] = journal
+            publication_paths = BatchAddTickerPaths(
+                *(Path(prepared_generation["roles"][role]) for role in PUBLICATION_ROLES),
+                source_paths.market_db,
+                source_paths.taxonomy_db,
+            )
+            crash("AFTER_GENERATION_ACTIVATION")
+            if inject_failure_at in {
+                "AFTER_PROVIDER_REPLACEMENT", "AFTER_CANONICAL_REPLACEMENT",
+                "AFTER_ANALYSIS_REPLACEMENT", "AFTER_GENERATION_ACTIVATION",
+            }:
+                raise RuntimeError("INJECTED_REMOVE_TICKERS_PUBLICATION_FAILURE:generation")
+        else:
+            for role in PUBLICATION_ROLES:
+                stage = f"PUBLISH_{role.upper()}"
+                if not write_boundary_crossed:
+                    writer.checkpoint(
+                        RunStage.WRITE_BOUNDARY_CROSSED,
+                        message="Journaled Remove Tickers publication started.",
+                        preview_fingerprint=preview_fingerprint,
+                        write_boundary_crossed=True,
+                    )
+                    write_boundary_crossed = True
+                journal = _replace_role(role, journal, journal_path=journal_path)
+                result["journal"] = journal
+                crash(f"AFTER_{role.upper()}_REPLACEMENT")
+                if inject_failure_at == f"AFTER_{role.upper()}_REPLACEMENT":
+                    raise RuntimeError(f"INJECTED_REMOVE_TICKERS_PUBLICATION_FAILURE:{role}")
 
         stage = "POSTFLIGHT"
         journal = update_journal(
@@ -1770,7 +1851,7 @@ def run_production_apply(
         if inject_failure_at == "POSTFLIGHT":
             raise RuntimeError("INJECTED_REMOVE_TICKERS_POSTFLIGHT_FAILURE")
         result["postflight"] = _production_postflight(
-            source_paths=source_paths, items=current_items, candidate=candidate, roles=roles,
+            source_paths=publication_paths, items=current_items, candidate=candidate, roles=roles,
         )
         journal = update_journal(
             journal_path, journal, state="COMPLETED",
@@ -1843,7 +1924,12 @@ def run_production_apply(
         finally:
             locks.close()
         if before_files is not None:
-            result["production_file_state_after"] = _production_file_state(source_paths)
+            state_paths = (
+                publication_paths
+                if result.get("outcome") == "COMPLETED"
+                else source_paths
+            )
+            result["production_file_state_after"] = _production_file_state(state_paths)
             result["production_file_state_unchanged"] = (
                 before_files == result["production_file_state_after"]
             )

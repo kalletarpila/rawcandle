@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals.admin.artifacts import ROOT
 from rawcandle.fundamentals.admin.contracts import utc_now
+from rawcandle.fundamentals.generations import activate_generation
 
 
 JOURNAL_FORMAT_VERSION = 1
@@ -126,12 +127,22 @@ def prepare_journal(
     new_source_watermark: str,
     source_schema_fingerprint: str,
     roles: Mapping[str, Mapping[str, Any]],
+    publication_mode: str = "ROLE_REPLACEMENT",
+    old_generation: Mapping[str, Any] | None = None,
+    new_generation_id: str | None = None,
+    active_generation_manifest_path: Path | None = None,
 ) -> dict[str, Any]:
     prior = load_journal(path)
     if prior and prior["state"] in INCOMPLETE_STATES:
         raise PublicationRecoveryError("INCOMPLETE_PUBLICATION_RECOVERY_REQUIRED")
     if set(roles) != set(PUBLICATION_ROLES):
         raise ValueError("PUBLICATION_JOURNAL_ROLE_SET_INVALID")
+    if publication_mode not in {"ROLE_REPLACEMENT", "GENERATION_POINTER"}:
+        raise ValueError("PUBLICATION_JOURNAL_MODE_INVALID")
+    if publication_mode == "GENERATION_POINTER" and (
+        not old_generation or not new_generation_id or not active_generation_manifest_path
+    ):
+        raise ValueError("PUBLICATION_JOURNAL_GENERATION_BINDING_MISSING")
     created = utc_now()
     payload = {
         "journal_format_version": JOURNAL_FORMAT_VERSION,
@@ -150,12 +161,62 @@ def prepare_journal(
         "postflight_state": "NOT_STARTED",
         "rollback_recovery_state": "NOT_REQUIRED",
         "roles": {role: dict(roles[role]) for role in PUBLICATION_ROLES},
+        "publication_mode": publication_mode,
     }
+    if publication_mode == "GENERATION_POINTER":
+        payload.update({
+            "old_generation": dict(old_generation or {}),
+            "new_generation_id": new_generation_id,
+            "active_generation_manifest_path": str(
+                Path(active_generation_manifest_path).resolve()
+            ),
+            "generation_activation_state": "NOT_STARTED",
+        })
     return write_journal(path, payload)
 
 
 def is_incomplete(journal: Mapping[str, Any] | None) -> bool:
     return bool(journal and journal.get("state") in INCOMPLETE_STATES)
+
+
+def activate_prepared_generation(
+    journal: Mapping[str, Any], *, new_manifest: Mapping[str, Any],
+    journal_path: Path = ACTIVE_JOURNAL_PATH,
+) -> dict[str, Any]:
+    if journal.get("publication_mode") != "GENERATION_POINTER":
+        raise PublicationRecoveryError("PUBLICATION_GENERATION_MODE_REQUIRED")
+    new_id = str(journal.get("new_generation_id") or "")
+    if new_manifest.get("generation_id") != new_id:
+        raise PublicationRecoveryError("PUBLICATION_NEW_GENERATION_ID_MISMATCH")
+    pointer = Path(str(journal.get("active_generation_manifest_path") or ""))
+    old_id = str((journal.get("old_generation") or {}).get("generation_id") or "")
+    intended = update_journal(
+        journal_path, journal,
+        state="PUBLISHING",
+        current_publication_step="ACTIVATING_GENERATION",
+        generation_activation_state="ACTIVATING",
+        new_generation_manifest=dict(new_manifest),
+    )
+    active = activate_generation(
+        new_manifest,
+        project_root=pointer.parent.parent,
+        expected_active_generation_id=old_id,
+    )
+    roles = dict(intended["roles"])
+    for role, path in active.role_paths().items():
+        record = dict(roles[role])
+        record.update({
+            "production_path": str(path.resolve()),
+            "replacement_state": "GENERATION_ACTIVATED_AND_VERIFIED",
+            "candidate_replacement_verified": True,
+        })
+        roles[role] = record
+    return update_journal(
+        journal_path, intended,
+        roles=roles,
+        current_publication_step="GENERATION_ACTIVATED",
+        generation_activation_state="ACTIVATED_AND_VERIFIED",
+    )
 
 
 def safety_status(path: Path = ACTIVE_JOURNAL_PATH) -> dict[str, Any]:
@@ -241,6 +302,55 @@ def restore_old_generation(
     )
     restored: dict[str, Any] = {}
     try:
+        if current.get("publication_mode") == "GENERATION_POINTER":
+            pointer = Path(str(current["active_generation_manifest_path"]))
+            project_root = pointer.parent.parent
+            old_manifest = (current.get("old_generation") or {}).get("manifest")
+            if not isinstance(old_manifest, Mapping):
+                raise PublicationRecoveryError(
+                    "RECOVERY_OLD_GENERATION_MANIFEST_MISSING"
+                )
+            validated = {
+                role: _validate_backup(role, current["roles"][role])
+                for role in role_order
+            }
+            active = activate_generation(old_manifest, project_root=project_root)
+            generation_verification: dict[str, Any] = {}
+            roles = dict(current["roles"])
+            for role in role_order:
+                target = active.role_paths()[role]
+                verification = sqlite_verification(target)
+                expected = validated[role][1]
+                if verification["sha256"] != expected:
+                    raise PublicationRecoveryError(
+                        f"RECOVERY_OLD_GENERATION_SET_MISMATCH:{role}"
+                    )
+                generation_verification[role] = verification
+                role_record = dict(roles[role])
+                role_record["replacement_state"] = "OLD_GENERATION_REACTIVATED"
+                role_record["rollback_restoration_verified"] = True
+                roles[role] = role_record
+                restored[role] = verification
+            new_id = str(current.get("new_generation_id") or "")
+            generation_parent = active.generation_dir.parent
+            new_dir = generation_parent / new_id
+            preparing = generation_parent / f".{new_id}.preparing"
+            if new_id and new_id != active.generation_id:
+                shutil.rmtree(new_dir, ignore_errors=True)
+                shutil.rmtree(preparing, ignore_errors=True)
+                fsync_directory(generation_parent)
+            candidate_cleanup = _cleanup_terminal_candidates(current)
+            current = update_journal(
+                journal_path, current, state="RECOVERED",
+                rollback_recovery_state="OLD_GENERATION_RESTORED_AND_VERIFIED",
+                postflight_state="OLD_GENERATION_VERIFIED",
+                old_generation_verification=generation_verification,
+                candidate_cleanup=candidate_cleanup,
+                roles=roles,
+                generation_activation_state="OLD_REACTIVATED",
+                current_publication_step="OLD_GENERATION_VERIFIED",
+            )
+            return {"status": "RECOVERED", "roles": restored, "journal": current}
         validated = {
             role: _validate_backup(role, current["roles"][role])
             for role in role_order

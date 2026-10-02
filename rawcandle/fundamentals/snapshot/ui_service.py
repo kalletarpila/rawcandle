@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.writer import report_filename
+from rawcandle.fundamentals.generations import resolved_production_paths
 
 
 LOGGER = logging.getLogger(__name__)
@@ -23,6 +24,17 @@ PRODUCTION_SNAPSHOT_PATHS = SnapshotPaths(
     taxonomy_db=PROJECT_ROOT / "data/analysis.db",
     provider_db=PROJECT_ROOT / "data/fundamentals_provider.db",
 )
+
+
+def _active_snapshot_paths() -> SnapshotPaths:
+    paths = resolved_production_paths(PROJECT_ROOT)
+    return SnapshotPaths(
+        canonical_db=paths["canonical"],
+        analysis_db=paths["analysis"],
+        market_db=paths["market"],
+        taxonomy_db=paths["taxonomy"],
+        provider_db=paths["provider"],
+    )
 REPORT_NAME_RE = re.compile(
     r"^(?P<ticker>[A-Z0-9]+(?:[.-][A-Z0-9]+)*)_"
     r"(?P<report_date>\d{4}-\d{2}-\d{2})\.md$"
@@ -185,7 +197,7 @@ class FundamentalsSnapshotUIService:
     def __init__(
         self,
         *,
-        paths: SnapshotPaths = PRODUCTION_SNAPSHOT_PATHS,
+        paths: SnapshotPaths | None = None,
         output_dir: Path = FUNDAMENTAL_REPORTS_DIR,
         generator: Callable[..., dict[str, Any]] = _generate_active_company_snapshot,
     ) -> None:
@@ -199,6 +211,7 @@ class FundamentalsSnapshotUIService:
         ticker_input: str | None,
         report_date_input: str | None,
         overwrite: bool = False,
+        _pinned_paths: SnapshotPaths | None = None,
     ) -> FundamentalsUIResult:
         try:
             ticker = normalize_ticker(ticker_input)
@@ -219,8 +232,9 @@ class FundamentalsSnapshotUIService:
             )
 
         try:
+            operation_paths = _pinned_paths or self.paths or _active_snapshot_paths()
             generated = self._generator(
-                self.paths,
+                operation_paths,
                 ticker=ticker,
                 report_date=report_date,
                 output_dir=self.output_dir,
@@ -328,11 +342,13 @@ class FundamentalsSnapshotUIService:
                 summary=FundamentalsBatchSummary(len(tickers), 0, 0, 0, len(tickers)),
             )
 
+        operation_paths = self.paths or _active_snapshot_paths()
         results = tuple(
             self.generate(
                 ticker_input=ticker,
                 report_date_input=report_date,
                 overwrite=overwrite,
+                _pinned_paths=operation_paths,
             )
             for ticker in tickers
         )

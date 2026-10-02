@@ -13,7 +13,7 @@ import threading
 import traceback
 from contextlib import ExitStack, contextmanager
 from collections import Counter
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 from zipfile import ZipFile
@@ -57,6 +57,7 @@ from rawcandle.datacenter_taxonomy_operation_log import (
 )
 from rawcandle.fundamentals.operating_income_v2.taxonomy_source import load_active_dc_memberships
 from rawcandle.fundamentals import structural_break
+from rawcandle.fundamentals.generations import resolved_production_paths
 from rawcandle.fundamentals.phase12d import (
     PRODUCTION,
     ROOT,
@@ -150,11 +151,21 @@ EXPECTED_PREWRITE_RV_RESULT = "9c642e80b06fdbb8c6e703a46a6bda2c7031bc270fbd195b0
 
 @dataclass(frozen=True)
 class BatchAddTickerPaths:
-    provider_db: Path = PRODUCTION["provider"]
-    canonical_db: Path = PRODUCTION["canonical"]
-    analysis_db: Path = PRODUCTION["analysis"]
-    market_db: Path = PRODUCTION["market"]
-    taxonomy_db: Path = PRODUCTION["taxonomy"]
+    provider_db: Path = field(
+        default_factory=lambda: resolved_production_paths(ROOT)["provider"]
+    )
+    canonical_db: Path = field(
+        default_factory=lambda: resolved_production_paths(ROOT)["canonical"]
+    )
+    analysis_db: Path = field(
+        default_factory=lambda: resolved_production_paths(ROOT)["analysis"]
+    )
+    market_db: Path = field(
+        default_factory=lambda: resolved_production_paths(ROOT)["market"]
+    )
+    taxonomy_db: Path = field(
+        default_factory=lambda: resolved_production_paths(ROOT)["taxonomy"]
+    )
 
     def as_dict(self) -> dict[str, Path]:
         return {
@@ -266,12 +277,16 @@ def reject_production_write_targets(paths: BatchAddTickerPaths) -> None:
 
 
 def validate_exact_production_paths(paths: BatchAddTickerPaths) -> dict[str, str]:
+    production = resolved_production_paths(ROOT)
+    configured_analysis = Path(PRODUCTION["analysis"]).resolve()
+    if not configured_analysis.is_relative_to(ROOT.resolve()):
+        production = {role: Path(path) for role, path in PRODUCTION.items()}
     resolved: dict[str, str] = {}
     for role, path in paths.as_dict().items():
         raw = str(path)
         if raw.startswith("file:"):
             raise PermissionError(f"PHASE13G2_PRODUCTION_SQLITE_URI_REFUSED:{role}:{raw}")
-        expected = PRODUCTION[role]
+        expected = production[role]
         if path != expected:
             raise PermissionError(f"PHASE13G2_EXACT_PRODUCTION_PATH_REQUIRED:{role}:{expected}")
         if not path.is_absolute() or path.is_symlink() or not path.is_file() or path.resolve() != expected.resolve():
@@ -1877,13 +1892,14 @@ def _apply_generic_plan(
 def run_preview(
     raw_inputs: str | Sequence[str],
     *,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    source_paths: BatchAddTickerPaths | None = None,
     run_root: Path = ADMIN_RUN_ROOT,
     temp_root: Path = ADMIN_TEMP_ROOT,
     network_allowed: bool = False,
     market: str | None = "usa",
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
+    source_paths = source_paths or BatchAddTickerPaths()
     request = parse_batch_tickers(raw_inputs, market=market)
     run_id = stable_run_id(AdminOperationType.ADD_TICKERS, fingerprint(request))
     writer = AdminRunWriter(run_id, AdminOperationType.ADD_TICKERS, root=run_root)
@@ -2070,7 +2086,7 @@ def run_apply(
     *,
     preview_payload_path: Path,
     preview_fingerprint: str,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    source_paths: BatchAddTickerPaths | None = None,
     run_root: Path = ADMIN_RUN_ROOT,
     temp_root: Path = ADMIN_TEMP_ROOT,
     confirm_apply: bool = False,
@@ -2080,6 +2096,7 @@ def run_apply(
 ) -> dict[str, Any]:
     if not confirm_apply:
         raise PermissionError("PHASE13G2_APPLY_REQUIRES_CONFIRMATION")
+    source_paths = source_paths or BatchAddTickerPaths()
     payload = _load_preview_payload(preview_payload_path)
     phase_preview = payload.get("phase13g2_preview") if isinstance(payload.get("phase13g2_preview"), Mapping) else {}
     if phase_preview.get("preview_fingerprint") != preview_fingerprint:
@@ -2338,7 +2355,7 @@ def run_production_apply(
     *,
     preview_payload_path: Path,
     preview_fingerprint: str,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    source_paths: BatchAddTickerPaths | None = None,
     run_root: Path = ADMIN_RUN_ROOT,
     backup_root: Path | None = None,
     temp_root: Path = ADMIN_TEMP_ROOT,
@@ -2349,6 +2366,7 @@ def run_production_apply(
 ) -> dict[str, Any]:
     if not confirm_production:
         raise PermissionError("PHASE13G2_PRODUCTION_APPLY_REQUIRES_CONFIRM_PRODUCTION")
+    source_paths = source_paths or BatchAddTickerPaths()
     from rawcandle.fundamentals.admin.production_operations import ADD_TICKERS
     from rawcandle.fundamentals.admin.production_transaction import run_transaction
 

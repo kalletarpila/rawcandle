@@ -16,6 +16,7 @@ from dev_tools.fundamentals_snapshot_page import (
     report_download_url,
 )
 from dev_tools.stock_update_scheduler_ui import add_fundamentals_download_route
+from rawcandle.fundamentals.snapshot import ui_service as snapshot_ui_service
 from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.ui_service import (
     FUNDAMENTAL_REPORTS_DIR,
@@ -216,6 +217,37 @@ def test_batch_overwrite_required_does_not_block_later_ticker(tmp_path: Path) ->
         "OVERWRITTEN", "NO_CHANGE"
     ]
     assert overwritten.summary == FundamentalsBatchSummary(2, 0, 1, 1, 0)
+
+
+def test_batch_pins_one_generation_binding_for_all_tickers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old = _paths(tmp_path / "old")
+    new = _paths(tmp_path / "new")
+    resolutions = 0
+    observed: list[SnapshotPaths] = []
+
+    def resolve_paths() -> SnapshotPaths:
+        nonlocal resolutions
+        resolutions += 1
+        return old if resolutions == 1 else new
+
+    def generator(paths, **kwargs):
+        observed.append(paths)
+        return _generator(f"{kwargs['ticker']}\n")(paths, **kwargs)
+
+    monkeypatch.setattr(snapshot_ui_service, "_active_snapshot_paths", resolve_paths)
+    service = FundamentalsSnapshotUIService(
+        output_dir=tmp_path / "reports", generator=generator,
+    )
+
+    result = service.generate_batch(
+        ticker_input="ONE TWO", report_date_input="2026-09-06",
+    )
+
+    assert result.status == "COMPLETED"
+    assert resolutions == 1
+    assert observed == [old, old]
 
 
 def test_batch_rejects_global_invalid_date_and_oversized_request(tmp_path: Path) -> None:

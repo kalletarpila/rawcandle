@@ -20,6 +20,7 @@ from rawcandle.forecasts.linking import AS_KNOWN, CURRENT_RECONCILED, ForecastLi
 from rawcandle.forecasts.repository import ForecastRepository
 from rawcandle.forecasts.schema import SCHEMA_VERSION, connect_forecasts_db, migrate_forecasts_db
 from rawcandle.forecasts.transport import YahooForecastTransport, YahooRawResult, utc_now
+from rawcandle.fundamentals.generations import resolve_requested_role_path
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -139,6 +140,7 @@ def acquire_run(
     scope_metadata: Mapping[str, Any] | None = None,
 ) -> AcquisitionOutcome:
     database = Path(forecast_db)
+    fundamentals_db = resolve_requested_role_path("canonical", fundamentals_db)
     verify_database(database)
     selected_families = tuple(dict.fromkeys(families))
     if not selected_families or not set(selected_families) <= set(FORECAST_FAMILIES):
@@ -247,6 +249,7 @@ def link_run(
     fundamentals_db: str | Path = DEFAULT_FUNDAMENTALS_DB,
 ) -> dict[str, int]:
     database = Path(forecast_db)
+    fundamentals_db = resolve_requested_role_path("canonical", fundamentals_db)
     service = ForecastLinkService(database, fundamentals_db)
     counts: Counter[str] = Counter()
     for fetch_id in _run_fetch_ids(database, run_id, fiscal_only=True):
@@ -264,6 +267,7 @@ def reconcile_run(
     fundamentals_db: str | Path = DEFAULT_FUNDAMENTALS_DB,
 ) -> dict[str, int]:
     database = Path(forecast_db)
+    fundamentals_db = resolve_requested_role_path("canonical", fundamentals_db)
     service = ForecastLinkService(database, fundamentals_db)
     counts: Counter[str] = Counter()
     for fetch_id in _run_fetch_ids(database, run_id, fiscal_only=True):

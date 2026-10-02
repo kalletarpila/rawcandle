@@ -1076,13 +1076,14 @@ def _render_report(result: Mapping[str, Any]) -> str:
 
 def run_apply(
     *, preview_payload_path: Path, preview_fingerprint: str,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(), run_root: Path = ADMIN_RUN_ROOT,
+    source_paths: BatchAddTickerPaths | None = None, run_root: Path = ADMIN_RUN_ROOT,
     temp_root: Path = ADMIN_TEMP_ROOT, client: SharadarClient | None = None,
     confirm_apply: bool = False, progress_callback: ProgressCallback | None = None,
     as_of_date: str | None = None,
 ) -> dict[str, Any]:
     if not confirm_apply:
         raise PermissionError("REFRESH_TEST_CONFIRMATION_REQUIRED")
+    source_paths = source_paths or BatchAddTickerPaths()
     request = _request()
     run_id = stable_run_id(AdminOperationType.REFRESH_FUNDAMENTALS, preview_fingerprint, suffix="test")
     writer = AdminRunWriter(run_id, AdminOperationType.REFRESH_FUNDAMENTALS, root=run_root)

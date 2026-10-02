@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -14,10 +15,16 @@ import pytest
 import rawcandle.datacenter_taxonomy_operation_log as taxonomy_locking
 from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
 from rawcandle.fundamentals.admin import batch_add_tickers, remove_tickers
+from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
 from rawcandle.fundamentals.admin.publication_journal import PUBLICATION_ROLES, sha256_file
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 from rawcandle.fundamentals.phase13b_foundation import CANONICAL_SCHEMA_SQL as UNIVERSE_SCHEMA_SQL
+from rawcandle.fundamentals.generations import (
+    migrate_flat_layout,
+    resolve_active_generation,
+    resolved_production_paths,
+)
 from tests.test_fundamentals_admin_refresh_full_workflow_production_parity import (
     WorkflowFixture,
     _fixture as build_refresh_fixture,
@@ -176,6 +183,7 @@ def _service(
     inject_failure_at: str | None = None,
     inject_crash_at: str | None = None,
     downstream_runner: Callable[..., dict[str, Any]] = run_full_v2_downstream,
+    actual_production: bool = False,
 ) -> FundamentalsAdminUIService:
     source_context = _source_context(fixture)
 
@@ -226,8 +234,8 @@ def _service(
             lock_path=fixture.base.root / "production.lock",
             scheduler_log_dir=str(fixture.base.root / "scheduler"),
             confirm_production=bool(kwargs["confirm_production"]),
-            production_intent=False,
-            rehearsal=True,
+            production_intent=actual_production,
+            rehearsal=not actual_production,
             source_context=source_context,
             downstream_runner=downstream_runner,
             progress_callback=kwargs.get("progress_callback"),
@@ -245,6 +253,43 @@ def _service(
         operation_lock_path=fixture.base.root / "ui.lock",
         recover_publication_on_startup=False,
     )
+
+
+def _migrate_fixture_to_generation_layout(
+    fixture: RemoveWorkflowFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    project = fixture.base.root / "generation-project"
+    data = project / "data"
+    data.mkdir(parents=True)
+    filenames = {
+        "provider": "fundamentals_provider.db",
+        "canonical": "fundamentals_v4.db",
+        "analysis": "fundamentals_analysis.db",
+        "market": "osakedata.db",
+        "taxonomy": "analysis.db",
+    }
+    for role, filename in filenames.items():
+        shutil.copy2(fixture.paths.as_dict()[role], data / filename)
+    migrate_flat_layout(project_root=project, generation_id="old")
+    active = resolved_production_paths(project)
+    fixture.base.paths = BatchAddTickerPaths(*(active[role] for role in (
+        "provider", "canonical", "analysis", "market", "taxonomy",
+    )))
+    fixture.base.initial_hashes = {
+        role: sha256_file(fixture.paths.as_dict()[role]) for role in PUBLICATION_ROLES
+    }
+    fixture.base.initial_semantic_hashes = {
+        role: _semantic_fingerprint(fixture.paths.as_dict()[role])
+        for role in PUBLICATION_ROLES
+    }
+    monkeypatch.setattr(remove_tickers, "ROOT", project)
+    monkeypatch.setattr(remove_tickers, "ADMIN_RUN_ROOT", fixture.run_root)
+    monkeypatch.setattr(remove_tickers, "ADMIN_LOCK", fixture.base.root / "production.lock")
+    monkeypatch.setattr(remove_tickers, "ACTIVE_JOURNAL_PATH", fixture.journal_path)
+    for role, path in active.items():
+        monkeypatch.setitem(remove_tickers.PRODUCTION, role, path)
+    return project
 
 
 def _workflow_payload(result: Any) -> dict[str, Any]:
@@ -380,6 +425,33 @@ def test_remove_tickers_real_full_workflow_success_and_source_contract(
     assert identity_after["ticker_alias"] == identity_before["ticker_alias"]
     assert identity_after["provider_security_identity"] == identity_before["provider_security_identity"]
     _terminal_cleanup(fixture)
+
+
+def test_remove_tickers_production_activates_complete_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _build_fixture(tmp_path, monkeypatch)
+    project = _migrate_fixture_to_generation_layout(fixture, monkeypatch)
+    old = resolve_active_generation(project, require_generation=True)
+
+    result = _service(fixture, actual_production=True).full_workflow(
+        operation_type="REMOVE_TICKERS", raw_inputs="AAA",
+    )
+
+    new = resolve_active_generation(project, require_generation=True)
+    assert result.outcome == "COMPLETED", result.message
+    assert new.generation_id != old.generation_id
+    assert fixture.stage_results["production"]["journal"][
+        "generation_activation_state"
+    ] == "ACTIVATED_AND_VERIFIED"
+    with sqlite3.connect(old.role_paths()["canonical"]) as connection:
+        assert connection.execute(
+            "SELECT active FROM security WHERE current_ticker='AAA'"
+        ).fetchone() == (1,)
+    with sqlite3.connect(new.role_paths()["canonical"]) as connection:
+        assert connection.execute(
+            "SELECT active FROM security WHERE current_ticker='AAA'"
+        ).fetchone() == (0,)
 
 
 def test_remove_tickers_full_workflow_stale_preview_blocks_before_production(

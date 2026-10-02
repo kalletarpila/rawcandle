@@ -1795,12 +1795,13 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
 
 def run_preview(
     *,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(),
+    source_paths: BatchAddTickerPaths | None = None,
     run_root: Path = ADMIN_RUN_ROOT,
     client: SharadarClient | None = None,
     progress_callback: ProgressCallback | None = None,
     trigger_source: str = "MANUAL",
 ) -> dict[str, Any]:
+    source_paths = source_paths or BatchAddTickerPaths()
     if trigger_source not in {"MANUAL", "SCHEDULER"}:
         raise ValueError("REFRESH_TRIGGER_SOURCE_INVALID")
     request = _request()

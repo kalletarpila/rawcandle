@@ -7,6 +7,11 @@ import pytest
 from rawcandle.fundamentals.admin import production_transaction as tx
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.admin.contracts import AdminOperationType
+from rawcandle.fundamentals.generations import (
+    migrate_flat_layout,
+    resolve_active_generation,
+    resolved_production_paths,
+)
 
 
 IDENTITY = {"domain": "dc_ecosystem", "version": "v2", "semantic_fingerprint": "semantic"}
@@ -172,6 +177,68 @@ def test_post_replacement_failure_restores_analysis_and_add_sources(tmp_path, mo
         for role in ("provider", "canonical", "analysis")
     )
     assert set(result["backups"]) == {"provider", "canonical", "analysis"}
+
+
+def test_add_tickers_production_activates_one_complete_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation, fixture_paths, kwargs = _fixture(
+        tmp_path, monkeypatch,
+        operation=AdminOperationType.ADD_TICKERS,
+        roles=("provider", "canonical", "analysis"),
+        source_mutation=True,
+    )
+    project = tmp_path / "project"
+    data = project / "data"
+    data.mkdir(parents=True)
+    filenames = {
+        "provider": "fundamentals_provider.db",
+        "canonical": "fundamentals_v4.db",
+        "analysis": "fundamentals_analysis.db",
+        "market": "osakedata.db",
+        "taxonomy": "analysis.db",
+    }
+    for role, filename in filenames.items():
+        source = fixture_paths.as_dict()[role]
+        (data / filename).write_bytes(source.read_bytes())
+    migrate_flat_layout(project_root=project, generation_id="old")
+    active = resolved_production_paths(project)
+    paths = BatchAddTickerPaths(*(active[role] for role in (
+        "provider", "canonical", "analysis", "market", "taxonomy",
+    )))
+    old_binding = resolve_active_generation(project, require_generation=True)
+    run_root = Path(kwargs["run_root"])
+    lock_path = tmp_path / "generation-production.lock"
+    monkeypatch.setattr(tx, "ROOT", project)
+    monkeypatch.setattr(tx, "ADMIN_RUN_ROOT", run_root)
+    monkeypatch.setattr(tx, "ADMIN_LOCK", lock_path)
+    for role, path in active.items():
+        monkeypatch.setitem(tx.PRODUCTION, role, path)
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.batch_add_tickers._assert_clean_worktree",
+        lambda: {"status": "CLEAN"},
+    )
+
+    result = tx.run_transaction(
+        operation,
+        preview_payload_path=Path(kwargs["preview_payload_path"]),
+        preview_fingerprint="preview-fp",
+        test_run_id=str(kwargs["test_run_id"]),
+        source_paths=paths,
+        run_root=run_root,
+        backup_root=tmp_path / "generation-backups",
+        scheduler_log_dir=str(tmp_path / "generation-scheduler"),
+        lock_path=lock_path,
+        production_intent=True,
+        publication_journal_path=data / "publication_journal.json",
+    )
+
+    new_binding = resolve_active_generation(project, require_generation=True)
+    assert result["outcome"] == "COMPLETED"
+    assert result["atomic_replacement"]["status"] == "GENERATION_ACTIVATED"
+    assert new_binding.generation_id != old_binding.generation_id
+    assert {_value(path) for path in new_binding.role_paths().values()} == {"new"}
+    assert {_value(path) for path in old_binding.role_paths().values()} == {"old"}
 
 
 def test_rebuild_failure_restores_add_sources_and_old_analysis(tmp_path, monkeypatch):

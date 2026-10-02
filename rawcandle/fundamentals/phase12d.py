@@ -48,6 +48,7 @@ from rawcandle.fundamentals.ttm.engine import (
     ensure_ttm_schema,
     load_canonical_rows,
 )
+from rawcandle.fundamentals.generations import resolved_production_paths
 from rawcandle.research.fundamental_profile_baseline.contract import (
     CONTRACT_FINGERPRINT as PHASE12B_CONTRACT_FINGERPRINT,
 )
@@ -56,13 +57,7 @@ from rawcandle.research.fundamental_profile_baseline.source import ResearchPaths
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PRODUCTION = {
-    "provider": ROOT / "data/fundamentals_provider.db",
-    "canonical": ROOT / "data/fundamentals_v4.db",
-    "analysis": ROOT / "data/fundamentals_analysis.db",
-    "market": ROOT / "data/osakedata.db",
-    "taxonomy": ROOT / "data/analysis.db",
-}
+PRODUCTION = resolved_production_paths(ROOT)
 REPORT_ROOT = ROOT / "fundamental_reports"
 SCHEDULER_CONFIG = ROOT / "scheduler_config.json"
 REBUILD_VERSION = "TEN_YEAR_OPERATIONAL_V4_REBUILD_REHEARSAL_V1"

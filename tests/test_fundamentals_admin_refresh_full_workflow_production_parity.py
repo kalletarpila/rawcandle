@@ -47,6 +47,11 @@ from rawcandle.fundamentals.schema.migrations import (
     PROVIDER_SCHEMA_SQL,
     bootstrap_database,
 )
+from rawcandle.fundamentals.generations import (
+    migrate_flat_layout,
+    resolve_active_generation,
+    resolved_production_paths,
+)
 
 
 AS_OF = "2026-09-22"
@@ -492,6 +497,7 @@ def _service(
     before_production: Any | None = None,
     inject_failure_at: str | None = None,
     inject_crash_at: str | None = None,
+    actual_production: bool = False,
 ) -> FundamentalsAdminUIService:
     def preview_backend(**kwargs: object) -> dict[str, Any]:
         return run_preview(
@@ -528,8 +534,8 @@ def _service(
             journal_path=fixture.journal_path,
             client=fixture.client,
             confirm_production=bool(kwargs["confirm_production"]),
-            production_intent=False,
-            rehearsal=True,
+            production_intent=actual_production,
+            rehearsal=not actual_production,
             lock_path=fixture.root / "production.lock",
             scheduler_log_dir=str(fixture.root / "scheduler"),
             progress_callback=kwargs.get("progress_callback"),
@@ -546,6 +552,40 @@ def _service(
         operation_lock_path=fixture.root / "ui.lock",
         recover_publication_on_startup=False,
     )
+
+
+def _migrate_refresh_fixture_to_generation_layout(
+    fixture: WorkflowFixture, monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    project = fixture.root / "generation-project"
+    data = project / "data"
+    data.mkdir(parents=True)
+    filenames = {
+        "provider": "fundamentals_provider.db",
+        "canonical": "fundamentals_v4.db",
+        "analysis": "fundamentals_analysis.db",
+        "market": "osakedata.db",
+        "taxonomy": "analysis.db",
+    }
+    for role, filename in filenames.items():
+        shutil.copy2(fixture.paths.as_dict()[role], data / filename)
+    migrate_flat_layout(project_root=project, generation_id="old")
+    active = resolved_production_paths(project)
+    fixture.paths = BatchAddTickerPaths(*(active[role] for role in (
+        "provider", "canonical", "analysis", "market", "taxonomy",
+    )))
+    fixture.initial_hashes = {
+        role: sha256_file(fixture.paths.as_dict()[role]) for role in PUBLICATION_ROLES
+    }
+    fixture.initial_semantic_hashes = {
+        role: _semantic_fingerprint(fixture.paths.as_dict()[role])
+        for role in PUBLICATION_ROLES
+    }
+    monkeypatch.setattr(refresh_production, "ROOT", project)
+    monkeypatch.setattr(refresh_production, "ADMIN_RUN_ROOT", fixture.run_root)
+    monkeypatch.setattr(refresh_production, "ACTIVE_JOURNAL_PATH", fixture.journal_path)
+    monkeypatch.setattr(refresh_production, "ADMIN_LOCK", fixture.root / "production.lock")
+    return project
 
 
 def _stage_payload(workflow_result: Mapping[str, Any], stage: str) -> dict[str, Any]:
@@ -1089,6 +1129,43 @@ def test_refresh_full_workflow_real_production_parity_success(
     assert sha256_file(fixture.paths.taxonomy_db) == taxonomy_before
     assert contention_checks == ["TEST_DOWNSTREAM", "PRODUCTION_POSTFLIGHT"]
     assert runtime < 30
+    _assert_terminal_lane_cleanup(fixture)
+
+
+def test_refresh_real_production_activates_one_complete_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch)
+    project = _migrate_refresh_fixture_to_generation_layout(fixture, monkeypatch)
+    old = resolve_active_generation(project, require_generation=True)
+    old_hashes = {
+        role: sha256_file(path) for role, path in old.role_paths().items()
+    }
+
+    result = _service(fixture, actual_production=True).full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    )
+
+    assert result.outcome == "COMPLETED"
+    workflow = _workflow_payload(result)
+    production = _stage_payload(workflow, "Production update")
+    active = resolve_active_generation(project, require_generation=True)
+    assert active.generation_id != old.generation_id
+    assert production["journal"]["publication_mode"] == "GENERATION_POINTER"
+    assert production["journal"]["generation_activation_state"] == "ACTIVATED_AND_VERIFIED"
+    assert production["journal"]["new_generation_id"] == active.generation_id
+    assert {
+        role: sha256_file(path) for role, path in old.role_paths().items()
+    } == old_hashes
+    assert any(
+        sha256_file(active.role_paths()[role]) != old_hashes[role]
+        for role in PUBLICATION_ROLES
+    )
+    report = Path(production["artifact_dir"], "operation_report.md").read_text(
+        encoding="utf-8"
+    )
+    assert "one atomic active-generation manifest replacement" in report
+    assert "not reader-atomically replaced" not in report
     _assert_terminal_lane_cleanup(fixture)
 
 

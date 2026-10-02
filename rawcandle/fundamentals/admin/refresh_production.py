@@ -13,7 +13,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, AdminRunWriter, stable_run_id
+from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, _assert_clean_worktree
 from rawcandle.fundamentals.admin.contracts import AdminOperationType, RunStage, utc_now
 from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
@@ -25,6 +25,7 @@ from rawcandle.fundamentals.admin.publication_journal import (
     PublicationRecoveredRetryRequired,
     fsync_directory,
     fsync_file,
+    activate_prepared_generation,
     prepare_journal,
     guard_production_writes,
     restore_old_generation,
@@ -65,7 +66,12 @@ from rawcandle.fundamentals.admin.source_bundle import (
     semantic_source_binding,
 )
 from rawcandle.fundamentals.operating_income_v2.full_rebuild import validate_rebuild
-from rawcandle.fundamentals.phase12d import PRODUCTION
+from rawcandle.fundamentals.generations import (
+    active_manifest_path,
+    prepare_generation_from_candidates,
+    resolve_active_generation,
+    resolved_production_paths,
+)
 from rawcandle.fundamentals.phase13b_foundation import online_backup
 from rawcandle.fundamentals.providers.sharadar import SharadarClient
 
@@ -620,6 +626,19 @@ def render_report(result: Mapping[str, Any]) -> str:
         item = disposable.get(key) or {}
         return f"- {label}: {item.get('status', 'NOT_RECORDED')} - {item.get('reason', 'Reason not recorded.')}"
 
+    journal = result.get("journal") or {}
+    generation_mode = journal.get("publication_mode") == "GENERATION_POINTER"
+    publication_safety = (
+        [
+            "- Publication boundary: one atomic active-generation manifest replacement.",
+            f"- Activated generation: `{journal.get('new_generation_id', 'NOT_ACTIVATED')}`.",
+            "- Readers pinned before activation remain on OLD; later readers resolve complete NEW.",
+        ]
+        if generation_mode else [
+            "- Publication order: provider -> canonical -> analysis.",
+            "- Rehearsal/legacy publication uses journaled role replacement.",
+        ]
+    )
     lines = [
         "# Refresh Fundamentals Production Update", "", "## Executive Summary", "",
         "- Operation: Refresh Fundamentals", "- Stage: Production update",
@@ -685,9 +704,7 @@ def render_report(result: Mapping[str, Any]) -> str:
         f"- Backups verified: {len(result.get('backups') or {})}/3",
         f"- Journal state: {(result.get('journal') or {}).get('state', 'NOT_PREPARED')}",
         f"- Candidate/source-copy cleanup: {(result.get('cleanup') or {}).get('status', 'NOT_RECORDED')}",
-        "- Publication order: provider -> canonical -> analysis.",
-        "- The three-file set is journaled and recoverable, not reader-atomically replaced as one filesystem operation.",
-        "- A reader can observe an intermediate generation during the bounded replacement window; generation-directory activation is deferred.",
+        *publication_safety,
         "", "## Terminal Cleanup", "",
         "### Automatically Disposable", "",
         cleanup_line("Candidate DB cleanup", "candidate_databases"),
@@ -755,7 +772,7 @@ def render_report(result: Mapping[str, Any]) -> str:
 
 def run_production_apply(
     *, preview_payload_path: Path, preview_fingerprint: str, test_run_id: str,
-    source_paths: BatchAddTickerPaths = BatchAddTickerPaths(), run_root: Path = ADMIN_RUN_ROOT,
+    source_paths: BatchAddTickerPaths | None = None, run_root: Path = ADMIN_RUN_ROOT,
     temp_root: Path = ADMIN_TEMP_ROOT, backup_root: Path = BACKUP_ROOT,
     journal_path: Path = ACTIVE_JOURNAL_PATH, client: SharadarClient | None = None,
     confirm_production: bool = False, production_intent: bool = False,
@@ -766,17 +783,23 @@ def run_production_apply(
 ) -> dict[str, Any]:
     if not confirm_production:
         raise PermissionError("REFRESH_PRODUCTION_CONFIRMATION_REQUIRED")
-    production_paths = {role: path.resolve() for role, path in PRODUCTION.items()}
+    source_paths = source_paths or BatchAddTickerPaths()
+    production_paths = {
+        role: path.resolve() for role, path in resolved_production_paths(ROOT).items()
+    }
     actual_production = source_paths.analysis_db.resolve() == production_paths["analysis"]
     if actual_production != (production_intent and not rehearsal):
         raise PermissionError("REFRESH_EXPLICIT_PRODUCTION_INTENT_REQUIRED")
     if actual_production:
+        active_generation = resolve_active_generation(ROOT, require_generation=True)
         if any(source_paths.as_dict()[role].resolve() != production_paths[role] for role in source_paths.as_dict()):
             raise PermissionError("REFRESH_EXACT_PRODUCTION_PATHS_REQUIRED")
         if run_root.resolve() != ADMIN_RUN_ROOT.resolve() or journal_path.resolve() != ACTIVE_JOURNAL_PATH.resolve() or lock_path.resolve() != ADMIN_LOCK.resolve():
             raise PermissionError("REFRESH_PRODUCTION_GUARD_PATH_OVERRIDE_REJECTED")
     elif any(path.resolve() in set(production_paths.values()) for path in source_paths.as_dict().values()):
         raise PermissionError("REFRESH_REHEARSAL_MUST_USE_ONLY_COPIES")
+    else:
+        active_generation = None
 
     run_id = stable_run_id(AdminOperationType.REFRESH_FUNDAMENTALS, preview_fingerprint, suffix="production" if actual_production else "transaction_rehearsal") + "_" + secrets.token_hex(4)
     writer = AdminRunWriter(run_id, AdminOperationType.REFRESH_FUNDAMENTALS, root=run_root)
@@ -788,6 +811,7 @@ def run_production_apply(
     stage = PRODUCTION_STAGES[0]
     journal: dict[str, Any] | None = None
     write_boundary_crossed = False
+    publication_paths = source_paths
     result: dict[str, Any] = {
         "run_id": run_id, "artifact_dir": str(writer.run_dir),
         "operation_type": AdminOperationType.REFRESH_FUNDAMENTALS.value,
@@ -1023,6 +1047,7 @@ def run_production_apply(
 
         stage = "JOURNAL_PREPARE"
         roles = _candidate_manifest(candidate_paths_by_role, backups)
+        generation_id = f"refresh_{run_id}" if active_generation is not None else None
         journal = prepare_journal(
             path=journal_path, operation_type=AdminOperationType.REFRESH_FUNDAMENTALS.value,
             run_id=run_id, preview_run_id=preview_payload_path.resolve().parent.name,
@@ -1030,24 +1055,87 @@ def run_production_apply(
             old_source_watermark=revalidated["state"].get("published_watermark"),
             new_source_watermark=source_watermark,
             source_schema_fingerprint=revalidated["schema"]["schema_fingerprint"], roles=roles,
+            publication_mode=(
+                "GENERATION_POINTER" if active_generation is not None
+                else "ROLE_REPLACEMENT"
+            ),
+            old_generation=(
+                active_generation.evidence()
+                | {"manifest": dict(active_generation.manifest)}
+                if active_generation is not None else None
+            ),
+            new_generation_id=generation_id,
+            active_generation_manifest_path=(
+                active_manifest_path(ROOT) if active_generation is not None else None
+            ),
         )
         result["journal"] = journal
         progress(stage, "COMPLETED", "Durable publication journal is PREPARED.")
         crash("AFTER_PREPARED")
 
-        for role in PUBLICATION_ROLES:
-            stage = f"PUBLISH_{role.upper()}"
-            progress(stage, "RUNNING", f"Publishing and verifying {role}.")
-            if not write_boundary_crossed:
-                writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Journaled three-database publication started.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
-                write_boundary_crossed = True
-                result["write_boundary_crossed"] = True
-            journal = _replace_role(role, journal, journal_path=journal_path)
+        if active_generation is not None:
+            stage = "PUBLISH_PROVIDER"
+            progress(stage, "RUNNING", "Preparing the complete immutable generation.")
+            prepared_generation = prepare_generation_from_candidates(
+                candidate_paths_by_role,
+                generation_id=str(generation_id),
+                project_root=ROOT,
+                source=AdminOperationType.REFRESH_FUNDAMENTALS.value,
+            )
+            journal = update_journal(
+                journal_path, journal,
+                current_publication_step="NEW_GENERATION_READY",
+                generation_activation_state="READY",
+                new_generation_manifest=prepared_generation["manifest"],
+                new_generation_dir=prepared_generation["generation_dir"],
+            )
             result["journal"] = journal
-            progress(stage, "COMPLETED", f"Published and verified {role}.")
-            crash(f"AFTER_{role.upper()}_REPLACEMENT")
-            if inject_failure_at == f"AFTER_{role.upper()}_REPLACEMENT":
-                raise RuntimeError(f"INJECTED_REFRESH_PUBLICATION_FAILURE:{role}")
+            progress(stage, "COMPLETED", "Complete immutable generation is ready.")
+            crash("AFTER_NEW_GENERATION_READY")
+            stage = "PUBLISH_CANONICAL"
+            progress(stage, "RUNNING", "Atomically activating the complete generation.")
+            writer.checkpoint(
+                RunStage.WRITE_BOUNDARY_CROSSED,
+                message="Atomic generation activation started.",
+                preview_fingerprint=preview_fingerprint,
+                write_boundary_crossed=True,
+            )
+            write_boundary_crossed = True
+            result["write_boundary_crossed"] = True
+            journal = activate_prepared_generation(
+                journal,
+                new_manifest=prepared_generation["manifest"],
+                journal_path=journal_path,
+            )
+            result["journal"] = journal
+            publication_paths = BatchAddTickerPaths(
+                *(Path(prepared_generation["roles"][role]) for role in PUBLICATION_ROLES),
+                source_paths.market_db,
+                source_paths.taxonomy_db,
+            )
+            progress(stage, "COMPLETED", "Complete generation activated atomically.")
+            crash("AFTER_GENERATION_ACTIVATION")
+            if inject_failure_at in {
+                "AFTER_PROVIDER_REPLACEMENT", "AFTER_CANONICAL_REPLACEMENT",
+                "AFTER_ANALYSIS_REPLACEMENT", "AFTER_GENERATION_ACTIVATION",
+            }:
+                raise RuntimeError("INJECTED_REFRESH_PUBLICATION_FAILURE:generation")
+            stage = "PUBLISH_ANALYSIS"
+            progress(stage, "COMPLETED", "Analysis is part of the activated generation.")
+        else:
+            for role in PUBLICATION_ROLES:
+                stage = f"PUBLISH_{role.upper()}"
+                progress(stage, "RUNNING", f"Publishing and verifying {role}.")
+                if not write_boundary_crossed:
+                    writer.checkpoint(RunStage.WRITE_BOUNDARY_CROSSED, message="Journaled three-database publication started.", preview_fingerprint=preview_fingerprint, write_boundary_crossed=True)
+                    write_boundary_crossed = True
+                    result["write_boundary_crossed"] = True
+                journal = _replace_role(role, journal, journal_path=journal_path)
+                result["journal"] = journal
+                progress(stage, "COMPLETED", f"Published and verified {role}.")
+                crash(f"AFTER_{role.upper()}_REPLACEMENT")
+                if inject_failure_at == f"AFTER_{role.upper()}_REPLACEMENT":
+                    raise RuntimeError(f"INJECTED_REFRESH_PUBLICATION_FAILURE:{role}")
 
         stage = "POSTFLIGHT"
         journal = update_journal(journal_path, journal, state="POSTFLIGHT", current_publication_step="POSTFLIGHT", postflight_state="RUNNING")
@@ -1056,7 +1144,7 @@ def run_production_apply(
         if inject_failure_at == "POSTFLIGHT":
             raise RuntimeError("INJECTED_REFRESH_POSTFLIGHT_FAILURE")
         postflight = _postflight(
-            paths=source_paths, histories=histories, merge_plans=merge_plans,
+            paths=publication_paths, histories=histories, merge_plans=merge_plans,
             canonical_result=canonical_result,
             analysis_result=analysis_result, expected_roles=roles, refresh_state=refresh_state,
             as_of_date=calculation_as_of_date,
@@ -1181,7 +1269,12 @@ def run_production_apply(
         if successful:
             progress("CLEANUP", "COMPLETED", "Terminal phase-owned candidate artifacts were removed.")
         if result.get("production_file_state_before"):
-            result["production_file_state_after"] = _production_file_state(source_paths)
+            state_paths = (
+                publication_paths
+                if result.get("outcome") == "COMPLETED"
+                else source_paths
+            )
+            result["production_file_state_after"] = _production_file_state(state_paths)
             result["production_file_state_unchanged"] = (
                 result["production_file_state_before"] == result["production_file_state_after"]
             )
