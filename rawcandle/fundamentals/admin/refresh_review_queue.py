@@ -18,11 +18,14 @@ ACCEPT_FISCAL_IDENTITY_REVISION = "ACCEPT_FISCAL_IDENTITY_REVISION"
 FISCAL_REVISION_APPROVAL_VERSION = "REFRESH_FISCAL_REVISION_APPROVAL_V1"
 FISCAL_IDENTITY_REVISION = "FISCAL_IDENTITY_REVISION"
 REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION = "REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION"
+CONFIRM_TRUE_SOURCE_REMOVAL = "CONFIRM_TRUE_SOURCE_REMOVAL"
+TRUE_REMOVAL_APPROVAL_VERSION = "REFRESH_TRUE_SOURCE_REMOVAL_APPROVAL_V1"
+TRUE_SOURCE_REMOVAL = "TRUE_SOURCE_REMOVAL"
 SUPPORTED_ACTIONS = (
     "WAIT_FOR_PROVIDER", "RETRY_REEVALUATION", ACCEPT_RETAINED_HISTORY,
-    ACCEPT_FISCAL_IDENTITY_REVISION,
+    ACCEPT_FISCAL_IDENTITY_REVISION, CONFIRM_TRUE_SOURCE_REMOVAL,
 )
-BLOCKED_ACTIONS = ("CONFIRM_TRUE_SOURCE_REMOVAL",)
+BLOCKED_ACTIONS: tuple[str, ...] = ()
 REASON_EXPLANATIONS = {
     "BOUNDARY_FISCAL_WINDOW_TOO_SHORT": (
         "Provider history is shorter than the required 41-quarter boundary."
@@ -38,6 +41,9 @@ REASON_EXPLANATIONS = {
     ),
     REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION: (
         "Provider fiscal identity changed on an existing source observation and requires operator review."
+    ),
+    TRUE_SOURCE_REMOVAL: (
+        "Complete provider history proves that exact published source observations are no longer returned."
     ),
 }
 
@@ -302,14 +308,59 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
         and event_tickers == {ticker}
         and fiscal_event_evidence_complete
     )
-    local = source_window_local or fiscal_revision_local
+    true_removal_events = [
+        item for item in events if item.get("event") == TRUE_SOURCE_REMOVAL
+    ]
+    true_removal_reasons = {
+        "INTERIOR_SOURCE_KEY_REMOVAL", "SAME_FISCAL_SOURCE_KEY_REPLACEMENT",
+    }
+    true_removal_local = (
+        change.get("classification") == "REVIEW_REQUIRED"
+        and change.get("review_reason") == TRUE_SOURCE_REMOVAL
+        and fiscal_identity_binding
+        and complete_arq_mrq
+        and bool(true_removal_events)
+        and event_tickers == {ticker}
+        and all(
+            item.get("classification_reason") in true_removal_reasons
+            and isinstance(item.get("source_identity"), Mapping)
+            and _valid_fiscal_identity(item.get("fiscal_identity"))
+            and (item.get("provider_absence_proof") or {}).get(
+                "absent_from_complete_source"
+            ) is True
+            and (item.get("provider_absence_proof") or {}).get(
+                "source_response_status"
+            ) == "COMPLETE"
+            and bool((item.get("provider_absence_proof") or {}).get(
+                "complete_source_raw_fingerprint"
+            ))
+            and bool((item.get("provider_absence_proof") or {}).get(
+                "complete_source_effective_fingerprint"
+            ))
+            for item in true_removal_events
+        )
+        and all(
+            item.get("event") in {TRUE_SOURCE_REMOVAL, "AGED_OUT_OF_SOURCE_WINDOW"}
+            for item in events
+        )
+        and not any(item.get("companion_dimension_conflict") for item in events)
+    )
+    local = source_window_local or fiscal_revision_local or true_removal_local
     affected_source_keys = [
         item.get("source_identity") for item in events if item.get("source_identity")
     ]
     fiscal_identities = (
         [_fiscal_event_evidence(item) for item in fiscal_events]
         if fiscal_events
-        else [item.get("fiscal_identity") for item in events if item.get("fiscal_identity")]
+        else [
+            item.get("fiscal_identity") for item in (
+                true_removal_events if true_removal_events else events
+            ) if item.get("fiscal_identity")
+        ]
+    )
+    affected_source_keys = (
+        [item.get("source_identity") for item in true_removal_events]
+        if true_removal_events else affected_source_keys
     )
     return {
         "ticker": ticker,
@@ -331,7 +382,8 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
             "proven_local_shape": (
                 "MRQ_FISCAL_REVISION_WITH_ARQ_COMPANION"
                 if fiscal_revision_local else "OLDEST_PREFIX_SOURCE_WINDOW"
-                if source_window_local else None
+                if source_window_local else "PROVEN_TRUE_SOURCE_REMOVAL"
+                if true_removal_local else None
             ),
             "fiscal_identity_binding_complete": fiscal_identity_binding,
             "mrq_fiscal_revisions_only": bool(fiscal_events) and len(fiscal_events) == len(events)
@@ -346,6 +398,30 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
             "short_window_is_ticker_local": bool(events) and all(
                 item.get("classification_reason") in allowed_reasons for item in events
             ),
+            "true_removal_only": bool(true_removal_events)
+            and len(true_removal_events) == sum(
+                item.get("event") == TRUE_SOURCE_REMOVAL for item in events
+            ),
+            "provider_absence_proven": bool(true_removal_events) and all(
+                (item.get("provider_absence_proof") or {}).get(
+                    "absent_from_complete_source"
+                ) is True
+                and (item.get("provider_absence_proof") or {}).get(
+                    "source_response_status"
+                ) == "COMPLETE"
+                for item in true_removal_events
+            ),
+            "provider_absence_evidence": [
+                {
+                    "source_identity": dict(item.get("source_identity") or {}),
+                    "fiscal_identity": dict(item.get("fiscal_identity") or {}),
+                    "classification_reason": item.get("classification_reason"),
+                    "provider_absence_proof": dict(
+                        item.get("provider_absence_proof") or {}
+                    ),
+                }
+                for item in true_removal_events
+            ],
             "affected_observation_count": len(affected_source_keys),
             "affected_arq_count": sum(
                 str(item.get("dimension")) == "ARQ" for item in events
@@ -624,6 +700,108 @@ def match_fiscal_revision_approval(
     }
 
 
+def true_removal_approval_eligibility(
+    item: Mapping[str, Any], *, publication_blocked: bool = False,
+) -> dict[str, Any]:
+    context = dict(item.get("review_context") or {})
+    locality = dict(context.get("locality_proof") or {})
+    identity = dict(context.get("identity_binding") or {})
+    reasons = set(context.get("reason_codes") or item.get("reason_codes") or [])
+    required_identity = (
+        "company_id", "security_id", "company_key", "current_ticker",
+        "provider_security_id", "provider_ticker",
+    )
+    allowed_reasons = {
+        "INTERIOR_SOURCE_KEY_REMOVAL",
+        "SAME_FISCAL_SOURCE_KEY_REPLACEMENT",
+        "OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW",
+    }
+    checks = (
+        (not publication_blocked, "Publication or recovery safety blocks review actions."),
+        (str(item.get("status")) in OPEN_STATUSES, "Review item is not unresolved."),
+        (item.get("review_type") == TRUE_SOURCE_REMOVAL, "Review item is not a true source removal."),
+        (context.get("scope") == TICKER_LOCAL_REVIEW, "Review scope is not ticker-local."),
+        (context.get("review_type") == TRUE_SOURCE_REMOVAL, "Review context is not a true source removal."),
+        (locality.get("proven_local_shape") == "PROVEN_TRUE_SOURCE_REMOVAL", "True-removal locality is not proven."),
+        (locality.get("complete_arq_mrq") is True, "Complete ARQ/MRQ evidence is missing."),
+        (locality.get("single_ticker_events") is True, "Evidence is not limited to one ticker."),
+        (locality.get("provider_absence_proven") is True, "Complete provider absence is not proven."),
+        (locality.get("no_cross_ticker_or_companion_conflict") is True, "Companion or cross-ticker evidence is conflicting."),
+        (identity.get("status") == "KNOWN" and all(identity.get(key) for key in required_identity), "Stable provider/company/security identity is incomplete."),
+        (bool(item.get("queue_item_id")), "Durable queue item identity is missing."),
+        (bool(item.get("affected_source_keys")), "Exact removed source keys are missing."),
+        (bool(item.get("fiscal_identities")), "Affected fiscal identities are missing."),
+        (reasons.issubset(allowed_reasons) and bool(reasons & {"INTERIOR_SOURCE_KEY_REMOVAL", "SAME_FISCAL_SOURCE_KEY_REPLACEMENT"}), "Review reasons are not true-removal compatible."),
+        (bool(item.get("source_evidence_fingerprint")), "Evidence fingerprint is missing."),
+        (bool(item.get("last_published_binding")), "Published-state binding is missing."),
+        (bool(context.get("queue_evidence_fingerprint")), "Queue evidence fingerprint is missing."),
+        (context.get("queue_evidence_fingerprint") == fingerprint(_queue_evidence_binding(item)), "Queue evidence fingerprint is invalid."),
+    )
+    for passed, reason in checks:
+        if not passed:
+            return {"eligible": False, "reason": reason}
+    return {
+        "eligible": True,
+        "reason": "Exact ticker-local true-removal evidence is eligible.",
+        "removed_source_count": len(item.get("affected_source_keys") or []),
+    }
+
+
+def match_true_removal_approval(
+    queue_item: Mapping[str, Any] | None,
+    current_scope: Mapping[str, Any],
+    *,
+    published_binding: str | None,
+) -> dict[str, Any]:
+    if not queue_item or queue_item.get("operator_action") != CONFIRM_TRUE_SOURCE_REMOVAL:
+        return {"applied": False, "reason": "NO_ACTIVE_TRUE_REMOVAL_APPROVAL"}
+    if queue_item.get("status") != "RETRY_REEVALUATION":
+        return {"applied": False, "reason": "APPROVAL_NOT_PENDING_REEVALUATION"}
+    approval = queue_item.get("resolution_evidence") or {}
+    if (
+        approval.get("resolution_action") != CONFIRM_TRUE_SOURCE_REMOVAL
+        or approval.get("resolution_contract_version")
+        != TRUE_REMOVAL_APPROVAL_VERSION
+    ):
+        return {"applied": False, "reason": "APPROVAL_EVIDENCE_MISSING"}
+    approved_binding = approval.get("binding")
+    if (
+        not isinstance(approved_binding, Mapping)
+        or approval.get("approval_evidence_fingerprint")
+        != fingerprint(approved_binding)
+    ):
+        return {"applied": False, "reason": "APPROVAL_FINGERPRINT_INVALID"}
+    current_item = {
+        **dict(queue_item),
+        "source_evidence_fingerprint": current_scope.get("source_evidence_fingerprint"),
+        "affected_source_keys": current_scope.get("affected_source_keys"),
+        "fiscal_identities": current_scope.get("fiscal_identities"),
+        "last_published_binding": published_binding,
+        "review_context": _review_context_with_integrity(
+            current_scope,
+            queue_item_id=str(queue_item.get("queue_item_id") or ""),
+            published_binding=published_binding,
+        ),
+    }
+    current_binding = _approval_binding(current_item)
+    if dict(approved_binding) != current_binding:
+        return {
+            "applied": False,
+            "reason": "TRUE_REMOVAL_APPROVAL_EVIDENCE_DRIFT",
+            "current_binding_fingerprint": fingerprint(current_binding),
+        }
+    return {
+        "applied": True,
+        "reason": "EXACT_TRUE_REMOVAL_APPROVAL_MATCH",
+        "approval_evidence_fingerprint": approval.get("approval_evidence_fingerprint"),
+        "approved_binding": dict(approved_binding),
+        "approved_source_keys": current_binding["affected_source_keys"],
+        "approved_fiscal_identities": current_binding["fiscal_identities"],
+        "operator_reviewed": True,
+        "resolution_contract_version": TRUE_REMOVAL_APPROVAL_VERSION,
+    }
+
+
 def partition_changes(changes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     safe = [dict(item) for item in changes if item.get("classification") != "REVIEW_REQUIRED"]
     reviews = [dict(item) for item in changes if item.get("classification") == "REVIEW_REQUIRED"]
@@ -687,11 +865,19 @@ def present_review_item(
     fiscal_eligibility = fiscal_revision_approval_eligibility(
         item, publication_blocked=publication_blocked,
     )
+    true_removal_eligibility = true_removal_approval_eligibility(
+        item, publication_blocked=publication_blocked,
+    )
     approval = item.get("resolution_evidence") or {}
+    locality = dict((item.get("review_context") or {}).get("locality_proof") or {})
     approval_pending_publication = (
         status == "RETRY_REEVALUATION"
         and item.get("operator_action")
-        in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION)
+        in (
+            ACCEPT_RETAINED_HISTORY,
+            ACCEPT_FISCAL_IDENTITY_REVISION,
+            CONFIRM_TRUE_SOURCE_REMOVAL,
+        )
         and bool(approval.get("approval_evidence_fingerprint"))
     )
     return {
@@ -724,6 +910,23 @@ def present_review_item(
             "Approval already granted and pending successful publication."
             if approval_pending_publication else fiscal_eligibility["reason"]
         ),
+        "confirm_true_removal_eligible": (
+            true_removal_eligibility["eligible"]
+            and not approval_pending_publication
+        ),
+        "confirm_true_removal_reason": (
+            "Approval already granted and pending successful publication."
+            if approval_pending_publication
+            else true_removal_eligibility["reason"]
+        ),
+        "true_removal_source_keys": source_keys,
+        "true_removal_changes_financial_history": any(
+            isinstance(value, Mapping) and value.get("dimension") == "ARQ"
+            for value in source_keys
+        ),
+        "true_removal_provider_evidence": locality.get(
+            "provider_absence_evidence"
+        ) or [],
         "fiscal_revision_event_count": len(fiscal_identities),
         "fiscal_revision_events": fiscal_identities,
         "approval_timestamp_utc": approval.get("operator_timestamp_utc"),
@@ -824,6 +1027,7 @@ class RefreshReviewQueue:
             approval_events = {
                 ACCEPT_RETAINED_HISTORY: "RETAINED_HISTORY_APPROVAL_INVALIDATED",
                 ACCEPT_FISCAL_IDENTITY_REVISION: "FISCAL_REVISION_APPROVAL_INVALIDATED",
+                CONFIRM_TRUE_SOURCE_REMOVAL: "TRUE_REMOVAL_APPROVAL_INVALIDATED",
             }
             if evidence_drift and prior_item.get("operator_action") in approval_events:
                 self._append_audit(
@@ -847,6 +1051,31 @@ class RefreshReviewQueue:
         now = utc_now()
         with _connect(self.path) as connection:
             for ticker in resolved:
+                row = connection.execute(
+                    "SELECT * FROM refresh_review_queue WHERE ticker=? AND status IN (?,?,?)",
+                    (ticker, *OPEN_STATUSES),
+                ).fetchone()
+                if row is not None:
+                    item = _decode_row(row)
+                    invalidation_events = {
+                        ACCEPT_RETAINED_HISTORY: "RETAINED_HISTORY_APPROVAL_INVALIDATED",
+                        ACCEPT_FISCAL_IDENTITY_REVISION: "FISCAL_REVISION_APPROVAL_INVALIDATED",
+                        CONFIRM_TRUE_SOURCE_REMOVAL: "TRUE_REMOVAL_APPROVAL_INVALIDATED",
+                    }
+                    invalidation_event = invalidation_events.get(
+                        str(item.get("operator_action") or "")
+                    )
+                    if invalidation_event:
+                        self._append_audit(
+                            connection,
+                            ticker=ticker,
+                            event_type=invalidation_event,
+                            run_id=run_id,
+                            evidence={
+                                "reason": "REEVALUATED_WITHOUT_LOCAL_REVIEW",
+                                "prior_approval": item.get("resolution_evidence"),
+                            },
+                        )
                 connection.execute(
                     "UPDATE refresh_review_queue SET status='RESOLVED',resolution_at_utc=?,resolution_evidence_json=?,last_seen_run_id=?,last_seen_at_utc=? "
                     "WHERE ticker=? AND status IN (?,?,?)",
@@ -890,10 +1119,17 @@ class RefreshReviewQueue:
             if row is None or str(row["status"]) == "RESOLVED":
                 raise ValueError("REFRESH_REVIEW_ITEM_NOT_OPEN")
             item = _decode_row(row)
-            if normalized in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION):
+            if normalized in (
+                ACCEPT_RETAINED_HISTORY,
+                ACCEPT_FISCAL_IDENTITY_REVISION,
+                CONFIRM_TRUE_SOURCE_REMOVAL,
+            ):
                 is_fiscal = normalized == ACCEPT_FISCAL_IDENTITY_REVISION
+                is_true_removal = normalized == CONFIRM_TRUE_SOURCE_REMOVAL
                 eligibility = (
-                    fiscal_revision_approval_eligibility(
+                    true_removal_approval_eligibility(
+                        item, publication_blocked=publication_blocked,
+                    ) if is_true_removal else fiscal_revision_approval_eligibility(
                         item, publication_blocked=publication_blocked,
                     ) if is_fiscal else retained_history_approval_eligibility(
                         item, publication_blocked=publication_blocked,
@@ -901,7 +1137,7 @@ class RefreshReviewQueue:
                 )
                 if not eligibility["eligible"]:
                     raise ValueError(
-                        ("REFRESH_FISCAL_REVISION_NOT_ELIGIBLE:" if is_fiscal else "REFRESH_RETAINED_HISTORY_NOT_ELIGIBLE:")
+                        ("REFRESH_TRUE_REMOVAL_NOT_ELIGIBLE:" if is_true_removal else "REFRESH_FISCAL_REVISION_NOT_ELIGIBLE:" if is_fiscal else "REFRESH_RETAINED_HISTORY_NOT_ELIGIBLE:")
                         + str(eligibility["reason"])
                     )
                 binding = _approval_binding(item)
@@ -918,7 +1154,8 @@ class RefreshReviewQueue:
                 resolution_evidence = {
                     "resolution_action": normalized,
                     "resolution_contract_version": (
-                        FISCAL_REVISION_APPROVAL_VERSION
+                        TRUE_REMOVAL_APPROVAL_VERSION
+                        if is_true_removal else FISCAL_REVISION_APPROVAL_VERSION
                         if is_fiscal else RETAINED_HISTORY_APPROVAL_VERSION
                     ),
                     "operator_timestamp_utc": now,
@@ -934,7 +1171,8 @@ class RefreshReviewQueue:
                     connection,
                     ticker=ticker,
                     event_type=(
-                        "FISCAL_REVISION_APPROVED"
+                        "TRUE_REMOVAL_APPROVED"
+                        if is_true_removal else "FISCAL_REVISION_APPROVED"
                         if is_fiscal else "RETAINED_HISTORY_APPROVED"
                     ),
                     run_id=str(item.get("last_seen_run_id") or "") or None,
@@ -957,7 +1195,11 @@ class RefreshReviewQueue:
                     ticker,
                 ),
             ).rowcount
-            if normalized in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION):
+            if normalized in (
+                ACCEPT_RETAINED_HISTORY,
+                ACCEPT_FISCAL_IDENTITY_REVISION,
+                CONFIRM_TRUE_SOURCE_REMOVAL,
+            ):
                 connection.execute(
                     "UPDATE refresh_review_queue SET resolution_at_utc=? WHERE ticker=?",
                     (resolution_at, ticker),
@@ -987,7 +1229,11 @@ class RefreshReviewQueue:
             item = _decode_row(row)
             approval = dict(item.get("resolution_evidence") or {})
             action = item.get("operator_action")
-            if action not in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION):
+            if action not in (
+                ACCEPT_RETAINED_HISTORY,
+                ACCEPT_FISCAL_IDENTITY_REVISION,
+                CONFIRM_TRUE_SOURCE_REMOVAL,
+            ):
                 raise ValueError("REFRESH_OPERATOR_APPROVAL_MISSING")
             if (
                 item.get("status") == "RESOLVED"
@@ -1038,7 +1284,9 @@ class RefreshReviewQueue:
                 connection,
                 ticker=ticker,
                 event_type=(
-                    "FISCAL_REVISION_APPROVAL_CONSUMED"
+                    "TRUE_REMOVAL_APPROVAL_CONSUMED"
+                    if action == CONFIRM_TRUE_SOURCE_REMOVAL
+                    else "FISCAL_REVISION_APPROVAL_CONSUMED"
                     if action == ACCEPT_FISCAL_IDENTITY_REVISION
                     else "RETAINED_HISTORY_APPROVAL_CONSUMED"
                 ),

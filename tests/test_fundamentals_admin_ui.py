@@ -1786,6 +1786,81 @@ def test_refresh_review_queue_ui_confirms_exact_fiscal_revision() -> None:
     assert service.actions == [("TRUG", "ACCEPT_FISCAL_IDENTITY_REVISION")]
 
 
+def test_refresh_review_queue_ui_confirms_exact_true_source_removal() -> None:
+    item = {
+        "ticker": "DROP",
+        "status": "OPEN",
+        "review_scope": "TICKER_LOCAL_REVIEW",
+        "classification": "TRUE_SOURCE_REMOVAL",
+        "reason_codes": ["INTERIOR_SOURCE_KEY_REMOVAL"],
+        "human_summary": "1 exact source observation is absent.",
+        "affected_source_keys": [{
+            "ticker": "DROP", "dimension": "ARQ", "date": "2025-05-20",
+            "reportperiod": "2025-03-31",
+        }],
+        "true_removal_source_keys": [{
+            "ticker": "DROP", "dimension": "ARQ", "date": "2025-05-20",
+            "reportperiod": "2025-03-31",
+        }],
+        "fiscal_identities": [{"fiscal_year": 2025, "fiscal_quarter": "Q1"}],
+        "true_removal_changes_financial_history": True,
+        "true_removal_provider_evidence": [{
+            "source_identity": {"dimension": "ARQ"},
+            "provider_absence_proof": {
+                "source_response_status": "COMPLETE",
+                "absent_from_complete_source": True,
+                "complete_source_row_count": 40,
+            },
+        }],
+        "first_seen_at_utc": "2026-10-02T01:00:00Z",
+        "last_seen_at_utc": "2026-10-02T02:00:00Z",
+        "last_published_binding": "published-1",
+        "source_evidence_fingerprint": "c" * 64,
+        "evidence_reference": "c" * 12,
+        "accept_retained_history_eligible": False,
+        "accept_fiscal_revision_eligible": False,
+        "confirm_true_removal_eligible": True,
+        "confirm_true_removal_reason": (
+            "Exact ticker-local true-removal evidence is eligible."
+        ),
+    }
+
+    class Service:
+        def __init__(self) -> None:
+            self.actions = []
+
+        def capabilities(self):
+            return ()
+
+        def history_entries(self, *, limit, include_technical=False):
+            return []
+
+        def list_refresh_review_queue(self, *, active_only=True):
+            return {"status": "READY", "items": [item]}
+
+        def resolve_refresh_review(self, ticker, action, *, evidence=None):
+            self.actions.append((ticker, action))
+            return item
+
+    page = _Page()
+    service = Service()
+    controls = build_fundamentals_admin_page(page=page, service=service)
+    controls.review_queue_refresh_button.on_click(None)
+    row = controls.review_queue_column.controls[0]
+
+    assert row.controls[9].disabled is True
+    assert row.controls[10].disabled is True
+    assert row.controls[11].disabled is False
+    row.controls[11].on_click(None)
+    summary = page.dialog.content.controls[0].value
+    assert "DROP / ARQ / 2025-05-20 / 2025-03-31" in summary
+    assert "Changes financial history: YES" in summary
+    assert "status=COMPLETE, absent=True, rows=40" in summary
+    assert "may delete these exact accepted source observations" in summary
+    page.dialog.actions[1].on_click(None)
+    assert service.actions == [("DROP", "CONFIRM_TRUE_SOURCE_REMOVAL")]
+
+
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [

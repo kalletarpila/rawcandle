@@ -50,10 +50,12 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
 from rawcandle.fundamentals.admin.refresh_review_queue import (
     ACCEPT_FISCAL_IDENTITY_REVISION,
     ACCEPT_RETAINED_HISTORY,
+    CONFIRM_TRUE_SOURCE_REMOVAL,
     RefreshReviewQueue,
     classify_review_scope,
     match_fiscal_revision_approval,
     match_retained_history_approval,
+    match_true_removal_approval,
     partition_artifact_fingerprint,
     partition_changes,
     queue_path_for_run_root,
@@ -224,6 +226,7 @@ def revalidate_bound_source(
         if (
             (item.get("retained_history_approval") or {}).get("applied")
             or (item.get("fiscal_revision_approval") or {}).get("applied")
+            or (item.get("true_removal_approval") or {}).get("applied")
         )
     }
     evaluation_tickers = sorted(
@@ -250,12 +253,23 @@ def revalidate_bound_source(
         preview_change = preview_changes.get(ticker, {})
         preview_approval = preview_change.get("retained_history_approval") or {}
         fiscal_preview_approval = preview_change.get("fiscal_revision_approval") or {}
+        true_removal_preview_approval = preview_change.get("true_removal_approval") or {}
         applied_approval: Mapping[str, Any] | None = None
         applied_fiscal_approval: Mapping[str, Any] | None = None
-        selected_approval = preview_approval if preview_approval.get("applied") else fiscal_preview_approval
+        applied_true_removal_approval: Mapping[str, Any] | None = None
+        selected_approval = (
+            preview_approval if preview_approval.get("applied")
+            else fiscal_preview_approval if fiscal_preview_approval.get("applied")
+            else true_removal_preview_approval
+        )
         if selected_approval.get("applied"):
             is_fiscal = selected_approval is fiscal_preview_approval
-            action = ACCEPT_FISCAL_IDENTITY_REVISION if is_fiscal else ACCEPT_RETAINED_HISTORY
+            is_true_removal = selected_approval is true_removal_preview_approval
+            action = (
+                CONFIRM_TRUE_SOURCE_REMOVAL if is_true_removal
+                else ACCEPT_FISCAL_IDENTITY_REVISION if is_fiscal
+                else ACCEPT_RETAINED_HISTORY
+            )
             approved_binding = selected_approval.get("approved_binding") or {}
             synthetic_queue_item = {
                 "ticker": ticker,
@@ -277,7 +291,11 @@ def revalidate_bound_source(
                 review_queue.get(ticker)
                 if review_queue is not None else synthetic_queue_item
             )
-            matcher = match_fiscal_revision_approval if is_fiscal else match_retained_history_approval
+            matcher = (
+                match_true_removal_approval if is_true_removal
+                else match_fiscal_revision_approval if is_fiscal
+                else match_retained_history_approval
+            )
             matched = matcher(
                 queue_item,
                 classify_review_scope(item),
@@ -285,10 +303,13 @@ def revalidate_bound_source(
             )
             if not matched["applied"]:
                 raise StaleRefreshPreview(
-                    "STALE_FISCAL_REVISION_APPROVAL_EVIDENCE"
+                    "STALE_TRUE_REMOVAL_APPROVAL_EVIDENCE"
+                    if is_true_removal else "STALE_FISCAL_REVISION_APPROVAL_EVIDENCE"
                     if is_fiscal else "STALE_RETAINED_HISTORY_APPROVAL_EVIDENCE"
                 )
-            if is_fiscal:
+            if is_true_removal:
+                applied_true_removal_approval = matched
+            elif is_fiscal:
                 applied_fiscal_approval = matched
             else:
                 applied_approval = matched
@@ -298,6 +319,7 @@ def revalidate_bound_source(
                 histories[ticker],
                 retained_history_approval=applied_approval,
                 fiscal_revision_approval=applied_fiscal_approval,
+                true_removal_approval=applied_true_removal_approval,
             )
         if all("rows" in current.get(dimension, {}) for dimension in REFRESH_DIMENSIONS):
             merge_plans[ticker] = build_source_history_merge(

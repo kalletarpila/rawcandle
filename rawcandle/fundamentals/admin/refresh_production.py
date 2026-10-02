@@ -998,6 +998,7 @@ def run_production_apply(
             approval = (
                 item.get("retained_history_approval")
                 or item.get("fiscal_revision_approval")
+                or item.get("true_removal_approval")
                 or {}
             )
             if not approval.get("applied"):

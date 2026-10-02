@@ -330,6 +330,14 @@ def test_true_interior_removal_deletes_key_but_preserves_alternate_canonical_qua
         }
     }
     comparison = compare_ticker_histories("TEST", current, histories["TEST"])
+    assert comparison["classification"] == "REVIEW_REQUIRED"
+    assert comparison["review_reason"] == "TRUE_SOURCE_REMOVAL"
+    comparison = compare_ticker_histories(
+        "TEST",
+        current,
+        histories["TEST"],
+        true_removal_approval={"applied": True},
+    )
     assert comparison["classification"] == "SOURCE_REMOVAL"
     plan = build_source_history_merge("TEST", current, histories["TEST"])
     replace_provider_histories(

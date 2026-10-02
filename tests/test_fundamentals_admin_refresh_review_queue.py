@@ -9,6 +9,7 @@ import pytest
 from rawcandle.fundamentals.admin.refresh_review_queue import (
     ACCEPT_FISCAL_IDENTITY_REVISION,
     ACCEPT_RETAINED_HISTORY,
+    CONFIRM_TRUE_SOURCE_REMOVAL,
     GLOBAL_BLOCKING_REVIEW,
     TICKER_LOCAL_REVIEW,
     RefreshReviewQueue,
@@ -16,11 +17,13 @@ from rawcandle.fundamentals.admin.refresh_review_queue import (
     fiscal_revision_approval_eligibility,
     match_fiscal_revision_approval,
     match_retained_history_approval,
+    match_true_removal_approval,
     partition_changes,
     present_review_item,
     queue_path_for_run_root,
     retained_history_approval_eligibility,
     review_reason_explanation,
+    true_removal_approval_eligibility,
 )
 from rawcandle.fundamentals.admin.refresh_copy_runtime import _load_bound_preview
 from rawcandle.fundamentals.admin.refresh_fundamentals import CONTRACT_VERSION
@@ -145,6 +148,172 @@ def _trug_fiscal_review() -> dict[str, object]:
         "fiscal_identity_revisions": [event],
         "source_history_events": [event],
     }
+
+
+def _true_removal_review() -> dict[str, object]:
+    source_identity = {
+        "ticker": "DROP", "dimension": "ARQ",
+        "date": "2025-05-20", "reportperiod": "2025-03-31",
+    }
+    return {
+        "ticker": "DROP",
+        "classification": "REVIEW_REQUIRED",
+        "review_reason": "TRUE_SOURCE_REMOVAL",
+        "identity": {
+            "status": "KNOWN", "ticker": "DROP", "company_id": 31,
+            "security_id": 310, "company_key": "SEC_CIK:0000000031",
+            "current_ticker": "DROP", "provider_security_id": "3100",
+            "provider_ticker": "DROP",
+        },
+        "source_completeness": {
+            "ARQ": {"status": "COMPLETE", "ticker": "DROP", "dimension": "ARQ"},
+            "MRQ": {"status": "COMPLETE", "ticker": "DROP", "dimension": "MRQ"},
+        },
+        "source_history_action": {
+            "true_source_removals": 1, "ambiguous_removals": 0,
+        },
+        "source_history_events": [{
+            "ticker": "DROP", "dimension": "ARQ",
+            "event": "TRUE_SOURCE_REMOVAL",
+            "classification_reason": "INTERIOR_SOURCE_KEY_REMOVAL",
+            "source_identity": source_identity,
+            "fiscal_identity": {"fiscal_year": 2025, "fiscal_quarter": "Q1"},
+            "was_oldest_prefix": False,
+            "chronology_coherent": True,
+            "same_fiscal_current_keys": [],
+            "companion_dimension_conflict": False,
+            "provider_absence_proof": {
+                "absent_from_complete_source": True,
+                "source_response_status": "COMPLETE",
+                "complete_source_row_count": 40,
+                "complete_source_raw_fingerprint": "raw-complete",
+                "complete_source_effective_fingerprint": "effective-complete",
+            },
+        }],
+    }
+
+
+def test_true_removal_approval_is_exact_production_durable_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_true_removal_review())
+    assert scope["scope"] == TICKER_LOCAL_REVIEW
+    assert scope["review_type"] == "TRUE_SOURCE_REMOVAL"
+    assert scope["locality_proof"]["provider_absence_proven"] is True
+    stored = queue.upsert_local(
+        scope, run_id="preview-1", published_binding="published-1",
+    )
+    assert true_removal_approval_eligibility(stored)["eligible"] is True
+
+    first = queue.apply_action(
+        "DROP", CONFIRM_TRUE_SOURCE_REMOVAL,
+        evidence={"source": "fixture", "comment": "confirmed exact deletion"},
+    )
+    second = queue.apply_action("DROP", CONFIRM_TRUE_SOURCE_REMOVAL)
+    assert second == first
+    assert first["status"] == "RETRY_REEVALUATION"
+    matched = match_true_removal_approval(
+        first, scope, published_binding="published-1",
+    )
+    assert matched["applied"] is True
+    assert matched["approved_source_keys"] == scope["affected_source_keys"]
+    pending = present_review_item(first)
+    assert pending["operator_status_label"] == "Approved - pending publication"
+    assert pending["confirm_true_removal_eligible"] is False
+    assert pending["true_removal_changes_financial_history"] is True
+
+    finalized = queue.finalize_published_approval(
+        "DROP", production_run_id="production-1",
+        approval_evidence_fingerprint=matched["approval_evidence_fingerprint"],
+        published_state_binding_before="published-1",
+        published_state_binding_after="production-1",
+        published_at_utc="2026-10-02T14:00:00Z",
+    )
+    duplicate = queue.finalize_published_approval(
+        "DROP", production_run_id="production-1",
+        approval_evidence_fingerprint=matched["approval_evidence_fingerprint"],
+        published_state_binding_before="published-1",
+        published_state_binding_after="production-1",
+        published_at_utc="2026-10-02T14:00:00Z",
+    )
+    assert duplicate == finalized
+    assert finalized["status"] == "RESOLVED"
+    assert [event["event_type"] for event in queue.audit_history("DROP")] == [
+        "TRUE_REMOVAL_APPROVED", "TRUE_REMOVAL_APPROVAL_CONSUMED",
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda review: review["source_history_events"][0]["provider_absence_proof"].update(absent_from_complete_source=False),
+        lambda review: review["source_history_events"][0]["provider_absence_proof"].update(source_response_status="FAILED"),
+        lambda review: review["source_history_events"][0].update(event="AMBIGUOUS_SOURCE_REMOVAL", classification_reason="BOUNDARY_FISCAL_WINDOW_TOO_SHORT"),
+        lambda review: review["identity"].update(company_id=None),
+    ],
+)
+def test_true_removal_confirmation_fails_closed_without_exact_local_proof(
+    tmp_path: Path, mutation,
+) -> None:
+    review = _true_removal_review()
+    mutation(review)
+    scope = classify_review_scope(review)
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    stored = queue.upsert_local(
+        scope, run_id="preview-1", published_binding="published-1",
+    )
+    assert true_removal_approval_eligibility(stored)["eligible"] is False
+    with pytest.raises(ValueError, match="TRUE_REMOVAL_NOT_ELIGIBLE"):
+        queue.apply_action("DROP", CONFIRM_TRUE_SOURCE_REMOVAL)
+
+
+def test_true_removal_approval_evidence_drift_reopens_review(tmp_path: Path) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    first_scope = classify_review_scope(_true_removal_review())
+    queue.upsert_local(first_scope, run_id="preview-1", published_binding="published-1")
+    approved = queue.apply_action("DROP", CONFIRM_TRUE_SOURCE_REMOVAL)
+    changed = _true_removal_review()
+    changed["source_history_events"][0]["provider_absence_proof"][
+        "complete_source_raw_fingerprint"
+    ] = "source-key-reappeared"
+    changed_scope = classify_review_scope(changed)
+    assert match_true_removal_approval(
+        approved, changed_scope, published_binding="published-1",
+    )["applied"] is False
+    reopened = queue.upsert_local(
+        changed_scope, run_id="preview-2", published_binding="published-1",
+    )
+    assert reopened["status"] == "OPEN"
+    assert reopened["operator_action"] is None
+    assert queue.audit_history("DROP")[-1]["event_type"] == (
+        "TRUE_REMOVAL_APPROVAL_INVALIDATED"
+    )
+
+
+def test_true_removal_source_key_reappearance_invalidates_pending_approval(
+    tmp_path: Path,
+) -> None:
+    queue = RefreshReviewQueue(tmp_path / "review.db")
+    scope = classify_review_scope(_true_removal_review())
+    queue.upsert_local(scope, run_id="preview-1", published_binding="published-1")
+    queue.apply_action("DROP", CONFIRM_TRUE_SOURCE_REMOVAL)
+
+    # A reappeared key is no longer a local removal review in the next Preview.
+    queue.resolve_absent(["DROP"], [], run_id="preview-2")
+
+    resolved = queue.get("DROP")
+    assert resolved is not None
+    assert resolved["status"] == "RESOLVED"
+    assert resolved["resolution_evidence"] == {
+        "reason": "REEVALUATED_WITHOUT_LOCAL_REVIEW", "run_id": "preview-2",
+    }
+    assert [event["event_type"] for event in queue.audit_history("DROP")] == [
+        "TRUE_REMOVAL_APPROVED", "TRUE_REMOVAL_APPROVAL_INVALIDATED",
+    ]
+    assert queue.audit_history("DROP")[-1]["evidence"]["reason"] == (
+        "REEVALUATED_WITHOUT_LOCAL_REVIEW"
+    )
 
 
 def test_trug_shaped_fiscal_revision_is_local_and_persists_complete_queue_evidence(tmp_path: Path) -> None:
@@ -443,7 +612,7 @@ def test_queue_operator_actions_never_edit_financial_state_and_resolution_is_ree
     assert accepted["resolution_evidence"]["binding"]["ticker"] == "YYAI"
     assert accepted["resolution_evidence"]["operator_evidence"]["comment"] == "reviewed"
     assert {path: path.read_bytes() for path in financial_paths} == before
-    with pytest.raises(ValueError, match="NOT_IMPLEMENTED"):
+    with pytest.raises(ValueError, match="TRUE_REMOVAL_NOT_ELIGIBLE"):
         queue.apply_action("YYAI", "CONFIRM_TRUE_SOURCE_REMOVAL")
 
     queue.resolve_absent(["YYAI"], [], run_id="preview-2")

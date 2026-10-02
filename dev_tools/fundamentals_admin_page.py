@@ -754,6 +754,87 @@ def build_fundamentals_admin_page(
         if hasattr(page, "update"):
             page.update()
 
+    def open_true_removal_confirmation(item: dict[str, Any]) -> None:
+        if not item.get("confirm_true_removal_eligible"):
+            review_queue_status_field.value = str(
+                item.get("confirm_true_removal_reason")
+                or "True source removal confirmation is not eligible."
+            )
+            if hasattr(page, "update"):
+                page.update()
+            return
+        ticker = str(item.get("ticker") or "UNKNOWN")
+        source_keys = item.get("true_removal_source_keys") or []
+        provider_evidence = item.get("true_removal_provider_evidence") or []
+        key_lines = [
+            " / ".join(
+                str(key.get(field) or "?")
+                for field in ("ticker", "dimension", "date", "reportperiod")
+            )
+            for key in source_keys if isinstance(key, dict)
+        ]
+        fiscal_lines = [
+            f"{value.get('fiscal_year', '?')} {value.get('fiscal_quarter', '?')}"
+            for value in item.get("fiscal_identities") or []
+            if isinstance(value, dict)
+        ]
+        evidence_lines = [
+            f"{(value.get('source_identity') or {}).get('dimension', '?')}: "
+            f"status={(value.get('provider_absence_proof') or {}).get('source_response_status', '?')}, "
+            f"absent={(value.get('provider_absence_proof') or {}).get('absent_from_complete_source', '?')}, "
+            f"rows={(value.get('provider_absence_proof') or {}).get('complete_source_row_count', '?')}"
+            for value in provider_evidence if isinstance(value, dict)
+        ]
+        comment = ft.TextField(
+            label="Operator comment (optional)", max_length=240,
+            multiline=True, min_lines=1, max_lines=3,
+        )
+
+        def confirm(_event: Any) -> None:
+            close_dialog()
+            apply_review_action(
+                ticker,
+                "CONFIRM_TRUE_SOURCE_REMOVAL",
+                evidence={
+                    "source": "FUNDAMENTALS_ADMIN_UI",
+                    "comment": str(comment.value or "").strip(),
+                },
+            )
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Confirm true source removal?"),
+            content=ft.Column([
+                ft.Text(
+                    f"Ticker: {ticker}\n"
+                    f"Exact source keys ({len(key_lines)}): {', '.join(key_lines)}\n"
+                    f"Affected fiscal quarters: {', '.join(fiscal_lines) or 'none'}\n"
+                    "Changes financial history: "
+                    f"{'YES' if item.get('true_removal_changes_financial_history') else 'NO'}\n"
+                    f"Complete-provider absence evidence: {'; '.join(evidence_lines)}\n\n"
+                    "Successful future Production may delete these exact accepted "
+                    "source observations from the published provider generation. "
+                    "Preview, Test, and Production will revalidate the evidence; "
+                    "any drift invalidates this confirmation."
+                ),
+                comment,
+            ], tight=True),
+            actions=[
+                ft.TextButton("Cancel", on_click=lambda _event: close_dialog()),
+                ft.ElevatedButton(
+                    "Confirm removal", icon=ft.Icons.DELETE_OUTLINE,
+                    on_click=confirm,
+                ),
+            ],
+        )
+        setattr(page, "dialog", dialog)
+        if hasattr(page, "open"):
+            page.open(dialog)
+        else:
+            dialog.open = True
+        if hasattr(page, "update"):
+            page.update()
+
     def render_review_queue(items: list[dict[str, Any]]) -> None:
         rows = []
         for item in items:
@@ -841,6 +922,16 @@ def build_fundamentals_admin_page(
                             ),
                             disabled=not bool(item.get("accept_fiscal_revision_eligible")),
                             on_click=lambda _event, selected=dict(item): open_fiscal_revision_confirmation(selected),
+                        ),
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE_OUTLINE,
+                            tooltip=(
+                                "Confirm exact true source removal"
+                                if item.get("confirm_true_removal_eligible")
+                                else str(item.get("confirm_true_removal_reason") or "True source removal confirmation unavailable")
+                            ),
+                            disabled=not bool(item.get("confirm_true_removal_eligible")),
+                            on_click=lambda _event, selected=dict(item): open_true_removal_confirmation(selected),
                         ),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,

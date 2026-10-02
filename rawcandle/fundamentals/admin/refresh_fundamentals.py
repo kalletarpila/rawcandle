@@ -35,6 +35,7 @@ from rawcandle.fundamentals.admin.refresh_review_queue import (
     classify_review_scope,
     match_fiscal_revision_approval,
     match_retained_history_approval,
+    match_true_removal_approval,
     partition_changes,
     queue_path_for_run_root,
 )
@@ -113,6 +114,7 @@ REFRESH_BINDING_FIELDS = (
     "fiscal_identity_revisions",
     "fiscal_revision_approval",
     "retained_history_approval",
+    "true_removal_approval",
 )
 
 REFRESH_STATE_SCHEMA_SQL = """
@@ -834,6 +836,13 @@ def build_source_history_merge(
                 "prior_min_reportperiod": prior_min,
                 "current_min_reportperiod": current_min,
                 "current_max_reportperiod": current_max,
+                "provider_absence_proof": {
+                    "absent_from_complete_source": key not in source_map,
+                    "source_response_status": source[dimension].status,
+                    "complete_source_row_count": source[dimension].row_count,
+                    "complete_source_raw_fingerprint": source[dimension].raw_fingerprint,
+                    "complete_source_effective_fingerprint": source[dimension].effective_fingerprint,
+                },
             })
         dimensions[dimension] = {
             "old_map": old_map,
@@ -1082,6 +1091,7 @@ def compare_ticker_histories(
     *,
     retained_history_approval: Mapping[str, Any] | None = None,
     fiscal_revision_approval: Mapping[str, Any] | None = None,
+    true_removal_approval: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if any(source[dimension].status != "COMPLETE" for dimension in REFRESH_DIMENSIONS):
         return {
@@ -1147,6 +1157,24 @@ def compare_ticker_histories(
             }),
             "source_completeness": {
                 dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS
+            },
+        }
+    if action["true_source_removals"] and not (
+        true_removal_approval and true_removal_approval.get("applied")
+    ):
+        return {
+            "ticker": ticker,
+            "classification": "REVIEW_REQUIRED",
+            "review_reason": TRUE_SOURCE_REMOVAL,
+            "source_history_action": action,
+            "source_history_events": merge["events"],
+            "retention_plan_fingerprint": fingerprint({
+                "events": merge["events"],
+                "merged_generation_fingerprint": merge["merged_generation_fingerprint"],
+            }),
+            "source_completeness": {
+                dimension: source[dimension].evidence()
+                for dimension in REFRESH_DIMENSIONS
             },
         }
     added: list[tuple[str, str, str, str]] = []
@@ -1257,6 +1285,8 @@ def compare_ticker_histories(
     if fiscal_revision_approval and fiscal_revision_approval.get("applied"):
         result["fiscal_identity_revisions"] = fiscal_revisions
         result["fiscal_revision_approval"] = dict(fiscal_revision_approval)
+    if true_removal_approval and true_removal_approval.get("applied"):
+        result["true_removal_approval"] = dict(true_removal_approval)
     return result
 
 
@@ -1856,6 +1886,11 @@ def run_preview(
                     current_scope,
                     published_binding=state.successful_run_id,
                 )
+                true_removal_approval = match_true_removal_approval(
+                    queue_item,
+                    current_scope,
+                    published_binding=state.successful_run_id,
+                )
                 if approval["applied"]:
                     comparison = compare_ticker_histories(
                         ticker,
@@ -1870,6 +1905,14 @@ def run_preview(
                         current,
                         histories[ticker],
                         fiscal_revision_approval=fiscal_approval,
+                    )
+                    comparison["identity"] = identities[ticker]
+                elif true_removal_approval["applied"]:
+                    comparison = compare_ticker_histories(
+                        ticker,
+                        current,
+                        histories[ticker],
+                        true_removal_approval=true_removal_approval,
                     )
                     comparison["identity"] = identities[ticker]
             if comparison["classification"] != "REVIEW_REQUIRED":
@@ -1916,6 +1959,7 @@ def run_preview(
             if (
                 (item.get("retained_history_approval") or {}).get("applied")
                 or (item.get("fiscal_revision_approval") or {}).get("applied")
+                or (item.get("true_removal_approval") or {}).get("applied")
             )
         ]
         pending_review_tickers = [item["ticker"] for item in held]

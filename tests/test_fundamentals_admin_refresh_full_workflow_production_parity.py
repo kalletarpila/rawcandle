@@ -35,6 +35,7 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
 from rawcandle.fundamentals.admin.refresh_review_queue import (
     ACCEPT_FISCAL_IDENTITY_REVISION,
     ACCEPT_RETAINED_HISTORY,
+    CONFIRM_TRUE_SOURCE_REMOVAL,
     RefreshReviewQueue,
     queue_path_for_run_root,
 )
@@ -876,6 +877,94 @@ def test_post_boundary_rollback_preserves_fiscal_approval_for_retry(
     )
     assert retried.outcome == "COMPLETED"
     assert queue.get("TRUG")["status"] == "RESOLVED"
+    _assert_terminal_lane_cleanup(fixture)
+
+
+def test_true_removal_approval_survives_interruption_and_rollback_then_publishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch, include_trug_hold=True)
+    baseline_trug = _histories(revised=False, include_trug=True)["TRUG"]
+    fixture.client.histories["TRUG"] = {
+        "ARQ": [
+            dict(row, lastupdated="2026-09-20")
+            for index, row in enumerate(baseline_trug["ARQ"])
+            if index != 1
+        ],
+        "MRQ": [dict(row, lastupdated="2026-09-20") for row in baseline_trug["MRQ"]],
+    }
+    service = _service(fixture)
+    quarantined = service.full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    )
+    assert quarantined.outcome == "COMPLETED"
+    queue = RefreshReviewQueue(queue_path_for_run_root(fixture.run_root))
+    binding_preview = run_preview(
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        client=fixture.client,
+    )
+    assert binding_preview["summary_counts"]["held_for_review"] == 1
+    open_item = queue.get("TRUG")
+    assert open_item["status"] == "OPEN"
+    assert open_item["review_type"] == "TRUE_SOURCE_REMOVAL"
+    accepted = service.resolve_refresh_review(
+        "TRUG", CONFIRM_TRUE_SOURCE_REMOVAL,
+        evidence={"source": "fixture", "comment": "confirm exact ARQ deletion"},
+    )
+    approval_fingerprint = accepted["resolution_evidence"][
+        "approval_evidence_fingerprint"
+    ]
+
+    interrupted_preview = run_preview(
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        client=fixture.client,
+    )
+    assert interrupted_preview["summary_counts"]["held_for_review"] == 0
+    interrupted_test = refresh_copy_runtime.run_apply(
+        preview_payload_path=Path(interrupted_preview["artifact_dir"])
+        / "refresh_preview.json",
+        preview_fingerprint=interrupted_preview["preview_fingerprint"],
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        temp_root=fixture.temp_root,
+        client=fixture.client,
+        confirm_apply=True,
+        as_of_date=AS_OF,
+    )
+    assert interrupted_test["outcome"] == "COMPLETED"
+    assert queue.get("TRUG")["status"] == "RETRY_REEVALUATION"
+
+    failed = _service(
+        fixture, inject_failure_at="AFTER_PROVIDER_REPLACEMENT",
+    ).full_workflow(operation_type="REFRESH_FUNDAMENTALS", raw_inputs="")
+    assert failed.outcome != "COMPLETED"
+    pending = queue.get("TRUG")
+    assert pending["status"] == "RETRY_REEVALUATION"
+    assert pending["resolution_evidence"]["approval_evidence_fingerprint"] == (
+        approval_fingerprint
+    )
+
+    completed = service.full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    )
+    assert completed.outcome == "COMPLETED"
+    resolved = queue.get("TRUG")
+    assert resolved["status"] == "RESOLVED"
+    assert resolved["resolution_evidence"]["publication_status"] == (
+        "SUCCESSFULLY_PUBLISHED"
+    )
+    with sqlite3.connect(fixture.paths.provider_db) as connection:
+        removed_count = int(connection.execute(
+            "SELECT COUNT(*) FROM sharadar_fundamental_observation "
+            "WHERE ticker='TRUG' AND dimension='ARQ' AND reportperiod='2025-06-30'"
+        ).fetchone()[0])
+    assert removed_count == 0
+    assert len([
+        event for event in queue.audit_history("TRUG")
+        if event["event_type"] == "TRUE_REMOVAL_APPROVED"
+    ]) == 1
     _assert_terminal_lane_cleanup(fixture)
 
 

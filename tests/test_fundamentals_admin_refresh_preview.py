@@ -326,7 +326,7 @@ def test_fiscal_revision_preserves_independent_source_removal_evidence() -> None
     )
 
 
-def test_short_oldest_boundary_removal_fails_closed_but_same_fiscal_replacement_is_removed() -> None:
+def test_short_oldest_boundary_and_true_source_removal_both_require_review() -> None:
     old_q1 = row(filing_date="2026-05-20", reportperiod="2026-04-30", fiscalperiod="2026-Q1")
     new_q2 = row()
     current, source = histories(old_q1, new_q2)
@@ -335,7 +335,8 @@ def test_short_oldest_boundary_removal_fails_closed_but_same_fiscal_replacement_
     assert result["review_reason"] == "AMBIGUOUS_SOURCE_REMOVAL"
     current, source = histories(row(), row(filing_date="2026-08-27"))
     result = compare_ticker_histories("TEST", current, source)
-    assert result["classification"] == "SOURCE_REMOVAL"
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["review_reason"] == "TRUE_SOURCE_REMOVAL"
     assert result["source_history_action"]["true_source_removals"] == 1
 
 
