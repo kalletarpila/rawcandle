@@ -483,6 +483,9 @@ class FundamentalsAdminUIService:
         preview_fingerprint: str,
         confirmation: str,
         test_run_id: str,
+        trigger_source: str = "MANUAL",
+        scheduler_log_dir: str | None = None,
+        scheduler_managed_locks: bool = False,
         progress_callback: AdminProgressCallback | None = None,
     ) -> AdminUIRunResult:
         operation = operation_type.strip().upper()
@@ -514,6 +517,9 @@ class FundamentalsAdminUIService:
                 confirm_production=confirmation == "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS",
                 production_intent=True,
                 test_run_id=test_run_id,
+                trigger_source=trigger_source,
+                scheduler_log_dir=scheduler_log_dir,
+                scheduler_managed_locks=scheduler_managed_locks,
                 progress_callback=progress_callback,
             )
         elif operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
@@ -553,6 +559,9 @@ class FundamentalsAdminUIService:
         operation_type: str = "ADD_TICKERS",
         raw_inputs: str,
         market: str = "usa",
+        trigger_source: str = "MANUAL",
+        scheduler_log_dir: str | None = None,
+        scheduler_managed_locks: bool = False,
         progress_callback: AdminProgressCallback | None = None,
     ) -> AdminUIRunResult:
         with self._operation_lock():
@@ -564,7 +573,8 @@ class FundamentalsAdminUIService:
                 result = workflow_module.run_refresh_full_workflow(
                     run_root=self.run_root,
                     preview_stage=lambda callback: self._preview_unlocked(
-                        operation, progress_callback=callback,
+                        operation, trigger_source=trigger_source,
+                        progress_callback=callback,
                     ),
                     test_stage=lambda preview, callback: self._copy_apply_unlocked(
                         operation,
@@ -578,9 +588,13 @@ class FundamentalsAdminUIService:
                         preview_fingerprint=preview.preview_fingerprint or "",
                         confirmation="CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS",
                         test_run_id=test.run_id or "",
+                        trigger_source=trigger_source,
+                        scheduler_log_dir=scheduler_log_dir,
+                        scheduler_managed_locks=scheduler_managed_locks,
                         progress_callback=callback,
                     ),
                     progress_callback=progress_callback,
+                    trigger_source=trigger_source,
                 )
             elif operation == "ADD_TICKERS":
                 result = workflow_module.run_full_workflow(

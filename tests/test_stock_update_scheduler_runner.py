@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -391,6 +392,7 @@ def _write_config(
     skip_next_run=False,
     technical_relevance_enabled=False,
     fundamentals_refresh_preview_enabled=None,
+    fundamentals_refresh_mode=None,
     ec_source_layer_enabled=None,
     ec_source_layer_ecosystem=None,
     ec_source_layer_taxonomy_version=None,
@@ -419,6 +421,8 @@ def _write_config(
         config.fundamentals_refresh_preview_enabled = (
             fundamentals_refresh_preview_enabled
         )
+    if fundamentals_refresh_mode is not None:
+        config.fundamentals_refresh_mode = fundamentals_refresh_mode
     if ec_source_layer_enabled is not None:
         config.ec_source_layer_enabled = ec_source_layer_enabled
     if ec_source_layer_ecosystem is not None:
@@ -767,7 +771,7 @@ def test_scheduler_runner_dispatches_enabled_refresh_preview_into_summary(
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner._run_fundamentals_refresh_preview_post_step",
-        lambda: calls.append("preview") or {
+        lambda mode, log_dir: calls.append((mode, log_dir)) or {
             "scheduler_summary_result": "REVIEW_REQUIRED",
             "preview_timestamp_utc": "2026-09-22T01:00:00Z",
             "published_baseline": "2026-09-01",
@@ -788,7 +792,7 @@ def test_scheduler_runner_dispatches_enabled_refresh_preview_into_summary(
     result = run_scheduler_config(config_path=str(config_path))
     payload = json.loads(Path(result.summary_json_path).read_text(encoding="utf-8"))
 
-    assert calls == ["preview"]
+    assert calls == [("PREVIEW_ONLY", str(tmp_path / "logs"))]
     assert result.fundamentals_refresh_preview_attempted == 1
     assert result.fundamentals_refresh_preview_status == "REVIEW_REQUIRED"
     assert result.fundamentals_refresh_pending_changes is True
@@ -798,6 +802,80 @@ def test_scheduler_runner_dispatches_enabled_refresh_preview_into_summary(
     assert payload["fundamentals_refresh_preview_report"].endswith(
         "operation_report.md"
     )
+
+
+def test_scheduler_runner_full_workflow_holds_admin_lock_before_dispatch(
+    tmp_path, monkeypatch,
+):
+    _touch(tmp_path / "osakedata.db")
+    _touch(tmp_path / "analysis.db")
+    config_path = _write_config(
+        tmp_path,
+        enabled_markets=["omxh"],
+        fundamentals_refresh_preview_enabled=True,
+        fundamentals_refresh_mode="FULL_WORKFLOW",
+    )
+    events: list[object] = []
+
+    @contextmanager
+    def fake_production_lock(*, scheduler_log_dir):
+        events.append(("LOCK_ENTER", scheduler_log_dir))
+        try:
+            yield {"scheduler_log_dir": scheduler_log_dir}
+        finally:
+            events.append("LOCK_EXIT")
+
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.production_transaction.production_lock",
+        fake_production_lock,
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._run_stock_update_via_service",
+        lambda self, **kwargs: StockUpdateResult(
+            market=kwargs["market"], status=STATUS_OK
+        ),
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.RawCandleApp._format_stock_update_service_result_for_ui",
+        lambda self, result: f"UI {result.market}",
+    )
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner.subprocess.run",
+        lambda *args, **kwargs: _FakeCompletedProcess(0),
+    )
+
+    def refresh(mode, log_dir):
+        events.append(("REFRESH", mode, log_dir))
+        return {
+            "scheduler_summary_result": "COMPLETED",
+            "outcome": "COMPLETED",
+            "final_outcome": "COMPLETED",
+            "test_invoked": True,
+            "production_invoked": True,
+            "production_run_id": "production-run",
+            "production_decision_reason": "Production completed.",
+            "unattended_production_available": True,
+            "held_review_tickers": [],
+            "global_blockers": 0,
+            "summary_counts": {},
+        }
+
+    monkeypatch.setattr(
+        "rawcandle.scheduler.runner._run_fundamentals_refresh_preview_post_step",
+        refresh,
+    )
+
+    result = run_scheduler_config(config_path=str(config_path))
+
+    assert events == [
+        ("LOCK_ENTER", str(tmp_path / "logs")),
+        ("REFRESH", "FULL_WORKFLOW", str(tmp_path / "logs")),
+        "LOCK_EXIT",
+    ]
+    assert result.fundamentals_refresh_mode == "FULL_WORKFLOW"
+    assert result.fundamentals_refresh_test_invoked is True
+    assert result.fundamentals_refresh_production_invoked is True
+    assert result.fundamentals_refresh_production_run_id == "production-run"
 
 
 def test_scheduler_runner_skips_refresh_preview_when_disabled(tmp_path, monkeypatch):
@@ -826,7 +904,7 @@ def test_scheduler_runner_skips_refresh_preview_when_disabled(tmp_path, monkeypa
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner._run_fundamentals_refresh_preview_post_step",
-        lambda: (_ for _ in ()).throw(
+        lambda _mode, _log_dir: (_ for _ in ()).throw(
             AssertionError("disabled Refresh Preview must not run")
         ),
     )

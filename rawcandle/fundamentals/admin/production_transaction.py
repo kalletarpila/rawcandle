@@ -10,6 +10,7 @@ import secrets
 import shutil
 import sqlite3
 from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
@@ -46,6 +47,9 @@ from rawcandle.scheduler.runner import acquire_scheduler_lock, release_scheduler
 ROOT = Path(__file__).resolve().parents[3]
 ADMIN_LOCK = ROOT / "temp/.fundamentals_admin_production.lock"
 BACKUP_ROOT = ROOT / "backups/fundamentals_admin_production"
+_ACTIVE_PRODUCTION_LOCK: ContextVar[dict[str, Any] | None] = ContextVar(
+    "fundamentals_active_production_lock", default=None,
+)
 
 
 class SimulatedTransactionCrash(BaseException):
@@ -128,12 +132,24 @@ def _fsync_file(path: Path) -> None:
 
 
 @contextmanager
-def production_lock(*, lock_path: Path = ADMIN_LOCK, scheduler_log_dir: str | None = None) -> Iterator[dict[str, Any]]:
+def production_lock(
+    *, lock_path: Path = ADMIN_LOCK, scheduler_log_dir: str | None = None,
+    allow_reentrant: bool = False,
+) -> Iterator[dict[str, Any]]:
     """Kernel locks, never deleted; stale owner text has no locking authority."""
     if taxonomy_lock_held_in_process():
         raise RuntimeError("LOCK_ORDER_VIOLATION:TAXONOMY_BEFORE_ADMIN_PRODUCTION")
     if scheduler_log_dir is None:
         scheduler_log_dir = read_scheduler_config(str(ROOT / "scheduler_config.json")).log_dir
+    active = _ACTIVE_PRODUCTION_LOCK.get()
+    if active is not None and allow_reentrant:
+        if (
+            Path(str(active["lock_path"])).resolve() != lock_path.resolve()
+            or str(active["scheduler_log_dir"]) != scheduler_log_dir
+        ):
+            raise RuntimeError("ADMIN_PRODUCTION_LOCK_REENTRANCY_MISMATCH")
+        yield dict(active["owner"])
+        return
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+", encoding="utf-8") as handle:
         try:
@@ -148,9 +164,15 @@ def production_lock(*, lock_path: Path = ADMIN_LOCK, scheduler_log_dir: str | No
         os.fsync(handle.fileno())
         try:
             scheduler_handle = acquire_scheduler_lock(scheduler_log_dir)
+            token = _ACTIVE_PRODUCTION_LOCK.set({
+                "lock_path": str(lock_path.resolve()),
+                "scheduler_log_dir": scheduler_log_dir,
+                "owner": owner,
+            })
             try:
                 yield owner
             finally:
+                _ACTIVE_PRODUCTION_LOCK.reset(token)
                 release_scheduler_lock(scheduler_handle)
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)

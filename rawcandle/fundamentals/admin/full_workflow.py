@@ -1137,6 +1137,7 @@ def run_refresh_full_workflow(
     test_stage: Callable[[Any, Callable[[Mapping[str, Any]], None]], Any],
     production_stage: Callable[[Any, Any, Callable[[Mapping[str, Any]], None]], Any],
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
+    trigger_source: str = "MANUAL",
 ) -> dict[str, Any]:
     adapter = WorkflowOperationAdapter(
         operation_type=AdminOperationType.REFRESH_FUNDAMENTALS,
@@ -1146,6 +1147,7 @@ def run_refresh_full_workflow(
         preview_stage=preview_stage,
         test_stage=test_stage,
         production_stage=production_stage,
+        trigger_source=trigger_source,
     )
     return run_operation_workflow(adapter, run_root=run_root, progress_callback=progress_callback)
 

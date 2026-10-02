@@ -123,7 +123,8 @@ def test_nams_like_interior_key_is_true_removal_and_alternate_arq_survives() -> 
     result = compare_ticker_histories("TEST", current, source)
     plan = build_source_history_merge("TEST", current, source)
 
-    assert result["classification"] == "SOURCE_REMOVAL"
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["review_reason"] == TRUE_SOURCE_REMOVAL
     assert result["source_history_action"]["true_source_removals"] == 1
     assert plan["events"][0]["event"] == TRUE_SOURCE_REMOVAL
     merged_keys = {source_key(item) for item in plan["dimensions"]["ARQ"]["merged_rows"]}
@@ -199,7 +200,8 @@ def test_aytu_style_replacement_and_aged_companion_resolve_independently() -> No
     result = compare_ticker_histories("TEST", current, source)
     plan = build_source_history_merge("TEST", current, source)
 
-    assert result["classification"] == "SOURCE_REMOVAL"
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["review_reason"] == TRUE_SOURCE_REMOVAL
     assert result["source_history_action"]["true_source_removals"] == 1
     assert result["source_history_action"]["newly_aged_out_source_rows"] == 1
     assert result["source_history_action"]["ambiguous_removals"] == 0
@@ -366,7 +368,8 @@ def test_love_like_same_fiscal_boundary_replacement_is_true_removal() -> None:
 
     result = compare_ticker_histories("TEST", current, source)
 
-    assert result["classification"] == "SOURCE_REMOVAL"
+    assert result["classification"] == "REVIEW_REQUIRED"
+    assert result["review_reason"] == TRUE_SOURCE_REMOVAL
     assert result["source_history_action"]["true_source_removals"] == 1
     event = result["source_history_events"][0]
     assert event["event"] == TRUE_SOURCE_REMOVAL

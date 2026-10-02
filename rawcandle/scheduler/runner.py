@@ -190,6 +190,14 @@ class ScheduledStockUpdateRunResult:
     fundamentals_refresh_preview_report: str = "NONE"
     fundamentals_refresh_preview_message: str = ""
     fundamentals_refresh_unattended_production_available: bool = False
+    fundamentals_refresh_mode: str = "PREVIEW_ONLY"
+    fundamentals_refresh_test_invoked: bool = False
+    fundamentals_refresh_production_invoked: bool = False
+    fundamentals_refresh_production_run_id: str = "NONE"
+    fundamentals_refresh_production_decision_reason: str = ""
+    fundamentals_refresh_final_outcome: str = "DISABLED"
+    fundamentals_refresh_held_review_tickers: List[str] = field(default_factory=list)
+    fundamentals_refresh_global_blockers: int = 0
 class SchedulerAlreadyRunningError(RuntimeError):
     pass
 
@@ -2351,10 +2359,15 @@ def _run_one_market(
     )
 
 
-def _run_fundamentals_refresh_preview_post_step() -> dict[str, object]:
+def _run_fundamentals_refresh_preview_post_step(
+    mode: str = "PREVIEW_ONLY",
+    scheduler_log_dir: str | None = None,
+) -> dict[str, object]:
     from rawcandle.fundamentals.admin.refresh_scheduler import run_scheduler_refresh_discovery
 
-    return run_scheduler_refresh_discovery()
+    return run_scheduler_refresh_discovery(
+        scheduler_mode=mode, scheduler_log_dir=scheduler_log_dir,
+    )
 
 
 def run_scheduler_config(
@@ -2367,7 +2380,19 @@ def run_scheduler_config(
     _preflight_validate_config(config)
     status_initialized = False
 
-    with acquire_scheduler_lock_context(config.log_dir):
+    if (
+        config.fundamentals_refresh_preview_enabled
+        and config.fundamentals_refresh_mode == "FULL_WORKFLOW"
+    ):
+        from rawcandle.fundamentals.admin.production_transaction import production_lock
+
+        scheduler_execution_lock = production_lock(
+            scheduler_log_dir=config.log_dir,
+        )
+    else:
+        scheduler_execution_lock = acquire_scheduler_lock_context(config.log_dir)
+
+    with scheduler_execution_lock:
         try:
             write_scheduler_status(
                 log_dir=config.log_dir,
@@ -2394,6 +2419,7 @@ def run_scheduler_config(
                     overall_status=STATUS_OK,
                     skipped=True,
                     skip_reason="skip_next_run",
+                    fundamentals_refresh_mode=config.fundamentals_refresh_mode,
                     technical_relevance_attempted=0,
                     technical_relevance_enabled=config.technical_relevance_enabled,
                     technical_relevance_status="DISABLED"
@@ -2522,7 +2548,10 @@ def run_scheduler_config(
                 "message": "",
             }
             if config.fundamentals_refresh_preview_enabled:
-                refresh_discovery = _run_fundamentals_refresh_preview_post_step()
+                refresh_discovery = _run_fundamentals_refresh_preview_post_step(
+                    config.fundamentals_refresh_mode,
+                    config.log_dir,
+                )
             overall_status = (
                 STATUS_FAILED
                 if technical_relevance_result.status == "FAILED"
@@ -2734,7 +2763,17 @@ def run_scheduler_config(
                 fundamentals_refresh_source_removal_count=int((refresh_discovery.get("summary_counts") or {}).get("SOURCE_REMOVAL") or 0),
                 fundamentals_refresh_review_required_count=int((refresh_discovery.get("summary_counts") or {}).get("REVIEW_REQUIRED") or 0),
                 fundamentals_refresh_unknown_ticker_count=int((refresh_discovery.get("summary_counts") or {}).get("NOT_IN_CANONICAL_UNIVERSE") or 0),
-                fundamentals_refresh_unattended_production_available=False,
+                fundamentals_refresh_unattended_production_available=bool(
+                    refresh_discovery.get("unattended_production_available")
+                ),
+                fundamentals_refresh_mode=config.fundamentals_refresh_mode,
+                fundamentals_refresh_test_invoked=bool(refresh_discovery.get("test_invoked")),
+                fundamentals_refresh_production_invoked=bool(refresh_discovery.get("production_invoked")),
+                fundamentals_refresh_production_run_id=str(refresh_discovery.get("production_run_id") or "NONE"),
+                fundamentals_refresh_production_decision_reason=str(refresh_discovery.get("production_decision_reason") or ""),
+                fundamentals_refresh_final_outcome=str(refresh_discovery.get("final_outcome") or refresh_discovery.get("outcome") or "UNKNOWN"),
+                fundamentals_refresh_held_review_tickers=list(refresh_discovery.get("held_review_tickers") or []),
+                fundamentals_refresh_global_blockers=int(refresh_discovery.get("global_blockers") or 0),
             )
             _write_summary_json(config=config, run_started_at=run_started_at, result=result)
             write_scheduler_status(

@@ -409,15 +409,16 @@ def test_scheduler_preview_preserves_review_and_technical_failure_states(
     assert result["full_workflow_invoked"] is False
 
 
-def test_scheduler_config_is_disabled_by_default_and_has_no_production_switch() -> None:
+def test_scheduler_config_is_disabled_and_preview_only_by_default() -> None:
     config = StockUpdateSchedulerConfig()
     assert config.fundamentals_refresh_preview_enabled is False
-    with pytest.raises(ValueError, match="Unexpected config keys"):
-        scheduler_config_from_dict({
-            "enabled_markets": [], "run_time": "05:30",
-            "osakedata_db_path": "market.db", "analysis_db_path": "analysis.db",
-            "log_dir": "logs", "fundamentals_refresh_production_enabled": True,
-        })
+    assert config.fundamentals_refresh_mode == "PREVIEW_ONLY"
+    parsed = scheduler_config_from_dict({
+        "enabled_markets": [], "run_time": "05:30",
+        "osakedata_db_path": "market.db", "analysis_db_path": "analysis.db",
+        "log_dir": "logs", "fundamentals_refresh_mode": "FULL_WORKFLOW",
+    })
+    assert parsed.fundamentals_refresh_mode == "FULL_WORKFLOW"
 
 
 def test_refresh_uses_existing_scheduler_summary_json_contract(tmp_path: Path) -> None:

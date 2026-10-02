@@ -29,7 +29,7 @@ _REQUIRED_CONFIG_KEYS = {
 }
 _OPTIONAL_CONFIG_KEYS = {
     "timezone", "skip_next_run", "technical_relevance_enabled",
-    "fundamentals_refresh_preview_enabled",
+    "fundamentals_refresh_preview_enabled", "fundamentals_refresh_mode",
 }
 _OPTIONAL_CONFIG_KEYS.update(
     {
@@ -62,6 +62,7 @@ _OPTIONAL_CONFIG_KEYS.update(
     }
 )
 SUPPORTED_EC_SOURCE_LAYER_MODES = ("refresh_latest",)
+SUPPORTED_FUNDAMENTALS_REFRESH_MODES = ("PREVIEW_ONLY", "FULL_WORKFLOW")
 
 
 @dataclass(eq=True)
@@ -75,6 +76,7 @@ class StockUpdateSchedulerConfig:
     skip_next_run: bool = False
     technical_relevance_enabled: bool = False
     fundamentals_refresh_preview_enabled: bool = False
+    fundamentals_refresh_mode: str = "PREVIEW_ONLY"
     datacenter_dashboard_fallback_to_reports: bool = True
     datacenter_dashboard_reports_reference_db: str | None = None
     datacenter_dashboard_reports_reference_enabled: bool = False
@@ -151,6 +153,11 @@ def validate_scheduler_config(
         raise ValueError("technical_relevance_enabled must be a bool")
     if type(config.fundamentals_refresh_preview_enabled) is not bool:
         raise ValueError("fundamentals_refresh_preview_enabled must be a bool")
+    if config.fundamentals_refresh_mode not in SUPPORTED_FUNDAMENTALS_REFRESH_MODES:
+        raise ValueError(
+            "fundamentals_refresh_mode must be one of: "
+            + ", ".join(SUPPORTED_FUNDAMENTALS_REFRESH_MODES)
+        )
     if type(config.datacenter_dashboard_fallback_to_reports) is not bool:
         raise ValueError("datacenter_dashboard_fallback_to_reports must be a bool")
     if type(config.datacenter_dashboard_reports_reference_enabled) is not bool:
@@ -221,6 +228,7 @@ def validate_scheduler_config(
         skip_next_run=config.skip_next_run,
         technical_relevance_enabled=config.technical_relevance_enabled,
         fundamentals_refresh_preview_enabled=config.fundamentals_refresh_preview_enabled,
+        fundamentals_refresh_mode=config.fundamentals_refresh_mode,
         datacenter_dashboard_fallback_to_reports=(
             config.datacenter_dashboard_fallback_to_reports
         ),
@@ -298,6 +306,7 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         skip_next_run=data.get("skip_next_run", False),
         technical_relevance_enabled=data.get("technical_relevance_enabled", False),
         fundamentals_refresh_preview_enabled=data.get("fundamentals_refresh_preview_enabled", False),
+        fundamentals_refresh_mode=data.get("fundamentals_refresh_mode", "PREVIEW_ONLY"),
         datacenter_dashboard_fallback_to_reports=data.get(
             "datacenter_dashboard_fallback_to_reports", True
         ),
@@ -390,6 +399,7 @@ def create_default_scheduler_config(
         skip_next_run=False,
         technical_relevance_enabled=False,
         fundamentals_refresh_preview_enabled=False,
+        fundamentals_refresh_mode="PREVIEW_ONLY",
         datacenter_dashboard_fallback_to_reports=True,
         datacenter_dashboard_reports_reference_db=None,
         datacenter_dashboard_reports_reference_enabled=False,

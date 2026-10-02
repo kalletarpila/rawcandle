@@ -781,11 +781,15 @@ def test_scheduler_dispatch_uses_real_read_only_preview_with_fake_provider(
     discoveries = []
     original_discovery = run_scheduler_refresh_discovery
 
-    def fixture_discovery():
+    def fixture_discovery(*, scheduler_mode, scheduler_log_dir):
+        assert scheduler_mode == "PREVIEW_ONLY"
+        assert scheduler_log_dir == str(tmp_path / "logs")
         output = original_discovery(
             run_root=run_root,
             operation_lock_path=tmp_path / "operation.lock",
             preview_backend=real_preview,
+            scheduler_mode=scheduler_mode,
+            scheduler_log_dir=scheduler_log_dir,
         )
         discoveries.append(output)
         return output

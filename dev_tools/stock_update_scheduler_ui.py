@@ -43,11 +43,15 @@ from dev_tools.forecast_scheduler_page import (
     build_forecast_scheduler_page,
 )
 from rawcandle.scheduler.config import (
+    SUPPORTED_FUNDAMENTALS_REFRESH_MODES,
     StockUpdateSchedulerConfig,
     read_scheduler_config,
     validate_run_time,
     validate_scheduler_config,
     write_scheduler_config,
+)
+from rawcandle.cli.configure_fundamentals_refresh_scheduler import (
+    FULL_WORKFLOW_CONFIRMATION,
 )
 from rawcandle.fundamentals.snapshot.ui_service import (
     FUNDAMENTAL_REPORTS_DIR,
@@ -223,10 +227,22 @@ def build_config_from_ui_values(
     run_time: str,
     selected_markets: List[str],
     technical_relevance_enabled: bool,
+    fundamentals_refresh_mode: str | None = None,
+    fundamentals_refresh_mode_confirmation: str = "",
     base_config: StockUpdateSchedulerConfig | None = None,
 ) -> StockUpdateSchedulerConfig:
+    current = base_config or StockUpdateSchedulerConfig()
+    requested_mode = fundamentals_refresh_mode or current.fundamentals_refresh_mode
+    if (
+        requested_mode == "FULL_WORKFLOW"
+        and current.fundamentals_refresh_mode != requested_mode
+        and fundamentals_refresh_mode_confirmation != FULL_WORKFLOW_CONFIRMATION
+    ):
+        raise PermissionError(
+            "FUNDAMENTALS_REFRESH_FULL_WORKFLOW_CONFIRMATION_REQUIRED"
+        )
     config = replace(
-        base_config or StockUpdateSchedulerConfig(),
+        current,
         enabled_markets=selected_markets,
         run_time=run_time,
         osakedata_db_path=osakedata_db_path,
@@ -234,6 +250,7 @@ def build_config_from_ui_values(
         log_dir=log_dir,
         timezone=timezone,
         technical_relevance_enabled=technical_relevance_enabled,
+        fundamentals_refresh_mode=requested_mode,
     )
     return validate_scheduler_config(config)
 
@@ -1054,6 +1071,19 @@ def run_app(
         label="Run technical relevance after stock updates",
         value=config.technical_relevance_enabled,
     )
+    fundamentals_refresh_mode_dropdown = ft.Dropdown(
+        label="Fundamentals Refresh mode",
+        value=config.fundamentals_refresh_mode,
+        options=[
+            ft.dropdown.Option(mode)
+            for mode in SUPPORTED_FUNDAMENTALS_REFRESH_MODES
+        ],
+    )
+    fundamentals_refresh_mode_confirmation_field = ft.TextField(
+        label="FULL_WORKFLOW confirmation",
+        password=True,
+        can_reveal_password=True,
+    )
     status_field = ft.TextField(label="Status", read_only=True, multiline=True)
     summary_field = ft.TextField(label="Latest summary", read_only=True, multiline=True)
     timer_status_field = ft.TextField(label="Timer status", read_only=True, multiline=True)
@@ -1144,10 +1174,22 @@ def run_app(
                 f"{latest.get('ec_source_layer_status', '')}",
                 "fundamentals_refresh_preview_status="
                 f"{latest.get('fundamentals_refresh_preview_status', 'DISABLED')}",
+                "fundamentals_refresh_mode="
+                f"{latest.get('fundamentals_refresh_mode', 'PREVIEW_ONLY')}",
                 "fundamentals_refresh_preview_timestamp_utc="
                 f"{latest.get('fundamentals_refresh_preview_timestamp_utc', 'NONE')}",
                 "fundamentals_refresh_pending_changes="
                 f"{latest.get('fundamentals_refresh_pending_changes', False)}",
+                "fundamentals_refresh_test_invoked="
+                f"{latest.get('fundamentals_refresh_test_invoked', False)}",
+                "fundamentals_refresh_production_invoked="
+                f"{latest.get('fundamentals_refresh_production_invoked', False)}",
+                "fundamentals_refresh_production_run_id="
+                f"{latest.get('fundamentals_refresh_production_run_id', 'NONE')}",
+                "fundamentals_refresh_final_outcome="
+                f"{latest.get('fundamentals_refresh_final_outcome', 'DISABLED')}",
+                "fundamentals_refresh_production_decision_reason="
+                f"{latest.get('fundamentals_refresh_production_decision_reason', '')}",
                 "fundamentals_refresh_review_required="
                 f"{latest.get('fundamentals_refresh_review_required', False)}",
                 "fundamentals_refresh_preview_report="
@@ -1266,6 +1308,8 @@ def run_app(
         omxs_checkbox.value = "omxs" in enabled
         usa_checkbox.value = "usa" in enabled
         technical_relevance_checkbox.value = next_config.technical_relevance_enabled
+        fundamentals_refresh_mode_dropdown.value = next_config.fundamentals_refresh_mode
+        fundamentals_refresh_mode_confirmation_field.value = ""
         skip_next_run_text.value = scheduler_skip_next_run_label(next_config)
 
     def on_save_config(_e: Any) -> None:
@@ -1279,6 +1323,12 @@ def run_app(
                 run_time=run_time_field.value,
                 selected_markets=selected_markets_from_ui(),
                 technical_relevance_enabled=bool(technical_relevance_checkbox.value),
+                fundamentals_refresh_mode=str(
+                    fundamentals_refresh_mode_dropdown.value or "PREVIEW_ONLY"
+                ),
+                fundamentals_refresh_mode_confirmation=str(
+                    fundamentals_refresh_mode_confirmation_field.value or ""
+                ),
                 base_config=current_config,
             )
             result = save_config_and_sync_systemd_timer(
@@ -1959,6 +2009,8 @@ def run_app(
             run_time_field,
             ft.Row([omxh_checkbox, omxs_checkbox, usa_checkbox]),
             technical_relevance_checkbox,
+            fundamentals_refresh_mode_dropdown,
+            fundamentals_refresh_mode_confirmation_field,
             skip_next_run_text,
             running_status_text,
             ft.Row(
@@ -2045,6 +2097,10 @@ def run_app(
     page.omxs_checkbox = omxs_checkbox
     page.usa_checkbox = usa_checkbox
     page.technical_relevance_checkbox = technical_relevance_checkbox
+    page.fundamentals_refresh_mode_dropdown = fundamentals_refresh_mode_dropdown
+    page.fundamentals_refresh_mode_confirmation_field = (
+        fundamentals_refresh_mode_confirmation_field
+    )
     page.save_config_button = save_config_button
     page.reload_config_button = reload_config_button
     page.run_now_button = run_now_button

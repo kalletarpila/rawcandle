@@ -777,12 +777,16 @@ def run_production_apply(
     journal_path: Path = ACTIVE_JOURNAL_PATH, client: SharadarClient | None = None,
     confirm_production: bool = False, production_intent: bool = False,
     rehearsal: bool = False, scheduler_log_dir: str | None = None,
+    trigger_source: str = "MANUAL",
+    scheduler_managed_locks: bool = False,
     lock_path: Path = ADMIN_LOCK, progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
     as_of_date: str | None = None, inject_failure_at: str | None = None,
     inject_crash_at: str | None = None,
 ) -> dict[str, Any]:
     if not confirm_production:
         raise PermissionError("REFRESH_PRODUCTION_CONFIRMATION_REQUIRED")
+    if trigger_source not in {"MANUAL", "SCHEDULER"}:
+        raise ValueError("REFRESH_TRIGGER_SOURCE_INVALID")
     source_paths = source_paths or BatchAddTickerPaths()
     production_paths = {
         role: path.resolve() for role, path in resolved_production_paths(ROOT).items()
@@ -816,7 +820,7 @@ def run_production_apply(
         "run_id": run_id, "artifact_dir": str(writer.run_dir),
         "operation_type": AdminOperationType.REFRESH_FUNDAMENTALS.value,
         "mode": "PRODUCTION_APPLY" if actual_production else "TRANSACTION_REHEARSAL",
-        "trigger_source": "MANUAL", "contract_version": PRODUCTION_CONTRACT_VERSION,
+        "trigger_source": trigger_source, "contract_version": PRODUCTION_CONTRACT_VERSION,
         "preview_fingerprint": preview_fingerprint, "test_run_id": test_run_id,
         "started_at_utc": started, "outcome": "FAILED", "write_boundary_crossed": False,
         "write_set": list(PUBLICATION_ROLES), "warnings": [],
@@ -861,7 +865,11 @@ def run_production_apply(
             "semantic_contract": _semantic_source_binding(test_source_binding),
         }
         calculation_as_of_date = as_of_date or date.today().isoformat()
-        owner = locks.enter_context(production_lock(lock_path=lock_path, scheduler_log_dir=scheduler_log_dir))
+        owner = locks.enter_context(production_lock(
+            lock_path=lock_path,
+            scheduler_log_dir=scheduler_log_dir,
+            allow_reentrant=scheduler_managed_locks,
+        ))
         result["lock_owner"] = owner
         result["recovery_preflight"] = guard_production_writes(journal_path)
         if actual_production:
