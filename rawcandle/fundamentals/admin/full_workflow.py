@@ -414,6 +414,7 @@ def _terminal_summary(
         "production_entered": production_entered,
         "production_completed": production_completed,
         "production_database_writes": _production_write_count(payload, completed=production_completed),
+        "terminal_cleanup": dict(payload.get("terminal_cleanup") or {}),
         "recommended_next_action": next_action,
         "source": "STRUCTURED_CHILD_RESULT" if evidence is payload else "STRUCTURED_LATEST_MATERIAL_RESULT",
     }
@@ -704,6 +705,27 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
             f"- Postflight: {publication.get('postflight', 'NOT_RUN')}",
             f"- Rollback/recovery: {publication.get('rollback_recovery', 'NOT_REQUIRED')}",
         ])
+        cleanup = terminal.get("terminal_cleanup") or {}
+        if cleanup:
+            disposable = cleanup.get("automatically_disposable") or {}
+            retained = cleanup.get("intentionally_retained") or {}
+            candidates = disposable.get("candidate_databases") or {}
+            market_bundle = disposable.get("compact_market_bundle") or {}
+            runtime_artifacts = disposable.get(
+                "taxonomy_runtime_temporary_artifacts"
+            ) or {}
+            lines.extend([
+                "", "## Terminal Cleanup", "",
+                "- Source: Production child result",
+                f"- Candidate DB cleanup: {candidates.get('status', 'NOT_RECORDED')} - {candidates.get('reason', 'Reason not recorded.')}",
+                f"- Compact market bundle cleanup: {market_bundle.get('status', 'NOT_RECORDED')} - {market_bundle.get('reason', 'Reason not recorded.')}",
+                f"- Taxonomy/runtime temporary artifact cleanup: {runtime_artifacts.get('status', 'NOT_RECORDED')} - {runtime_artifacts.get('reason', 'Reason not recorded.')}",
+                f"- Other phase-owned temporary artifacts remaining: {cleanup.get('other_phase_owned_temporary_artifacts_remaining', 'NOT_RECORDED')}",
+                f"- Rollback backups retained: {retained.get('rollback_backup_count', 0)} ({retained.get('rollback_backup_bytes', 0)} bytes)",
+                "- Operator acceptance required for rollback-backup deletion: "
+                + str(cleanup.get("operator_acceptance_required_for_rollback_backup_deletion", "NO")),
+                f"- Cleanup verification: {(cleanup.get('cleanup_verification') or {}).get('status', 'NOT_RECORDED')}",
+            ])
     else:
         lines.extend([
             "", "## Final Batch Outcome", "",

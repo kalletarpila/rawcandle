@@ -334,6 +334,62 @@ def _cleanup_candidate_lane(lane_dir: Path, journal: Mapping[str, Any] | None) -
     }
 
 
+def _terminal_cleanup_summary(
+    result: Mapping[str, Any], *, lane_dir: Path, cleanup: Mapping[str, Any],
+) -> dict[str, Any]:
+    cleanup_status = str(cleanup.get("status") or "NOT_RECORDED")
+    if cleanup_status == "COMPLETED":
+        category_reason = "Run-owned candidate lane removed and verified absent."
+    elif cleanup_status == "RETAINED_FOR_RECOVERY":
+        category_reason = "Run-owned artifacts retained because the publication journal requires recovery."
+    else:
+        category_reason = "Run-owned candidate cleanup did not complete."
+    remaining = int(cleanup.get("remaining_phase_owned_files") or 0)
+    lane_absent = not lane_dir.exists()
+    verification_status = (
+        "PASSED" if cleanup_status == "COMPLETED" and lane_absent and remaining == 0
+        else "DEFERRED_FOR_RECOVERY" if cleanup_status == "RETAINED_FOR_RECOVERY"
+        else "FAILED"
+    )
+    retained_backups = []
+    for role, evidence in sorted((result.get("backups") or {}).items()):
+        path = Path(str((evidence or {}).get("backup") or ""))
+        if path.is_file() and not path.is_symlink():
+            retained_backups.append({
+                "role": role,
+                "path": str(path.resolve()),
+                "size_bytes": int(path.stat().st_size),
+            })
+    backup_bytes = sum(item["size_bytes"] for item in retained_backups)
+    categories = {
+        "candidate_databases": {"status": cleanup_status, "reason": category_reason},
+        "compact_market_bundle": {"status": cleanup_status, "reason": category_reason},
+        "taxonomy_runtime_temporary_artifacts": {
+            "status": cleanup_status, "reason": category_reason,
+        },
+    }
+    return {
+        "status": cleanup_status,
+        "automatically_disposable": categories,
+        "other_phase_owned_temporary_artifacts_remaining": remaining,
+        "remaining_paths": [str(lane_dir.resolve())] if not lane_absent else [],
+        "intentionally_retained": {
+            "rollback_backups": retained_backups,
+            "rollback_backup_count": len(retained_backups),
+            "rollback_backup_bytes": backup_bytes,
+            "rollback_backup_gib": backup_bytes / (1024 ** 3),
+        },
+        "operator_acceptance_required_for_rollback_backup_deletion": (
+            "YES" if retained_backups else "NO"
+        ),
+        "cleanup_verification": {
+            "status": verification_status,
+            "candidate_lane_absent": lane_absent,
+            "remaining_phase_owned_files": remaining,
+        },
+    }
+
+
 def _verified_backups(paths: BatchAddTickerPaths, backup_dir: Path) -> dict[str, Any]:
     backup_dir.mkdir(parents=True, exist_ok=False)
     fsync_directory(backup_dir.parent)
@@ -555,6 +611,15 @@ def render_report(result: Mapping[str, Any]) -> str:
     taxonomy_evidence = source_binding.get("taxonomy") or {}
     taxonomy_binding = taxonomy_evidence.get("binding") or {}
     binding_comparison = result.get("test_source_binding_comparison") or {}
+    terminal_cleanup = result.get("terminal_cleanup") or {}
+    disposable = terminal_cleanup.get("automatically_disposable") or {}
+    retained = terminal_cleanup.get("intentionally_retained") or {}
+    cleanup_verification = terminal_cleanup.get("cleanup_verification") or {}
+
+    def cleanup_line(label: str, key: str) -> str:
+        item = disposable.get(key) or {}
+        return f"- {label}: {item.get('status', 'NOT_RECORDED')} - {item.get('reason', 'Reason not recorded.')}"
+
     lines = [
         "# Refresh Fundamentals Production Update", "", "## Executive Summary", "",
         "- Operation: Refresh Fundamentals", "- Stage: Production update",
@@ -623,6 +688,24 @@ def render_report(result: Mapping[str, Any]) -> str:
         "- Publication order: provider -> canonical -> analysis.",
         "- The three-file set is journaled and recoverable, not reader-atomically replaced as one filesystem operation.",
         "- A reader can observe an intermediate generation during the bounded replacement window; generation-directory activation is deferred.",
+        "", "## Terminal Cleanup", "",
+        "### Automatically Disposable", "",
+        cleanup_line("Candidate DB cleanup", "candidate_databases"),
+        cleanup_line("Compact market bundle cleanup", "compact_market_bundle"),
+        cleanup_line(
+            "Taxonomy/runtime temporary artifact cleanup",
+            "taxonomy_runtime_temporary_artifacts",
+        ),
+        f"- Other phase-owned temporary artifacts remaining: {terminal_cleanup.get('other_phase_owned_temporary_artifacts_remaining', 'NOT_RECORDED')}",
+        f"- Remaining paths: `{json.dumps(terminal_cleanup.get('remaining_paths') or [])}`",
+        "", "### Intentionally Retained", "",
+        f"- Rollback backups retained: {retained.get('rollback_backup_count', 0)}",
+        f"- Rollback backup bytes/GiB: {retained.get('rollback_backup_bytes', 0)} / {float(retained.get('rollback_backup_gib') or 0):.3f}",
+        "- Retained roles: "
+        + (", ".join(str(item.get("role")) for item in retained.get("rollback_backups") or []) or "none"),
+        "- Operator acceptance required for rollback-backup deletion: "
+        + str(terminal_cleanup.get("operator_acceptance_required_for_rollback_backup_deletion", "NO")),
+        f"- Cleanup verification: {cleanup_verification.get('status', 'NOT_RECORDED')}",
         "", "## Final Result", "",
         str(result.get("user_message") or "See technical evidence for the final state."),
     ]
@@ -1090,6 +1173,9 @@ def run_production_apply(
             progress("CLEANUP", "RUNNING", "Removing terminal phase-owned candidate artifacts.")
         try:
             result["cleanup"] = _cleanup_candidate_lane(lane_dir, journal)
+            result["terminal_cleanup"] = _terminal_cleanup_summary(
+                result, lane_dir=lane_dir, cleanup=result["cleanup"],
+            )
         finally:
             locks.close()
         if successful:

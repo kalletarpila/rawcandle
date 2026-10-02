@@ -1069,6 +1069,17 @@ def test_refresh_full_workflow_real_production_parity_success(
     assert production["postflight"]["cross_role_lineage"]["analysis_matches_validated_candidate"] is True
     assert production["journal"]["postflight_state"] == "PASSED"
     assert production["cleanup"]["remaining_phase_owned_files"] == 0
+    terminal_cleanup = production["terminal_cleanup"]
+    assert terminal_cleanup["cleanup_verification"]["status"] == "PASSED"
+    assert terminal_cleanup["other_phase_owned_temporary_artifacts_remaining"] == 0
+    assert terminal_cleanup["intentionally_retained"]["rollback_backup_count"] == 3
+    assert terminal_cleanup["operator_acceptance_required_for_rollback_backup_deletion"] == "YES"
+    assert workflow["terminal_summary"]["terminal_cleanup"] == terminal_cleanup
+    workflow_report = (Path(result.artifact_dir) / "operation_report.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## Terminal Cleanup" in workflow_report
+    assert "Source: Production child result" in workflow_report
     assert production["production_source_binding"]["market"]["compact_bundle_bytes"] > 0
     assert production["production_source_binding"]["market"]["old_full_copy_bytes_avoided"] == fixture.paths.market_db.stat().st_size
     assert not any(item.get("source") == str(fixture.paths.market_db) for item in production.get("backups", {}).values())

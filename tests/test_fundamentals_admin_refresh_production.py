@@ -1467,6 +1467,50 @@ def test_prepublication_failure_report_uses_candidate_not_published_semantics() 
     assert "| Refreshed |" not in report
 
 
+def test_terminal_cleanup_summary_reports_disposable_artifacts_and_retained_backups(
+    tmp_path: Path,
+) -> None:
+    lane = tmp_path / "candidate-lane"
+    lane.mkdir()
+    (lane / "provider_candidate.db").write_bytes(b"candidate")
+    backups = {}
+    for role in PUBLICATION_ROLES:
+        backup = tmp_path / "backups" / f"{role}.db"
+        backup.parent.mkdir(exist_ok=True)
+        backup.write_bytes(role.encode("ascii"))
+        backups[role] = {"backup": str(backup)}
+
+    cleanup = refresh_production._cleanup_candidate_lane(lane, None)
+    summary = refresh_production._terminal_cleanup_summary(
+        {"backups": backups}, lane_dir=lane, cleanup=cleanup,
+    )
+
+    assert summary["status"] == "COMPLETED"
+    assert set(summary["automatically_disposable"]) == {
+        "candidate_databases", "compact_market_bundle",
+        "taxonomy_runtime_temporary_artifacts",
+    }
+    assert summary["other_phase_owned_temporary_artifacts_remaining"] == 0
+    assert summary["intentionally_retained"]["rollback_backup_count"] == 3
+    assert summary["intentionally_retained"]["rollback_backup_bytes"] == sum(
+        len(role) for role in PUBLICATION_ROLES
+    )
+    assert summary["operator_acceptance_required_for_rollback_backup_deletion"] == "YES"
+    assert summary["cleanup_verification"]["status"] == "PASSED"
+
+    report = render_report({
+        "outcome": "COMPLETED", "terminal_cleanup": summary,
+        "cleanup": cleanup, "backups": backups,
+    })
+    assert "## Terminal Cleanup" in report
+    assert "Candidate DB cleanup: COMPLETED" in report
+    assert "Compact market bundle cleanup: COMPLETED" in report
+    assert "Taxonomy/runtime temporary artifact cleanup: COMPLETED" in report
+    assert "Rollback backups retained: 3" in report
+    assert "Operator acceptance required for rollback-backup deletion: YES" in report
+    assert "Cleanup verification: PASSED" in report
+
+
 def test_required_taxonomy_dependency_uses_admin_wrapper_active_taxonomy() -> None:
     dependency = _required_taxonomy_dependency({
         "active_taxonomy": {
