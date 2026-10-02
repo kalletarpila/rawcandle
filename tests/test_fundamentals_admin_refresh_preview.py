@@ -37,6 +37,7 @@ from rawcandle.fundamentals.admin.refresh_review_queue import (
     RefreshReviewQueue,
     classify_review_scope,
     match_retained_history_approval,
+    present_review_item,
     queue_path_for_run_root,
 )
 from rawcandle.fundamentals.admin.refresh_scheduler import (
@@ -615,7 +616,7 @@ def test_realistic_preview_writes_artifacts_but_not_databases(tmp_path: Path) ->
     assert preview["refresh_set_fingerprint"] == output["preview_fingerprint"]
 
 
-def test_preview_consumes_matching_retained_history_approval_and_preserves_financial_dbs(
+def test_preview_validates_matching_retained_history_approval_without_finalizing(
     tmp_path: Path,
 ) -> None:
     paths = _create_preview_databases(tmp_path / "dbs")
@@ -721,17 +722,19 @@ def test_preview_consumes_matching_retained_history_approval_and_preserves_finan
         "retained_history_approvals_applied"
     ][0]["approved_source_count"] == 23
     revalidated = revalidate_bound_source(
-        second["refresh_preview"], paths, client,
+        second["refresh_preview"], paths, client, review_queue=queue,
     )
     assert revalidated["changed_tickers"] == ["YYAI"]
     assert revalidated["merge_plans"]["YYAI"]["action"][
         "newly_aged_out_source_rows"
     ] == 23
-    consumed = queue.get("YYAI")
-    assert consumed["status"] == "RESOLVED"
-    assert consumed["resolution_evidence"]["consumption_status"] == (
-        "EXACT_EVIDENCE_MATCH_APPLIED"
-    )
+    pending = queue.get("YYAI")
+    assert pending["status"] == "RETRY_REEVALUATION"
+    assert pending["resolution_evidence"].get("publication_status") is None
+    presented = present_review_item(pending)
+    assert presented["operator_status_label"] == "Approved - pending publication"
+    assert presented["approval_pending_publication"] is True
+    assert presented["accept_retained_history_eligible"] is False
     assert {
         name: (path.stat().st_size, path.stat().st_mtime_ns)
         for name, path in paths.as_dict().items()

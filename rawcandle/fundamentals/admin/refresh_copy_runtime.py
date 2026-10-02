@@ -50,11 +50,13 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
 from rawcandle.fundamentals.admin.refresh_review_queue import (
     ACCEPT_FISCAL_IDENTITY_REVISION,
     ACCEPT_RETAINED_HISTORY,
+    RefreshReviewQueue,
     classify_review_scope,
     match_fiscal_revision_approval,
     match_retained_history_approval,
     partition_artifact_fingerprint,
     partition_changes,
+    queue_path_for_run_root,
 )
 from rawcandle.fundamentals.admin.structural_context import _events
 from rawcandle.fundamentals.admin.source_bundle import (
@@ -68,7 +70,7 @@ from rawcandle.fundamentals.providers.sharadar import SharadarClient
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 
 
-TEST_CONTRACT_VERSION = "PHASE13G3_31_REFRESH_DIRECT_TAXONOMY_READ_V1"
+TEST_CONTRACT_VERSION = "PHASE13G3_58_PRODUCTION_DURABLE_REVIEW_APPROVAL_V1"
 REPLACEMENT_CLASSES = REFRESH_REPLACEMENT_CLASSES
 FULL_V2_READ_ONLY_SOURCE_ROLES = ("market", "taxonomy")
 
@@ -199,6 +201,7 @@ def _load_bound_preview(path: Path, expected_fingerprint: str, run_root: Path) -
 
 def revalidate_bound_source(
     preview: Mapping[str, Any], paths: BatchAddTickerPaths, client: SharadarClient,
+    *, review_queue: RefreshReviewQueue | None = None,
 ) -> dict[str, Any]:
     state = resolve_refresh_state(paths.provider_db)
     expected_state = preview["state"]
@@ -270,8 +273,16 @@ def revalidate_bound_source(
                     ),
                 },
             }
+            queue_item = (
+                review_queue.get(ticker)
+                if review_queue is not None else synthetic_queue_item
+            )
             matcher = match_fiscal_revision_approval if is_fiscal else match_retained_history_approval
-            matched = matcher(synthetic_queue_item, classify_review_scope(item), published_binding=state.successful_run_id)
+            matched = matcher(
+                queue_item,
+                classify_review_scope(item),
+                published_binding=state.successful_run_id,
+            )
             if not matched["applied"]:
                 raise StaleRefreshPreview(
                     "STALE_FISCAL_REVISION_APPROVAL_EVIDENCE"
@@ -1075,7 +1086,12 @@ def run_apply(
 
         failed_stage = ProgressStage.SOURCE_REVALIDATION
         progress.running(failed_stage, "Revalidating complete Sharadar source state.")
-        revalidated = revalidate_bound_source(preview, source_paths, api)
+        revalidated = revalidate_bound_source(
+            preview,
+            source_paths,
+            api,
+            review_queue=RefreshReviewQueue(queue_path_for_run_root(run_root)),
+        )
         writer.write_json(
             "source_revalidation.json",
             {key: value for key, value in revalidated.items() if key not in {"histories", "merge_plans"}},

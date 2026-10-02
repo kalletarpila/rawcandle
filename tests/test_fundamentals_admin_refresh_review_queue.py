@@ -201,11 +201,36 @@ def test_fiscal_revision_approval_is_exact_idempotent_and_writes_no_financial_db
     assert first["status"] == "RETRY_REEVALUATION"
     assert first["resolution_evidence"]["binding"]["queue_evidence_fingerprint"]
     assert first["resolution_evidence"]["binding"]["fiscal_identities"][0]["old_source_fingerprint"]
+    pending = present_review_item(first)
+    assert pending["operator_status_label"] == "Approved - pending publication"
+    assert pending["approval_pending_publication"] is True
+    assert pending["accept_fiscal_revision_eligible"] is False
+    assert pending["accept_retained_history_eligible"] is False
     assert {path: path.read_bytes() for path in financial_paths} == before
     matched = match_fiscal_revision_approval(first, scope, published_binding="published-1")
     assert matched["applied"] is True
-    consumed = queue.mark_approval_consumed("TRUG", run_id="preview-2")
+    consumed = queue.finalize_published_approval(
+        "TRUG",
+        production_run_id="production-2",
+        approval_evidence_fingerprint=first["resolution_evidence"][
+            "approval_evidence_fingerprint"
+        ],
+        published_state_binding_before="published-1",
+        published_state_binding_after="production-2",
+        published_at_utc="2026-10-02T12:00:00Z",
+    )
     assert consumed["status"] == "RESOLVED"
+    duplicate = queue.finalize_published_approval(
+        "TRUG",
+        production_run_id="production-2",
+        approval_evidence_fingerprint=first["resolution_evidence"][
+            "approval_evidence_fingerprint"
+        ],
+        published_state_binding_before="published-1",
+        published_state_binding_after="production-2",
+        published_at_utc="2026-10-02T12:00:00Z",
+    )
+    assert duplicate == consumed
     assert [item["event_type"] for item in queue.audit_history("TRUG")] == [
         "FISCAL_REVISION_APPROVED", "FISCAL_REVISION_APPROVAL_CONSUMED",
     ]
@@ -455,15 +480,34 @@ def test_retained_history_approval_is_exact_idempotent_and_consumed_only_by_matc
     )
     assert second == first
     assert len(queue.audit_history("YYAI")) == 1
+    pending = present_review_item(first)
+    assert pending["operator_status_label"] == "Approved - pending publication"
+    assert pending["accept_retained_history_eligible"] is False
+    assert pending["accept_fiscal_revision_eligible"] is False
 
     matched = match_retained_history_approval(
         second, scope, published_binding="published-1",
     )
     assert matched["applied"] is True
     assert len(matched["approved_source_keys"]) == 23
-    consumed = queue.mark_approval_consumed("YYAI", run_id="preview-2")
+    consumed = queue.finalize_published_approval(
+        "YYAI",
+        production_run_id="production-2",
+        approval_evidence_fingerprint=first["resolution_evidence"][
+            "approval_evidence_fingerprint"
+        ],
+        published_state_binding_before="published-1",
+        published_state_binding_after="production-2",
+        published_at_utc="2026-10-02T12:00:00Z",
+    )
     assert consumed["status"] == "RESOLVED"
-    assert consumed["resolution_evidence"]["consumed_run_id"] == "preview-2"
+    assert consumed["resolution_evidence"]["production_run_id"] == "production-2"
+    assert consumed["resolution_evidence"]["published_state_binding_before"] == (
+        "published-1"
+    )
+    assert consumed["resolution_evidence"]["published_state_binding_after"] == (
+        "production-2"
+    )
     assert [item["event_type"] for item in queue.audit_history("YYAI")] == [
         "RETAINED_HISTORY_APPROVED",
         "RETAINED_HISTORY_APPROVAL_CONSUMED",

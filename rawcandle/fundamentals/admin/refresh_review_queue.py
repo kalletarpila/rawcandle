@@ -688,6 +688,12 @@ def present_review_item(
         item, publication_blocked=publication_blocked,
     )
     approval = item.get("resolution_evidence") or {}
+    approval_pending_publication = (
+        status == "RETRY_REEVALUATION"
+        and item.get("operator_action")
+        in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION)
+        and bool(approval.get("approval_evidence_fingerprint"))
+    )
     return {
         **dict(item),
         "review_scope": TICKER_LOCAL_REVIEW,
@@ -698,11 +704,26 @@ def present_review_item(
         "affected_fiscal_identity_count": len(fiscal_identities),
         "evidence_reference": str(item.get("source_evidence_fingerprint") or "")[:12],
         "reevaluation_pending": status == "RETRY_REEVALUATION",
+        "approval_pending_publication": approval_pending_publication,
+        "operator_status_label": (
+            "Approved - pending publication"
+            if approval_pending_publication else status
+        ),
         "currently_held": status in OPEN_STATUSES,
-        "accept_retained_history_eligible": eligibility["eligible"],
-        "accept_retained_history_reason": eligibility["reason"],
-        "accept_fiscal_revision_eligible": fiscal_eligibility["eligible"],
-        "accept_fiscal_revision_reason": fiscal_eligibility["reason"],
+        "accept_retained_history_eligible": (
+            eligibility["eligible"] and not approval_pending_publication
+        ),
+        "accept_retained_history_reason": (
+            "Approval already granted and pending successful publication."
+            if approval_pending_publication else eligibility["reason"]
+        ),
+        "accept_fiscal_revision_eligible": (
+            fiscal_eligibility["eligible"] and not approval_pending_publication
+        ),
+        "accept_fiscal_revision_reason": (
+            "Approval already granted and pending successful publication."
+            if approval_pending_publication else fiscal_eligibility["reason"]
+        ),
         "fiscal_revision_event_count": len(fiscal_identities),
         "fiscal_revision_events": fiscal_identities,
         "approval_timestamp_utc": approval.get("operator_timestamp_utc"),
@@ -713,8 +734,15 @@ def present_review_item(
         "approval_evidence_fingerprint": approval.get(
             "approval_evidence_fingerprint"
         ),
-        "approval_consumed": bool(approval.get("consumed_at_utc")),
-        "approval_consumed_run_id": approval.get("consumed_run_id"),
+        "approval_consumed": bool(approval.get("published_at_utc")),
+        "approval_consumed_run_id": approval.get("production_run_id"),
+        "approval_published_at_utc": approval.get("published_at_utc"),
+        "published_state_binding_before": approval.get(
+            "published_state_binding_before"
+        ),
+        "published_state_binding_after": approval.get(
+            "published_state_binding_after"
+        ),
     }
 
 
@@ -939,7 +967,16 @@ class RefreshReviewQueue:
             raise ValueError("REFRESH_REVIEW_ITEM_NOT_OPEN")
         return self.get(ticker) or {}
 
-    def mark_approval_consumed(self, ticker: str, *, run_id: str) -> dict[str, Any]:
+    def finalize_published_approval(
+        self,
+        ticker: str,
+        *,
+        production_run_id: str,
+        approval_evidence_fingerprint: str,
+        published_state_binding_before: str,
+        published_state_binding_after: str,
+        published_at_utc: str,
+    ) -> dict[str, Any]:
         ticker = ticker.upper()
         with _connect(self.path) as connection:
             row = connection.execute(
@@ -952,17 +989,50 @@ class RefreshReviewQueue:
             action = item.get("operator_action")
             if action not in (ACCEPT_RETAINED_HISTORY, ACCEPT_FISCAL_IDENTITY_REVISION):
                 raise ValueError("REFRESH_OPERATOR_APPROVAL_MISSING")
-            now = utc_now()
+            if (
+                item.get("status") == "RESOLVED"
+                and approval.get("publication_status") == "SUCCESSFULLY_PUBLISHED"
+                and approval.get("approval_evidence_fingerprint")
+                == approval_evidence_fingerprint
+                and approval.get("production_run_id") == production_run_id
+                and approval.get("published_state_binding_before")
+                == published_state_binding_before
+                and approval.get("published_state_binding_after")
+                == published_state_binding_after
+            ):
+                return item
+            if item.get("status") != "RETRY_REEVALUATION":
+                raise ValueError("REFRESH_OPERATOR_APPROVAL_NOT_PENDING_PUBLICATION")
+            binding = approval.get("binding")
+            if (
+                not isinstance(binding, Mapping)
+                or approval.get("approval_evidence_fingerprint")
+                != approval_evidence_fingerprint
+                or fingerprint(binding) != approval_evidence_fingerprint
+                or binding.get("published_binding")
+                != published_state_binding_before
+                or not published_state_binding_after
+            ):
+                raise ValueError("REFRESH_OPERATOR_APPROVAL_FINALIZATION_DRIFT")
             approval.update({
-                "consumed_at_utc": now,
-                "consumed_run_id": run_id,
-                "consumption_status": "EXACT_EVIDENCE_MATCH_APPLIED",
+                "publication_status": "SUCCESSFULLY_PUBLISHED",
+                "published_at_utc": published_at_utc,
+                "production_run_id": production_run_id,
+                "published_state_binding_before": published_state_binding_before,
+                "published_state_binding_after": published_state_binding_after,
+                "consumption_status": "SUCCESSFUL_PRODUCTION_PUBLICATION",
             })
             connection.execute(
                 "UPDATE refresh_review_queue SET status='RESOLVED',"
                 "resolution_at_utc=?,resolution_evidence_json=?,"
                 "last_seen_run_id=?,last_seen_at_utc=? WHERE ticker=?",
-                (now, _json(approval), run_id, now, ticker),
+                (
+                    published_at_utc,
+                    _json(approval),
+                    production_run_id,
+                    published_at_utc,
+                    ticker,
+                ),
             )
             self._append_audit(
                 connection,
@@ -972,7 +1042,7 @@ class RefreshReviewQueue:
                     if action == ACCEPT_FISCAL_IDENTITY_REVISION
                     else "RETAINED_HISTORY_APPROVAL_CONSUMED"
                 ),
-                run_id=run_id,
+                run_id=production_run_id,
                 evidence=approval,
             )
             connection.commit()

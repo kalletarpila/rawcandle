@@ -578,7 +578,7 @@ def build_fundamentals_admin_page(
         return "\n".join(
             [
                 f"Ticker: {item.get('ticker', 'UNKNOWN')}",
-                f"Status: {item.get('status', 'UNKNOWN')}",
+                f"Status: {item.get('operator_status_label') or item.get('status', 'UNKNOWN')}",
                 f"Scope: {item.get('review_scope', 'TICKER_LOCAL_REVIEW')}",
                 f"Classification: {item.get('classification', 'UNKNOWN')}",
                 f"Summary: {item.get('human_summary', 'No additional explanation is available.')}",
@@ -760,10 +760,14 @@ def build_fundamentals_admin_page(
             ticker = str(item.get("ticker") or "UNKNOWN")
             is_resolved = str(item.get("status") or "").upper() == "RESOLVED"
             reason_codes = ", ".join(str(value) for value in item.get("reason_codes") or [])
-            status_lines = [str(item.get("status") or "UNKNOWN")]
+            status_lines = [str(
+                item.get("operator_status_label") or item.get("status") or "UNKNOWN"
+            )]
             if item.get("operator_action"):
                 status_lines.append(str(item["operator_action"]))
-            if item.get("reevaluation_pending"):
+            if item.get("reevaluation_pending") and not item.get(
+                "approval_pending_publication"
+            ):
                 status_lines.append("Reevaluation pending")
             rows.append(
                 ft.Row(

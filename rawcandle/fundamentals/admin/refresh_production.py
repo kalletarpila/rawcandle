@@ -51,8 +51,10 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     ensure_refresh_state_schema,
 )
 from rawcandle.fundamentals.admin.refresh_review_queue import (
+    RefreshReviewQueue,
     partition_artifact_fingerprint,
     partition_changes,
+    queue_path_for_run_root,
 )
 from rawcandle.fundamentals.admin.source_bundle import (
     ReadOnlySourceMode,
@@ -68,7 +70,7 @@ from rawcandle.fundamentals.phase13b_foundation import online_backup
 from rawcandle.fundamentals.providers.sharadar import SharadarClient
 
 
-PRODUCTION_CONTRACT_VERSION = "PHASE13G3_31_REFRESH_DIRECT_TAXONOMY_READ_V1"
+PRODUCTION_CONTRACT_VERSION = "PHASE13G3_58_PRODUCTION_DURABLE_REVIEW_APPROVAL_V1"
 PRODUCTION_STAGES = (
     "PRODUCTION_PREFLIGHT", "SOURCE_REVALIDATION", "PROVIDER_CANDIDATE",
     "CANONICAL_CANDIDATE", "ANALYSIS_CANDIDATE", "CANDIDATE_VALIDATION",
@@ -699,6 +701,7 @@ def run_production_apply(
     lane_dir = temp_root / run_id
     backup_dir = backup_root / run_id
     api = client or SharadarClient()
+    review_queue = RefreshReviewQueue(queue_path_for_run_root(run_root))
     stage = PRODUCTION_STAGES[0]
     journal: dict[str, Any] | None = None
     write_boundary_crossed = False
@@ -767,7 +770,9 @@ def run_production_apply(
         stage = "SOURCE_REVALIDATION"
         progress(stage, "RUNNING", "Revalidating complete Sharadar histories against the successful Test.")
         try:
-            revalidated = revalidate_bound_source(preview, source_paths, api)
+            revalidated = revalidate_bound_source(
+                preview, source_paths, api, review_queue=review_queue,
+            )
         except Exception as exc:
             raise StaleRefreshTest("STALE_REFRESH_TEST") from exc
         if revalidated["refresh_set_fingerprint"] != preview_fingerprint:
@@ -909,7 +914,9 @@ def run_production_apply(
         stage = "FINAL_SOURCE_RECHECK"
         progress(stage, "RUNNING", "Rechecking complete source state immediately before publication.")
         try:
-            final_source = revalidate_bound_source(preview, source_paths, api)
+            final_source = revalidate_bound_source(
+                preview, source_paths, api, review_queue=review_queue,
+            )
         except Exception as exc:
             raise StaleRefreshTest("STALE_REFRESH_SOURCE_BEFORE_PUBLICATION") from exc
         if final_source["refresh_set_fingerprint"] != revalidated["refresh_set_fingerprint"]:
@@ -986,6 +993,41 @@ def run_production_apply(
         result["journal"] = journal
         result["outcome"] = "COMPLETED"
         result["rollback"] = {"status": "NOT_REQUIRED"}
+        finalized_approvals = []
+        for item in revalidated["ticker_changes"]:
+            approval = (
+                item.get("retained_history_approval")
+                or item.get("fiscal_revision_approval")
+                or {}
+            )
+            if not approval.get("applied"):
+                continue
+            finalized_approvals.append(
+                review_queue.finalize_published_approval(
+                    str(item["ticker"]),
+                    production_run_id=run_id,
+                    approval_evidence_fingerprint=str(
+                        approval["approval_evidence_fingerprint"]
+                    ),
+                    published_state_binding_before=str(
+                        revalidated["state"]["successful_run_id"]
+                    ),
+                    published_state_binding_after=str(
+                        refresh_state["successful_run_id"]
+                    ),
+                    published_at_utc=str(refresh_state["completed_at_utc"]),
+                )
+            )
+        result["finalized_review_approvals"] = [
+            {
+                "ticker": item["ticker"],
+                "status": item["status"],
+                "approval_evidence_fingerprint": (
+                    item.get("resolution_evidence") or {}
+                ).get("approval_evidence_fingerprint"),
+            }
+            for item in finalized_approvals
+        ]
         result["user_message"] = "Refresh Fundamentals Production update completed. The provider, canonical, and analysis generation passed postflight."
         progress(stage, "COMPLETED", "Publication journal committed after successful postflight.")
     except Exception as exc:

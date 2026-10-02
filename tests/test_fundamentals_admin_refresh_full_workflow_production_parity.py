@@ -34,6 +34,9 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
 )
 from rawcandle.fundamentals.admin.refresh_review_queue import (
     ACCEPT_FISCAL_IDENTITY_REVISION,
+    ACCEPT_RETAINED_HISTORY,
+    RefreshReviewQueue,
+    queue_path_for_run_root,
 )
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
@@ -723,6 +726,29 @@ def test_trug_fiscal_revision_acceptance_revalidates_and_publishes_via_normal_wo
         fixture.paths, ticker="TRUG", company_id=4,
     ) == before
 
+    interrupted_preview = run_preview(
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        client=fixture.client,
+    )
+    interrupted_test = refresh_copy_runtime.run_apply(
+        preview_payload_path=Path(interrupted_preview["artifact_dir"])
+        / "refresh_preview.json",
+        preview_fingerprint=interrupted_preview["preview_fingerprint"],
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        temp_root=fixture.temp_root,
+        client=fixture.client,
+        confirm_apply=True,
+        as_of_date=AS_OF,
+    )
+    assert interrupted_test["outcome"] == "COMPLETED"
+    pending = RefreshReviewQueue(queue_path_for_run_root(fixture.run_root)).get(
+        "TRUG"
+    )
+    assert pending["status"] == "RETRY_REEVALUATION"
+    assert pending["resolution_evidence"].get("publication_status") is None
+
     result = service.full_workflow(
         operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
     )
@@ -744,6 +770,112 @@ def test_trug_fiscal_revision_acceptance_revalidates_and_publishes_via_normal_wo
     assert trug["status"] == "RESOLVED"
     assert trug["approval_consumed"] is True
     assert production["analysis_candidate"]["status"] == "READY"
+    _assert_terminal_lane_cleanup(fixture)
+
+
+def test_retained_history_approval_survives_preview_test_interruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch, include_yyai_hold=True)
+    service = _service(fixture)
+    assert service.full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    ).outcome == "COMPLETED"
+    binding_preview = run_preview(
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        client=fixture.client,
+    )
+    assert binding_preview["summary_counts"]["held_for_review"] == 1
+    accepted = service.resolve_refresh_review(
+        "YYAI",
+        ACCEPT_RETAINED_HISTORY,
+        evidence={"source": "fixture", "comment": "accept exact retained history"},
+    )
+    approval_fingerprint = accepted["resolution_evidence"][
+        "approval_evidence_fingerprint"
+    ]
+
+    interrupted_preview = run_preview(
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        client=fixture.client,
+    )
+    interrupted_test = refresh_copy_runtime.run_apply(
+        preview_payload_path=Path(interrupted_preview["artifact_dir"])
+        / "refresh_preview.json",
+        preview_fingerprint=interrupted_preview["preview_fingerprint"],
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        temp_root=fixture.temp_root,
+        client=fixture.client,
+        confirm_apply=True,
+        as_of_date=AS_OF,
+    )
+    assert interrupted_test["outcome"] == "COMPLETED"
+    queue = RefreshReviewQueue(queue_path_for_run_root(fixture.run_root))
+    pending = queue.get("YYAI")
+    assert pending["status"] == "RETRY_REEVALUATION"
+    assert pending["resolution_evidence"]["approval_evidence_fingerprint"] == (
+        approval_fingerprint
+    )
+
+    result = service.full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    )
+    assert result.outcome == "COMPLETED"
+    resolved = queue.get("YYAI")
+    assert resolved["status"] == "RESOLVED"
+    assert resolved["resolution_evidence"]["publication_status"] == (
+        "SUCCESSFULLY_PUBLISHED"
+    )
+    assert resolved["resolution_evidence"]["approval_evidence_fingerprint"] == (
+        approval_fingerprint
+    )
+    assert len([
+        event for event in queue.audit_history("YYAI")
+        if event["event_type"] == "RETAINED_HISTORY_APPROVED"
+    ]) == 1
+    _assert_terminal_lane_cleanup(fixture)
+
+
+def test_post_boundary_rollback_preserves_fiscal_approval_for_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _fixture(tmp_path, monkeypatch, include_trug_hold=True)
+    service = _service(fixture)
+    assert service.full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    ).outcome == "COMPLETED"
+    run_preview(
+        source_paths=fixture.paths,
+        run_root=fixture.run_root,
+        client=fixture.client,
+    )
+    accepted = service.resolve_refresh_review(
+        "TRUG", ACCEPT_FISCAL_IDENTITY_REVISION,
+        evidence={"source": "fixture"},
+    )
+    approval_fingerprint = accepted["resolution_evidence"][
+        "approval_evidence_fingerprint"
+    ]
+
+    failed = _service(
+        fixture, inject_failure_at="AFTER_PROVIDER_REPLACEMENT",
+    ).full_workflow(operation_type="REFRESH_FUNDAMENTALS", raw_inputs="")
+    assert failed.outcome != "COMPLETED"
+    queue = RefreshReviewQueue(queue_path_for_run_root(fixture.run_root))
+    pending = queue.get("TRUG")
+    assert pending["status"] == "RETRY_REEVALUATION"
+    assert pending["resolution_evidence"]["approval_evidence_fingerprint"] == (
+        approval_fingerprint
+    )
+
+    retried = service.full_workflow(
+        operation_type="REFRESH_FUNDAMENTALS", raw_inputs="",
+    )
+    assert retried.outcome == "COMPLETED"
+    assert queue.get("TRUG")["status"] == "RESOLVED"
     _assert_terminal_lane_cleanup(fixture)
 
 

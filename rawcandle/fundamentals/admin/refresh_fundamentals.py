@@ -1918,11 +1918,11 @@ def run_preview(
                 or (item.get("fiscal_revision_approval") or {}).get("applied")
             )
         ]
-        for item in applied_approvals:
-            item["review_queue_resolution"] = review_queue.mark_approval_consumed(
-                str(item["ticker"]), run_id=run_id,
-            )
-        review_queue.resolve_absent(tickers, [item["ticker"] for item in held], run_id=run_id)
+        pending_review_tickers = [item["ticker"] for item in held]
+        pending_review_tickers.extend(item["ticker"] for item in applied_approvals)
+        review_queue.resolve_absent(
+            tickers, pending_review_tickers, run_id=run_id,
+        )
         queue_items = review_queue.list_items()
         counts["safe_changes"] = len(replacement)
         counts["held_for_review"] = len(held)
