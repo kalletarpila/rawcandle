@@ -26,6 +26,8 @@ from dev_tools.stock_update_scheduler_ui import (
     build_skip_next_run_config,
     build_text_log_browser_url,
     find_datacenter_generated_reports,
+    fundamentals_full_workflow_checked,
+    fundamentals_refresh_mode_from_checkbox,
     format_taxonomy_plan_lines,
     format_run_now_error_message,
     format_systemd_on_calendar,
@@ -112,7 +114,17 @@ class _FakePage:
         self.tasks.append(coro)
 
 
-def _write_config(path: Path, *, skip_next_run: bool = False) -> None:
+def _write_config(
+    path: Path,
+    *,
+    skip_next_run: bool = False,
+    fundamentals_refresh_mode: str | None = None,
+) -> None:
+    optional_mode = (
+        {"fundamentals_refresh_mode": fundamentals_refresh_mode}
+        if fundamentals_refresh_mode is not None
+        else {}
+    )
     path.write_text(
         json.dumps(
             {
@@ -124,6 +136,7 @@ def _write_config(path: Path, *, skip_next_run: bool = False) -> None:
                 "skip_next_run": skip_next_run,
                 "technical_relevance_enabled": False,
                 "timezone": "Europe/Helsinki",
+                **optional_mode,
                 **_LEGACY_DASHBOARD_CONFIG_KEYS,
             }
         ),
@@ -1027,6 +1040,113 @@ def test_run_app_save_config_persists_technical_relevance(tmp_path, monkeypatch)
     page.save_config_button.on_click(None)
 
     assert read_scheduler_config(str(config_path)).technical_relevance_enabled is True
+
+
+@pytest.mark.parametrize(
+    ("mode", "checked"),
+    (("PREVIEW_ONLY", False), ("FULL_WORKFLOW", True)),
+)
+def test_scheduler_full_workflow_checkbox_renders_persisted_mode(
+    tmp_path,
+    monkeypatch,
+    mode,
+    checked,
+):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path, fundamentals_refresh_mode=mode)
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing"},
+    )
+
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    assert page.fundamentals_full_workflow_checkbox.value is checked
+    assert page.fundamentals_full_workflow_checkbox.label == (
+        "Run Fundamentals Full Workflow"
+    )
+    assert not hasattr(page, "fundamentals_refresh_mode_dropdown")
+    assert not hasattr(page, "fundamentals_refresh_mode_confirmation_field")
+
+
+def test_scheduler_full_workflow_checkbox_save_uses_internal_confirmation(
+    tmp_path,
+    monkeypatch,
+):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path, fundamentals_refresh_mode="PREVIEW_ONLY")
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing"},
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: tmp_path / "missing.timer",
+    )
+    from dev_tools import stock_update_scheduler_ui as scheduler_ui
+
+    original_builder = scheduler_ui.build_config_from_ui_values
+    captured = {}
+
+    def capture_builder(**kwargs):
+        captured.update(kwargs)
+        return original_builder(**kwargs)
+
+    monkeypatch.setattr(scheduler_ui, "build_config_from_ui_values", capture_builder)
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    page.fundamentals_full_workflow_checkbox.value = True
+    page.save_config_button.on_click(None)
+
+    assert captured["fundamentals_refresh_mode"] == "FULL_WORKFLOW"
+    assert captured["fundamentals_refresh_mode_confirmation"] == (
+        "CONFIRM_SCHEDULER_FULL_WORKFLOW"
+    )
+    assert read_scheduler_config(str(config_path)).fundamentals_refresh_mode == (
+        "FULL_WORKFLOW"
+    )
+    assert read_scheduler_config(str(config_path)).enabled_markets == ["omxh"]
+
+
+def test_scheduler_full_workflow_checkbox_uncheck_and_reload_persisted_state(
+    tmp_path,
+    monkeypatch,
+):
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path, fundamentals_refresh_mode="FULL_WORKFLOW")
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.read_systemd_user_timer_status",
+        lambda: {"installed": False, "status_summary": "missing"},
+    )
+    monkeypatch.setattr(
+        "dev_tools.stock_update_scheduler_ui.get_systemd_user_timer_path",
+        lambda: tmp_path / "missing.timer",
+    )
+    page = _FakePage()
+    run_app(page, str(config_path))
+
+    page.fundamentals_full_workflow_checkbox.value = False
+    page.save_config_button.on_click(None)
+    assert read_scheduler_config(str(config_path)).fundamentals_refresh_mode == (
+        "PREVIEW_ONLY"
+    )
+
+    page.fundamentals_full_workflow_checkbox.value = True
+    page.reload_config_button.on_click(None)
+    assert page.fundamentals_full_workflow_checkbox.value is False
+
+
+def test_scheduler_full_workflow_checkbox_mode_mapping_keeps_backend_values() -> None:
+    assert fundamentals_refresh_mode_from_checkbox(False) == "PREVIEW_ONLY"
+    assert fundamentals_refresh_mode_from_checkbox(True) == "FULL_WORKFLOW"
+    assert fundamentals_full_workflow_checked(
+        StockUpdateSchedulerConfig(fundamentals_refresh_mode="PREVIEW_ONLY")
+    ) is False
+    assert fundamentals_full_workflow_checked(
+        StockUpdateSchedulerConfig(fundamentals_refresh_mode="FULL_WORKFLOW")
+    ) is True
 
 
 def test_scheduler_ui_port_constant_is_fixed():

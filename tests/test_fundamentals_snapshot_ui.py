@@ -21,7 +21,6 @@ from rawcandle.fundamentals.snapshot.v2_scaffold import SnapshotPaths
 from rawcandle.fundamentals.snapshot.ui_service import (
     FUNDAMENTAL_REPORTS_DIR,
     MAX_BATCH_TICKERS,
-    PRODUCTION_SNAPSHOT_PATHS,
     FundamentalsBatchResult,
     FundamentalsBatchSummary,
     FundamentalsSnapshotUIService,
@@ -515,7 +514,8 @@ def test_recent_report_row_has_download_action() -> None:
 @pytest.mark.integration
 @pytest.mark.database
 def test_ui_service_real_snapshot_integration_is_read_only(tmp_path: Path) -> None:
-    if not all(path.is_file() for path in PRODUCTION_SNAPSHOT_PATHS.__dict__.values()):
+    active_paths = snapshot_ui_service._active_snapshot_paths()
+    if not all(path.is_file() for path in active_paths.__dict__.values()):
         pytest.skip("Fundamentals V4 production databases are not present")
     from rawcandle.fundamentals.relative_valuation.engine import (
         MODEL_FINGERPRINT as RELATIVE_VALUATION_MODEL_FINGERPRINT,
@@ -525,7 +525,7 @@ def test_ui_service_real_snapshot_integration_is_read_only(tmp_path: Path) -> No
     )
 
     with sqlite3.connect(
-        f"{PRODUCTION_SNAPSHOT_PATHS.analysis_db.resolve().as_uri()}?mode=ro",
+        f"{active_paths.analysis_db.resolve().as_uri()}?mode=ro",
         uri=True,
     ) as connection:
         repository = RelativeValuationRepository(connection)

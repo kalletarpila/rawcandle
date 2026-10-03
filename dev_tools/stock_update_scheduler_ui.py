@@ -43,7 +43,6 @@ from dev_tools.forecast_scheduler_page import (
     build_forecast_scheduler_page,
 )
 from rawcandle.scheduler.config import (
-    SUPPORTED_FUNDAMENTALS_REFRESH_MODES,
     StockUpdateSchedulerConfig,
     read_scheduler_config,
     validate_run_time,
@@ -253,6 +252,14 @@ def build_config_from_ui_values(
         fundamentals_refresh_mode=requested_mode,
     )
     return validate_scheduler_config(config)
+
+
+def fundamentals_refresh_mode_from_checkbox(enabled: bool) -> str:
+    return "FULL_WORKFLOW" if enabled else "PREVIEW_ONLY"
+
+
+def fundamentals_full_workflow_checked(config: StockUpdateSchedulerConfig) -> bool:
+    return config.fundamentals_refresh_mode == "FULL_WORKFLOW"
 
 
 def load_latest_scheduler_summary(log_dir: str) -> Optional[Dict[str, Any]]:
@@ -1071,18 +1078,9 @@ def run_app(
         label="Run technical relevance after stock updates",
         value=config.technical_relevance_enabled,
     )
-    fundamentals_refresh_mode_dropdown = ft.Dropdown(
-        label="Fundamentals Refresh mode",
-        value=config.fundamentals_refresh_mode,
-        options=[
-            ft.dropdown.Option(mode)
-            for mode in SUPPORTED_FUNDAMENTALS_REFRESH_MODES
-        ],
-    )
-    fundamentals_refresh_mode_confirmation_field = ft.TextField(
-        label="FULL_WORKFLOW confirmation",
-        password=True,
-        can_reveal_password=True,
+    fundamentals_full_workflow_checkbox = ft.Checkbox(
+        label="Run Fundamentals Full Workflow",
+        value=fundamentals_full_workflow_checked(config),
     )
     status_field = ft.TextField(label="Status", read_only=True, multiline=True)
     summary_field = ft.TextField(label="Latest summary", read_only=True, multiline=True)
@@ -1308,13 +1306,17 @@ def run_app(
         omxs_checkbox.value = "omxs" in enabled
         usa_checkbox.value = "usa" in enabled
         technical_relevance_checkbox.value = next_config.technical_relevance_enabled
-        fundamentals_refresh_mode_dropdown.value = next_config.fundamentals_refresh_mode
-        fundamentals_refresh_mode_confirmation_field.value = ""
+        fundamentals_full_workflow_checkbox.value = fundamentals_full_workflow_checked(
+            next_config
+        )
         skip_next_run_text.value = scheduler_skip_next_run_label(next_config)
 
     def on_save_config(_e: Any) -> None:
         try:
             current_config = _load_config_or_raise(config_path)
+            requested_mode = fundamentals_refresh_mode_from_checkbox(
+                bool(fundamentals_full_workflow_checkbox.value)
+            )
             next_config = build_config_from_ui_values(
                 osakedata_db_path=osakedata_db_field.value,
                 analysis_db_path=analysis_db_field.value,
@@ -1323,11 +1325,12 @@ def run_app(
                 run_time=run_time_field.value,
                 selected_markets=selected_markets_from_ui(),
                 technical_relevance_enabled=bool(technical_relevance_checkbox.value),
-                fundamentals_refresh_mode=str(
-                    fundamentals_refresh_mode_dropdown.value or "PREVIEW_ONLY"
-                ),
-                fundamentals_refresh_mode_confirmation=str(
-                    fundamentals_refresh_mode_confirmation_field.value or ""
+                fundamentals_refresh_mode=requested_mode,
+                fundamentals_refresh_mode_confirmation=(
+                    FULL_WORKFLOW_CONFIRMATION
+                    if requested_mode == "FULL_WORKFLOW"
+                    and current_config.fundamentals_refresh_mode != requested_mode
+                    else ""
                 ),
                 base_config=current_config,
             )
@@ -2009,8 +2012,7 @@ def run_app(
             run_time_field,
             ft.Row([omxh_checkbox, omxs_checkbox, usa_checkbox]),
             technical_relevance_checkbox,
-            fundamentals_refresh_mode_dropdown,
-            fundamentals_refresh_mode_confirmation_field,
+            fundamentals_full_workflow_checkbox,
             skip_next_run_text,
             running_status_text,
             ft.Row(
@@ -2097,10 +2099,7 @@ def run_app(
     page.omxs_checkbox = omxs_checkbox
     page.usa_checkbox = usa_checkbox
     page.technical_relevance_checkbox = technical_relevance_checkbox
-    page.fundamentals_refresh_mode_dropdown = fundamentals_refresh_mode_dropdown
-    page.fundamentals_refresh_mode_confirmation_field = (
-        fundamentals_refresh_mode_confirmation_field
-    )
+    page.fundamentals_full_workflow_checkbox = fundamentals_full_workflow_checkbox
     page.save_config_button = save_config_button
     page.reload_config_button = reload_config_button
     page.run_now_button = run_now_button
