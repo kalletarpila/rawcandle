@@ -141,7 +141,66 @@ def _journal_state(journal_path: Path) -> tuple[str, str | None]:
     state = str(journal.get("state"))
     if state in INCOMPLETE_STATES or state == "RECOVERY_FAILED":
         return state, "Recovery journal still active"
+    if state != "COMPLETED":
+        return state, "Recovery or rollback journal is not clean"
     return state, None
+
+
+def _generation_publication_sources(
+    result: Mapping[str, Any], *, run_id: str,
+) -> dict[str, Path] | None:
+    journal = result.get("journal")
+    if not isinstance(journal, Mapping) or journal.get("publication_mode") != "GENERATION_POINTER":
+        return None
+    required = {
+        "state": "COMPLETED",
+        "current_publication_step": "COMPLETED",
+        "postflight_state": "PASSED",
+        "rollback_recovery_state": "NOT_REQUIRED",
+        "generation_activation_state": "ACTIVATED_AND_VERIFIED",
+        "production_run_id": run_id,
+    }
+    if any(journal.get(key) != expected for key, expected in required.items()):
+        raise RunAcceptanceCleanupError("Generation publication evidence is incomplete")
+    old_generation = journal.get("old_generation")
+    roles = old_generation.get("roles") if isinstance(old_generation, Mapping) else None
+    if (
+        not isinstance(old_generation, Mapping)
+        or old_generation.get("layout") != "GENERATION_DIRECTORY"
+        or not isinstance(roles, Mapping)
+        or set(roles) != KNOWN_ROLES
+    ):
+        raise RunAcceptanceCleanupError("Generation backup source ownership is invalid")
+    cleanup = result.get("terminal_cleanup")
+    if cleanup is not None:
+        verification = cleanup.get("cleanup_verification") if isinstance(cleanup, Mapping) else None
+        retained = cleanup.get("intentionally_retained") if isinstance(cleanup, Mapping) else None
+        retained_backups = retained.get("rollback_backups") if isinstance(retained, Mapping) else None
+        if (
+            not isinstance(cleanup, Mapping)
+            or cleanup.get("status") != "COMPLETED"
+            or cleanup.get("operator_acceptance_required_for_rollback_backup_deletion") != "YES"
+            or not isinstance(verification, Mapping)
+            or verification.get("status") != "PASSED"
+            or not isinstance(retained_backups, list)
+        ):
+            raise RunAcceptanceCleanupError("Generation terminal cleanup evidence is incomplete")
+        recorded_paths = {
+            str(Path(str(item.get("path") or "")).resolve())
+            for item in retained_backups
+            if isinstance(item, Mapping)
+        }
+        backup_paths = {
+            str(Path(str(record.get("backup") or "")).resolve())
+            for record in (result.get("backups") or {}).values()
+            if isinstance(record, Mapping)
+        }
+        if (
+            int(retained.get("rollback_backup_count") or -1) != len(KNOWN_ROLES)
+            or recorded_paths != backup_paths
+        ):
+            raise RunAcceptanceCleanupError("Generation retained backup evidence does not match")
+    return {role: Path(str(roles[role])).resolve() for role in KNOWN_ROLES}
 
 
 def _validated_manifest(
@@ -150,6 +209,7 @@ def _validated_manifest(
     run_id: str,
     backup_root: Path,
     live_paths: Mapping[str, Path],
+    source_paths: Mapping[str, Path] | None = None,
 ) -> dict[str, dict[str, Any]]:
     records = _backup_records(result)
     if not records:
@@ -180,8 +240,9 @@ def _validated_manifest(
         ):
             raise RunAcceptanceCleanupError(f"CLEANUP_BACKUP_OWNERSHIP_UNPROVEN:{role}")
         expected_live = Path(live_paths[role]).resolve()
+        expected_source = Path((source_paths or live_paths)[role]).resolve()
         source = record.get("source")
-        if source and Path(str(source)).resolve() != expected_live:
+        if source and Path(str(source)).resolve() != expected_source:
             raise RunAcceptanceCleanupError(f"CLEANUP_LIVE_SOURCE_MISMATCH:{role}")
         validated[role] = dict(record) | {
             "path": resolved,
@@ -227,8 +288,13 @@ def inspect_cleanup_eligibility(
             raise RunAcceptanceCleanupError("Rollback was required")
         if not _publication_complete(result):
             raise RunAcceptanceCleanupError("Publication or postflight evidence is incomplete")
+        source_paths = _generation_publication_sources(result, run_id=run_id)
         manifest = _validated_manifest(
-            result, run_id=run_id, backup_root=backup_root, live_paths=live_paths
+            result,
+            run_id=run_id,
+            backup_root=backup_root,
+            live_paths=live_paths,
+            source_paths=source_paths,
         )
         missing = [role for role, record in manifest.items() if not record["path"].is_file()]
         if missing:
@@ -304,8 +370,13 @@ def _accept_run_and_cleanup_backups_locked(
     if not eligibility.get("eligible"):
         raise RunAcceptanceCleanupError(str(eligibility.get("reason") or "CLEANUP_NOT_ELIGIBLE"))
     result = _load_json(directory / "result.json")
+    source_paths = _generation_publication_sources(result, run_id=run_id)
     manifest = _validated_manifest(
-        result, run_id=run_id, backup_root=backup_root, live_paths=live_paths
+        result,
+        run_id=run_id,
+        backup_root=backup_root,
+        live_paths=live_paths,
+        source_paths=source_paths,
     )
     state, journal_error = _journal_state(journal_path)
     if journal_error:

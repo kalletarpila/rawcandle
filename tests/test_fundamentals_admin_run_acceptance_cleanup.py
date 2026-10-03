@@ -128,12 +128,204 @@ def _cleanup(fixture: dict[str, object]) -> dict[str, object]:
     )
 
 
+def _make_generation_publication(fixture: dict[str, object]) -> dict[str, Path]:
+    generation_root = fixture["run_root"].parent / "generations"
+    migration_dir = generation_root / "migration_20261003T103216Z"
+    active_dir = generation_root / f"refresh_{RUN_ID}"
+    migration_paths: dict[str, Path] = {}
+    active_paths: dict[str, Path] = {}
+    for role in ("provider", "canonical", "analysis"):
+        migration_path = migration_dir / f"{role}.db"
+        active_path = active_dir / f"{role}.db"
+        _database(migration_path, f"migration-{role}")
+        _database(active_path, f"active-{role}")
+        migration_paths[role] = migration_path
+        active_paths[role] = active_path
+        fixture["result"]["backups"][role]["source"] = str(migration_path)
+    fixture["live_paths"] = active_paths
+    manifest = fixture["run_root"].parent / "fundamentals_active_generation.json"
+    manifest.write_text(json.dumps({"generation_id": f"refresh_{RUN_ID}"}), encoding="utf-8")
+    fixture["result"]["journal"] = {
+        "state": "COMPLETED",
+        "current_publication_step": "COMPLETED",
+        "postflight_state": "PASSED",
+        "rollback_recovery_state": "NOT_REQUIRED",
+        "generation_activation_state": "ACTIVATED_AND_VERIFIED",
+        "production_run_id": RUN_ID,
+        "publication_mode": "GENERATION_POINTER",
+        "new_generation_id": f"refresh_{RUN_ID}",
+        "active_generation_manifest_path": str(manifest),
+        "old_generation": {
+            "generation_id": "migration_20261003T103216Z",
+            "generation_dir": str(migration_dir),
+            "layout": "GENERATION_DIRECTORY",
+            "roles": {role: str(path) for role, path in migration_paths.items()},
+        },
+    }
+    rollback_backups = [
+        {
+            "role": role,
+            "path": record["backup"],
+            "size_bytes": Path(record["backup"]).stat().st_size,
+        }
+        for role, record in fixture["result"]["backups"].items()
+    ]
+    fixture["result"]["terminal_cleanup"] = {
+        "status": "COMPLETED",
+        "cleanup_verification": {"status": "PASSED"},
+        "operator_acceptance_required_for_rollback_backup_deletion": "YES",
+        "intentionally_retained": {
+            "rollback_backup_count": 3,
+            "rollback_backup_bytes": sum(item["size_bytes"] for item in rollback_backups),
+            "rollback_backups": rollback_backups,
+        },
+    }
+    (fixture["run_dir"] / "result.json").write_text(
+        json.dumps(fixture["result"]), encoding="utf-8"
+    )
+    return {
+        "manifest": manifest,
+        "migration_dir": migration_dir,
+        "active_dir": active_dir,
+    }
+
+
 def test_historical_completed_production_run_is_eligible(tmp_path: Path) -> None:
     fixture = _fixture(tmp_path)
     eligibility = _inspect(fixture)
     assert eligibility["status"] == "ELIGIBLE"
     assert eligibility["backup_count"] == 3
     assert eligibility["bytes_freed"] > 0
+
+
+def test_generation_production_run_is_eligible_and_ui_shows_cleanup_action(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    _make_generation_publication(fixture)
+    eligibility = _inspect(fixture)
+    service = FundamentalsAdminUIService(
+        run_root=fixture["run_root"],
+        cleanup_inspect=lambda _run_id: _inspect(fixture),
+    )
+    page = _Page()
+
+    controls = build_fundamentals_admin_page(page=page, service=service)
+
+    assert eligibility["status"] == "ELIGIBLE"
+    assert eligibility["backup_count"] == 3
+    assert eligibility["bytes_freed"] == sum(
+        path.stat().st_size for path in fixture["backup_dir"].iterdir()
+    )
+    assert controls.history_column.controls[0].controls[-1].tooltip == (
+        "Accept run and cleanup backups"
+    )
+    controls.history_column.controls[0].controls[-1].on_click(None)
+    assert "3 verified rollback backup file(s)" in page.dialog.content.value
+    assert f"{eligibility['bytes_freed'] / (1024 ** 3):.3f} GiB" in page.dialog.content.value
+
+
+def test_generation_cleanup_deletes_only_run_backups_and_preserves_generations(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    protected = _make_generation_publication(fixture)
+
+    result = _cleanup(fixture)
+
+    assert result["cleanup_outcome"] == "COMPLETED"
+    assert not fixture["backup_dir"].exists()
+    assert protected["manifest"].is_file()
+    assert protected["active_dir"].is_dir()
+    assert protected["migration_dir"].is_dir()
+    assert all(path.is_file() for path in fixture["live_paths"].values())
+    assert all(
+        (protected["migration_dir"] / f"{role}.db").is_file()
+        for role in ("provider", "canonical", "analysis")
+    )
+
+
+def test_generation_cleanup_fails_closed_on_source_or_terminal_evidence_mismatch(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    protected = _make_generation_publication(fixture)
+    fixture["result"]["backups"]["provider"]["source"] = str(
+        protected["active_dir"] / "provider.db"
+    )
+    (fixture["run_dir"] / "result.json").write_text(
+        json.dumps(fixture["result"]), encoding="utf-8"
+    )
+
+    eligibility = _inspect(fixture)
+
+    assert eligibility["eligible"] is False
+    assert "source" in eligibility["reason"].lower()
+    assert all(path.is_file() for path in fixture["backup_dir"].iterdir())
+    assert protected["manifest"].is_file()
+
+
+def test_generation_cleanup_requires_terminal_generation_journal(tmp_path: Path) -> None:
+    fixture = _fixture(tmp_path)
+    _make_generation_publication(fixture)
+    fixture["result"]["journal"]["state"] = "PUBLISHING"
+    (fixture["run_dir"] / "result.json").write_text(
+        json.dumps(fixture["result"]), encoding="utf-8"
+    )
+
+    eligibility = _inspect(fixture)
+
+    assert eligibility["eligible"] is False
+    assert eligibility["reason"] == "Generation publication evidence is incomplete"
+    assert all(path.is_file() for path in fixture["backup_dir"].iterdir())
+
+
+def test_historical_generation_run_without_terminal_cleanup_uses_existing_fallback(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture(tmp_path)
+    _make_generation_publication(fixture)
+    fixture["result"].pop("terminal_cleanup")
+    (fixture["run_dir"] / "result.json").write_text(
+        json.dumps(fixture["result"]), encoding="utf-8"
+    )
+
+    eligibility = _inspect(fixture)
+
+    assert eligibility["status"] == "ELIGIBLE"
+    assert eligibility["backup_count"] == 3
+
+
+@pytest.mark.parametrize("protected_name", ("active_generation", "active_manifest", "migration_generation"))
+def test_generation_artifacts_cannot_be_declared_as_run_owned_backups(
+    tmp_path: Path,
+    protected_name: str,
+) -> None:
+    fixture = _fixture(tmp_path)
+    protected = _make_generation_publication(fixture)
+    targets = {
+        "active_generation": protected["active_dir"] / "provider.db",
+        "active_manifest": protected["manifest"],
+        "migration_generation": protected["migration_dir"] / "provider.db",
+    }
+    target = targets[protected_name]
+    fixture["result"]["backups"]["provider"]["backup"] = str(target)
+    retained = fixture["result"]["terminal_cleanup"]["intentionally_retained"]
+    next(
+        item for item in retained["rollback_backups"] if item["role"] == "provider"
+    )["path"] = str(target)
+    (fixture["run_dir"] / "result.json").write_text(
+        json.dumps(fixture["result"]), encoding="utf-8"
+    )
+
+    eligibility = _inspect(fixture)
+
+    assert eligibility["eligible"] is False
+    assert "ownership" in eligibility["reason"].lower()
+    assert target.exists()
+    assert protected["manifest"].is_file()
+    assert protected["active_dir"].is_dir()
+    assert protected["migration_dir"].is_dir()
 
 
 @pytest.mark.parametrize(
@@ -162,6 +354,24 @@ def test_nonterminal_journal_blocks_cleanup(tmp_path: Path) -> None:
     assert _inspect(fixture)["reason"] == "Recovery journal still active"
     with pytest.raises(RunAcceptanceCleanupError, match="Recovery journal still active"):
         _cleanup(fixture)
+
+
+@pytest.mark.parametrize("state", ("RECOVERED", "ROLLED_BACK", "RECOVERY_FAILED"))
+def test_recovery_or_rollback_journal_blocks_cleanup(
+    tmp_path: Path,
+    state: str,
+) -> None:
+    fixture = _fixture(tmp_path)
+    fixture["journal_path"].write_text(
+        json.dumps({"journal_format_version": 1, "state": state}),
+        encoding="utf-8",
+    )
+
+    eligibility = _inspect(fixture)
+
+    assert eligibility["eligible"] is False
+    assert "journal" in eligibility["reason"].lower()
+    assert all(path.is_file() for path in fixture["backup_dir"].iterdir())
 
 
 def test_hash_mismatch_blocks_all_deletion(tmp_path: Path) -> None:

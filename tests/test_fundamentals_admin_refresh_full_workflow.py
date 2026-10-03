@@ -117,6 +117,123 @@ def test_refresh_full_workflow_happy_path_retains_child_reports(tmp_path: Path) 
     assert "V2/RP/RV: READY" in report
 
 
+def test_refresh_full_workflow_history_uses_production_changed_ticker_count(
+    tmp_path: Path,
+) -> None:
+    result = run_refresh_full_workflow(
+        run_root=tmp_path,
+        preview_stage=lambda _callback: _stage(
+            tmp_path,
+            "preview-count-run",
+            mode="PREVIEW",
+            extra={"summary_counts": {"effective_changed_known": 3}},
+        ),
+        test_stage=lambda _preview, _callback: _stage(
+            tmp_path,
+            "test-count-run",
+            mode="COPY_ONLY_APPLY",
+            extra={"summary_counts": {"effective_changed_known": 3}},
+        ),
+        production_stage=lambda _preview, _test, _callback: _stage(
+            tmp_path,
+            "production-count-run",
+            mode="PRODUCTION_APPLY",
+            extra={"summary_counts": {"effective_changed_known": 3}},
+        ),
+    )
+
+    entry = next(
+        item
+        for item in FundamentalsAdminUIService(run_root=tmp_path).history_entries(limit=10)
+        if item.run_id == result["run_id"]
+    )
+
+    assert result["terminal_summary"]["changed_ticker_count"] == 3
+    assert entry.primary_count == 3
+    assert entry.count_label == "3 changed tickers"
+
+
+def test_refresh_full_workflow_test_stop_uses_test_changed_ticker_count(
+    tmp_path: Path,
+) -> None:
+    result = run_refresh_full_workflow(
+        run_root=tmp_path,
+        preview_stage=lambda _callback: _stage(
+            tmp_path,
+            "preview-test-stop-count",
+            mode="PREVIEW",
+            extra={"summary_counts": {"effective_changed_known": 3}},
+        ),
+        test_stage=lambda _preview, _callback: _stage(
+            tmp_path,
+            "test-stop-count",
+            mode="COPY_ONLY_APPLY",
+            outcome="FAILED",
+            extra={"summary_counts": {"effective_changed_known": 2}},
+        ),
+        production_stage=lambda *_args: pytest.fail("Production must not run"),
+    )
+
+    assert result["terminal_summary"]["authoritative_stage"] == "Test on copies"
+    assert result["terminal_summary"]["changed_ticker_count"] == 2
+
+
+def test_refresh_full_workflow_preview_review_uses_preview_changed_ticker_count(
+    tmp_path: Path,
+) -> None:
+    result = run_refresh_full_workflow(
+        run_root=tmp_path,
+        preview_stage=lambda _callback: _stage(
+            tmp_path,
+            "preview-review-count",
+            mode="PREVIEW",
+            outcome="REVIEW_REQUIRED",
+            extra={"summary_counts": {"effective_changed_known": 4}},
+        ),
+        test_stage=lambda *_args: pytest.fail("Test must not run"),
+        production_stage=lambda *_args: pytest.fail("Production must not run"),
+    )
+
+    assert result["terminal_summary"]["authoritative_stage"] == "Preview"
+    assert result["terminal_summary"]["changed_ticker_count"] == 4
+
+
+def test_refresh_full_workflow_no_change_and_historical_count_fallback(
+    tmp_path: Path,
+) -> None:
+    no_change = run_refresh_full_workflow(
+        run_root=tmp_path,
+        preview_stage=lambda _callback: _stage(
+            tmp_path,
+            "preview-no-change-count",
+            mode="PREVIEW",
+            outcome="NO_CHANGE",
+            extra={"summary_counts": {"effective_changed_known": 0}},
+        ),
+        test_stage=lambda *_args: pytest.fail("Test must not run"),
+        production_stage=lambda *_args: pytest.fail("Production must not run"),
+    )
+    no_change_entry = next(
+        item
+        for item in FundamentalsAdminUIService(run_root=tmp_path).history_entries(limit=10)
+        if item.run_id == no_change["run_id"]
+    )
+    assert no_change_entry.count_label == "0 changed tickers"
+
+    result_path = Path(no_change["artifact_dir"]) / "result.json"
+    historical = json.loads(result_path.read_text(encoding="utf-8"))
+    historical["source_summary"]["effective_changed_known"] = 3
+    historical.pop("terminal_summary", None)
+    result_path.write_text(json.dumps(historical), encoding="utf-8")
+
+    historical_entry = next(
+        item
+        for item in FundamentalsAdminUIService(run_root=tmp_path).history_entries(limit=10)
+        if item.run_id == no_change["run_id"]
+    )
+    assert historical_entry.count_label == "3 changed tickers"
+
+
 def test_refresh_full_workflow_stops_before_test_when_preview_is_not_authorized(
     tmp_path: Path,
 ) -> None:

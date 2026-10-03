@@ -326,6 +326,16 @@ def _batch_outcome(payload: Mapping[str, Any], *, production_published: bool = F
     }
 
 
+def _changed_ticker_count(payload: Mapping[str, Any]) -> int | None:
+    counts = payload.get("summary_counts")
+    if isinstance(counts, Mapping) and "effective_changed_known" in counts:
+        try:
+            return int(counts["effective_changed_known"])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def _child_reason(payload: Mapping[str, Any], child: Any, fallback: str) -> str:
     for value in (
         payload.get("user_failure_reason"), payload.get("outcome_message"),
@@ -396,6 +406,7 @@ def _terminal_summary(
     batch = _batch_outcome(evidence, production_published=production_completed)
     if not batch["requested"]:
         batch["requested"] = requested_count
+    changed_ticker_count = _changed_ticker_count(evidence)
     return {
         "failure_stage": stage if workflow_outcome not in {"COMPLETED", "NO_CHANGE"} else None,
         "authoritative_stage": evidence_stage or stage,
@@ -411,6 +422,7 @@ def _terminal_summary(
         "reporting_integrity_error_count": integrity_count,
         "problem_items": problems,
         "batch_outcome": batch,
+        "changed_ticker_count": changed_ticker_count,
         "production_entered": production_entered,
         "production_completed": production_completed,
         "production_database_writes": _production_write_count(payload, completed=production_completed),

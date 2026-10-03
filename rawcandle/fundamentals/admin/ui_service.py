@@ -977,6 +977,22 @@ class FundamentalsAdminUIService:
         taxonomy = taxonomy_preview_presentation(payload)
         if taxonomy and taxonomy.get("memberships") is not None:
             return int(taxonomy["memberships"])
+        if (
+            payload.get("operation_type") == "REFRESH_FUNDAMENTALS"
+            and payload.get("mode") == "FULL_WORKFLOW"
+        ):
+            terminal = payload.get("terminal_summary")
+            if isinstance(terminal, Mapping) and terminal.get("changed_ticker_count") is not None:
+                try:
+                    return int(terminal["changed_ticker_count"])
+                except (TypeError, ValueError):
+                    pass
+            source = payload.get("source_summary")
+            if isinstance(source, Mapping) and source.get("effective_changed_known") is not None:
+                try:
+                    return int(source["effective_changed_known"])
+                except (TypeError, ValueError):
+                    pass
         counts = payload.get("summary_counts")
         if isinstance(counts, Mapping):
             mode = str(payload.get("mode") or "")
