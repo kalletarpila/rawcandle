@@ -73,6 +73,8 @@ class ExportRequest:
     yahoo_observations: Path | None = None
     write_yahoo_observations: Path | None = None
     v2_candidates: Path | None = None
+    first_full_day_from: str | None = None
+    exact_timestamp_from: str | None = None
 
 
 class RecordingYahooObservationProvider:
@@ -359,6 +361,10 @@ def run_research_export(
     generated = _aware_timestamp(
         generated_at_utc or datetime.now(timezone.utc).isoformat(), "generated_at_utc"
     )
+    if request.first_full_day_from:
+        datetime.strptime(request.first_full_day_from, "%Y-%m-%d")
+    if request.exact_timestamp_from:
+        _aware_timestamp(request.exact_timestamp_from, "exact_timestamp_from")
     if request.yahoo_mode not in {"none", "frozen", "live"}:
         raise ValueError("YAHOO_MODE_INVALID")
     if request.yahoo_mode == "frozen" and request.yahoo_observations is None:
@@ -404,6 +410,15 @@ def run_research_export(
 
     all_statuses = Counter(item.result.research_status for item in assembled)
     exported = [item for item in assembled if request.include_unusable or item.result.research_status != "UNUSABLE"]
+    if request.first_full_day_from or request.exact_timestamp_from:
+        exported = [item for item in exported if (
+            bool(request.first_full_day_from and item.result.first_full_post_result_trading_date
+                 and item.result.first_full_post_result_trading_date >= request.first_full_day_from)
+            or bool(request.exact_timestamp_from and item.result.research_status == "EXACT"
+                    and item.result.canonical_timestamp_utc
+                    and _aware_timestamp(item.result.canonical_timestamp_utc, "canonical_timestamp_utc")
+                    >= _aware_timestamp(request.exact_timestamp_from, "exact_timestamp_from"))
+        )]
     rows = []
     for item in exported:
         payload = item.to_dict()
@@ -448,10 +463,13 @@ def run_research_export(
             "from_fiscal_year": request.from_fiscal_year,
             "to_fiscal_year": request.to_fiscal_year,
             "include_unusable": request.include_unusable,
+            "first_full_day_from": request.first_full_day_from,
+            "exact_timestamp_from": request.exact_timestamp_from,
         },
         "evaluated_rows": len(assembled),
         "exported_rows": len(rows),
-        "status_counts": dict(sorted(all_statuses.items())),
+        "evaluated_status_counts": dict(sorted(all_statuses.items())),
+        "status_counts": dict(sorted(Counter(item.result.research_status for item in exported).items())) if request.first_full_day_from or request.exact_timestamp_from else dict(sorted(all_statuses.items())),
         "output": str(request.output.resolve()),
         "output_format": request.output_format,
         "output_sha256": _sha256(request.output),

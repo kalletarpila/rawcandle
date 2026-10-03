@@ -28,6 +28,28 @@ NOW = "2026-09-29T12:00:00Z"
 DATES = ("2026-01-20", "2026-01-21", "2026-01-22", "2026-01-23", "2026-01-26")
 
 
+def test_overlap_export_retains_exact_even_without_future_trading_boundary(tmp_path):
+    request = _request(tmp_path, first_full_day_from="2026-09-27",
+                       exact_timestamp_from="2026-09-27T16:27:26Z")
+    with sqlite3.connect(request.canonical_db) as c:
+        c.execute("UPDATE v4_result_publication_authority SET result_publication_timestamp_utc=? WHERE company_id=1",
+                  ("2026-09-28T20:00:00Z",))
+    metadata = run_research_export(request, generated_at_utc=NOW)
+    assert metadata["exported_rows"] == 1
+    assert metadata["status_counts"] == {"EXACT": 1}
+    from rawcandle.research.result_publication_event_window import validate_publication_input
+    validate_publication_input(request.output, Path(str(request.output)+".metadata.json"))
+
+
+def test_overlap_export_empty_is_valid_and_deterministic(tmp_path):
+    request = _request(tmp_path, first_full_day_from="2026-09-27",
+                       exact_timestamp_from="2026-09-27T16:27:26Z")
+    first = run_research_export(request, generated_at_utc=NOW)
+    second = run_research_export(request, generated_at_utc=NOW)
+    assert first == second
+    assert first["exported_rows"] == 0
+
+
 class FailingYahooProvider:
     def get_events(self, key: QuarterKey, ticker: str, period_end: str):
         del key, ticker, period_end
