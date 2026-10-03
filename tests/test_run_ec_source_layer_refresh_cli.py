@@ -350,6 +350,7 @@ def test_runs_loaders_with_replace_existing_true_in_correct_order(tmp_path: Path
     args = _base_args(tmp_path)
     call_order: list[str] = []
     loader_kwargs: dict[str, object] = {}
+    audit_kwargs: dict[str, object] = {}
 
     monkeypatch.setattr(cli, "plan_ec_source_layer_refresh", lambda **_: _ready_refresh_plan(status="READY_REFRESH_REPLACE_DATE"))
     monkeypatch.setattr(
@@ -388,8 +389,19 @@ def test_runs_loaders_with_replace_existing_true_in_correct_order(tmp_path: Path
     monkeypatch.setattr(cli, "load_ec_group_synthetic_ohlc_daily_from_dc", synthetic_loader)
     monkeypatch.setattr(cli, "load_ec_group_index_daily_from_dc", group_index_loader)
     monkeypatch.setattr(cli, "load_ec_pipeline_watermark_from_dc", watermark_loader)
-    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", lambda **_: (call_order.append("coverage") or {"status": "OK_WITH_WARNINGS"}))
-    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", lambda **_: (call_order.append("parity") or {"status": "OK_WITH_WARNINGS", "total_mismatch_count": 0}))
+
+    def coverage_audit(**kwargs):
+        call_order.append("coverage")
+        audit_kwargs["coverage"] = kwargs
+        return {"status": "OK_WITH_WARNINGS"}
+
+    def parity_audit(**kwargs):
+        call_order.append("parity")
+        audit_kwargs["parity"] = kwargs
+        return {"status": "OK_WITH_WARNINGS", "total_mismatch_count": 0}
+
+    monkeypatch.setattr(cli, "audit_dc_facts_against_ec_sidecar", coverage_audit)
+    monkeypatch.setattr(cli, "audit_dc_ec_fact_parity", parity_audit)
     monkeypatch.setattr(cli, "_selected_date_row_counts", lambda *_: {
         "ticker_rows": 236,
         "group_signal_rows": 54,
@@ -398,7 +410,14 @@ def test_runs_loaders_with_replace_existing_true_in_correct_order(tmp_path: Path
         "watermark_rows": 15,
     })
 
-    exit_code = cli.main(args + ["--allow-replace-date"])
+    exit_code = cli.main(
+        args
+        + [
+            "--allow-replace-date",
+            "--ohlc-calc-version",
+            "DC_SWING_OHLC_V1",
+        ]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 0
@@ -406,8 +425,11 @@ def test_runs_loaders_with_replace_existing_true_in_correct_order(tmp_path: Path
     assert loader_kwargs["ticker"]["replace_existing"] is True
     assert loader_kwargs["group_signal"]["replace_existing"] is True
     assert loader_kwargs["synthetic"]["replace_existing"] is True
+    assert loader_kwargs["synthetic"]["ohlc_calc_version"] == "DC_SWING_OHLC_V1"
     assert loader_kwargs["group_index"]["replace_existing"] is True
     assert loader_kwargs["watermark"]["replace_existing"] is True
+    assert audit_kwargs["coverage"]["ohlc_calc_version"] == "DC_SWING_OHLC_V1"
+    assert audit_kwargs["parity"]["ohlc_calc_version"] == "DC_SWING_OHLC_V1"
     assert "Refresh Status: REFRESH_COMPLETED" in output
 
 

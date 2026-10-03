@@ -625,7 +625,14 @@ def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkey
         "group_index_rows": 54,
     })
 
-    exit_code = cli.main(args + ["--allow-replace-existing"])
+    exit_code = cli.main(
+        args
+        + [
+            "--allow-replace-existing",
+            "--ohlc-calc-version",
+            "DC_SWING_OHLC_V2",
+        ]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 0
@@ -646,10 +653,14 @@ def test_runs_four_fact_loaders_per_date_in_correct_order(tmp_path: Path, monkey
     ]
     assert loader_kwargs["ticker:2026-05-29"]["replace_existing"] is False
     assert loader_kwargs["ticker:2026-06-01"]["replace_existing"] is True
+    assert loader_kwargs["synthetic:2026-05-29"]["ohlc_calc_version"] == "DC_SWING_OHLC_V2"
+    assert loader_kwargs["synthetic:2026-06-01"]["ohlc_calc_version"] == "DC_SWING_OHLC_V2"
     assert audit_kwargs["coverage:2026-05-29"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
     assert audit_kwargs["parity:2026-05-29"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
     assert audit_kwargs["coverage:2026-06-01"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
     assert audit_kwargs["parity:2026-06-01"]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
+    assert audit_kwargs["coverage:2026-05-29"]["ohlc_calc_version"] == "DC_SWING_OHLC_V2"
+    assert audit_kwargs["parity:2026-05-29"]["ohlc_calc_version"] == "DC_SWING_OHLC_V2"
     assert "Backfill Status: BACKFILL_COMPLETED" in output
 
 

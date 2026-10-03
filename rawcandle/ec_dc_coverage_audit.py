@@ -87,15 +87,21 @@ def _resolve_matching_date(
     date_column: str,
     selected_date: str,
     taxonomy_version_code: str,
+    ohlc_calc_version: str | None = None,
 ) -> str | None:
+    calc_version_clause = " AND calc_version = ?" if ohlc_calc_version is not None else ""
+    params: tuple[str, ...] = (selected_date, taxonomy_version_code)
+    if ohlc_calc_version is not None:
+        params += (ohlc_calc_version,)
     row = conn.execute(
         f"""
         SELECT MAX({date_column})
         FROM {table_name}
         WHERE {date_column} = ?
           AND taxonomy_version = ?
+          {calc_version_clause}
         """,
-        (selected_date, taxonomy_version_code),
+        params,
     ).fetchone()
     return None if row is None or row[0] is None else str(row[0])
 
@@ -249,16 +255,22 @@ def _audit_group_table(
     date_column: str,
     selected_date: str,
     taxonomy_version_code: str,
+    ohlc_calc_version: str | None = None,
 ) -> dict[str, object]:
+    calc_version_clause = " AND calc_version = ?" if ohlc_calc_version is not None else ""
+    params: tuple[str, ...] = (selected_date, taxonomy_version_code)
+    if ohlc_calc_version is not None:
+        params += (ohlc_calc_version,)
     rows = analysis_conn.execute(
         f"""
         SELECT DISTINCT group_type, group_name
         FROM {table_name}
         WHERE {date_column} = ?
           AND taxonomy_version = ?
+          {calc_version_clause}
         ORDER BY group_type, group_name
         """,
-        (selected_date, taxonomy_version_code),
+        params,
     ).fetchall()
 
     missing_rows: list[dict[str, str]] = []
@@ -483,7 +495,10 @@ def audit_dc_facts_against_ec_sidecar(
     ecosystem_code: str = "DATACENTER",
     taxonomy_version_code: str = "DC_TAXONOMY_FULL_V1",
     signal_date: str | None = None,
+    ohlc_calc_version: str | None = None,
 ) -> dict[str, object]:
+    if ohlc_calc_version is not None and not ohlc_calc_version.strip():
+        raise ValueError("ohlc_calc_version must be non-empty when provided")
     analysis_conn = _connect_readonly(analysis_db_path)
     ec_conn = _connect_readonly(ec_db_path)
     try:
@@ -515,6 +530,7 @@ def audit_dc_facts_against_ec_sidecar(
             "ohlc_date",
             selected_signal_date,
             taxonomy_version_code,
+            ohlc_calc_version,
         )
         selected_group_index_date = _resolve_matching_date(
             analysis_conn,
@@ -571,6 +587,7 @@ def audit_dc_facts_against_ec_sidecar(
             date_column="ohlc_date",
             selected_date=selected_synthetic_date or selected_signal_date,
             taxonomy_version_code=taxonomy_version_code,
+            ohlc_calc_version=ohlc_calc_version,
         )
         group_index_result = _audit_group_index_table(
             analysis_conn,
@@ -615,6 +632,7 @@ def audit_dc_facts_against_ec_sidecar(
             "status": status,
             "ecosystem_code": ecosystem_code,
             "taxonomy_version_code": taxonomy_version_code,
+            "ohlc_calc_version": ohlc_calc_version,
             "requested_taxonomy_version": taxonomy_version_code,
             "dc_source_taxonomy_version": taxonomy_version_code,
             "dc_source_taxonomy_match": not unexpected_dc_tickers,

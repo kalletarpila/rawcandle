@@ -1142,7 +1142,10 @@ def audit_dc_ec_fact_parity(
     numeric_tolerance: float = 1e-9,
     include_pipeline_watermark: bool = True,
     parity_policy: str = PARITY_POLICY_STRICT,
+    ohlc_calc_version: str | None = None,
 ) -> dict[str, object]:
+    if ohlc_calc_version is not None and not ohlc_calc_version.strip():
+        raise ValueError("ohlc_calc_version must be non-empty when provided")
     if parity_policy not in {PARITY_POLICY_STRICT, PARITY_POLICY_RSO_REVALIDATION_METADATA}:
         raise ValueError(f"unsupported parity policy: {parity_policy}")
     source_conn = _connect_readonly(source_db_path)
@@ -1169,6 +1172,7 @@ def audit_dc_ec_fact_parity(
             return {
                 "status": "FAILED",
                 "parity_policy": parity_policy,
+                "ohlc_calc_version": ohlc_calc_version,
                 "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
                 "signal_date": signal_date,
                 "date_alignment": date_alignment,
@@ -1224,6 +1228,7 @@ def audit_dc_ec_fact_parity(
             signal_date=selected_signal_date,
             numeric_tolerance=numeric_tolerance,
             parity_policy=parity_policy,
+            ohlc_calc_version=ohlc_calc_version,
         )
         group_index_parity = _group_index_parity(
             source_conn,
@@ -1319,6 +1324,7 @@ def audit_dc_ec_fact_parity(
             "parity_field_policy_version": PARITY_FIELD_POLICY_VERSION,
             "signal_date": selected_signal_date,
             "taxonomy_version_code": taxonomy_version_code,
+            "ohlc_calc_version": ohlc_calc_version,
             "requested_taxonomy_version": taxonomy_version_code,
             "taxonomy_version_id": taxonomy_version_id,
             "date_alignment": date_alignment,

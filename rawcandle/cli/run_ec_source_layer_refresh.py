@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", required=True, help="Path to the target SQLite database")
     parser.add_argument("--ecosystem", required=True, help="Target ecosystem code")
     parser.add_argument("--taxonomy-version", required=True, help="Target taxonomy version code")
+    parser.add_argument("--ohlc-calc-version", help="Explicit DC synthetic OHLC calculation version")
     parser.add_argument("--taxonomy-csv", required=True, help="Path to taxonomy CSV")
     parser.add_argument("--watchlist", required=True, help="Path to watchlist TXT")
     parser.add_argument("--backup-dir", required=True, help="Existing writable directory for pre-write backups")
@@ -183,6 +184,7 @@ def run_ec_source_layer_refresh(
     db_path: str,
     ecosystem_code: str,
     taxonomy_version_code: str,
+    ohlc_calc_version: str | None = None,
     taxonomy_csv_path: str,
     watchlist_path: str,
     backup_dir: str,
@@ -200,6 +202,8 @@ def run_ec_source_layer_refresh(
         gate_errors.append("--confirm-ecosystem must exactly match --ecosystem")
     if confirm_taxonomy_version != taxonomy_version_code:
         gate_errors.append("--confirm-taxonomy-version must exactly match --taxonomy-version")
+    if ohlc_calc_version is not None and not ohlc_calc_version.strip():
+        gate_errors.append("--ohlc-calc-version must be non-empty when provided")
 
     try:
         resolved_backup_dir = _ensure_backup_dir(backup_dir)
@@ -393,6 +397,7 @@ def run_ec_source_layer_refresh(
                 "target_db_path": db_path,
                 "ecosystem_code": ecosystem_code,
                 "taxonomy_version_code": taxonomy_version_code,
+                "ohlc_calc_version": ohlc_calc_version,
                 "signal_date": selected_signal_date,
                 "replace_existing": True,
             },
@@ -440,6 +445,7 @@ def run_ec_source_layer_refresh(
                 "ec_db_path": db_path,
                 "ecosystem_code": ecosystem_code,
                 "taxonomy_version_code": taxonomy_version_code,
+                "ohlc_calc_version": ohlc_calc_version,
                 "signal_date": selected_signal_date,
             },
         )
@@ -459,6 +465,7 @@ def run_ec_source_layer_refresh(
                 "target_db_path": db_path,
                 "ecosystem_code": ecosystem_code,
                 "taxonomy_version_code": taxonomy_version_code,
+                "ohlc_calc_version": ohlc_calc_version,
                 "signal_date": selected_signal_date,
             },
         )
@@ -634,6 +641,7 @@ def main(argv: list[str] | None = None) -> int:
         db_path=args.db,
         ecosystem_code=args.ecosystem,
         taxonomy_version_code=args.taxonomy_version,
+        ohlc_calc_version=args.ohlc_calc_version,
         taxonomy_csv_path=args.taxonomy_csv,
         watchlist_path=args.watchlist,
         backup_dir=args.backup_dir,

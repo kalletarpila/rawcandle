@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", required=True, help="Path to the target SQLite database")
     parser.add_argument("--ecosystem", required=True, help="Target ecosystem code")
     parser.add_argument("--taxonomy-version", required=True, help="Target taxonomy version code")
+    parser.add_argument("--ohlc-calc-version", help="Explicit DC synthetic OHLC calculation version")
     parser.add_argument("--date-from", required=True, help="Inclusive start date in YYYY-MM-DD format")
     parser.add_argument("--date-to", required=True, help="Inclusive end date in YYYY-MM-DD format")
     parser.add_argument("--taxonomy-csv", required=True, help="Path to taxonomy CSV")
@@ -527,6 +528,7 @@ def run_ec_source_layer_backfill(
     db_path: str,
     ecosystem_code: str,
     taxonomy_version_code: str,
+    ohlc_calc_version: str | None = None,
     date_from: str,
     date_to: str,
     taxonomy_csv_path: str,
@@ -552,6 +554,8 @@ def run_ec_source_layer_backfill(
         gate_errors.append("--confirm-ecosystem must exactly match --ecosystem")
     if confirm_taxonomy_version != taxonomy_version_code:
         gate_errors.append("--confirm-taxonomy-version must exactly match --taxonomy-version")
+    if ohlc_calc_version is not None and not ohlc_calc_version.strip():
+        gate_errors.append("--ohlc-calc-version must be non-empty when provided")
     if taxonomy_rebuild:
         if ecosystem_code != "DATACENTER":
             gate_errors.append("--taxonomy-rebuild is restricted to ecosystem DATACENTER")
@@ -830,6 +834,7 @@ def run_ec_source_layer_backfill(
                     "target_db_path": db_path,
                     "ecosystem_code": ecosystem_code,
                     "taxonomy_version_code": taxonomy_version_code,
+                    "ohlc_calc_version": ohlc_calc_version,
                     "signal_date": current_date,
                     "replace_existing": replace_existing,
                 },
@@ -872,6 +877,7 @@ def run_ec_source_layer_backfill(
                     "ec_db_path": db_path,
                     "ecosystem_code": ecosystem_code,
                     "taxonomy_version_code": taxonomy_version_code,
+                    "ohlc_calc_version": ohlc_calc_version,
                     "signal_date": current_date,
                 },
             )
@@ -888,6 +894,7 @@ def run_ec_source_layer_backfill(
                     "target_db_path": db_path,
                     "ecosystem_code": ecosystem_code,
                     "taxonomy_version_code": taxonomy_version_code,
+                    "ohlc_calc_version": ohlc_calc_version,
                     "signal_date": current_date,
                     "include_pipeline_watermark": False,
                 },
@@ -1295,6 +1302,7 @@ def main(argv: list[str] | None = None) -> int:
         db_path=args.db,
         ecosystem_code=args.ecosystem,
         taxonomy_version_code=args.taxonomy_version,
+        ohlc_calc_version=args.ohlc_calc_version,
         date_from=args.date_from,
         date_to=args.date_to,
         taxonomy_csv_path=args.taxonomy_csv,

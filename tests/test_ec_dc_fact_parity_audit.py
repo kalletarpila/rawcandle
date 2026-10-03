@@ -529,6 +529,39 @@ def test_parity_audit_succeeds_for_small_fixture_build(tmp_path) -> None:
     )
 
 
+def test_parity_audit_scopes_synthetic_rows_to_explicit_calc_version(tmp_path) -> None:
+    source_db, target_db = _build_target(tmp_path)
+    with _connect(str(source_db)) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(dc_group_synthetic_ohlc_daily)")]
+        calc_version_index = columns.index("calc_version")
+        run_id_index = columns.index("run_id")
+        rows = conn.execute("SELECT * FROM dc_group_synthetic_ohlc_daily").fetchall()
+        placeholders = ", ".join("?" for _ in columns)
+        for source_row in rows:
+            copied_row = list(source_row)
+            copied_row[calc_version_index] = "DC_SWING_OHLC_V2"
+            copied_row[run_id_index] = f"{copied_row[run_id_index]}_V2"
+            conn.execute(
+                f"INSERT INTO dc_group_synthetic_ohlc_daily VALUES ({placeholders})",
+                copied_row,
+            )
+        conn.commit()
+
+    summary = audit_dc_ec_fact_parity(
+        str(source_db),
+        str(target_db),
+        signal_date="2026-06-05",
+        include_pipeline_watermark=False,
+        ohlc_calc_version="DC_SWING_OHLC_V1",
+    )
+
+    assert summary["status"] == "OK_WITH_WARNINGS"
+    assert summary["ohlc_calc_version"] == "DC_SWING_OHLC_V1"
+    assert summary["synthetic_ohlc_parity"]["source_row_count"] == 2
+    assert summary["synthetic_ohlc_parity"]["target_row_count"] == 2
+    assert summary["total_mismatch_count"] == 0
+
+
 def test_v2_parity_scopes_dc_sources_by_requested_taxonomy(tmp_path) -> None:
     source_db, target_db = _build_v2_target_with_same_date_v1_source_rows(tmp_path)
 

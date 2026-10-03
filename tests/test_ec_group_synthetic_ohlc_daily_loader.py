@@ -552,6 +552,42 @@ def test_loader_blocks_ambiguous_calc_version_within_requested_taxonomy_scope(tm
     assert "Multiple calc_version" in str(summary["loader_error"])
 
 
+def test_loader_selects_explicit_v1_and_v2_from_multi_version_scope(tmp_path) -> None:
+    source_db = tmp_path / "source_multi_calc.db"
+    target_db = _setup_target_db_with_versions(tmp_path, ("DC_TAXONOMY_FULL_V2",))
+    _create_source_db(
+        source_db,
+        [
+            _source_row(group_type="layer", group_name="Compute silicon", taxonomy_version="DC_TAXONOMY_FULL_V2", calc_version="DC_SWING_OHLC_V1", run_id="run-v1"),
+            _source_row(group_type="layer", group_name="Compute silicon", taxonomy_version="DC_TAXONOMY_FULL_V2", calc_version="DC_SWING_OHLC_V2", run_id="run-v2"),
+        ],
+    )
+
+    for calc_version, run_id in (
+        ("DC_SWING_OHLC_V1", "run-v1"),
+        ("DC_SWING_OHLC_V2", "run-v2"),
+    ):
+        summary = load_ec_group_synthetic_ohlc_daily_from_dc(
+            source_db_path=str(source_db),
+            target_db_path=str(target_db),
+            taxonomy_version_code="DC_TAXONOMY_FULL_V2",
+            ohlc_calc_version=calc_version,
+        )
+        assert summary["status"] == "OK_WITH_WARNINGS"
+        assert summary["ohlc_calc_version"] == calc_version
+        assert summary["source_run_ids"] == [run_id]
+
+    with _connect(str(target_db)) as conn:
+        rows = conn.execute(
+            "SELECT ohlc_calc_version, source_run_id "
+            "FROM ec_group_synthetic_ohlc_daily ORDER BY ohlc_calc_version"
+        ).fetchall()
+    assert rows == [
+        ("DC_SWING_OHLC_V1", "run-v1"),
+        ("DC_SWING_OHLC_V2", "run-v2"),
+    ]
+
+
 def test_loader_blocks_duplicate_source_group_before_insert(tmp_path) -> None:
     source_db = tmp_path / "source_duplicate.db"
     target_db = _setup_target_db_with_versions(tmp_path, ("DC_TAXONOMY_FULL_V2",))

@@ -404,6 +404,7 @@ def _write_config(
     ec_source_layer_only_on_new_signal_date=None,
     datacenter_stage2_incremental_enabled=None,
     datacenter_stage2_overlap_trading_days=None,
+    datacenter_ohlc_calc_version=None,
 ):
     osakedata_db = osakedata_db or (tmp_path / "osakedata.db")
     analysis_db = analysis_db or (tmp_path / "analysis.db")
@@ -449,6 +450,8 @@ def _write_config(
         config.datacenter_stage2_incremental_enabled = datacenter_stage2_incremental_enabled
     if datacenter_stage2_overlap_trading_days is not None:
         config.datacenter_stage2_overlap_trading_days = datacenter_stage2_overlap_trading_days
+    if datacenter_ohlc_calc_version is not None:
+        config.datacenter_ohlc_calc_version = datacenter_ohlc_calc_version
     path = tmp_path / "scheduler_config.json"
     write_scheduler_config(str(path), config)
     return path
@@ -3001,6 +3004,7 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
         ec_source_layer_taxonomy_csv=tmp_path / "taxonomy.csv",
         ec_source_layer_watchlist=tmp_path / "watchlist.txt",
         ec_source_layer_backup_dir=tmp_path / "backups",
+        datacenter_ohlc_calc_version="DC_SWING_OHLC_V1",
     )
 
     called_kwargs: dict[str, object] = {}
@@ -3085,6 +3089,7 @@ def test_scheduler_runner_ec_source_layer_enabled_runs_after_legacy_success(
     assert called_kwargs["confirm_db"] == str(analysis_db)
     assert called_kwargs["allow_replace_date"] is False
     assert called_kwargs["reconcile_watchlist"] is False
+    assert called_kwargs["ohlc_calc_version"] == "DC_SWING_OHLC_V1"
 
 
 def test_scheduler_runner_ec_bridge_single_date_incremental_uses_latest_refresh(
@@ -3102,6 +3107,7 @@ def test_scheduler_runner_ec_bridge_single_date_incremental_uses_latest_refresh(
         ec_source_layer_watchlist=tmp_path / "watchlist.txt",
         ec_source_layer_backup_dir=tmp_path / "backups",
         datacenter_stage2_incremental_enabled=True,
+        datacenter_ohlc_calc_version="DC_SWING_OHLC_V2",
     )
     refresh_calls: list[dict[str, object]] = []
 
@@ -3157,6 +3163,7 @@ def test_scheduler_runner_ec_bridge_single_date_incremental_uses_latest_refresh(
 
     assert len(refresh_calls) == 1
     assert refresh_calls[0]["reconcile_watchlist"] is False
+    assert refresh_calls[0]["ohlc_calc_version"] == "DC_SWING_OHLC_V2"
     assert result.ec_bridge_mode == "LATEST_REFRESH"
     assert result.ec_bridge_reason == "SINGLE_DATE_MATERIALIZATION"
     assert result.ec_bridge_status == "OK"
@@ -3179,6 +3186,7 @@ def test_scheduler_runner_ec_bridge_multi_date_uses_backfill_only(
         ec_source_layer_backup_dir=tmp_path / "backups",
         ec_source_layer_only_on_new_signal_date=True,
         datacenter_stage2_incremental_enabled=True,
+        datacenter_ohlc_calc_version="DC_SWING_OHLC_V2",
     )
     backfill_calls: list[dict[str, object]] = []
 
@@ -3245,6 +3253,7 @@ def test_scheduler_runner_ec_bridge_multi_date_uses_backfill_only(
     assert backfill_calls[0]["date_to"] == "2026-06-05"
     assert backfill_calls[0]["ecosystem_code"] == "DATACENTER"
     assert backfill_calls[0]["taxonomy_version_code"] == "DC_TAXONOMY_FULL_V1"
+    assert backfill_calls[0]["ohlc_calc_version"] == "DC_SWING_OHLC_V2"
     assert backfill_calls[0]["allow_replace_existing"] is True
     assert backfill_calls[0]["reconcile_watchlist"] is False
     assert result.ec_source_layer_status == "BACKFILL_COMPLETED"
