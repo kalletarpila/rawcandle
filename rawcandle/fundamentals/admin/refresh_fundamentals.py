@@ -57,6 +57,19 @@ SOURCE_PRIMARY_KEY = ("ticker", "dimension", "date", "reportperiod")
 REFRESH_DIMENSIONS = ("ARQ", "MRQ")
 DISCOVERY_LIMIT = 10_000
 OVERLAP_DAYS = 3
+HISTORICAL_SOURCE_WINDOW_REVIEW_YEARS = 3
+
+
+def historical_source_window_policy(as_of_date: date, years: int = 3) -> dict[str, Any]:
+    if isinstance(years, bool) or not isinstance(years, int) or years < 0 or years >= as_of_date.year:
+        raise ValueError("HISTORICAL_SOURCE_WINDOW_REVIEW_YEARS_INVALID")
+    try:
+        cutoff = as_of_date.replace(year=as_of_date.year - years)
+    except ValueError:
+        cutoff = as_of_date.replace(year=as_of_date.year - years, day=28)
+    return {"as_of_date": as_of_date.isoformat(),
+            "historical_source_window_review_years": years,
+            "cutoff_date": cutoff.isoformat()}
 
 FISCAL_FIELDS = ("calendardate", "fiscalperiod")
 FINANCIAL_FIELDS = (
@@ -707,6 +720,8 @@ def _retention_evidence(
                 "resolution_contract_version"
             ),
         }
+    if event.get("historical_source_window_policy"):
+        evidence["historical_source_window_policy"] = event["historical_source_window_policy"]
     return evidence
 
 
@@ -770,9 +785,14 @@ def build_source_history_merge(
     source: Mapping[str, HistoryTrust],
     *,
     retained_history_approval: Mapping[str, Any] | None = None,
+    as_of_date: date | None = None,
+    historical_source_window_review_years: int = HISTORICAL_SOURCE_WINDOW_REVIEW_YEARS,
 ) -> dict[str, Any]:
     """Classify absent source keys and build the deterministic provider generation."""
     dimensions: dict[str, dict[str, Any]] = {}
+    policy = historical_source_window_policy(
+        as_of_date or datetime.now(timezone.utc).date(), historical_source_window_review_years,
+    )
     missing_events: list[dict[str, Any]] = []
     for dimension in REFRESH_DIMENSIONS:
         old_rows = tuple(current[dimension]["rows"])
@@ -873,6 +893,27 @@ def build_source_history_merge(
                 event["classification_reason"] = "COMPANION_DIMENSION_CONTRADICTION"
                 event["companion_dimension_conflict"] = True
 
+    # Relax only passive coherent prefix absence; identity conflicts stay strict.
+    if (
+        historical_source_window_review_years
+        and all(source[d].status == "COMPLETE" for d in REFRESH_DIMENSIONS)
+        and not detect_fiscal_identity_revisions(ticker, current, source)
+    ):
+        for dimension in REFRESH_DIMENSIONS:
+            events = [e for e in missing_events if e["dimension"] == dimension]
+            if events and all(
+                e["was_oldest_prefix"] and e["chronology_coherent"]
+                and not e["same_fiscal_current_keys"]
+                and not e.get("companion_dimension_conflict")
+                and e["event"] != TRUE_SOURCE_REMOVAL
+                and e["source_identity"]["reportperiod"] < policy["cutoff_date"]
+                for e in events
+            ):
+                for event in events:
+                    event["event"] = AGED_OUT_OF_SOURCE_WINDOW
+                    event["classification_reason"] = "RETAINED_OUTSIDE_HISTORICAL_REVIEW_HORIZON"
+                    event["historical_source_window_policy"] = policy
+
     if retained_history_approval and retained_history_approval.get("applied"):
         approved_keys = {
             tuple(str(item.get(field) or "") for field in SOURCE_PRIMARY_KEY)
@@ -965,6 +1006,12 @@ def build_source_history_merge(
             "true_source_removals": len(true_removed),
             "ambiguous_removals": len(ambiguous),
             "current_source_reappearances": reappeared,
+            **({"historical_source_window_policy": policy,
+                "historical_retained_rows": sum("historical_source_window_policy" in e for e in aged),
+                "historical_oldest_period": min(e["source_identity"]["reportperiod"] for e in aged if "historical_source_window_policy" in e),
+                "historical_newest_period": max(e["source_identity"]["reportperiod"] for e in aged if "historical_source_window_policy" in e),
+                "canonical_impact": "RETAINED_HISTORY"}
+               if any("historical_source_window_policy" in e for e in aged) else {}),
         },
         "current_generation_fingerprint": _generation_fingerprint(current_rows),
         "merged_generation_fingerprint": _generation_fingerprint(target_rows),
@@ -1092,6 +1139,8 @@ def compare_ticker_histories(
     retained_history_approval: Mapping[str, Any] | None = None,
     fiscal_revision_approval: Mapping[str, Any] | None = None,
     true_removal_approval: Mapping[str, Any] | None = None,
+    as_of_date: date | None = None,
+    historical_source_window_review_years: int = HISTORICAL_SOURCE_WINDOW_REVIEW_YEARS,
 ) -> dict[str, Any]:
     if any(source[dimension].status != "COMPLETE" for dimension in REFRESH_DIMENSIONS):
         return {
@@ -1124,6 +1173,8 @@ def compare_ticker_histories(
         current,
         source,
         retained_history_approval=retained_history_approval,
+        as_of_date=as_of_date,
+        historical_source_window_review_years=historical_source_window_review_years,
     )
     if fiscal_revisions and not (
         fiscal_revision_approval and fiscal_revision_approval.get("applied")
@@ -1581,7 +1632,7 @@ def _summary_counts(changes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     for key in (
         "newly_aged_out_source_rows", "retained_arq", "retained_mrq",
         "already_retained_carry_forward", "true_source_removals",
-        "ambiguous_removals", "current_source_reappearances",
+        "ambiguous_removals", "current_source_reappearances", "historical_retained_rows",
     ):
         counts[key] = sum(int(action.get(key) or 0) for action in actions)
     counts["fiscal_identity_revisions"] = sum(
@@ -1600,6 +1651,7 @@ def refresh_binding_change(item: Mapping[str, Any]) -> dict[str, Any]:
 def refresh_binding(
     *, state: RefreshState, schema: Mapping[str, Any], discovery: Mapping[str, Any],
     changes: Sequence[Mapping[str, Any]], review_partition: Mapping[str, Any],
+    historical_window_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "contract_version": CONTRACT_VERSION,
@@ -1614,6 +1666,7 @@ def refresh_binding(
         "ticker_changes": [refresh_binding_change(item) for item in changes],
         "review_partition": review_partition["binding"],
         "review_partition_fingerprint": review_partition["partition_fingerprint"],
+        **({"historical_source_window_policy": dict(historical_window_policy)} if historical_window_policy else {}),
     }
 
 
@@ -1694,6 +1747,9 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         f"- Already-retained rows carried forward: `{counts.get('already_retained_carry_forward', 0)}`",
         f"- True source removals: `{counts.get('true_source_removals', 0)}`",
         f"- Ambiguous removals: `{counts.get('ambiguous_removals', 0)}`",
+        f"- Outside historical review horizon: `{counts.get('historical_retained_rows', 0)}`",
+        "- Historical review policy: "
+        f"`{result.get('refresh_preview', {}).get('historical_source_window_policy', {})}`",
         "- Operator-reviewed retained-history approvals applied: "
         f"`{len(result.get('refresh_preview', {}).get('review_queue', {}).get('retained_history_approvals_applied') or [])}`",
         "",
@@ -1800,11 +1856,22 @@ def run_preview(
     client: SharadarClient | None = None,
     progress_callback: ProgressCallback | None = None,
     trigger_source: str = "MANUAL",
+    historical_source_window_review_years: int = HISTORICAL_SOURCE_WINDOW_REVIEW_YEARS,
+    as_of_date: date | None = None,
 ) -> dict[str, Any]:
     source_paths = source_paths or BatchAddTickerPaths()
     if trigger_source not in {"MANUAL", "SCHEDULER"}:
         raise ValueError("REFRESH_TRIGGER_SOURCE_INVALID")
     request = _request()
+    policy = historical_source_window_policy(as_of_date or datetime.now(timezone.utc).date(), historical_source_window_review_years)
+    policy_args = {"as_of_date": date.fromisoformat(policy["as_of_date"]),
+                   "historical_source_window_review_years": historical_source_window_review_years}
+    request = AdminBatchRequest(
+        operation_type=request.operation_type,
+        requested_inputs=request.requested_inputs,
+        normalized_inputs=request.normalized_inputs,
+        options={**request.options, "historical_source_window_policy": policy},
+    )
     state = resolve_refresh_state(source_paths.provider_db)
     request_fp = fingerprint({"request": request.as_dict(), "state": state.as_dict()})
     run_id = stable_run_id(AdminOperationType.REFRESH_FUNDAMENTALS, request_fp)
@@ -1872,7 +1939,7 @@ def run_preview(
         changes: list[dict[str, Any]] = []
         for index, ticker in enumerate(known, start=1):
             current = {dimension: load_current_history(source_paths.provider_db, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
-            comparison = compare_ticker_histories(ticker, current, histories[ticker])
+            comparison = compare_ticker_histories(ticker, current, histories[ticker], **policy_args)
             comparison["identity"] = identities[ticker]
             if comparison["classification"] == "REVIEW_REQUIRED":
                 current_scope = classify_review_scope(comparison)
@@ -1898,6 +1965,7 @@ def run_preview(
                         current,
                         histories[ticker],
                         retained_history_approval=approval,
+                        **policy_args,
                     )
                     comparison["identity"] = identities[ticker]
                 elif fiscal_approval["applied"]:
@@ -1906,6 +1974,7 @@ def run_preview(
                         current,
                         histories[ticker],
                         fiscal_revision_approval=fiscal_approval,
+                        **policy_args,
                     )
                     comparison["identity"] = identities[ticker]
                 elif true_removal_approval["applied"]:
@@ -1914,6 +1983,7 @@ def run_preview(
                         current,
                         histories[ticker],
                         true_removal_approval=true_removal_approval,
+                        **policy_args,
                     )
                     comparison["identity"] = identities[ticker]
             if comparison["classification"] != "REVIEW_REQUIRED":
@@ -1965,6 +2035,12 @@ def run_preview(
         ]
         pending_review_tickers = [item["ticker"] for item in held]
         pending_review_tickers.extend(item["ticker"] for item in applied_approvals)
+        # A policy relaxation is not operator resolution of historical evidence.
+        pending_review_tickers.extend(
+            item["ticker"] for item in changes
+            if (item.get("source_history_action") or {}).get("historical_retained_rows")
+            and review_queue.get(item["ticker"]) is not None
+        )
         review_queue.resolve_absent(
             tickers, pending_review_tickers, run_id=run_id,
         )
@@ -1976,6 +2052,7 @@ def run_preview(
         binding = refresh_binding(
             state=state, schema=schema, discovery=discovery, changes=changes,
             review_partition=partition,
+            historical_window_policy=policy,
         )
         refresh_set_fingerprint = fingerprint(binding)
         progress.completed(ProgressStage.CLASSIFICATION, "Classifications and deterministic binding evidence completed.")
@@ -1984,6 +2061,7 @@ def run_preview(
         progress.running(ProgressStage.REPORT, "Writing durable Preview artifacts and report.")
         preview = {
             "contract_version": CONTRACT_VERSION,
+            "historical_source_window_policy": policy,
             "read_only": True,
             "state": state.as_dict(),
             "schema": schema,

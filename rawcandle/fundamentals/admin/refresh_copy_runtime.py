@@ -205,6 +205,11 @@ def revalidate_bound_source(
     preview: Mapping[str, Any], paths: BatchAddTickerPaths, client: SharadarClient,
     *, review_queue: RefreshReviewQueue | None = None,
 ) -> dict[str, Any]:
+    policy = preview.get("historical_source_window_policy")
+    policy_args = {
+        "as_of_date": date.fromisoformat(policy["as_of_date"]) if policy else None,
+        "historical_source_window_review_years": policy["historical_source_window_review_years"] if policy else 0,
+    }
     state = resolve_refresh_state(paths.provider_db)
     expected_state = preview["state"]
     for field in ("mode", "published_watermark", "derived_watermark", "query_start_date"):
@@ -248,7 +253,7 @@ def revalidate_bound_source(
             continue
         histories[ticker] = {dimension: fetch_complete_history(client, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
         current = {dimension: load_current_history(paths.provider_db, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
-        item = compare_ticker_histories(ticker, current, histories[ticker])
+        item = compare_ticker_histories(ticker, current, histories[ticker], **policy_args)
         item["identity"] = identity
         preview_change = preview_changes.get(ticker, {})
         preview_approval = preview_change.get("retained_history_approval") or {}
@@ -320,6 +325,7 @@ def revalidate_bound_source(
                 retained_history_approval=applied_approval,
                 fiscal_revision_approval=applied_fiscal_approval,
                 true_removal_approval=applied_true_removal_approval,
+                **policy_args,
             )
         if all("rows" in current.get(dimension, {}) for dimension in REFRESH_DIMENSIONS):
             merge_plans[ticker] = build_source_history_merge(
@@ -327,6 +333,7 @@ def revalidate_bound_source(
                 current,
                 histories[ticker],
                 retained_history_approval=applied_approval,
+                **policy_args,
             )
         item["identity"] = identity
         changes.append(item)
@@ -337,6 +344,7 @@ def revalidate_bound_source(
     actual = fingerprint(refresh_binding(
         state=state, schema=schema, discovery=discovery, changes=changes,
         review_partition=partition,
+        historical_window_policy=policy,
     ))
     if actual != preview["refresh_set_fingerprint"]:
         raise StaleRefreshPreview("STALE_REFRESH_PREVIEW")

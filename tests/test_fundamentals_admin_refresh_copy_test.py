@@ -860,7 +860,7 @@ def test_revalidation_rejects_source_fingerprint_b_after_preview_a(monkeypatch: 
     trust = validate_complete_history([source_row()], ticker="TEST", dimension="ARQ")
     monkeypatch.setattr(refresh_copy_runtime, "fetch_complete_history", lambda *_args: trust)
     monkeypatch.setattr(refresh_copy_runtime, "load_current_history", lambda *_args: {})
-    monkeypatch.setattr(refresh_copy_runtime, "compare_ticker_histories", lambda *_args: dict(common, source_effective_fingerprint="B"))
+    monkeypatch.setattr(refresh_copy_runtime, "compare_ticker_histories", lambda *_args, **_kwargs: dict(common, source_effective_fingerprint="B"))
     paths = BatchAddTickerPaths(*(Path(f"/{name}") for name in ("p", "c", "a", "m", "t")))
     with pytest.raises(StaleRefreshPreview, match="STALE_REFRESH_PREVIEW"):
         revalidate_bound_source(preview, paths, object())

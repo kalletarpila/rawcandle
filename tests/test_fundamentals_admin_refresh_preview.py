@@ -381,7 +381,7 @@ def test_yyai_style_exact_approval_retains_23_rows_without_weakening_boundary(
             source_rows[dimension], ticker="YYAI", dimension=dimension,
         )
 
-    initial = compare_ticker_histories("YYAI", current, source)
+    initial = compare_ticker_histories("YYAI", current, source, historical_source_window_review_years=0)
     initial["identity"] = {
         "status": "KNOWN",
         "ticker": "YYAI",
@@ -403,7 +403,7 @@ def test_yyai_style_exact_approval_retains_23_rows_without_weakening_boundary(
         approved_item, scope, published_binding="published-1",
     )
     accepted = compare_ticker_histories(
-        "YYAI", current, source, retained_history_approval=approval,
+        "YYAI", current, source, retained_history_approval=approval, historical_source_window_review_years=0,
     )
 
     assert accepted["classification"] == "SOURCE_HISTORY_CHANGE"
@@ -689,7 +689,7 @@ def test_preview_validates_matching_retained_history_approval_without_finalizing
 
     run_root = tmp_path / "operational" / "admin_runs"
     client = PreviewClient(source_rows["ARQ"], source_rows["MRQ"])
-    first = run_preview(source_paths=paths, run_root=run_root, client=client)
+    first = run_preview(source_paths=paths, run_root=run_root, client=client, historical_source_window_review_years=0)
     first_change = first["refresh_preview"]["ticker_changes"][0]
     assert first_change["classification"] == "REVIEW_REQUIRED"
     assert first["refresh_preview"]["review_partition"]["held"][0]["ticker"] == "YYAI"
@@ -712,7 +712,7 @@ def test_preview_validates_matching_retained_history_approval_without_finalizing
     assert after_action == before_action
     assert queue.get("YYAI")["status"] == "RETRY_REEVALUATION"
 
-    second = run_preview(source_paths=paths, run_root=run_root, client=client)
+    second = run_preview(source_paths=paths, run_root=run_root, client=client, historical_source_window_review_years=0)
     second_change = second["refresh_preview"]["ticker_changes"][0]
 
     assert second_change["classification"] == "SOURCE_HISTORY_CHANGE"

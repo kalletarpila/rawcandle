@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from functools import partial
 
 from rawcandle.fundamentals.admin.refresh_fundamentals import (
     AGED_OUT_OF_SOURCE_WINDOW,
@@ -16,6 +17,10 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     source_key,
     validate_complete_history,
 )
+
+# Preserve strict pre-horizon classifier coverage; the new policy has its own tests.
+build_source_history_merge = partial(build_source_history_merge, historical_source_window_review_years=0)
+compare_ticker_histories = partial(compare_ticker_histories, historical_source_window_review_years=0)
 
 
 def row(
