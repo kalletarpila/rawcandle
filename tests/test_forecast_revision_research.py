@@ -2,8 +2,46 @@ from rawcandle.research.forecast_revision_research import ordered_observations, 
 from rawcandle.research.forecast_revision_research import analyze_event, classify_fetch, numeric, revision, reconstruct_fetch
 from rawcandle.forecasts.fiscal_linker import LINK_RULE_VERSION
 from rawcandle.forecasts.identity import IDENTITY_RULE_VERSION
+from rawcandle.research.forecast_revision_research import next_fiscal_target
+from rawcandle.research.forecast_revision_research import transition_class_counts
 import sqlite3
 import pytest
+
+
+def test_mixed_missing_trading_calendar_counts_are_json_serializable():
+    import json
+    counts = transition_class_counts([
+        {"transition_trading_day_class": None},
+        {"transition_trading_day_class": "NOT_YET_OBSERVED"},
+        {},
+    ])
+    assert counts == {"UNAVAILABLE": 2, "NOT_YET_OBSERVED": 1}
+    assert json.loads(json.dumps(counts, sort_keys=True)) == counts
+
+
+def test_linked_future_target_without_canonical_row_is_usable():
+    key = (1, 2026, "Q3")
+    rows = [observation(1, "2026-09-29T12:00:00Z", "+1q", "Q4"),
+            observation(2, "2026-09-30T12:00:00Z", "0q", "Q4", 2)]
+    target = next_fiscal_target([key], key, rows)
+    assert target == (1, 2026, "Q4")
+    assert analyze_event(event(), rows, target, [])["eps_revision_abs"] == 1
+
+
+def test_future_target_requires_exact_linked_identity_and_canonical_result():
+    key = (1, 2026, "Q3")
+    wrong = [observation(1, "2026-09-29T12:00:00Z", "+1q", "Q1")]
+    assert next_fiscal_target([key], key, wrong) is None
+    assert next_fiscal_target([], key, wrong) is None
+    assert next_fiscal_target([key], key, []) is None
+
+
+def test_future_target_does_not_skip_canonical_gap_and_handles_rollover():
+    key = (1, 2026, "Q3")
+    rows = [observation(1, "2026-09-29T12:00:00Z", "+1q", "Q4")]
+    assert next_fiscal_target([key, (1, 2027, "Q1")], key, rows) is None
+    rollover = dict(rows[0], target=(1, 2027, "Q1"))
+    assert next_fiscal_target([(1, 2026, "Q4")], (1, 2026, "Q4"), [rollover]) == (1, 2027, "Q1")
 
 
 def event(status="EXACT"):

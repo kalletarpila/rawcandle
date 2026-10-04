@@ -268,6 +268,23 @@ def summarize_forecast_revision_research(
     }
 
 
+def next_fiscal_target(quarters: list[tuple], key: tuple,
+                      observations: list[dict[str, Any]]) -> tuple | None:
+    if key not in quarters:
+        return None
+    expected = (key[0], key[1]+1, "Q1") if key[2] == "Q4" else (key[0], key[1], f"Q{int(key[2][1])+1}")
+    index = quarters.index(key)
+    if index+1 < len(quarters):
+        return expected if quarters[index+1] == expected else None
+    # LINKED AS_KNOWN identities can legitimately precede a canonical quarter row.
+    return expected if any(row["target"] == expected and row["horizon"] in {"0q", "+1q"}
+                           for row in observations) else None
+
+
+def transition_class_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    return dict(Counter(row.get("transition_trading_day_class") or "UNAVAILABLE" for row in rows))
+
+
 def build_forecast_revision_research(
     publication_csv: Path, publication_metadata: Path, forecasts_db: Path,
     canonical_db: Path, ohlc_db: Path, output_csv: Path, output_metadata: Path,
@@ -318,11 +335,7 @@ def build_forecast_revision_research(
                 "SELECT company_id,fiscal_year,fiscal_quarter FROM v4_quarter WHERE company_id=? ORDER BY period_end,fiscal_year,fiscal_quarter",
                 (int(event["company_id"]),))]
             key = (int(event["company_id"]), int(event["fiscal_year"]), event["fiscal_quarter"])
-            index = quarters.index(key) if key in quarters else -1
-            target = quarters[index+1] if index >= 0 and index+1 < len(quarters) else None
-            expected = (key[0], key[1]+1, "Q1") if key[2] == "Q4" else (key[0], key[1], f"Q{int(key[2][1])+1}")
-            if target != expected:
-                target = None
+            target = next_fiscal_target(quarters, key, reconstructed)
             days = [row[0] for row in ohlc.execute("SELECT DISTINCT pvm FROM osakedata WHERE osake=? ORDER BY pvm", (event["ticker"],))]
             rows.append(analyze_event(event, reconstructed, target, days))
     finally:
@@ -337,7 +350,7 @@ def build_forecast_revision_research(
         "events_without_usable_observations": sum(not row["has_pre"] and not row["has_post"] for row in rows),
         "comparable_next_quarter_events": sum(row["comparable"] for row in rows),
         "transition_status_counts": dict(Counter(row["transition_status"] for row in rows)),
-        "transition_class_counts": dict(Counter(row.get("transition_trading_day_class") for row in rows)),
+        "transition_class_counts": transition_class_counts(rows),
     }
     for column in ("transition_interval_hours", "trading_days_publication_to_new_0q", "eps_revision_abs", "revenue_revision_abs", "eps_analyst_count_change", "revenue_analyst_count_change"):
         values = [row[column] for row in rows if row.get(column) is not None]
