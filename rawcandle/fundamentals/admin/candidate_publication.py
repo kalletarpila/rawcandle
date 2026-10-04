@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import math
 import time
 from collections import Counter
 from datetime import date, timedelta
@@ -14,9 +15,9 @@ from rawcandle.fundamentals.admin.publication_journal import sqlite_verification
 
 def select_candidate_scope(
     candidate_db: Path, new_quarter_identities: Sequence[Sequence[Any]], *,
-    as_of_date: str, retry_days: int = 60, retry_max_quarters: int = 50,
+    as_of_date: str, retry_days: int = 60, retry_max_quarters: int | None = 100,
 ) -> dict[str, Any]:
-    if retry_days < 0 or retry_max_quarters < 0:
+    if retry_days < 0 or (retry_max_quarters is not None and retry_max_quarters < 0):
         raise ValueError("PUBLICATION_RETRY_CONFIGURATION_INVALID")
     today = date.fromisoformat(as_of_date)
     cutoff = (today - timedelta(days=retry_days)).isoformat()
@@ -56,10 +57,13 @@ def select_candidate_scope(
 
 def run_candidate_publication(
     candidate_db: Path, new_quarter_identities: Sequence[Sequence[Any]], *,
-    as_of_date: str, retry_days: int = 60, retry_max_quarters: int = 50,
+    as_of_date: str, retry_days: int = 60, retry_max_quarters: int | None = 100,
     client: SecClient | None = None,
+    network_budget_seconds: float = 300,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    if not math.isfinite(network_budget_seconds) or network_budget_seconds <= 0:
+        raise ValueError("PUBLICATION_NETWORK_BUDGET_INVALID")
     if (candidate_db.resolve().parent / "generation_manifest.json").exists():
         raise ValueError("PUBLICATION_FINALIZED_GENERATION_WRITE_FORBIDDEN")
     scope = select_candidate_scope(candidate_db, new_quarter_identities, as_of_date=as_of_date,
@@ -67,7 +71,7 @@ def run_candidate_publication(
     if not scope["quarter_keys"]:
         return {**scope,"status":"SKIPPED","total_processed":0,"status_counts":{},"network":{},
                 "runtime_seconds":round(time.perf_counter()-started,3)}
-    client = client or SecClient(maximum_runtime_seconds=300)
+    client = client or SecClient(maximum_runtime_seconds=network_budget_seconds)
     counts: Counter = Counter()
     errors, results = [], []
     # Limit SQL parameter/expression size without capping NEW_THIS_REFRESH.

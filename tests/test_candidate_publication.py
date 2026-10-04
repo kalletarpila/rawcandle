@@ -35,7 +35,7 @@ def open_status(path, company, status, day="2026-09-30"):
 
 
 def test_priority_cap_new_uncapped_old_excluded(tmp_path):
-    p=database(tmp_path/"c.db",120)
+    p=database(tmp_path/"c.db",220)
     open_status(p,1,"AMBIGUOUS")
     open_status(p,2,"NOT_FOUND")
     open_status(p,3,"UNRESOLVED")
@@ -43,12 +43,12 @@ def test_priority_cap_new_uncapped_old_excluded(tmp_path):
     new=[(i,2026,"Q3") for i in range(60,121)]
     scope=select_candidate_scope(p,new,as_of_date="2026-10-04")
     assert len(scope["new_quarters"])==61
-    assert scope["retry_selected"]==50
-    assert scope["retry_backlog_remaining"]==8
+    assert scope["retry_selected"]==100
+    assert scope["retry_backlog_remaining"]==58
     assert scope["retry_quarters"][0]==(5,2026,"Q3")
     assert (4,2026,"Q3") not in scope["quarter_keys"]
     assert scope==select_candidate_scope(p,new,as_of_date="2026-10-04")
-    all_scope=select_candidate_scope(p,[],as_of_date="2026-10-04",retry_max_quarters=200)
+    all_scope=select_candidate_scope(p,[],as_of_date="2026-10-04",retry_max_quarters=300)
     assert all_scope["retry_quarters"][-3:]==[(3,2026,"Q3"),(2,2026,"Q3"),(1,2026,"Q3")]
 
 

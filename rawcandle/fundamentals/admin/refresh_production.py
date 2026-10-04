@@ -396,22 +396,29 @@ def _terminal_cleanup_summary(
     }
 
 
-def _verified_backups(paths: BatchAddTickerPaths, backup_dir: Path) -> dict[str, Any]:
+def _verified_backups(paths: BatchAddTickerPaths, backup_dir: Path, *, immutable_generation: bool = False) -> dict[str, Any]:
     backup_dir.mkdir(parents=True, exist_ok=False)
     fsync_directory(backup_dir.parent)
     result: dict[str, Any] = {}
     for role in PUBLICATION_ROLES:
         source = paths.as_dict()[role]
         backup = backup_dir / f"{role}.db"
-        online_backup(source, backup)
+        if immutable_generation:
+            if any(Path(str(source)+suffix).exists() for suffix in ("-wal", "-shm", "-journal")):
+                raise RuntimeError("IMMUTABLE_GENERATION_BACKUP_SIDECAR")
+            shutil.copyfile(source, backup)
+        else:
+            online_backup(source, backup)
         fsync_file(backup)
         fsync_directory(backup_dir)
         verified = sqlite_verification(backup)
         source_sha = sha256_file(source)
+        if immutable_generation and source_sha != verified["sha256"]:
+            raise RuntimeError("IMMUTABLE_GENERATION_BACKUP_FINGERPRINT_MISMATCH")
         result[role] = {
             "role": role, "source": str(source.resolve()), "backup": str(backup.resolve()),
             "verification": verified, "source_sha256": source_sha,
-            "snapshot_method": "SQLITE_ONLINE_BACKUP",
+            "snapshot_method": "IMMUTABLE_GENERATION_COPY" if immutable_generation else "SQLITE_ONLINE_BACKUP",
         }
     return result
 
@@ -797,7 +804,7 @@ def run_production_apply(
     as_of_date: str | None = None, inject_failure_at: str | None = None,
     inject_crash_at: str | None = None,
     result_publication_retry_days: int = 60,
-    result_publication_retry_max_quarters: int = 50,
+    result_publication_retry_max_quarters: int = 100,
 ) -> dict[str, Any]:
     if not confirm_production:
         raise PermissionError("REFRESH_PRODUCTION_CONFIRMATION_REQUIRED")
