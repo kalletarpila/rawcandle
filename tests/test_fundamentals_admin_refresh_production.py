@@ -807,6 +807,7 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
     )
 
     canonical_result = {
+        "new_quarter_identities": [],
         "publication_date_bootstrap": {
             "repair_required": 0, "bootstrap_eligible": 1,
             "preservation_map_applied": 1, "preservation_map_applicable_existing_quarters": 1,
@@ -829,6 +830,10 @@ def _install_rehearsal_doubles(monkeypatch: pytest.MonkeyPatch, source_paths: Ba
         return canonical_result
 
     monkeypatch.setattr("rawcandle.fundamentals.admin.refresh_production.fresh_rebuild_canonical", rebuild_canonical)
+    monkeypatch.setattr(
+        "rawcandle.fundamentals.admin.candidate_publication.run_candidate_publication",
+        lambda *_args, **_kwargs: {"status": "SKIPPED"},
+    )
     monkeypatch.setattr(
         "rawcandle.fundamentals.admin.refresh_production._identity_mapping",
         lambda *_args: {"fingerprint": "identity"},
@@ -895,6 +900,52 @@ def test_production_shaped_rehearsal_commits_only_after_postflight(
     assert not any((tmp_path / "temp").rglob("*.db"))
     assert result["publication_activity"]["live_replacements"] == list(PUBLICATION_ROLES)
     assert result["publication_activity"]["rollback_restorations"] == []
+
+
+@pytest.mark.parametrize("structural", [False, True])
+def test_candidate_publication_failure_isolation_and_lock(tmp_path, monkeypatch, structural):
+    import fcntl
+    paths, run_root, preview_path, fingerprint, test_id = _rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch, paths)
+    lock_path=tmp_path/"admin.lock"
+    called=[]
+    def publication(candidate, new, **kwargs):
+        assert candidate != paths.canonical_db
+        assert new == []
+        with lock_path.open("a") as lock:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(lock.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        called.append(candidate)
+        if structural:
+            raise sqlite3.DatabaseError("candidate schema broken")
+        return {"status":"PARTIAL","status_counts":{"UNRESOLVED":1}}
+    monkeypatch.setattr("rawcandle.fundamentals.admin.candidate_publication.run_candidate_publication",publication)
+    result=run_production_apply(preview_payload_path=preview_path,preview_fingerprint=fingerprint,test_run_id=test_id,
+        source_paths=paths,run_root=run_root,temp_root=tmp_path/"temp",backup_root=tmp_path/"backups",
+        journal_path=tmp_path/"journal.json",confirm_production=True,rehearsal=True,lock_path=lock_path,client=object())
+    assert len(called)==1
+    assert result["outcome"]==("FAILED" if structural else "COMPLETED")
+    if structural:
+        assert result["failed_stage"]=="RESULT_PUBLICATION"
+        assert not result["write_boundary_crossed"]
+        assert _generation(paths.canonical_db)=="old"
+    else:
+        assert result["result_publication"]["status"]=="PARTIAL"
+        assert result["rollback"]["status"]=="NOT_REQUIRED"
+
+
+@pytest.mark.parametrize("point", ["BEFORE_CANDIDATE_PUBLICATION","AFTER_CANDIDATE_PUBLICATION"])
+def test_publication_pre_manifest_crash_keeps_active_unchanged(tmp_path,monkeypatch,point):
+    paths,run_root,preview,fingerprint,test_id=_rehearsal_fixture(tmp_path)
+    _install_rehearsal_doubles(monkeypatch,paths)
+    journal=tmp_path/"journal.json"
+    before={role:sha256_file(path) for role,path in paths.as_dict().items() if role in PUBLICATION_ROLES}
+    with pytest.raises(SimulatedPublicationCrash,match=point):
+        run_production_apply(preview_payload_path=preview,preview_fingerprint=fingerprint,test_run_id=test_id,
+            source_paths=paths,run_root=run_root,temp_root=tmp_path/"temp",backup_root=tmp_path/"backups",
+            journal_path=journal,confirm_production=True,rehearsal=True,lock_path=tmp_path/"lock",client=object(),inject_crash_at=point)
+    assert not journal.exists()
+    assert before=={role:sha256_file(path) for role,path in paths.as_dict().items() if role in PUBLICATION_ROLES}
 
 
 def test_production_analysis_candidate_uses_compact_market_and_direct_taxonomy(
@@ -1046,6 +1097,15 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
             "canonical_source_policy,created_at_utc,updated_at_utc) "
             "VALUES(1,100,10,5,'SHARADAR_ARQ_PRIMARY','2026-09-20T00:00:00Z','2026-09-20T00:00:00Z')"
         )
+        from rawcandle.fundamentals.schema.result_publication import ensure_result_publication_schema
+        from rawcandle.fundamentals.result_publication import apply_resolution
+        ensure_result_publication_schema(connection)
+        quarter={"quarter_id":123456,"company_id":1,"fiscal_year":2026,"fiscal_quarter":"Q2"}
+        evidence={**quarter,"evidence_id":"preserved","source_type":"ISSUER_EARNINGS_RELEASE",
+                  "source_timestamp_utc":"2026-08-14T20:00:00Z","source_reference":"https://example.test/release",
+                  "matching_method":"REVIEWED","rule_version":"result_publication_v1","reviewed_manual":1,
+                  "evidence_hash":"preserved-fingerprint"}
+        apply_resolution(connection,quarter,[evidence],unresolved=False)
 
     actual_postflight = refresh_production._postflight
     _install_rehearsal_doubles(monkeypatch, paths)
@@ -1145,6 +1205,7 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
     assert result["provider_candidate"]["ticker_count"] == 1
     assert result["canonical_candidate"]["identity_contract"]["company_security_identity_mapping_unchanged"] is True
     assert [call["path"] for call in validation_calls] == [
+        Path(result["analysis_candidate"]["candidate_analysis_db"]),
         Path(result["analysis_candidate"]["candidate_analysis_db"]), paths.analysis_db,
     ]
     assert all(
@@ -1172,6 +1233,9 @@ def test_production_parity_consumes_real_full_v2_wrapper_output_through_postflig
         ).fetchone()[0] == 120
     with sqlite3.connect(paths.canonical_db) as connection:
         assert connection.execute("SELECT revenue FROM v4_quarter_financials").fetchone()[0] == 120
+        quarter_id=connection.execute("SELECT quarter_id FROM v4_quarter").fetchone()[0]
+        assert connection.execute("SELECT quarter_id,status FROM v4_result_publication_authority").fetchone()==(quarter_id,"VERIFIED")
+        assert connection.execute("SELECT quarter_id,evidence_hash FROM v4_result_publication_evidence").fetchone()==(quarter_id,"preserved-fingerprint")
     assert _generation(paths.analysis_db) == "new"
 
 

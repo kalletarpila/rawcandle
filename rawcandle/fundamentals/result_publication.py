@@ -8,7 +8,7 @@ import statistics
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -112,6 +112,7 @@ class SecClient:
         fetch_json: Callable[[str], Mapping[str, Any]] | None = None,
         fetch_text: Callable[[str], str] | None = None,
         minimum_interval_seconds: float = 0.12,
+        maximum_runtime_seconds: float | None = None,
     ) -> None:
         self._fetch_json = fetch_json or self._get_json
         self._fetch_text = fetch_text or self._get_text
@@ -119,6 +120,7 @@ class SecClient:
         self._last_request = 0.0
         self._cache: dict[str, bytes] = {}
         self.stats: Counter[str] = Counter()
+        self._deadline = time.monotonic() + maximum_runtime_seconds if maximum_runtime_seconds is not None else None
 
     def _request(self, url: str) -> bytes:
         if url in self._cache:
@@ -126,6 +128,9 @@ class SecClient:
             return self._cache[url]
         request_kind = "metadata_requests" if "data.sec.gov/submissions/" in url else "document_requests"
         for attempt in range(3):
+            if self._deadline is not None and time.monotonic() >= self._deadline:
+                self.stats["budget_exhausted"] += 1
+                raise TimeoutError("SEC_CANDIDATE_TIME_BUDGET_EXHAUSTED")
             delay = self._minimum_interval_seconds - (time.monotonic() - self._last_request)
             if delay > 0:
                 time.sleep(delay)
@@ -133,7 +138,8 @@ class SecClient:
             self.stats[request_kind] += 1
             try:
                 request = Request(url, headers={"Accept": "application/json,text/html", "User-Agent": SEC_USER_AGENT})
-                with urlopen(request, timeout=30) as response:
+                timeout = min(30, max(0.1, self._deadline-time.monotonic())) if self._deadline is not None else 30
+                with urlopen(request, timeout=timeout) as response:
                     payload = response.read()
                 self._cache[url] = payload
                 return payload
@@ -157,7 +163,8 @@ class SecClient:
     def _get_text(self, url: str) -> str:
         return self._request(url).decode("utf-8", errors="replace")
 
-    def item_2_02_filings(self, cik: str, *, from_calendar_year: int = 2024) -> list[SecFiling]:
+    def item_2_02_filings(self, cik: str, *, from_calendar_year: int = 2024,
+                        from_calendar_date: str | None = None, to_calendar_date: str | None = None) -> list[SecFiling]:
         normalized = cik.zfill(10)
         payload = self._fetch_json(f"https://data.sec.gov/submissions/CIK{normalized}.json")
         batches = [payload["filings"]["recent"]]
@@ -171,6 +178,9 @@ class SecClient:
                 if str(form).upper() != "8-K" or "2.02" not in {part.strip() for part in items.split(",")}:
                     continue
                 accepted_raw = str(recent["acceptanceDateTime"][index])
+                if (from_calendar_date and accepted_raw[:10] < from_calendar_date) or (to_calendar_date and accepted_raw[:10] > to_calendar_date):
+                    self.stats["candidate_filings_outside_scope_skipped"] += 1
+                    continue
                 if accepted_raw < f"{from_calendar_year}-01-01":
                     self.stats["candidate_filings_outside_scope_skipped"] += 1
                     continue
@@ -449,6 +459,7 @@ def scoped_quarters(
     from_fiscal_year: int,
     tickers: Sequence[str],
     company_ids: Sequence[int] = (),
+    quarter_keys: Sequence[tuple[int, int, str]] | None = None,
 ) -> list[dict[str, Any]]:
     params: list[Any] = [from_fiscal_year]
     ticker_clause = ""
@@ -459,6 +470,15 @@ def scoped_quarters(
     if company_ids:
         company_clause = f" AND q.company_id IN ({','.join('?' for _ in company_ids)})"
         params.extend(int(company_id) for company_id in company_ids)
+    quarter_clause = ""
+    if quarter_keys is not None:
+        if not quarter_keys:
+            return []
+        quarter_clause = " AND (" + " OR ".join(
+            "(q.company_id=? AND q.fiscal_year=? AND q.fiscal_quarter=?)" for _ in quarter_keys
+        ) + ")"
+        for key in quarter_keys:
+            params.extend(key)
     rows = connection.execute(
         f"""
         SELECT q.quarter_id,q.company_id,q.fiscal_year,q.fiscal_quarter,q.period_end,
@@ -466,7 +486,7 @@ def scoped_quarters(
         FROM v4_quarter q
         JOIN company_cik c ON c.company_id=q.company_id AND c.status='ACTIVE'
         LEFT JOIN security s ON s.company_id=q.company_id AND s.active=1
-        WHERE q.fiscal_year>=? {ticker_clause} {company_clause}
+        WHERE q.fiscal_year>=? {ticker_clause} {company_clause} {quarter_clause}
         GROUP BY q.quarter_id
         HAVING COUNT(DISTINCT c.cik_normalized)=1
         ORDER BY q.company_id,q.fiscal_year,q.fiscal_quarter
@@ -575,6 +595,7 @@ def enrich_database(
     client: SecClient | None = None,
     apply: bool = False,
     refresh_existing: bool = False,
+    quarter_keys: Sequence[tuple[int, int, str]] | None = None,
 ) -> dict[str, Any]:
     client = client or SecClient()
     started = time.perf_counter()
@@ -583,19 +604,16 @@ def enrich_database(
         connection.execute("PRAGMA foreign_keys=ON")
         if apply:
             ensure_result_publication_schema(connection)
-        quarters = scoped_quarters(connection, from_fiscal_year, tickers, company_ids)
+        quarters = scoped_quarters(connection, from_fiscal_year, tickers, company_ids, quarter_keys)
         if not refresh_existing and connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v4_result_publication_authority'"
         ).fetchone():
-            verified = {
-                (int(row[0]), int(row[1]), str(row[2]))
-                for row in connection.execute(
-                    "SELECT company_id,fiscal_year,fiscal_quarter FROM v4_result_publication_authority WHERE status='VERIFIED'"
-                )
-            }
             quarters = [
                 row for row in quarters
-                if (int(row["company_id"]), int(row["fiscal_year"]), str(row["fiscal_quarter"])) not in verified
+                if not connection.execute(
+                    "SELECT 1 FROM v4_result_publication_authority WHERE company_id=? AND fiscal_year=? AND fiscal_quarter=? AND status='VERIFIED'",
+                    (row["company_id"], row["fiscal_year"], row["fiscal_quarter"]),
+                ).fetchone()
             ]
         by_company: dict[int, list[dict[str, Any]]] = defaultdict(list)
         for quarter in quarters:
@@ -606,8 +624,14 @@ def enrich_database(
         for company_id, company_quarters in by_company.items():
             try:
                 earliest_period_year = min(int(str(row["period_end"])[:4]) for row in company_quarters)
+                date_scope = {}
+                if quarter_keys is not None and isinstance(client, SecClient):
+                    date_scope = {
+                        "from_calendar_date": min(str(row["period_end"]) for row in company_quarters),
+                        "to_calendar_date": (datetime.fromisoformat(max(str(row["period_end"]) for row in company_quarters)) + timedelta(days=180)).date().isoformat(),
+                    }
                 filings = client.item_2_02_filings(
-                    str(company_quarters[0]["cik_normalized"]), from_calendar_year=earliest_period_year
+                    str(company_quarters[0]["cik_normalized"]), from_calendar_year=earliest_period_year, **date_scope
                 )
                 matches, unresolved, diagnostics = resolve_sec_filings_detailed(company_quarters, filings)
                 for quarter in company_quarters:
@@ -631,6 +655,8 @@ def enrich_database(
                     connection.commit()
             except Exception as exc:
                 connection.rollback()
+                if quarter_keys is not None and isinstance(exc, sqlite3.DatabaseError):
+                    raise
                 errors.append({"company_id": company_id, "ticker": company_quarters[0]["current_ticker"], "error": type(exc).__name__, "reason": str(exc)})
                 if apply:
                     for quarter in company_quarters:

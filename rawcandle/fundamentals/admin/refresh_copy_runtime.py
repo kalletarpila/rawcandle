@@ -792,6 +792,7 @@ def fresh_rebuild_canonical(
             "unexplained_unaffected_changes": len(unexplained),
         },
         "removed_quarter_publication_evidence": removed_evidence,
+        "new_quarter_identities": [list(key) for key in sorted(after.keys() - before.keys())],
         "company_impact": company_impact,
         "identity_contract": {
             "before": identity_before,

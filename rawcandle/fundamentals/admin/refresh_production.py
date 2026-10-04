@@ -80,7 +80,7 @@ PRODUCTION_CONTRACT_VERSION = "PHASE13G3_58_PRODUCTION_DURABLE_REVIEW_APPROVAL_V
 PRODUCTION_STAGES = (
     "PRODUCTION_PREFLIGHT", "SOURCE_REVALIDATION", "PROVIDER_CANDIDATE",
     "CANONICAL_CANDIDATE", "ANALYSIS_CANDIDATE", "CANDIDATE_VALIDATION",
-    "FINAL_SOURCE_RECHECK", "BACKUP", "JOURNAL_PREPARE", "PUBLISH_PROVIDER",
+    "RESULT_PUBLICATION", "FINAL_SOURCE_RECHECK", "BACKUP", "JOURNAL_PREPARE", "PUBLISH_PROVIDER",
     "PUBLISH_CANONICAL", "PUBLISH_ANALYSIS", "POSTFLIGHT", "JOURNAL_COMMIT",
     "CLEANUP", "COMPLETED",
 )
@@ -727,6 +727,20 @@ def render_report(result: Mapping[str, Any]) -> str:
         str(result.get("user_message") or "See technical evidence for the final state."),
     ]
     ticker_changes = result.get("ticker_changes") or []
+    publication = result.get("result_publication")
+    if publication:
+        counts = publication.get("status_counts") or {}
+        network = publication.get("network") or {}
+        lines.extend([
+            "", "## Result Publication", "",
+            f"- Status: {publication['status']} (separate from core refresh)",
+            f"- New quarters: {len(publication.get('new_quarters') or [])}",
+            f"- Recent-open eligible / retry selected / backlog: {publication.get('recent_open_total',0)} / {publication.get('retry_selected',0)} / {publication.get('retry_backlog_remaining',0)}",
+            f"- Total processed / new VERIFIED: {publication.get('total_processed',0)} / {counts.get('VERIFIED',0)}",
+            f"- UNRESOLVED / AMBIGUOUS / NOT_FOUND: {counts.get('UNRESOLVED',0)} / {counts.get('AMBIGUOUS',0)} / {counts.get('NOT_FOUND',0)}",
+            f"- SEC metadata / document / total requests: {network.get('metadata_requests',0)} / {network.get('document_requests',0)} / {network.get('network_requests',0)}",
+            f"- Runtime seconds: {publication.get('runtime_seconds',0)}",
+        ])
     if ticker_changes:
         lines.extend([
             "", "## Ticker Results", "",
@@ -782,6 +796,8 @@ def run_production_apply(
     lock_path: Path = ADMIN_LOCK, progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
     as_of_date: str | None = None, inject_failure_at: str | None = None,
     inject_crash_at: str | None = None,
+    result_publication_retry_days: int = 60,
+    result_publication_retry_max_quarters: int = 50,
 ) -> dict[str, Any]:
     if not confirm_production:
         raise PermissionError("REFRESH_PRODUCTION_CONFIRMATION_REQUIRED")
@@ -1026,6 +1042,27 @@ def run_production_apply(
         result["candidate_analysis_lineage"] = candidate_analysis_lineage
         progress(stage, "COMPLETED", "Provider, canonical, and analysis candidates all passed validation.")
 
+        stage = "RESULT_PUBLICATION"
+        progress(stage, "RUNNING", "Enriching bounded result-publication scope in the inactive candidate.")
+        crash("BEFORE_CANDIDATE_PUBLICATION")
+        from rawcandle.fundamentals.admin.candidate_publication import run_candidate_publication
+        with _durable_heartbeat(writer, stage, "Candidate result-publication enrichment is running."):
+            result["result_publication"] = run_candidate_publication(
+                canonical_candidate, canonical_result["new_quarter_identities"],
+                as_of_date=calculation_as_of_date,
+                retry_days=result_publication_retry_days,
+                retry_max_quarters=result_publication_retry_max_quarters,
+            )
+        crash("AFTER_CANDIDATE_PUBLICATION")
+        result["candidate_validation"] = {
+            role: sqlite_verification(path) for role, path in candidate_paths_by_role.items()
+        }
+        result["candidate_analysis_lineage"] = _validate_analysis_generation(
+            analysis_candidate, analysis_result=analysis_result,
+            as_of_date=calculation_as_of_date, sources=candidate_sources,
+        )
+        progress(stage, "COMPLETED", "Candidate publication step: " + result["result_publication"]["status"])
+
         stage = "FINAL_SOURCE_RECHECK"
         progress(stage, "RUNNING", "Rechecking complete source state immediately before publication.")
         try:
@@ -1171,6 +1208,10 @@ def run_production_apply(
         )
         result["journal"] = journal
         result["outcome"] = "COMPLETED"
+        result["completion_status"] = (
+            "SUCCESS_WITH_PUBLICATION_PARTIAL"
+            if result["result_publication"]["status"] == "PARTIAL" else "SUCCESS"
+        )
         result["rollback"] = {"status": "NOT_REQUIRED"}
         finalized_approvals = []
         for item in revalidated["ticker_changes"]:
