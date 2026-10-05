@@ -131,6 +131,7 @@ def prepare_journal(
     old_generation: Mapping[str, Any] | None = None,
     new_generation_id: str | None = None,
     active_generation_manifest_path: Path | None = None,
+    scope_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     prior = load_journal(path)
     if prior and prior["state"] in INCOMPLETE_STATES:
@@ -172,6 +173,8 @@ def prepare_journal(
             ),
             "generation_activation_state": "NOT_STARTED",
         })
+    if scope_evidence is not None:
+        payload["scope_evidence"] = dict(scope_evidence)
     return write_journal(path, payload)
 
 
