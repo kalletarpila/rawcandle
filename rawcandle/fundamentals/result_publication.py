@@ -16,6 +16,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from rawcandle.fundamentals.admin.contracts import utc_now
+from rawcandle.fundamentals.sec_result_context import (
+    item_202_sections, linked_result_exhibits, result_context, result_fiscal_tokens,
+    result_periods, same_accession_document, unsafe_new_event,
+)
 from rawcandle.fundamentals.schema.result_publication import (
     RESULT_PUBLICATION_RULE_VERSION,
     ensure_result_publication_schema,
@@ -95,6 +99,13 @@ def pit_result_side(fetched_at_utc: str, authority: Mapping[str, Any]) -> str | 
 
 
 @dataclass(frozen=True)
+class SecResultExhibit:
+    source_reference: str
+    sha256: str
+    text: str
+
+
+@dataclass(frozen=True)
 class SecFiling:
     accession_number: str
     form: str
@@ -103,6 +114,9 @@ class SecFiling:
     primary_document: str
     source_reference: str
     text: str
+    legacy_primary: bool = True
+    result_sections: tuple[str, ...] = ()
+    result_exhibits: tuple[SecResultExhibit, ...] = ()
 
 
 class SecClient:
@@ -190,10 +204,33 @@ class SecClient:
                 archive_cik = str(int(normalized))
                 accession_path = accession.replace("-", "")
                 reference = f"https://www.sec.gov/Archives/edgar/data/{archive_cik}/{accession_path}/{document}"
-                text = filing_text(self._fetch_text(reference))
+                html = self._fetch_text(reference)
+                text = filing_text(html)
                 self.stats["documents_fetched"] += 1
-                if not is_item_2_02(str(form), items, text):
+                legacy_primary = is_item_2_02(str(form), items, text)
+                sections = item_202_sections(html)
+                if not legacy_primary and not sections:
                     continue
+                exhibits = []
+                primary_contexts = [context for section in sections if (context := result_context(section))]
+                # Acquisition has no target quarters: use strong section context to
+                # avoid exhibit downloads where the primary already supplies it.
+                if sections and not any(result_periods(context) or result_fiscal_tokens(context) for context in primary_contexts):
+                    if not any(unsafe_new_event(section) for section in sections):
+                        for url in linked_result_exhibits(html, reference):
+                            try:
+                                exhibit_html = self._fetch_text(url)
+                            except (HTTPError, URLError, TimeoutError, OSError):
+                                # Optional coverage cannot discard a legacy primary
+                                # candidate or verify from an incomplete exhibit set.
+                                self.stats["result_context_exhibit_failures"] += 1
+                                exhibits.clear()
+                                break
+                            self.stats["documents_fetched"] += 1
+                            self.stats["result_context_exhibits_fetched"] += 1
+                            exhibits.append(SecResultExhibit(
+                                url, hashlib.sha256(exhibit_html.encode()).hexdigest(), filing_text(exhibit_html),
+                            ))
                 results.append(SecFiling(
                     accession_number=accession,
                     form=str(form),
@@ -202,6 +239,9 @@ class SecClient:
                     primary_document=document,
                     source_reference=reference,
                     text=text,
+                    legacy_primary=legacy_primary,
+                    result_sections=sections,
+                    result_exhibits=tuple(exhibits),
                 ))
         return results
 
@@ -257,8 +297,12 @@ def resolve_sec_filings_detailed(
             if period_end <= accepted and (accepted - period_end).days <= 180:
                 plausible.append(quarter)
                 plausible_counts[(int(quarter["company_id"]), int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"]))] += 1
-        filing_matches = [(quarter, match_quarter_context(filing.text, quarter)) for quarter in plausible]
+        # Preserve every pre-13G.3.65 candidate, including preliminary/partial
+        # disclosures. Safety restrictions below apply only to additive paths.
+        filing_matches = [(quarter, match_quarter_context(filing.text, quarter)) for quarter in plausible] if filing.legacy_primary else []
         filing_matches = [(quarter, method) for quarter, method in filing_matches if method]
+        if not filing_matches:
+            filing_matches = _new_sec_context_matches(filing, plausible)
         if len(filing_matches) == 1:
             quarter, method = filing_matches[0]
             key = (int(quarter["company_id"]), int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"]))
@@ -294,6 +338,66 @@ def resolve_sec_filings_detailed(
             "accessions": sorted({str(row["accession_number"]) for row in candidates}),
         }
     return matches, unresolved, diagnostics
+
+
+def _new_sec_context_matches(
+    filing: SecFiling, quarters: Sequence[Mapping[str, Any]],
+) -> list[tuple[Mapping[str, Any], str]]:
+    if filing.form.upper() != "8-K" or "2.02" not in {item.strip() for item in filing.items.split(",")}:
+        return []
+    if not filing.result_sections or any(unsafe_new_event(section) for section in filing.result_sections):
+        return []
+    if len(filing.result_exhibits) > 2 or any(
+        not same_accession_document(filing.source_reference, exhibit.source_reference)
+        for exhibit in filing.result_exhibits
+    ):
+        return []
+    primary_contexts = [context for section in filing.result_sections if (context := result_context(section))]
+    primary_matches = []
+    for quarter in quarters:
+        for context in primary_contexts:
+            if method := _new_context_method(context, quarter):
+                primary_matches.append((quarter, method))
+                break
+    if primary_matches:
+        return [(quarter, "NORMALIZED_ITEM_2_02_HEADING:" + method) for quarter, method in primary_matches]
+    contexts = [(exhibit, context) for exhibit in filing.result_exhibits if (context := result_context(exhibit.text))]
+    periods = {period for _, context in contexts for period in result_periods(context)}
+    fiscal_tokens = {token for _, context in contexts for token in result_fiscal_tokens(context)}
+    primary_periods = {period for context in primary_contexts for period in result_periods(context)}
+    primary_tokens = {token for context in primary_contexts for token in result_fiscal_tokens(context)}
+    if (len(periods) > 1 or len(fiscal_tokens) > 1
+            or (primary_periods and periods != primary_periods)
+            or (primary_tokens and fiscal_tokens and primary_tokens != fiscal_tokens)):
+        return []
+    matches = []
+    for quarter in quarters:
+        matched = [(exhibit, method) for exhibit, context in contexts
+                   if (method := _new_context_method(context, quarter))]
+        if matched:
+            # Reuse the existing durable method column as a versioned structured
+            # context record; parent URL/document/timestamp remain unchanged.
+            method = "SEC_LINKED_EXHIBIT:" + json.dumps({
+                "version": 1,
+                "parent_accession": filing.accession_number,
+                "fiscal_identity": [quarter["company_id"], quarter["fiscal_year"], quarter["fiscal_quarter"]],
+                "exhibits": [{"url": exhibit.source_reference, "sha256": exhibit.sha256, "method": match}
+                             for exhibit, match in matched],
+            }, sort_keys=True, separators=(",", ":"))
+            matches.append((quarter, method))
+    return matches
+
+
+def _new_context_method(context: str, quarter: Mapping[str, Any]) -> str | None:
+    if len(result_periods(context)) > 1 or len(result_fiscal_tokens(context)) > 1:
+        return None
+    method = match_quarter_context(context, quarter)
+    if method == "CIK_ITEM_2_02_EXACT_PERIOD_END":
+        end = datetime.strptime(str(quarter["period_end"]), "%Y-%m-%d")
+        expected = f"{end.strftime('%B')} {end.day}, {end.year}".lower().replace(",", "")
+        if expected not in {period.replace(",", "") for period in result_periods(context)}:
+            return None
+    return method
 
 
 def _insert_evidence(connection: sqlite3.Connection, evidence: Mapping[str, Any], disposition: str, now: str) -> None:

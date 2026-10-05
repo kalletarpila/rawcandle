@@ -1,0 +1,710 @@
+{
+  "note": "Compact extracted-text regression excerpts, not raw SEC downloads. Full candidate acquisition replay is recorded separately in the 278-case impact study.",
+  "baseline": "8b6240730e31294c174ee59664c8831090906a19",
+  "cases": [
+    {
+      "ticker": "ABAT",
+      "quarter": {
+        "quarter_id": 369,
+        "company_id": 9,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q4",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001493152-26-039500",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-20T21:00:28Z",
+          "primary_document": "form8-k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1576873/000149315226039500/form8-k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 20, 2026, American Battery Technology Company (the \u201cCompany\u201d) issued a press release relating to the Company\u2019s preliminary estimated financial results for the fiscal quarter ended June 30, 2026. The press release is furnished hereto as Exhibit 99.1. The information in this Current Report on Form 8-K, including Exhibit 99.1, shall n",
+          "source_sha256": "4d7803c4c8c47af10f9951ecf7f70affc5a035a03d0f4cf6d93996762d2a18fd"
+        },
+        {
+          "accession_number": "0001493152-26-042948",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-09-16T21:05:56Z",
+          "primary_document": "form8-k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1576873/000149315226042948/form8-k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On September 14, 2026, American Battery Technology Company (the \u201cCompany\u201d) posted an investor presentation to its website used in an earnings call pertaining to the financial results for the fiscal year ended June 30, 2026. On September 14, 2026, the Company issued a press release relating to the Company\u2019s financial results for the fiscal ye",
+          "source_sha256": "693ea5d50e34df3f11b382d76eebb9c40bc57d2be908a1d4ee8c17e7f5ab36d1"
+        }
+      ]
+    },
+    {
+      "ticker": "GME",
+      "quarter": {
+        "quarter_id": 33905,
+        "company_id": 956,
+        "fiscal_year": 2027,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-08-01"
+      },
+      "filings": [
+        {
+          "accession_number": "0001326380-26-000046",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-31T10:23:08Z",
+          "primary_document": "gme-20260831.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1326380/000132638026000046/gme-20260831.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition The following information is furnished pursuant to Item 2.02, \u201cResults of Operations and Financial Condition,\u201d and shall not be deemed \u201cfiled\u201d for purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise subject to the liabilities of that section. On August 31, 2026, the Company issued a press release announcing ... e announcing certain preliminary financial results for its second quarter ended August 1, 2026. A copy of the press release is attached hereto as Exhibit 99.1. The information contained in this ",
+          "source_sha256": "74870a7a49a48a42c3665d7e7560697e2463bc5ddfc9a8b3b4ada42d6bd9032a"
+        },
+        {
+          "accession_number": "0001326380-26-000050",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-09-08T13:02:39Z",
+          "primary_document": "gme-20260908.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1326380/000132638026000050/gme-20260908.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. The following information is furnished pursuant to Item 2.02, \u201cResults of Operations and Financial Condition,\u201d and shall not be deemed \u201cfiled\u201d for purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise subject to the liabilities of that section. On September 8, 2026 , GameStop Corp. (the \u201cCompany\u201d) issued a p ... d a press release announcing its financial results for its second quarter ended August 1, 2026. A copy of the press release is attached hereto as Exhibit 99.1. The foregoing information containe",
+          "source_sha256": "bf6d467f8d25415a17075e3f855538643b1cc3a2272ec668f7f325f4ddbeb323"
+        }
+      ]
+    },
+    {
+      "ticker": "SMCI",
+      "quarter": {
+        "quarter_id": 72079,
+        "company_id": 2027,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q4",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001375365-26-000019",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-21T20:10:55Z",
+          "primary_document": "smci-20260721.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000019/smci-20260721.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition On July 21, 2026, Super Micro Computer, Inc. (the \u201cCompany\u201d) issued a press release (the \u201cPress Release\u201d) providing a preliminary business update for the quarter ended June 30, 2026. A copy of the Press Release is attached as Exhibit 99.1 to this report and is incorporated herein by reference. The information in, and the exhibit furnished pur",
+          "source_sha256": "5f27221da599cfb2b73b280a679dd1d550d1cc6817d1e11d0b6973332c6e8560"
+        },
+        {
+          "accession_number": "0001375365-26-000021",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-11T20:06:16Z",
+          "primary_document": "smci-20260811.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1375365/000137536526000021/smci-20260811.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition On August 11, 2026, Super Micro Computer, Inc. (the \u201cCompany\u201d) issued a press release (the \u201cPress Release\u201d) announcing unaudited financial results for the quarter and full fiscal year ended June 30, 2026. A copy of the Press Release is attached as Exhibit 99.1 to this report and is incorporated herein by reference. The information in, and the",
+          "source_sha256": "ee887c8fd0107e58f47e05106c9b9c8ad47dbee73077b4dac2d79201a03694ae"
+        }
+      ]
+    },
+    {
+      "ticker": "OPTT",
+      "quarter": {
+        "quarter_id": 89485,
+        "company_id": 2527,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q4",
+        "period_end": "2026-04-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001493152-26-034425",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-23T20:56:00Z",
+          "primary_document": "form8-k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1378140/000149315226034425/form8-k.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. On July 23, 2026, the Company issued a press release announcing its financial results for its fiscal fourth quarter and fiscal year ended April 30, 2026. A copy of the press release is furnished as Exhibit 99.2 to this report and is incorporated herein by reference. In accordance with General Instruction B.2 of Form 8-K, the information set",
+          "source_sha256": "7ab1bcf32458c47c85101a9f9fe481fdb911f7e19582db90ca4ae877d8ab3090"
+        },
+        {
+          "accession_number": "0001493152-26-039793",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-24T13:00:14Z",
+          "primary_document": "form8-k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1378140/000149315226039793/form8-k.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. On August 19, 2026, Ocean Power Technologies, Inc. (the \u201cCompany\u201d) issued a press release announcing an update to the preliminary financial results previously announced on July 23, 2026 for the fiscal year and quarter ended April 30, 2026. A copy of the press release is furnished as Exhibit 99.1 to this report and is incorporated herein by ",
+          "source_sha256": "ce5cae606bfd1ce564b23db048921a12737b887f3db51e6a955494eb89d1d735"
+        }
+      ]
+    },
+    {
+      "ticker": "GOSS",
+      "quarter": {
+        "quarter_id": 34427,
+        "company_id": 970,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001728117-26-000064",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-27T20:01:09Z",
+          "primary_document": "goss-20260723.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1728117/000172811726000064/goss-20260723.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. The Company estimates that its cash, cash equivalents and marketable securities were approximately $57.0 million as of June 30, 2026. This amount is unaudited and preliminary and is subject to completion of financial closing procedures. As a result, this amount may differ from the amount that will be reflected in the Company\u2019s financial sta",
+          "source_sha256": "9c8acb7a3b9418643aa268123404fe66b9369ab33b3ae2b1b572a33c4c70d0ae"
+        },
+        {
+          "accession_number": "0001728117-26-000073",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-13T20:02:19Z",
+          "primary_document": "goss-20260813.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1728117/000172811726000073/goss-20260813.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. On August 13, 2026, Gossamer Bio, Inc. (the \"Company\") issued a press release reporting its financial results for the quarter ended June 30, 2026. The full text of the press release is attached as Exhibit 99.1 to this Current Report on Form 8-K. In accordance with General Instruction B.2 of Form 8-K, the information contained or incorporate",
+          "source_sha256": "79a560901729f952e0000937bde3495dd903756e81f6b384346b86f86829957b"
+        }
+      ]
+    },
+    {
+      "ticker": "REKR",
+      "quarter": {
+        "quarter_id": 66531,
+        "company_id": 1867,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001437749-26-023616",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-15T18:13:28Z",
+          "primary_document": "rekr20260715_8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1697851/000143774926023616/rekr20260715_8k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On July 15, 2026, Rekor Systems, Inc. (the \u201cCompany\u201d) issued a press release announcing certain preliminary, unaudited financial results for the quarter ended June 30, 2026, including expected revenue, adjusted gross margin, Adjusted EBITDA and quarter-end cash, together with an update regarding the Company\u2019s operational realignment and cost",
+          "source_sha256": "f35ecd0d1de4de16205dc70d3ff7ee30c09902335e96edaff943cbb02d7ff8e6"
+        },
+        {
+          "accession_number": "0001437749-26-027481",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-13T12:00:12Z",
+          "primary_document": "rekr20260812_8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1697851/000143774926027481/rekr20260812_8k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 13, 2026, before the open of trading, Rekor Systems, Inc. (the \u201cCompany\u201d) issued a press release summarizing the Company\u2019s financial results for the second quarter ended June 30, 2026. A copy of this press release is furnished as Exhibit 99.1 hereto and incorporated herein by reference. The foregoing information is intended to be f",
+          "source_sha256": "0840856615b4b937c9014c4b952b5899530fbab7f111b419b0bdf8770268a844"
+        }
+      ]
+    },
+    {
+      "ticker": "ANRO",
+      "quarter": {
+        "quarter_id": 5737,
+        "company_id": 162,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001104659-26-082875",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-13T11:39:07Z",
+          "primary_document": "tm2620297d1_8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1999480/000110465926082875/tm2620297d1_8k.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. The information disclosed under the heading \u201cCash, Cash Equivalents and Restricted Cash as of June 30, 2026\u201d under Item 8.01 of this Current Report on Form 8-K is incorporated herein by reference and shall not be deemed \u201cfiled\u201d for purposes of Section 18 of the Securities Exchange Act of 1934, as amended (the \u201c Exchange Act \u201d), or otherwise",
+          "source_sha256": "9644ffa7d30e7bb2312665c4e26d6c487f59016dd938f12265a74baab01a6cc8"
+        },
+        {
+          "accession_number": "0001999480-26-000022",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-12T20:14:32Z",
+          "primary_document": "alto-20260812.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1999480/000199948026000022/alto-20260812.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 12, 2026, Alto Neuroscience, Inc. (the \u201cCompany\u201d) reported financial results for the fiscal quarter ended June 30, 2026. A copy of the press release is furnished as Exhibit 99.1 to this Current Report on Form 8-K (the \u201cCurrent Report\u201d) and is incorporated by reference herein. The information in this Item 2.02 of this Current Report",
+          "source_sha256": "3b01015ade220acd2e0ab84851301c03498f76aba7e671c520c41a9df5344dc4"
+        }
+      ]
+    },
+    {
+      "ticker": "KSCP",
+      "quarter": {
+        "quarter_id": 44474,
+        "company_id": 1249,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001104659-26-084853",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-20T11:01:12Z",
+          "primary_document": "kscp-20260720x8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1600983/000110465926084853/kscp-20260720x8k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On July 20, 2026, Knightscope, Inc. (the \"Company\") issued a press release announcing preliminary, unaudited financial and operational results for the quarter ended June 30, 2026. A copy of the press release is furnished as Exhibit 99.1 to this Current Report on Form 8-K. The preliminary results described in the press release are subject to ",
+          "source_sha256": "5fd97ea47c3ccbc34dcccc79e2c5fc2816690657c7ff5711ecff701e8b544c76"
+        },
+        {
+          "accession_number": "0001104659-26-094868",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-12T20:07:15Z",
+          "primary_document": "kscp-20260812x8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1600983/000110465926094868/kscp-20260812x8k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 12, 2026, Knightscope, Inc. (the \"Company\") issued a press release announcing its financial results for the second quarter ended June 30, 2026. A copy of the press release is furnished as Exhibit 99.1 to this Current Report on Form 8-K and incorporated herein by reference. The information in this Item 2.02 and Exhibit 99.1 is being",
+          "source_sha256": "0ea29ea78e8b31f9b920b87f4aad35c1dd332dbef4a10824229d0f57162042b8"
+        }
+      ]
+    },
+    {
+      "ticker": "TE",
+      "quarter": {
+        "quarter_id": 76199,
+        "company_id": 2144,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001213900-26-081974",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-28T10:37:38Z",
+          "primary_document": "ea0299450-8k_t1energy.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1992243/000121390026081974/ea0299450-8k_t1energy.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. To the extent the information included or incorporated by reference into Item 8.01 below with respect to the results of operations or financial condition of T1 Energy Inc. (the \u201cCompany\u201d) and its subsidiaries relates to or is presented as of or for a completed fiscal period, such information is incorporated into this Item 2.02 by reference  ... .01. Other Events. On July 28, 2026, the Company issued a press release announcing certain preliminary financial results and business updates for the second quarter of 2026. The press release is filed as Exhibit 99.1 to this Current Report on Form 8-K and is incorporated herein by reference to this Item 8.01. Item 9.01. Financial Statements and Exhibits. (d) Exhibits Exhibit No. Description 99.1 Press Release, dated July 28, 2026. 104 Cover Page Interactive Data File (embedded within the Inline XBRL Document) 1 SIGNATURE Pursuant to the require",
+          "source_sha256": "78932efe4ac4680f98414edf767e6a8ed6e0bf0a2c3e05440286d52884d527bd"
+        },
+        {
+          "accession_number": "0001213900-26-088022",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-12T10:50:51Z",
+          "primary_document": "ea0301615-8k_t1energy.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1992243/000121390026088022/ea0301615-8k_t1energy.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. On August 12, 2026, T1 Energy Inc., a Delaware corporation (the \u201cCompany\u201d), issued a press release announcing its financial results for the quarter ended June 30, 2026. A copy of the press release is attached hereto as Exhibit 99.1 to this Current Report on Form 8-K and is incorporated herein by reference. The information in this Item 2.02,",
+          "source_sha256": "f4b9bcb525d410ba1642cfee0959d956e175af794159ca0daf393285d84b4b94"
+        }
+      ]
+    },
+    {
+      "ticker": "CDXS",
+      "quarter": {
+        "quarter_id": 15230,
+        "company_id": 434,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001193125-26-314158",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-23T20:22:28Z",
+          "primary_document": "d24920d8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1200375/000119312526314158/d24920d8k.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. On July 23, 2026, Codexis, Inc. (the \u201cCompany\u201d) disclosed that it expects to report total revenue for the three months ended June 30, 2026 to be at least $14.8 million, and cash, cash equivalents and short-term investments as of June 30, 2026 of approximately $54.9 million. These amounts are preliminary and subject to completion of the Comp",
+          "source_sha256": "54be4704f7a4bffd05f48723be90d0929bfdcb300856aa6fe4b5cfcf2c2b40d1"
+        },
+        {
+          "accession_number": "0001193125-26-344646",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-11T20:11:09Z",
+          "primary_document": "d171403d8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1200375/000119312526344646/d171403d8k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 11, 2026, Codexis, Inc. announced its financial results for the quarter ended June 30, 2026. The full text of the press release issued in connection with the announcement is furnished as Exhibit 99.1 to this Current Report on Form 8-K. The information in Item 2.02 of this Current Report on Form 8-K (including Exhibit 99.1) shall no",
+          "source_sha256": "2b54c27904f2ef05351623ba6e4b0cf23fac601a8d6590050d33d76acdb29d51"
+        }
+      ]
+    },
+    {
+      "ticker": "ASTS",
+      "quarter": {
+        "quarter_id": 7700,
+        "company_id": 217,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001493152-26-033365",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-15T20:18:33Z",
+          "primary_document": "form8-k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1780312/000149315226033365/form8-k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On July 15, 2026, AST SpaceMobile, Inc. (the \u201c Company \u201d) announced a proposed offering (the \u201c Notes Offering \u201d) of convertible senior notes due 2034 (the \u201c Notes \u201d) to qualified institutional buyers pursuant to Rule 144A under the Securities Act of 1933, as amended (the \u201c Securities Act \u201d) and its intention to enter into capped call transac ... cludes certain preliminary unaudited financial information of the Company as of June 30, 2026: Liquidity Update As of June 30, 2026, total cash and cash equivalents and restricted cash was appr",
+          "source_sha256": "15034b1607feb16c2a65cc8c6b215b581bdbae1d485a18e747f66a6aacd86a95"
+        },
+        {
+          "accession_number": "0001193125-26-342540",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-10T20:38:57Z",
+          "primary_document": "asts-20260810.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1780312/000119312526342540/asts-20260810.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. On August 10, 2026, AST SpaceMobile, Inc. (\u201cAST SpaceMobile\u201d or the \u201cCompany\u201d) issued a press release announcing financial results for the three and six months ended June 30, 2026. A copy of the press release is attached hereto as Exhibit 99.1. The information included in this Item 2.02 and in Exhibit 99.1 shall not be deemed \u201cfiled\u201d for pu",
+          "source_sha256": "9cffb787dc52016d480d9499a7fa61bdbf109995a7861a5d2957f4248f37fd92"
+        }
+      ]
+    },
+    {
+      "ticker": "BKD",
+      "quarter": {
+        "quarter_id": 11430,
+        "company_id": 323,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001332349-26-000057",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-09T20:18:59Z",
+          "primary_document": "bkd-20260709.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1332349/000133234926000057/bkd-20260709.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On July 9, 2026, Brookdale Senior Living Inc. (the \"Company\") issued a press release announcing its occupancy for June 2026 and certain other information regarding the quarter ended June 30, 2026. A copy of the press release is furnished herewith as Exhibit 99.1. The information furnished pursuant to this Current Report on Form 8-K (includin",
+          "source_sha256": "f31723fc8d26affef10e4d77fa25e50d825875cd5e3d168828879dfa34c8acee"
+        },
+        {
+          "accession_number": "0001332349-26-000062",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-10T20:18:01Z",
+          "primary_document": "bkd-20260810.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1332349/000133234926000062/bkd-20260810.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 10, 2026, Brookdale Senior Living Inc. (the \"Company\") issued a press release announcing its second quarter 2026 financial results and announcing a conference call to review these results. A copy of the press release is furnished herewith as Exhibit 99.1. Supplemental information related to the Company's second quarter 2026 results ... Results of Operations and Financial Condition. On August 10, 2026, Brookdale Senior Living Inc. (the \"Company\") issued a press release announcing its second quarter 2026 financial results and announcing a conference call to review these results. A copy of the press release is furnished herewith as Exhibit 99.1. Supplemental information related to the Company's second quarter 2026 results is furnished herewith as Exhibit 99.2. The information furnished pursuant to this Current Report on Form 8-K (including the exhibits hereto) shall not be consi",
+          "source_sha256": "a5c6c8d31d0969bcb7ebbb26b51dc3556c5fe31abf4310852a1094a017c71276"
+        }
+      ]
+    },
+    {
+      "ticker": "CRC",
+      "quarter": {
+        "quarter_id": 19619,
+        "company_id": 556,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001609253-26-000122",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-14T13:00:34Z",
+          "primary_document": "crc-20260714.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1609253/000160925326000122/crc-20260714.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. California Resources Corporation (the \" Company \" ) presents in this Item 2.02 certain summary information for the three months ended June 30, 2026 regarding realized prices and commodity derivatives. The summary information presented below is preliminary and unaudited, does not reflect all adjustments and charges, and remains subject to com",
+          "source_sha256": "d5de1c68498751ce35272bf3ced0deb110c9893dc1b60d657bcf77e7707fd766"
+        },
+        {
+          "accession_number": "0001609253-26-000127",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-10T12:06:09Z",
+          "primary_document": "crc-20260810.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1609253/000160925326000127/crc-20260810.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 10, 2026, California Resources Corporation (the \u201cCompany\u201d) issued a press release announcing its financial condition and results of operations for the three and six months ended June 30, 2026. A copy of the press release is furnished as Exhibit 99.1 to this report on Form 8-K, and is incorporated herein by reference. The informatio",
+          "source_sha256": "6e47521747d74abf5f49ec0996c34383f609d16b4efe7478068403abf0e6ff9e"
+        }
+      ]
+    },
+    {
+      "ticker": "PLUG",
+      "quarter": {
+        "quarter_id": 62556,
+        "company_id": 1755,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001104659-26-082854",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-13T11:15:41Z",
+          "primary_document": "tm2620282d1_8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1093691/000110465926082854/tm2620282d1_8k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. As of June 30, 2026, the Company had approximately $162 million of unrestricted cash and cash equivalents. This figure is unaudited and preliminary, subject to normal quarterly closing processes and accounting review, and does not present all information necessary for an understanding of the Company\u2019s financial condition as of June 30, 2026.",
+          "source_sha256": "6df8056b588ba72c3f8355235fb4d7e13eae973876f0e65e9a7d1f547b3a5982"
+        },
+        {
+          "accession_number": "0001104659-26-093339",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-10T20:01:21Z",
+          "primary_document": "tm2622713d1_8k.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1093691/000110465926093339/tm2622713d1_8k.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 10, 2026, Plug Power Inc., a Delaware corporation, issued a press release regarding its financial results for the second quarter ended June 30, 2026. A copy of the press release is furnished herewith as Exhibit 99.1. The information in this Item 2.02 of this Current Report on Form 8-K, including Exhibit 99.1 hereto, shall not be de",
+          "source_sha256": "15f38e335f0471c6dfecf06bc2c89695cca2009d02e78e4b8dfb1178f5c43563"
+        }
+      ]
+    },
+    {
+      "ticker": "RDVT",
+      "quarter": {
+        "quarter_id": 66318,
+        "company_id": 1860,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001193125-26-335043",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-05T20:05:42Z",
+          "primary_document": "rdvt-20260805.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1720116/000119312526335043/rdvt-20260805.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. The preliminary financial information for the three months ended June 30, 2026 set forth under Item 7.01 below is incorporated into this Item 2.02 by reference. Item 7.01 Regulation FD Disclosure. Estimated Preliminary Results for the Three Months Ended June 30, 2026 Set forth below are certain estimated and unaudited preliminary financial r",
+          "source_sha256": "4519cdef2f3b4da2acfc78e0ebe46a6732f25e2a176115a38ac31670a8bb1ee4"
+        },
+        {
+          "accession_number": "0001193125-26-345050",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-11T21:26:49Z",
+          "primary_document": "rdvt-20260810.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1720116/000119312526345050/rdvt-20260810.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition On August 10, 2026, Red Violet, Inc., a Delaware corporation (the \u201cCompany\u201d), issued a press release announcing its financial results for the second quarter ended June 30, 2026 (the \u201cEarnings Release\u201d). A copy of the Earnings Release is furnished herewith as Exhibit 99.1. Also on August 10, 2026, following the issuance of the Earnings Release",
+          "source_sha256": "8b20d65a16690d9fc3373911e9362486fc528e44d47a1afaceec1a86e456f226"
+        }
+      ]
+    },
+    {
+      "ticker": "RXT",
+      "quarter": {
+        "quarter_id": 69042,
+        "company_id": 1938,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001810019-26-000078",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-09T12:13:03Z",
+          "primary_document": "rxt-20260702.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1810019/000181001926000078/rxt-20260702.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. O n July 9, 2026, the Company issued a press release announcing preliminary financial results for the fiscal quarter ended June 30, 2026 and updates to its fiscal year 2026 outlook. A copy of the press release is attached hereto as Exhibit 99.1 and incorporated by reference herein. -2- The information contained in this Item 2.02, including ",
+          "source_sha256": "3293603b1d11a012214cd34b05f1fb73d4ee0ea7102c364a2877170ac16f52d2"
+        },
+        {
+          "accession_number": "0001810019-26-000092",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-10T20:08:51Z",
+          "primary_document": "rxt-20260810.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1810019/000181001926000092/rxt-20260810.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. O n August 10, 2026, Rackspace Technology, Inc. issued a press release announcing its financial results for the fiscal quarter ended June 30, 2026. A copy of the press release is attached hereto as Exhibit 99.1 and incorporated by reference herein. The information contained in this report, including Exhibit 99.1 attached hereto, shall not b",
+          "source_sha256": "1ed74ef9fec8ed16a981b70f1eb0194c61f1b13b5056c6f8ff5b0b4deb2529e5"
+        }
+      ]
+    },
+    {
+      "ticker": "AMR",
+      "quarter": {
+        "quarter_id": 5104,
+        "company_id": 145,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001704715-26-000025",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-27T12:02:06Z",
+          "primary_document": "amr-20260727.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1704715/000170471526000025/amr-20260727.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition Item 9.01 Financial Statements and Exhibits Signatures Exhibit Index Item 2.02 Results of Operations and Financial Condition. On July 27, 2026, Alpha Metallurgical Resources, Inc. (the \u201cCompany\u201d) issued a press release announcing certain preliminary financial results for its fiscal quarter ended June 30, 2026. The press release is attached he ... e announcing certain preliminary financial results for its fiscal quarter ended June 30, 2026. The press release is attached hereto as Exhibit 99.1. This Current Report on Form 8-K and the earn",
+          "source_sha256": "e39f2485bc5d88871db1a9ec52d7cf0e0488704db36069b40eebcbabbe70b380"
+        },
+        {
+          "accession_number": "0001704715-26-000030",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-07T11:32:23Z",
+          "primary_document": "amr-20260807.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1704715/000170471526000030/amr-20260807.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition Item 9.01 Financial Statements and Exhibits Signatures Exhibit Index Item 2.02 Results of Operations and Financial Condition. On August 7, 2026, Alpha Metallurgical Resources, Inc. (the \u201cCompany\u201d) issued a press release announcing earnings and other financial results for its fiscal quarter ended June 30, 2026. The press release is attached he ... se announcing earnings and other financial results for its fiscal quarter ended June 30, 2026. The press release is attached hereto as Exhibit 99.1. Item 9.01 Financial Statements and Exhibits.",
+          "source_sha256": "a712dec5a83c8b4660b979e5c7a0ad5786934398ce55aec49952923ef1f59583"
+        }
+      ]
+    },
+    {
+      "ticker": "ARKO",
+      "quarter": {
+        "quarter_id": 6924,
+        "company_id": 195,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001193125-26-337978",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-06T20:08:30Z",
+          "primary_document": "arko-20260806.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1823794/000119312526337978/arko-20260806.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 6, 2026, ARKO Petroleum Corp., a Delaware corporation (\u201cAPC\u201d), a subsidiary of ARKO Corp., a Delaware corporation (the \u201cCompany\u201d), issued a press release announcing APC\u2019s financial results for the second quarter and six months ended June 30, 2026, which press release includes certain results of operations for the Company for the se",
+          "source_sha256": "a0316645eaa92f609075ce970b3f59af124a4277b9fa588e604a294526905218"
+        },
+        {
+          "accession_number": "0001193125-26-339092",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-07T11:00:16Z",
+          "primary_document": "arko-20260807.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1823794/000119312526339092/arko-20260807.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 7, 2026, ARKO Corp., a Delaware corporation (the \u201cCompany\u201d), issued a press release announcing its financial results for the second quarter ended June 30, 2026. A copy of the press release is furnished as Exhibit 99.1 to this Current Report on Form 8-K and is incorporated by reference into this Item 2.02. Item 7.01 Regulation FD Di",
+          "source_sha256": "bc2d0d50a524bb729c25a13022da466235e48ff686852c7bbdb112ac89dd5185"
+        }
+      ]
+    },
+    {
+      "ticker": "APA",
+      "quarter": {
+        "quarter_id": 5948,
+        "company_id": 168,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001841666-26-000045",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-08T21:07:26Z",
+          "primary_document": "apa8k-20260708.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1841666/000184166626000045/apa8k-20260708.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. On July 8, 2026, APA Corporation issued a press release announcing supplemental information regarding certain financial and operating results for the fiscal quarter ended June 30, 2026. The full text of the press release is furnished herewith as Exhibit 99.1 and incorporated herein by reference. Item 9.01. Financial Statements and Exhibits.",
+          "source_sha256": "5a2d4c84c1d0b372d9b90675981d4b0d1e2b9ccf2a409feac671f6bfe6e04a6b"
+        },
+        {
+          "accession_number": "0001841666-26-000050",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-05T20:33:08Z",
+          "primary_document": "apa8k-20260805.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1841666/000184166626000050/apa8k-20260805.htm",
+          "text": "Item 2.02. Results of Operations and Financial Condition. On August 5, 2026, APA Corporation issued a press release announcing financial and operating results for the fiscal quarter ended June 30, 2026. The full text of the press release is furnished herewith as Exhibit 99.1 and incorporated herein by reference. Item 9.01. Financial Statements and Exhibits. (d) Exhibits. Exhibit No. Description 99",
+          "source_sha256": "0d0ad9f71176b7b6af0963d4e07d76b2b224032abf6c0fbb5b32050bbf91a9cc"
+        }
+      ]
+    },
+    {
+      "ticker": "PDYN",
+      "quarter": {
+        "quarter_id": 61017,
+        "company_id": 1712,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0001193125-26-297985",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-08T11:04:42Z",
+          "primary_document": "pdyn-20260708.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1826681/000119312526297985/pdyn-20260708.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On July 8, 2026, Palladyne AI Corp. (the \"Company\") issued a press release announcing preliminary results for the second quarter ended June 30, 2026. The full text of the press release issued in connection with the announcement is furnished as Exhibit 99.1 to this Current Report on Form 8-K. The Company\u2019s actual results for the quarter ended",
+          "source_sha256": "7ff990037e4e734a3596a147b3aa922f6dfbe789946afbbd3c00f18515ad1cc0"
+        },
+        {
+          "accession_number": "0001193125-26-336621",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-06T10:47:17Z",
+          "primary_document": "pdyn-20260806.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1826681/000119312526336621/pdyn-20260806.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. On August 6, 2026, Palladyne AI Corp. (the \"Company\") issued a press release announcing its financial results for the three and six months ended June 30, 2026, and certain other information. A copy of the press release is furnished herewith as Exhibit 99.1. The information furnished in this Current Report under this Item 2.02 and the exhibit",
+          "source_sha256": "6563e34f11e5c9148993fce4030126066d3430eed7106d9ad55f960f695c67a9"
+        }
+      ]
+    },
+    {
+      "ticker": "RGLD",
+      "quarter": {
+        "quarter_id": 66897,
+        "company_id": 1878,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0000085535-26-000032",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-21T13:05:12Z",
+          "primary_document": "rgld-20260721.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/85535/000008553526000032/rgld-20260721.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition On July 21, 2026, Royal Gold, Inc. issued a press release with certain preliminary financial information for the quarter ended June 30, 2026. A copy of the press release is furnished as Exhibit 99.1 to this Current Report on Form 8-K. The information furnished under this Item 2.02, including the exhibit, will not be deemed \u201cfiled\u201d for purpose",
+          "source_sha256": "bd1f1d9b43c92e5d5669099c1dcd47382661183f3f46f275a99900d0ff7117cb"
+        },
+        {
+          "accession_number": "0000085535-26-000038",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-05T21:14:50Z",
+          "primary_document": "rgld-20260805.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/85535/000008553526000038/rgld-20260805.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition On August 5, 2026, Royal Gold, Inc. reported its results for the quarter ended June 30, 2026. A copy of the press release is furnished as Exhibit 99.1 to this Current Report on Form 8-K. The information furnished under this Item 2.02, including the exhibit, will not be deemed \u201cfiled\u201d for purposes of Section 18 of the Securities Exchange Act o",
+          "source_sha256": "bb4df47ecfcda8a33b0d272aff8fed937eaee81040fbe456d625c304cfffc283"
+        }
+      ]
+    },
+    {
+      "ticker": "SM",
+      "quarter": {
+        "quarter_id": 72047,
+        "company_id": 2026,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "period_end": "2026-06-30"
+      },
+      "filings": [
+        {
+          "accession_number": "0000893538-26-000104",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-07-16T20:15:15Z",
+          "primary_document": "sm-20260716.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/893538/000089353826000104/sm-20260716.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition In accordance with General Instruction B.2. of Form 8-K, the following information shall not be deemed filed for purposes of Section 18 of the Securities Exchange Act of 1934, as amended (the \u201c Exchange Act \u201d), or otherwise subject to the liabilities of that section, nor shall such information and exhibits be deemed incorporated by reference  ... mpany presents in this Item 2.02 certain information for the three months ended June 30, 2026, regarding its realized prices and commodity derivative activity. Realized Prices The following tab",
+          "source_sha256": "95f058e2b1d69f63248b99a61bc613c200bf3d5b42d0ba1b3647531bc6a8a86d"
+        },
+        {
+          "accession_number": "0000893538-26-000119",
+          "form": "8-K",
+          "items": "2.02",
+          "acceptance_timestamp_utc": "2026-08-05T20:18:04Z",
+          "primary_document": "sm-20260805.htm",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/893538/000089353826000119/sm-20260805.htm",
+          "text": "Item 2.02 Results of Operations and Financial Condition. In accordance with General Instruction B.2. of Form 8-K, the following information, including Exhibit 99.1, shall not be deemed filed for purposes of Section 18 of the Securities Exchange Act of 1934, as amended (\u201c Exchange Act \u201d), or otherwise subject to the liabilities of that section, nor shall such information and exhibits be deemed inco ... ce in such a filing. On August 5, 2026, SM Energy Company (\u201c Company \u201d) issued a press release announcing its financial and operating results for the second quarter of 2026. A copy of the press release is furnished as Exhibit 99.1 to this report and incorporated by reference herein. As indicated in the press release, the Company scheduled a webcast and conference call for August 6, 2026, at 8:00 a.m. Mountain time/10:00 a.m. Eastern time. The conference call is publicly accessible via webcast (available live and for replay) and telephone, and t",
+          "source_sha256": "752993ac5d4683a55bf6d8add6bf7672b368fa1b79a916e8d837c577c1e3371d"
+        }
+      ]
+    }
+  ]
+}

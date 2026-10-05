@@ -1,0 +1,35 @@
+{
+  "note": "Compact frozen audit excerpts with reconstructed HTML formatting, not full raw downloads. Original SEC URLs and raw document hashes are preserved in the audit CSV.",
+  "cases": [
+    {
+      "ticker": "AVT",
+      "cik": "8858",
+      "accession": "0000008858-26-000066",
+      "accepted": "2026-08-05T12:03:39Z",
+      "url": "https://www.sec.gov/Archives/edgar/data/8858/000000885826000066/avt-20260805x8k.htm",
+      "quarter": {"quarter_id": 1, "company_id": 1, "fiscal_year": 2026, "fiscal_quarter": "Q4", "period_end": "2026-06-27"},
+      "primary_html": "<p>Item 2.02 Results of Operations and Financial Condition.</p><p>On August 5, 2026, Avnet, Inc. issued a press release announcing its fourth quarter and year end results of operations for fiscal 2026. A copy of the press release is attached hereto as <a href='avt-20260805xex99d1.htm'>Exhibit 99.1</a>.</p>",
+      "exhibits": {"avt-20260805xex99d1.htm": "Avnet Reports Fourth Quarter and Fiscal 2026 Financial Results. PHOENIX - August 5, 2026 - Avnet, Inc. (Nasdaq: AVT) today announced results for its fourth quarter and fiscal year 2026 ended June 27, 2026."}
+    },
+    {
+      "ticker": "CPB",
+      "cik": "16732",
+      "accession": "0000016732-26-000020",
+      "accepted": "2026-09-03T11:17:14Z",
+      "url": "https://www.sec.gov/Archives/edgar/data/16732/000001673226000020/cpb-20260903.htm",
+      "quarter": {"quarter_id": 2, "company_id": 2, "fiscal_year": 2026, "fiscal_quarter": "Q4", "period_end": "2026-08-02"},
+      "primary_html": "<p>Item 2.02 &#8211; Results of Operations and Financial Condition</p><p>On September 3, 2026, The Campbell's Company issued a press release announcing financial results for the quarter ended August 2, 2026, a copy of which is attached as Exhibit 99.1.</p>",
+      "exhibits": {}
+    },
+    {
+      "ticker": "ORCL",
+      "cik": "1341439",
+      "accession": "0001193125-26-387905",
+      "accepted": "2026-09-10T20:16:50Z",
+      "url": "https://www.sec.gov/Archives/edgar/data/1341439/000119312526387905/orcl-20260910.htm",
+      "quarter": {"quarter_id": 3, "company_id": 3, "fiscal_year": 2027, "fiscal_quarter": "Q1", "period_end": "2026-08-31"},
+      "primary_html": "<p>Item 2.02</p><p>Results of <span>Operati</span><span>ons</span> and Financial Condition</p><p>On September 10, 2026, Oracle Corporation issued a press release announcing financial results for its fiscal first quarter ended August 31, 2026. A copy of this press release is furnished as Exhibit 99.1 to this report.</p>",
+      "exhibits": {}
+    }
+  ]
+}
