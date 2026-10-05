@@ -59,6 +59,7 @@ class AdminUIRunResult:
     report_filename: str | None = None
     report_sha256: str | None = None
     summary_rows: tuple[str, ...] = ()
+    operational_decision: Mapping[str, Any] | None = None
     business_outcome: str | None = None
     preview_domain: str | None = None
     copy_actionable: bool | None = None
@@ -1086,6 +1087,7 @@ class FundamentalsAdminUIService:
             report_filename=(WORKFLOW_REPORT_NAME if workflow_mode else OPERATION_REPORT_NAME) if report else None,
             report_sha256=report.report_sha256 if report else None,
             summary_rows=report.summary_rows if report else (),
+            operational_decision=result.get("operational_decision"),
             business_outcome=taxonomy["business_outcome"] if taxonomy else None,
             preview_domain=taxonomy["domain"] if taxonomy else None,
             copy_actionable=(

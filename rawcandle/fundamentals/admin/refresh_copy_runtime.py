@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from rawcandle.fundamentals.admin.refresh_operational_decision import advance_refresh_decision, refresh_operational_decision, operational_decision_section
+
 import hashlib
 import json
 import shutil
@@ -962,6 +964,7 @@ def _render_report(result: Mapping[str, Any]) -> str:
         f"- First-public dates bootstrapped: {bootstrap.get('bootstrapped_in_candidate', 0)}",
         f"- B1/full rebuild: {downstream.get('analysis', {}).get('status', 'NOT_RUN')}",
         "- Production writes: 0", "",
+        *operational_decision_section(result.get("operational_decision")),
         "## Read-Only Source Binding", "",
         f"- Market mode: `{market_source.get('mode', 'NOT_RECORDED')}`",
         f"- Source contract: `{market_manifest.get('source_contract_version', 'NOT_RECORDED')}`",
@@ -1111,6 +1114,7 @@ def run_apply(
     failed_stage = ProgressStage.PREVIEW_BINDING
     api = client or SharadarClient()
     locks = ExitStack()
+    preview: dict[str, Any] = {}
     try:
         progress.running(failed_stage, "Validating bound Refresh Preview.")
         preview = _load_bound_preview(preview_payload_path, preview_fingerprint, run_root)
@@ -1301,6 +1305,23 @@ def run_apply(
         if not result["production_file_state_unchanged"]:
             raise RuntimeError("PRODUCTION_FILE_STATE_CHANGED_DURING_REFRESH_TEST")
         writer.write_json("result.json", result)
+        if preview.get("operational_decision"):
+            # Reuse the real evidence/binding gate; a completed Test is not itself authorization.
+            from rawcandle.fundamentals.admin.refresh_production import load_production_authorization
+            try:
+                load_production_authorization(
+                    preview_payload_path=preview_payload_path, preview_fingerprint=preview_fingerprint,
+                    test_run_id=run_id, run_root=run_root,
+                )
+                production_state, production_reason = "AUTHORIZED", "MATCHING_SUCCESSFUL_TEST_VALIDATED"
+            except (ValueError, OSError) as authorization_error:
+                production_state, production_reason = "NOT_AUTHORIZED", str(authorization_error)
+            result["operational_decision"] = advance_refresh_decision(
+                preview["operational_decision"], stage="Test on copies",
+                production_state=production_state, production_reason_code=production_reason,
+            )
+            result["recommended_next_action"] = result["operational_decision"]["recommended_action_text"]
+            writer.write_json("result.json", result)
         writer.write_text("operation_report.md", _render_report(result))
         progress.completed(failed_stage, "Durable Test evidence written.")
         failed_stage = ProgressStage.CLEANUP
@@ -1339,6 +1360,17 @@ def run_apply(
             "production_writes": 0, "database_safety": "COPY_ONLY",
             "production_file_state_unchanged": before_files == _production_file_state(source_paths),
         }
+        if preview.get("operational_decision"):
+            result["operational_decision"] = advance_refresh_decision(
+                preview["operational_decision"], stage="Test on copies",
+                technical_failure=f"{type(exc).__name__}: {exc}",
+            )
+        else:
+            result["operational_decision"] = refresh_operational_decision(
+                safe_effective_changes=None, held_items=[], global_blockers=[],
+                future_test_authorized=False, test_reason_code="TECHNICAL_FAILURE",
+                stage="Test on copies", technical_failure=f"{type(exc).__name__}: {exc}",
+            )
         writer.write_json("result.json", result)
         writer.write_text("operation_report.md", _render_report(result))
         writer.write_exit_code(2)

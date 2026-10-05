@@ -899,6 +899,13 @@ def test_next_preview_after_published_generation_is_no_change(tmp_path: Path) ->
     assert output["refresh_preview"]["state"]["mode"] == "ESTABLISHED"
     assert output["refresh_preview"]["state"]["published_watermark"] == "2026-08-26"
     assert output["refresh_preview"]["future_test_authorized"] is False
+    decision = output["operational_decision"]
+    assert decision == output["refresh_preview"]["operational_decision"]
+    assert decision["decision_code"] == "NO_SAFE_CHANGES"
+    assert decision["production_gate"]["state"] == "NOT_APPLICABLE"
+    assert decision["recommended_action_code"] != "RUN_TEST"
+    persisted = json.loads((Path(output["artifact_dir"]) / "result.json").read_text())
+    assert persisted["operational_decision"] == decision
 
 
 def test_consecutive_scheduler_previews_keep_published_baseline_and_accumulate_pending_source(

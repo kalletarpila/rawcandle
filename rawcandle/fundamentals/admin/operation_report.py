@@ -293,6 +293,10 @@ def resolve_operation_report_download(
 
 
 def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    if result.get("operational_decision"):
+        from rawcandle.fundamentals.admin.refresh_operational_decision import operational_decision_rows
+
+        return (final_status_message(result), *operational_decision_rows(result["operational_decision"]))
     taxonomy = taxonomy_preview_presentation(result)
     if taxonomy:
         return _taxonomy_preview_rows(taxonomy, result)
@@ -501,6 +505,10 @@ def render_operation_report(
     ]
     lines = ["# Fundamentals Administration Operation Report"]
     section(lines, "Executive Summary", executive)
+    if result.get("operational_decision"):
+        from rawcandle.fundamentals.admin.refresh_operational_decision import operational_decision_section
+
+        lines.extend(operational_decision_section(result["operational_decision"]))
     if result.get("operation_type") == "ADD_TICKERS" and result.get("ticker_reporting"):
         from rawcandle.fundamentals.admin.ticker_reporting import render_ticker_sections
 

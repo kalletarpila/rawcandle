@@ -639,6 +639,10 @@ def _yyai_published_financial_fingerprint(paths: BatchAddTickerPaths) -> dict[st
 def test_refresh_full_workflow_quarantines_yyai_and_publishes_two_safe_tickers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from functools import partial
+
+    # This legacy fixture exercises holds, not the accepted three-year age-out exemption.
+    monkeypatch.setattr(__name__ + ".run_preview", partial(run_preview, historical_source_window_review_years=0))
     fixture = _fixture(tmp_path, monkeypatch, include_yyai_hold=True)
     held_before = _yyai_published_financial_fingerprint(fixture.paths)
 
@@ -655,6 +659,11 @@ def test_refresh_full_workflow_quarantines_yyai_and_publishes_two_safe_tickers(
     assert preview["summary_counts"]["safe_changes"] == 2
     assert preview["summary_counts"]["held_for_review"] == 1
     assert preview["summary_counts"]["global_blockers"] == 0
+    assert preview["operational_decision"]["test_gate"]["authorized"] is True
+    assert preview["operational_decision"]["production_gate"]["state"] == "NOT_EVALUATED"
+    assert test["operational_decision"]["production_gate"]["state"] == "AUTHORIZED"
+    assert workflow["operational_decision"]["decision_code"] == "PUBLICATION_COMPLETED"
+    assert workflow["terminal_summary"]["operational_decision"] == workflow["operational_decision"]
     assert [item["ticker"] for item in preview["refresh_preview"]["review_partition"]["held"]] == ["YYAI"]
     assert {
         item["ticker"] for item in test["downstream"]["ticker_changes"]
@@ -691,6 +700,12 @@ def test_refresh_full_workflow_quarantines_yyai_and_publishes_two_safe_tickers(
     assert later["refresh_preview"]["discovery"]["queued_tickers_reevaluated"] == ["YYAI"]
     assert [item["ticker"] for item in later["refresh_preview"]["review_partition"]["held"]] == ["YYAI"]
     assert later["refresh_preview"]["review_queue"]["open_count"] == 1
+    assert later["operational_decision"]["safe_effective_changes"] == 0
+    assert later["operational_decision"]["held_item_count"] == 1
+    assert later["operational_decision"]["decision_code"] == "NO_SAFE_CHANGES"
+    assert later["operational_decision"]["local_hold_blocked_safe_changes"] is False
+    assert later["operational_decision"]["production_gate"]["state"] == "NOT_APPLICABLE"
+    assert "No Test or Production run is required" in later["recommended_next_action"]
     _assert_terminal_lane_cleanup(fixture)
 
 
@@ -1023,6 +1038,8 @@ def test_refresh_full_workflow_global_review_still_stops_fail_closed(
     assert result.outcome == "STOPPED"
     assert [item["stage"] for item in workflow["stages"]] == ["Preview"]
     assert preview["summary_counts"]["global_blockers"] == 1
+    assert workflow["operational_decision"]["decision_code"] == "GLOBAL_BLOCKER"
+    assert workflow["operational_decision"]["production_gate"]["state"] == "NOT_AUTHORIZED"
     assert preview["summary_counts"]["held_for_review"] == 0
     assert preview["refresh_preview"]["future_test_authorized"] is False
     assert preview["refresh_preview"]["review_queue"]["open_count"] == 0

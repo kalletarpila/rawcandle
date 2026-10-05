@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import parse_batch_tickers
+from rawcandle.fundamentals.admin.refresh_operational_decision import advance_refresh_decision, operational_decision_rows, operational_decision_section
 from rawcandle.fundamentals.admin.contracts import (
     AdminOperationType,
     build_batch_request,
@@ -155,7 +156,13 @@ def _refresh_problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
             "ticker": str(item.get("ticker") or "UNKNOWN"),
             "classification": "REVIEW_REQUIRED",
             "reason": reason,
-            "action": str(payload.get("recommended_next_action") or ""),
+            "action": (
+                "Review this ticker separately. It remains quarantined."
+                if payload.get("operational_decision") and str(item.get("ticker")) in held_by_ticker
+                else "Resolve this item's global review evidence."
+                if payload.get("operational_decision")
+                else str(payload.get("recommended_next_action") or "")
+            ),
             "reason_codes": [reason, *[value for value in event_reasons if value != reason]],
             "reasons": [value.replace("_", " ").title() for value in [reason, *event_reasons]],
             "review_required": True,
@@ -403,6 +410,11 @@ def _terminal_summary(
         stop_kind = "TECHNICAL_FAILURE"
         headline = _child_reason(payload, child, fallback_reason)
         next_action = str(payload.get("recommended_next_action") or "Review the stage error and rerun only after correcting its cause.")
+    decision = payload.get("operational_decision")
+    if decision:
+        stop_kind = decision["decision_code"]
+        headline = decision["decision_text"]
+        next_action = decision["recommended_action_text"]
     batch = _batch_outcome(evidence, production_published=production_completed)
     if not batch["requested"]:
         batch["requested"] = requested_count
@@ -428,6 +440,7 @@ def _terminal_summary(
         "production_database_writes": _production_write_count(payload, completed=production_completed),
         "terminal_cleanup": dict(payload.get("terminal_cleanup") or {}),
         "recommended_next_action": next_action,
+        **({"operational_decision": dict(decision)} if decision else {}),
         "source": "STRUCTURED_CHILD_RESULT" if evidence is payload else "STRUCTURED_LATEST_MATERIAL_RESULT",
     }
 
@@ -557,6 +570,11 @@ def workflow_ui_summary(result: Mapping[str, Any]) -> tuple[str, ...]:
         f"{stage_label}: {terminal.get('authoritative_stage') or result.get('current_stage') or 'Not recorded'}.",
         str(terminal.get("headline") or result.get("stop_reason") or "No terminal reason was recorded."),
     ]
+    if result.get("operational_decision"):
+        return (
+            *rows[:2], *operational_decision_rows(result["operational_decision"]),
+            f"Production ran: {'Yes' if terminal.get('production_entered') else 'No'}.",
+        )
     if batch:
         rows.append(
             f"Requested: {batch.get('requested', 0)}; eligible: {batch.get('eligible', 0)}; "
@@ -631,6 +649,7 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
         f"- Final completed stage: {result.get('final_completed_stage') or 'None'}",
         f"- Production completed: {'Yes' if result.get('production_completed') else 'No'}",
         f"- NO_CHANGE: {'Yes' if result.get('outcome') == 'NO_CHANGE' else 'No'}",
+        *operational_decision_section(result.get("operational_decision")),
     ]
     if result.get("outcome") not in {"COMPLETED", "NO_CHANGE"}:
         lines.extend([
@@ -870,12 +889,31 @@ def run_operation_workflow(
     persist()
     preview_payload: Mapping[str, Any] = {}
     test_payload: Mapping[str, Any] = {}
+
+    def stage_decision(payload: Mapping[str, Any], child: Any, stage: str) -> Mapping[str, Any]:
+        if adapter.operation_type != AdminOperationType.REFRESH_FUNDAMENTALS:
+            return payload
+        decision = payload.get("operational_decision") or result.get("operational_decision")
+        if not decision:
+            return payload  # Legacy evidence must not acquire invented authorization facts.
+        if _value(child, "status") != "COMPLETED" or _value(child, "outcome") not in {"COMPLETED", "NO_CHANGE", "REVIEW_REQUIRED"}:
+            if not payload.get("operational_decision") or decision["decision_code"] != "TECHNICAL_FAILURE":
+                decision = advance_refresh_decision(
+                    decision, stage=stage,
+                    technical_failure=_child_reason(payload, None, _value(child, "message") or f"{stage} failed."),
+                )
+        elif stage != "Preview" and not payload.get("operational_decision"):
+            decision = advance_refresh_decision(decision, stage=stage)
+        result["operational_decision"] = dict(decision)
+        return dict(payload) | {"operational_decision": decision}
+
     try:
         emit("Preview", 1, "RUNNING", "Preview - Running")
         stage_started = utc_now()
         preview = adapter.preview_stage(child_progress("Preview", 1))
         stage_completed = utc_now()
         preview_payload = _load_result(run_root, _value(preview, "run_id"))
+        preview_payload = stage_decision(preview_payload, preview, "Preview")
         preview_record = _stage_record("Preview", preview, stage_started, stage_completed)
         result["stages"].append(preview_record)
         if adapter.operation_type == AdminOperationType.REFRESH_FUNDAMENTALS:
@@ -960,6 +998,7 @@ def run_operation_workflow(
             test = adapter.test_stage(preview, child_progress("Test on copies", 2))
             stage_completed = utc_now()
             test_payload = _load_result(run_root, _value(test, "run_id"))
+            test_payload = stage_decision(test_payload, test, "Test on copies")
             test_record = _stage_record("Test on copies", test, stage_started, stage_completed)
             result["stages"].append(test_record)
             test_batch = _batch_outcome(test_payload)
@@ -1003,6 +1042,12 @@ def run_operation_workflow(
                         "Test on copies",
                         "Full workflow stopped after Test on copies because reporting integrity requires attention. Manual Production review remains available.",
                     )
+                    if result.get("operational_decision"):
+                        result["operational_decision"] = advance_refresh_decision(
+                            result["operational_decision"], stage="Test on copies",
+                            technical_failure=result["stop_reason"],
+                        )
+                        test_payload = dict(test_payload) | {"operational_decision": result["operational_decision"]}
                     terminal = _terminal_summary(
                         stage="Test on copies", child=test, payload=test_payload,
                         workflow_outcome=result["outcome"], requested_count=len(adapter.requested_inputs),
@@ -1019,6 +1064,7 @@ def run_operation_workflow(
             production = adapter.production_stage(preview, test, child_progress("Production update", 3))
             stage_completed = utc_now()
             production_payload = _load_result(run_root, _value(production, "run_id"))
+            production_payload = stage_decision(production_payload, production, "Production update")
             production_record = _stage_record("Production update", production, stage_started, stage_completed)
             result["stages"].append(production_record)
             if adapter.operation_type == AdminOperationType.REFRESH_FUNDAMENTALS:
@@ -1107,6 +1153,21 @@ def run_operation_workflow(
         result["completed_at_utc"] = utc_now()
         if result["workflow_status"] == "RUNNING":
             stop(result["current_stage"], "Workflow ended without a terminal stage.", failed=True)
+        if result.get("operational_decision"):
+            if result["workflow_status"] == "FAILED":
+                result["operational_decision"] = advance_refresh_decision(
+                    result["operational_decision"], stage=result["current_stage"],
+                    technical_failure=result["stop_reason"],
+                )
+            decision = result["operational_decision"]
+            terminal = result.setdefault("terminal_summary", {})
+            terminal.update(
+                operational_decision=decision, headline=decision["decision_text"],
+                reason=decision["decision_text"], recommended_next_action=decision["recommended_action_text"],
+                stop_kind=decision["decision_code"],
+            )
+            if result["outcome"] != "COMPLETED":
+                result["stop_reason"] = decision["decision_text"]
         item_authority, appendix_source = _select_report_authorities(result)
         result["authoritative_item_evidence"] = item_authority
         result["appendix_source"] = appendix_source

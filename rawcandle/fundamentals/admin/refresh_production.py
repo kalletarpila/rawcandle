@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from rawcandle.fundamentals.admin.refresh_operational_decision import advance_refresh_decision, operational_decision_section
+
 import json
 import os
 import secrets
@@ -669,6 +671,7 @@ def render_report(result: Mapping[str, Any]) -> str:
         f"- Candidate/proposed next watermark: {proposed_watermark or 'NOT_PREPARED'}",
         f"- Postflight: {'PASSED' if result.get('postflight') else 'NOT_COMPLETED'}",
         f"- Rollback: {(result.get('rollback') or {}).get('status', 'NOT_REQUIRED')}",
+        *operational_decision_section(result.get("operational_decision")),
         "", "## Source Refresh", "",
         f"- Refresh-set fingerprint: `{result.get('preview_fingerprint')}`",
         f"- Source schema fingerprint: `{refresh_state.get('source_schema_fingerprint', 'not published')}`",
@@ -879,6 +882,11 @@ def run_production_apply(
             preview_payload_path=preview_payload_path, preview_fingerprint=preview_fingerprint,
             test_run_id=test_run_id, run_root=run_root,
         )
+        if preview.get("operational_decision"):
+            result["operational_decision"] = advance_refresh_decision(
+                preview["operational_decision"], stage="Production update",
+                production_state="AUTHORIZED", production_reason_code="MATCHING_SUCCESSFUL_TEST_VALIDATED",
+            )
         result["preview"] = {"run_id": preview_payload_path.resolve().parent.name, "payload": str(preview_payload_path.resolve())}
         result["test_on_copies"] = {"run_id": test_run_id, "outcome": test["outcome"]}
         test_source_binding = test["_authorized_source_binding"]
@@ -1340,6 +1348,14 @@ def run_production_apply(
         completed = utc_now()
         result["completed_at_utc"] = completed
         result["duration_seconds"] = _duration(started, completed)
+        if result.get("operational_decision"):
+            result["operational_decision"] = advance_refresh_decision(
+                result["operational_decision"], stage="Production update",
+                production_state="AUTHORIZED", production_reason_code="MATCHING_SUCCESSFUL_TEST_VALIDATED",
+                completed=successful,
+                technical_failure=None if successful else str(result.get("error") or result.get("errors") or result.get("outcome")),
+            )
+            result["recommended_next_action"] = result["operational_decision"]["recommended_action_text"]
         writer.write_json("result.json", result)
         writer.write_text("operation_report.md", render_report(result))
         terminal = RunStage.COMPLETED if result.get("outcome") == "COMPLETED" else RunStage.FAILED_AFTER_WRITE if write_boundary_crossed else RunStage.FAILED_BEFORE_WRITE

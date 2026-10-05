@@ -14,6 +14,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
+from rawcandle.fundamentals.admin.refresh_operational_decision import refresh_operational_decision, operational_decision_section
 from rawcandle.fundamentals.admin.contracts import (
     AdminBatchRequest,
     AdminFinalResult,
@@ -1707,6 +1708,7 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         f"- Global blockers: `{counts.get('global_blockers', 0)}`",
         f"- Fiscal identity revisions: `{counts.get('fiscal_identity_revisions', 0)}`",
         f"- Fiscal identity revisions requiring review: `{counts.get('fiscal_identity_revisions_requiring_review', 0)}`",
+        *operational_decision_section(result.get("operational_decision")),
         "",
         "## Discovery",
         "",
@@ -2121,6 +2123,20 @@ def run_preview(
                 )
             },
         }
+        test_reason = (
+            "GLOBAL_BLOCKER_PRESENT" if global_blockers
+            else "NO_SAFE_CHANGES_TO_PUBLISH" if not replacement
+            else "MANUAL_PREVIEW_REQUIRED" if trigger_source != "MANUAL"
+            else "DISCOVERY_INCOMPLETE" if discovery["status"] != "COMPLETE"
+            else "PUBLICATION_DATE_PREREQUISITES" if not publication_date_gate_authorized(publication_state)
+            else "SAFE_CHANGES_TEST_AUTHORIZED"
+        )
+        decision = refresh_operational_decision(
+            safe_effective_changes=len(replacement), held_items=preview["review_partition"]["held"],
+            global_blockers=preview["review_partition"]["global_blockers"],
+            future_test_authorized=preview["future_test_authorized"], test_reason_code=test_reason,
+        )
+        preview["operational_decision"] = decision
         preview_path = writer.write_json("refresh_preview.json", preview)
         changes_path = writer.write_json("refresh_ticker_changes.json", changes)
         unknown_path = writer.write_json("refresh_unknown_tickers.json", unknown)
@@ -2168,22 +2184,13 @@ def run_preview(
                 "review_required": str(review_path),
                 "publish_date_bootstrap": str(bootstrap_path),
             },
-            recommended_next_action=(
-                "No relevant Sharadar fundamentals changes since the previous successful refresh."
-                if outcome == AdminStatus.NO_CHANGE
-                else "Resolve global review items before a future Test on copies."
-                if global_blockers
-                else "Safe changes may continue; held ticker financial state remains quarantined and visible in the review queue."
-                if held and replacement
-                else "Review the read-only Preview. Use only this exact manual Preview for a separately approved Test on copies."
-                if trigger_source == "MANUAL"
-                else "Scheduler Preview is informational only; run a fresh manual Preview before Test on copies."
-            ),
+            recommended_next_action=decision["recommended_action_text"],
         )
         result = result_obj.as_dict() | {
             "artifact_dir": str(writer.run_dir),
             "preview_payload_path": str(preview_path),
             "refresh_preview": preview,
+            "operational_decision": decision,
             "network_used": True,
             "trigger_source": trigger_source,
             "database_safety": "NO_PRODUCTION_DATABASE_WRITES; OPERATIONAL_REVIEW_QUEUE_UPDATED",
@@ -2227,6 +2234,12 @@ def run_preview(
             "database_safety": "NO_PRODUCTION_DATABASE_WRITES; OPERATIONAL_REVIEW_QUEUE_MAY_BE_UPDATED",
             "production_file_state_unchanged": before == _production_file_state(source_paths),
         }
+        result["operational_decision"] = refresh_operational_decision(
+            safe_effective_changes=None, held_items=[], global_blockers=[],
+            future_test_authorized=False, test_reason_code="TECHNICAL_FAILURE",
+            technical_failure=f"{type(exc).__name__}: {exc}",
+        )
+        result["recommended_next_action"] = result["operational_decision"]["recommended_action_text"]
         writer.write_json("result.json", result)
         writer.write_text("operation_report.md", _render_refresh_report(result))
         writer.write_exit_code(2)
