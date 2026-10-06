@@ -105,6 +105,14 @@ def _resolve(quarters, input_record):
 
 
 def validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(plan, dict):
+        raise ValueError("PUBLICATION_PLAN_SHAPE_INVALID")
+    mode = plan.get("policy_mode", "LEGACY")
+    if mode == "PUBLICATION_EVENT_POLICY_V1":
+        from rawcandle.fundamentals.admin.policy_reviewed_publication_plan import validate_policy_plan
+        return validate_policy_plan(plan)
+    if mode != "LEGACY":
+        raise ValueError("PUBLICATION_PLAN_POLICY_MODE_UNSUPPORTED")
     try:
         if type(plan["schema_version"]) is not int or plan["schema_version"] != SCHEMA_VERSION:
             raise ValueError("PUBLICATION_PLAN_SCHEMA_UNSUPPORTED")
@@ -203,7 +211,7 @@ def _ordered_cases(plan):
     cases = sorted(plan["per_case"], key=_key)
     cases.sort(key=lambda c: max(c["state"]["quarter"][0].get("first_public_result_date") or "",
                                  c["state"]["quarter"][0].get("source_availability_date") or ""), reverse=True)
-    cases.sort(key=lambda c: {"MISSING": 0, "UNRESOLVED": 1, "NOT_FOUND": 2}[c["prior_status"]])
+    cases.sort(key=lambda c: {"MISSING": 0, "UNRESOLVED": 1, "NOT_FOUND": 2, "AMBIGUOUS": 3}[c["prior_status"]])
     return cases
 
 
@@ -212,7 +220,7 @@ def _case_quarters(cases, record):
     return [lookup[_key(c)] for c in cases]
 
 
-def load_plan(path: Path) -> dict[str, Any]:
+def read_unique_json(path: Path) -> dict[str, Any]:
     if path.is_symlink() or not path.is_file():
         raise ValueError("PUBLICATION_PLAN_PATH_INVALID")
     def unique_fields(pairs):
@@ -222,16 +230,30 @@ def load_plan(path: Path) -> dict[str, Any]:
                 raise ValueError("PUBLICATION_PLAN_DUPLICATE_JSON_FIELD")
             result[key] = value
         return result
-    return validate_plan(json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_fields))
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_fields)
+
+
+def load_plan(path: Path) -> dict[str, Any]:
+    return validate_plan(read_unique_json(path))
 
 
 def prepare_reviewed_plan(*, project_root: Path, allowlist_path: Path, output_plan: Path,
                           client: SecClient | None = None, as_of_date: str | None = None,
-                          retry_days: int = 60, network_budget_seconds: float = 1800) -> dict[str, Any]:
+                          retry_days: int = 60, network_budget_seconds: float = 1800,
+                          publication_event_policy: str | None = None,
+                          policy_evidence_path: Path | None = None) -> dict[str, Any]:
     root = project_root.resolve()
     if not math.isfinite(network_budget_seconds) or network_budget_seconds <= 0:
         raise ValueError("PUBLICATION_NETWORK_BUDGET_INVALID")
     day = as_of_date or utc_now()[:10]
+    if publication_event_policy is not None:
+        if publication_event_policy != "PUBLICATION_EVENT_POLICY_V1" or client is not None:
+            raise ValueError("PUBLICATION_PLAN_POLICY_INPUT_MODE_INVALID")
+        from rawcandle.fundamentals.admin.policy_reviewed_publication_plan import prepare_policy_plan
+        return prepare_policy_plan(project_root=project_root,allowlist_path=allowlist_path,output_plan=output_plan,
+                                   policy_evidence_path=policy_evidence_path,as_of_date=day,retry_days=retry_days)
+    if policy_evidence_path is not None:
+        raise ValueError("PUBLICATION_POLICY_MODE_REQUIRED")
     destination = output_plan.resolve()
     if any(base == destination or base in destination.parents for base in (root / "data", root / "backups")):
         raise ValueError("PUBLICATION_PLAN_OUTPUT_PATH_UNSAFE")
@@ -307,6 +329,14 @@ def prepare_reviewed_plan(*, project_root: Path, allowlist_path: Path, output_pl
     if fingerprint(resolve_active_generation(root, require_generation=True).manifest) != fingerprint(binding.manifest):
         raise RuntimeError("PUBLICATION_PLAN_GENERATION_DRIFT")
     _require_clean_journal(root)
+    publish_plan(plan, output_plan)
+    return {"status": "PREPARED" if cases else "SKIPPED", "plan_path": str(output_plan.resolve()),
+            "plan_id": plan["plan_id"], "plan_fingerprint": plan["plan_fingerprint"],
+            "source_allowlist_count": len(allowed), "source_allowlist_fingerprint": provenance["allowlist_fingerprint"],
+            "prepared_key_count": len(cases), "classification_counts": dict(Counter(r["fresh_outcome"] for r in classifications))}
+
+
+def publish_plan(plan, output_plan):
     output_plan.parent.mkdir(parents=True, exist_ok=True)
     # Publish a complete, exclusive artifact; never overwrite an existing review.
     with tempfile.NamedTemporaryFile(dir=output_plan.parent, mode="w", encoding="utf-8", delete=False) as target:
@@ -326,10 +356,6 @@ def prepare_reviewed_plan(*, project_root: Path, allowlist_path: Path, output_pl
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-    return {"status": "PREPARED" if cases else "SKIPPED", "plan_path": str(output_plan.resolve()),
-            "plan_id": plan["plan_id"], "plan_fingerprint": plan["plan_fingerprint"],
-            "source_allowlist_count": len(allowed), "source_allowlist_fingerprint": provenance["allowlist_fingerprint"],
-            "prepared_key_count": len(cases), "classification_counts": dict(Counter(r["fresh_outcome"] for r in classifications))}
 
 
 def revalidate_plan_state(plan, binding, *, as_of_date):
@@ -339,13 +365,21 @@ def revalidate_plan_state(plan, binding, *, as_of_date):
         raise RuntimeError("PUBLICATION_PLAN_GENERATION_DRIFT")
     canonical = binding.role_paths()["canonical"]
     keys = normalize_allowlist(plan["prepared_keys"])
-    scope = select_exact_scope(canonical, keys, as_of_date=as_of_date, retry_days=plan["retry_days"])
+    policy = plan.get("policy_mode") == "PUBLICATION_EVENT_POLICY_V1"
+    if policy:
+        from rawcandle.fundamentals.admin.policy_reviewed_publication_plan import policy_scope, _evidence_rows
+        scope = policy_scope(canonical,keys,as_of_date=as_of_date,retry_days=plan["retry_days"])
+    else:
+        scope = select_exact_scope(canonical, keys, as_of_date=as_of_date, retry_days=plan["retry_days"])
     if set(scope["quarter_keys"]) != set(keys):
         raise RuntimeError("PUBLICATION_PLAN_OPEN_SCOPE_DRIFT")
     with closing(sqlite3.connect(canonical.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
-        if any(state_for_key(connection, _key(c)) != c["state"] for c in plan["per_case"]):
+        bound_cases = plan["policy_cases"] if policy else plan["per_case"]
+        if any(state_for_key(connection, _key(c)) != c["state"] for c in bound_cases):
             raise RuntimeError("PUBLICATION_PLAN_AUTHORITY_IDENTITY_DRIFT")
+        if policy and any(_evidence_rows(connection,_key(c)) != c["original_candidate_evidence"] for c in plan["policy_cases"]):
+            raise RuntimeError("PUBLICATION_POLICY_STORED_EVIDENCE_DRIFT")
     scope["scope_mode"] = SCOPE_MODE
     return scope
 
@@ -380,8 +414,12 @@ def run_plan_candidate(candidate_db, plan, *, as_of_date):
         if any(state_for_key(connection, _key(c)) != c["state"] for c in plan["per_case"]):
             raise RuntimeError("PUBLICATION_PLAN_CANDIDATE_STATE_DRIFT")
     # Existing resolver/apply remains authoritative, with only reviewed inputs supplied.
-    result = run_candidate_publication(candidate_db, [], as_of_date=as_of_date, retry_days=plan["retry_days"],
-                                       client=PlanSecClient(plan), exact_quarter_allowlist=plan["prepared_keys"])
+    if plan.get("policy_mode") == "PUBLICATION_EVENT_POLICY_V1":
+        from rawcandle.fundamentals.admin.policy_reviewed_publication_plan import run_policy_candidate
+        result = run_policy_candidate(candidate_db,plan,as_of_date=as_of_date)
+    else:
+        result = run_candidate_publication(candidate_db, [], as_of_date=as_of_date, retry_days=plan["retry_days"],
+                                           client=PlanSecClient(plan), exact_quarter_allowlist=plan["prepared_keys"])
     expected = {tuple(k) for k in plan["prepared_keys"]}
     if (set(result.get("applied_natural_keys", ())) != expected or result["status"] != "SUCCESS"
             or result.get("new_verified") != len(expected)):
@@ -400,9 +438,13 @@ def run_plan_candidate(candidate_db, plan, *, as_of_date):
 
 
 def plan_scope_evidence(plan):
-    return {"scope_mode": SCOPE_MODE, "plan_id": plan["plan_id"], "plan_fingerprint": plan["plan_fingerprint"],
+    result = {"scope_mode": SCOPE_MODE, "plan_id": plan["plan_id"], "plan_fingerprint": plan["plan_fingerprint"],
             "prepared_keys_fingerprint": plan["prepared_keys_fingerprint"], "prepared_key_count": plan["prepared_key_count"],
             "source_allowlist_count": plan["source_allowlist_count"], "source_allowlist_fingerprint": plan["source_allowlist_fingerprint"]}
+    if plan.get("policy_mode") == "PUBLICATION_EVENT_POLICY_V1":
+        result.update({name:plan[name] for name in ("policy_mode","policy_version","policy_evidence_version","policy_decisions_fingerprint")})
+        result["policy_decision_fingerprints"] = {str(_key(c)):c["policy_decision_fingerprint"] for c in plan["policy_cases"]}
+    return result
 
 
 def _canonical_digest(path, *, excluded_keys=(), publication_only=False):

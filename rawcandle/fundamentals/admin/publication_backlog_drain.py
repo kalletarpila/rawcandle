@@ -97,6 +97,10 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
             if fence.get("scope_mode") == SCOPE_MODE:
                 if plan is None or plan["plan_fingerprint"] != fence["plan_fingerprint"]:
                     raise RuntimeError("PUBLICATION_PLAN_RECOVERY_SAME_PLAN_REQUIRED")
+                if plan.get("policy_mode") == "PUBLICATION_EVENT_POLICY_V1" and any(
+                    fence.get(name) != value for name,value in plan_scope_evidence(plan).items()
+                ):
+                    raise RuntimeError("PUBLICATION_POLICY_RECOVERY_SAME_POLICY_PLAN_REQUIRED")
             elif plan is not None or allowed is None or allowlist_evidence(allowed)["allowlist_fingerprint"] != fence["allowlist_fingerprint"]:
                 raise RuntimeError("PUBLICATION_EXACT_ALLOWLIST_RECOVERY_SCOPE_REQUIRED")
         binding = resolve_active_generation(root, require_generation=True)

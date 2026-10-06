@@ -7,11 +7,12 @@ It deliberately has no database writer, network client, or production selector.
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import re
 from typing import Any, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 from rawcandle.fundamentals.sec_result_context import same_accession_document
 
@@ -43,6 +44,25 @@ def fingerprint(value: Any) -> str:
 
 def evidence_binding(evidence: Mapping[str, Any]) -> str:
     return fingerprint({field: evidence.get(field) for field in _BINDING_FIELDS})
+
+
+def reviewed_acceptance_gate(evidence: Mapping[str, Any], index: Mapping[str, Any] | None) -> str:
+    """Corroborate an explicitly reviewed stored boundary, never replace it."""
+    if index is None:
+        return "NO_REVIEWED_DISCREPANCY"
+    interpreted = datetime.fromisoformat(index["index_accepted_display"]).replace(
+        tzinfo=ZoneInfo("America/New_York")
+    ).astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    if not (
+        index["accession"] == evidence["accession_number"]
+        and interpreted == index["index_interpreted_utc"] == index["stored_utc"] == evidence["source_timestamp_utc"]
+        and index["submissions_utc"] != evidence["source_timestamp_utc"]
+        and index["matches_stored"] is True
+        and re.fullmatch(r"[a-f0-9]{64}", index["index_sha256"])
+        and same_accession_document(evidence["source_reference"], index["index_url"])
+    ):
+        raise ValueError("ACCEPTANCE_SOURCE_DISCREPANCY_NOT_CORROBORATED")
+    return "ACCEPTANCE_SOURCE_DISCREPANCY_REVIEWED"
 
 
 def _key(row: Mapping[str, Any]) -> tuple[int, int, str]:

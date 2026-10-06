@@ -4,18 +4,14 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import csv
-from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-import re
-from zoneinfo import ZoneInfo
 
-from rawcandle.fundamentals.publication_event_policy import PUBLICATION_EVENT_POLICY_V1
+from rawcandle.fundamentals.publication_event_policy import PUBLICATION_EVENT_POLICY_V1, reviewed_acceptance_gate
 from rawcandle.fundamentals.result_publication import (
     SecFiling, resolve_sec_filings_detailed, resolve_sec_filings_with_event_policy,
 )
-from rawcandle.fundamentals.sec_result_context import same_accession_document
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,22 +20,7 @@ DEFAULT_FIXTURE = ROOT / "tests/fixtures/publication_event_policy_v1.json"
 
 def acceptance_gate(event):
     """Corroborate the stored boundary, never normalize/choose a replacement."""
-    evidence, index = event["evidence"], event.get("acceptance_index_review")
-    if index is None:
-        return "NO_REVIEWED_DISCREPANCY"
-    interpreted = datetime.fromisoformat(index["index_accepted_display"]).replace(
-        tzinfo=ZoneInfo("America/New_York")
-    ).astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    if not (
-        index["accession"] == evidence["accession_number"]
-        and interpreted == index["index_interpreted_utc"] == index["stored_utc"] == evidence["source_timestamp_utc"]
-        and index["submissions_utc"] != evidence["source_timestamp_utc"]
-        and index["matches_stored"] is True
-        and re.fullmatch(r"[a-f0-9]{64}", index["index_sha256"])
-        and same_accession_document(evidence["source_reference"], index["index_url"])
-    ):
-        raise ValueError("ACCEPTANCE_SOURCE_DISCREPANCY_NOT_CORROBORATED")
-    return "ACCEPTANCE_SOURCE_DISCREPANCY_REVIEWED"
+    return reviewed_acceptance_gate(event["evidence"], event.get("acceptance_index_review"))
 
 
 def replay_case(case):
