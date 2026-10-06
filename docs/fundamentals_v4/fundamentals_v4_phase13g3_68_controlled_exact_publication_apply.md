@@ -2,77 +2,125 @@
 
 Date: 2026-10-06 (Europe/Helsinki)
 
-## Outcome: STOP Before Network or Production Mutation
+## Corrected Fingerprint: PASS
 
-The mandatory allowlist fingerprint comparison failed. The task explicitly
-requires STOP if this fingerprint differs; the expected value was not silently
-corrected. No live resolver, copy rehearsal or production application was run.
-This is a stopped operator phase, not a successful publication.
+The user explicitly confirmed the complete reviewed SHA-256 after the initial
+fingerprint STOP. The committed CSV parser reproduces 60 unique natural keys
+and this exact value:
 
-| Evidence | Value |
+`4b69d8500733c1d3e3d5219458bf070dc5c8fb6b99f4082e3241413c9a99ce4e`
+
+The previous truncated fingerprint is no longer a blocker. The initial STOP
+remains historical evidence in commit `d4ab2cec0efda2ca028674998bc0ca25b4444c26`
+and its runtime report; this report describes the corrected-fingerprint retry.
+
+## Outcome: STOP Before Network or Publication
+
+A separate existing-contract conflict prevents executing the requested operator
+sequence without implementation changes. The task says to STOP if source changes
+become necessary; none were made.
+
+### 1. Fresh unique apply scope cannot be enforced independently
+
+At `rawcandle/fundamentals/admin/candidate_publication.py:153`, exact-mode
+`apply_keys` are every selected key without a preview fetch error. They are not
+restricted to FRESH_UNIQUE. NO_CANDIDATE and newly ambiguous successful resolutions
+use the existing apply contract, which can update authority/evidence metadata.
+The Phase 13G.3.67 report explicitly describes this scope-only behavior.
+
+The new task requires publication only for the separately reviewed FRESH_UNIQUE
+set, while supplying the original 60-row CSV to the CLI. The current entry point
+has no separate expected fresh apply set or in-lock assertion against that set.
+Supplying a smaller CSV instead would not meet the requested original artifact
+and fingerprint contract. Silently changing resolver/apply eligibility would
+violate the accepted scope-only semantics.
+
+### 2. Cross-stage frozen evidence is not a CLI contract
+
+At `candidate_publication.py:132`, each writer invocation creates a new internal
+frozen client. It reuses evidence between that invocation's preview and apply,
+which correctly implements Phase 13G.3.67. It does not expose a frozen precheck
+artifact for a later rehearsal and production invocation.
+
+The CLI in `rawcandle/cli/result_publication_backlog_drain.py` accepts the
+allowlist but no reviewed frozen-input artifact or expected evidence fingerprint.
+It constructs its own client through the writer. Thus running the live CLI after
+a separate precheck/rehearsal would fetch fresh inputs again, not enforce the
+same approved accession/context set or fail on material evidence drift against
+that rehearsal. The API's injectable client is not an existing reviewed CLI
+artifact-handoff contract.
+
+These are capability conflicts, not proof that current live evidence is
+nonunique or that the resolver is broken. No network was run to manufacture an
+answer. No monkeypatch, alternate activation, reduced operator CSV, direct SQL
+or low-level enrichment against production was used.
+
+## Read-Only Preflight
+
+| Evidence | Result |
 | --- | --- |
-| Actual HEAD | `7f7367ef5cb770becf2420fd603059b54a5fdaab` |
-| Exact writer implementation | Phase 13G.3.67 is HEAD |
-| Reviewed unique identities | 60 |
-| Historical prior statuses in reviewed CSV | 28 UNRESOLVED, 32 NOT_FOUND |
-| Expected fingerprint length | 63 hex characters |
-| Actual fingerprint length | 64 hex characters |
-| Fingerprint gate | FAIL |
-| Fresh unique count | NOT_RUN |
-| Applied / new VERIFIED | 0 / 0 |
-| Rehearsal / production postflight | NOT_RUN / NOT_RUN |
-| Journal / immutable activation | NOT_CHECKED / NOT_RUN |
+| Retry starting HEAD | `d4ab2cec0efda2ca028674998bc0ca25b4444c26` |
+| Phase 13G.3.67 included | YES |
+| Unexpected source modifications | NO |
+| Reviewed normalized count / fingerprint | 60 / PASS |
+| Active generation | `publication_drain_20261005T064921Z_43a1e040` |
+| Provider / canonical / analysis quick_check | ok / ok / ok |
+| Foreign-key violations, all three role DBs | 0 |
+| All three role DB hashes against Phase 13G.3.66 | UNCHANGED |
+| Current journal | COMPLETED, non-incomplete |
+| Current recent-open count, as of 2026-10-06 | 231 |
+| Current UNRESOLVED / NOT_FOUND / AMBIGUOUS | 41 / 170 / 20 |
+| Allowlist currently SELECTED_OPEN | 43 (21 UNRESOLVED, 22 NOT_FOUND) |
+| Allowlist outside current 60-day scope | 17 |
+| Allowlist currently VERIFIED / AMBIGUOUS / missing | 0 / 0 / 0 |
+| Required disk under existing writer check | 7661223936 bytes |
+| Free disk at preflight | 699114950656 bytes |
+| Fresh SEC resolution / rehearsal / production apply | NOT_RUN |
+| New VERIFIED / applied | 0 / 0 |
 
-Expected value supplied in the Phase 13G.3.68 task:
+The 60-day selector is evaluated on 2026-10-06, not backdated to reproduce the
+historical 278 cohort. All original 60 remain UNRESOLVED/NOT_FOUND, but 17 are
+now out of scope. Historical allowlist priors remain 28 UNRESOLVED and
+32 NOT_FOUND. No retry horizon or retry behavior was changed.
 
-```text
-4b69d8500733c1d3e3d5219458bf070dc5c8fb6b99f4082e3241413c9a99ce4
-```
+Production/scheduler lock acquisition and final in-lock validation were not
+performed because the source-contract STOP occurred first. A terminal journal
+is reported from read-only inspection; recovery/guard machinery was not invoked.
+No claim of complete operational clearance or completed live postflight is made.
 
-Actual value calculated by the committed `read_allowlist_csv` and
-`allowlist_evidence` APIs from the reviewed Phase 13G.3.66 CSV:
+## Results and Artifacts
 
-```text
-4b69d8500733c1d3e3d5219458bf070dc5c8fb6b99f4082e3241413c9a99ce4e
-```
+Fresh unique/candidate/timestamp/error classifications remain NOT_RUN for the
+43 eligible keys. The 17 out-of-scope keys are marked IDENTITY_OR_SCOPE_DRIFT.
+The CSV distinguishes initial current scope from fresh apply selection; no key
+is represented as freshly authorized. Post-status contains read-only current
+authority status, not a publication result.
 
-The actual value matches the complete SHA-256 recorded in the Phase 13G.3.67
-report. The task value omits the final `e`. This looks like a transcription
-truncation, but that inference does not authorize overriding the explicit gate.
-Continuation requires confirmation of the complete reviewed fingerprint.
+There was no application: prior UNRESOLVED -> VERIFIED = 0,
+prior NOT_FOUND -> VERIFIED = 0, existing AMBIGUOUS modified = 0.
+All original 60 remain open in the all-age sense. Fresh ambiguous/error outcomes
+and authority timestamp invariants were not evaluated. No post-run cohort is
+claimed because there was no production run.
 
-## Review and Worktree
+Structured retry evidence is retained, uncommitted, under:
 
-HEAD and worktree were checked before execution. There were no source changes.
-Existing dirty runtime journal, untracked active-generation files and unrelated
-P/E research artifacts were preserved and are excluded from this docs commit.
-The committed exact-allowlist contract and the original 60-row operator artifact
-were read. Their 60 identities normalize successfully without duplicates.
+`fundamental_reports/publication_drains/publication_13g368_corrected_fingerprint_stop_20261006/result.json`
 
-The fingerprint gate failed before further operational preflight. Active
-generation resolution, DB integrity, journal recovery, lock availability, disk
-space, current cohort and per-key current authority were not measured in this
-phase. Historical CSV statuses are not represented as current production state.
+No source/test files, resolver, authority hierarchy, journal/recovery machinery,
+retry settings or scheduler were changed. No production publication, Refresh,
+backup creation/deletion or activation was executed. Existing dirty runtime and
+research artifacts were preserved. Only this report and its 60-row CSV belong
+to the docs commit; no runtime DB, JSON, raw SEC evidence or generation is staged.
+Read-only comparisons also confirm pointer, journal, Review Queue and scheduler
+configuration hashes unchanged against the Phase 13G.3.66 STOP evidence.
+No tests or full suite were run. CSV identity checks and `git diff --check` pass.
+Nothing pushed.
 
-No read-only fresh SEC resolution was run. Therefore remaining-open counts,
-fresh ambiguity/error counts, authority timestamp invariants, rehearsal diffs
-and production postflight results are unavailable, not zero or PASS.
+## Required Separate Decision
 
-## Artifacts and Safety
-
-The companion CSV has one row per original reviewed identity. All fresh,
-selection, rehearsal and application fields are NOT_RUN; post-status is
-NOT_CHECKED. Every row records `ALLOWLIST_FINGERPRINT_MISMATCH` as the stop reason.
-No SEC evidence or historical candidate is presented as newly validated.
-
-Structured runtime STOP evidence:
-
-`fundamental_reports/publication_drains/publication_13g368_stop_20261006/result.json`
-
-Only this Markdown report and the companion CSV are committed. The runtime
-JSON is not committed. No raw SEC files were downloaded, no source or policy
-changes were made, no tests or full suite were run, and no production writer,
-Refresh, scheduler, recovery, backup deletion or activation was invoked.
-This task made no changes to production publication/financial DBs, active
-generation, Review Queue, scheduler configuration or runtime journal.
-`git diff --check` and CSV identity/row-count validation passed. Nothing pushed.
+Authorize a separate operator-gating/artifact-handoff implementation, or explicitly
+revise the operator sequence to the capabilities of the existing writer.
+Any extension must keep None/default and current resolver/apply semantics intact:
+the operator gate may constrain a reviewed apply set and bind frozen inputs,
+but must not redefine publication status, authority, ambiguity or retry policy.
+Until that decision, the controlled production application remains stopped.
