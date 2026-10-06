@@ -25,6 +25,9 @@ from rawcandle.fundamentals.result_publication import SecClient
 from rawcandle.fundamentals.admin.publication_allowlist import (
     normalize_allowlist, allowlist_evidence, select_exact_scope, assert_scope_subset,
 )
+from rawcandle.fundamentals.admin.reviewed_publication_plan import (
+    load_plan, revalidate_plan_state, run_plan_candidate, plan_scope_evidence, SCOPE_MODE,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 DRAIN_NETWORK_BUDGET_SECONDS = 1800
@@ -35,12 +38,17 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
                       network_budget_seconds: float = DRAIN_NETWORK_BUDGET_SECONDS,
                       client: SecClient | None = None, as_of_date: str | None = None,
                       inject_crash_at: str | None = None,
-                      exact_quarter_allowlist: Collection[Sequence[Any]] | None = None) -> dict[str, Any]:
+                      exact_quarter_allowlist: Collection[Sequence[Any]] | None = None,
+                      reviewed_apply_plan: Path | None = None) -> dict[str, Any]:
     started = time.perf_counter()
     root = project_root.resolve()
     if not math.isfinite(network_budget_seconds) or network_budget_seconds <= 0:
         raise ValueError("PUBLICATION_NETWORK_BUDGET_INVALID")
-    allowed = normalize_allowlist(exact_quarter_allowlist) if exact_quarter_allowlist is not None else None
+    if reviewed_apply_plan is not None and (exact_quarter_allowlist is not None or client is not None):
+        raise ValueError("PUBLICATION_PLAN_INPUT_MODES_INCOMPATIBLE")
+    plan = load_plan(reviewed_apply_plan) if reviewed_apply_plan is not None else None
+    allowed = (normalize_allowlist(plan["prepared_keys"]) if plan is not None else
+               normalize_allowlist(exact_quarter_allowlist) if exact_quarter_allowlist is not None else None)
     journal_path = root / "data/.fundamentals_admin_publication_journal.json"
     prior_journal = load_journal(journal_path) if apply else None
     exact_recovery = bool(prior_journal and prior_journal.get("scope_evidence") and
@@ -49,6 +57,8 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
     binding = resolve_active_generation(root, require_generation=True)
     if apply and exact_recovery:
         scope = {"quarter_keys": [], "retry_selected": 0}
+    elif plan is not None and not apply:
+        scope = revalidate_plan_state(plan, binding, as_of_date=day)
     elif allowed is None:
         scope = select_candidate_scope(binding.role_paths()["canonical"], [], as_of_date=day,
                                        retry_days=retry_days, retry_max_quarters=None)
@@ -64,11 +74,13 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
         "status": "SKIPPED" if not scope["quarter_keys"] else "DRY_RUN",
         "attempted_current_backlog": 0, "still_open_after_attempt": scope["retry_selected"],
         "rollback": {"status": "NOT_REQUIRED"},
-        "scope_mode": "RECENT_OPEN_DEFAULT" if allowed is None else allowlist_evidence(allowed)["scope_mode"],
+        "scope_mode": SCOPE_MODE if plan is not None else "RECENT_OPEN_DEFAULT" if allowed is None else allowlist_evidence(allowed)["scope_mode"],
     }
+    if plan is not None:
+        result["reviewed_plan"] = plan_scope_evidence(plan)
     if not apply:
         if allowed is not None and not scope["quarter_keys"]:
-            result["skip_reason"] = "NO_ELIGIBLE_ALLOWLIST_ITEMS"
+            result["skip_reason"] = "NO_PREPARED_PLAN_KEYS" if plan is not None else "NO_ELIGIBLE_ALLOWLIST_ITEMS"
         return result
     if not confirm_production:
         raise PermissionError("PUBLICATION_DRAIN_PRODUCTION_CONFIRMATION_REQUIRED")
@@ -81,15 +93,27 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
         guard_production_writes(journal_path)
         recovered = load_journal(journal_path)
         if recovered and recovered["state"] == "RECOVERED" and recovered.get("scope_evidence"):
-            if allowed is None or allowlist_evidence(allowed)["allowlist_fingerprint"] != recovered["scope_evidence"]["allowlist_fingerprint"]:
+            fence = recovered["scope_evidence"]
+            if fence.get("scope_mode") == SCOPE_MODE:
+                if plan is None or plan["plan_fingerprint"] != fence["plan_fingerprint"]:
+                    raise RuntimeError("PUBLICATION_PLAN_RECOVERY_SAME_PLAN_REQUIRED")
+            elif plan is not None or allowed is None or allowlist_evidence(allowed)["allowlist_fingerprint"] != fence["allowlist_fingerprint"]:
                 raise RuntimeError("PUBLICATION_EXACT_ALLOWLIST_RECOVERY_SCOPE_REQUIRED")
         binding = resolve_active_generation(root, require_generation=True)
         if binding.generation_id != result["source_generation"]:
             raise RuntimeError("PUBLICATION_DRAIN_ACTIVE_GENERATION_DRIFT")
         # Re-select under the writer lock before freezing the exact scope.
-        scope = (select_candidate_scope(binding.role_paths()["canonical"], [], as_of_date=day,
-                                        retry_days=retry_days, retry_max_quarters=None) if allowed is None else
-                 select_exact_scope(binding.role_paths()["canonical"], allowed, as_of_date=day, retry_days=retry_days))
+        if plan is not None:
+            locked_plan = load_plan(reviewed_apply_plan)
+            if locked_plan["plan_fingerprint"] != plan["plan_fingerprint"]:
+                raise RuntimeError("PUBLICATION_PLAN_ARTIFACT_DRIFT")
+        if plan is not None:
+            scope = revalidate_plan_state(plan, binding, as_of_date=day)
+        elif allowed is None:
+            scope = select_candidate_scope(binding.role_paths()["canonical"], [], as_of_date=day,
+                                           retry_days=retry_days, retry_max_quarters=None)
+        else:
+            scope = select_exact_scope(binding.role_paths()["canonical"], allowed, as_of_date=day, retry_days=retry_days)
         if allowed is not None:
             assert_scope_subset(scope["quarter_keys"], allowed)
         result["scope"] = scope
@@ -97,7 +121,7 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
         if not scope["quarter_keys"]:
             result["status"] = "SKIPPED"
             if allowed is not None:
-                result["skip_reason"] = "NO_ELIGIBLE_ALLOWLIST_ITEMS"
+                result["skip_reason"] = "NO_PREPARED_PLAN_KEYS" if plan is not None else "NO_ELIGIBLE_ALLOWLIST_ITEMS"
             return result
         run_dir.mkdir(parents=True, exist_ok=False)
         lane.mkdir(parents=True, exist_ok=False)
@@ -117,11 +141,14 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
                     raise RuntimeError("PUBLICATION_DRAIN_IMMUTABLE_SOURCE_SIDECAR")
                 shutil.copyfile(path, candidates[role])
             result["source_verification"] = original
-            result["publication"] = run_candidate_publication(
-                candidates["canonical"], [], as_of_date=day, retry_days=retry_days,
-                retry_max_quarters=None, client=client, network_budget_seconds=network_budget_seconds,
-                **({"exact_quarter_allowlist": allowed} if allowed is not None else {}),
-            )
+            if plan is not None:
+                result["publication"] = run_plan_candidate(candidates["canonical"], plan, as_of_date=day)
+            else:
+                result["publication"] = run_candidate_publication(
+                    candidates["canonical"], [], as_of_date=day, retry_days=retry_days,
+                    retry_max_quarters=None, client=client, network_budget_seconds=network_budget_seconds,
+                    **({"exact_quarter_allowlist": allowed} if allowed is not None else {}),
+                )
             publication = result["publication"]
             result["attempted_current_backlog"] = publication["total_processed"]
             if allowed is None:
@@ -148,6 +175,8 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
                     "applied_count": publication["applied_count"],
                     "skipped_error_natural_keys": publication["skipped_error_natural_keys"],
                 }
+                if plan is not None:
+                    result["scope_evidence"].update(plan_scope_evidence(plan))
             if publication["unprocessed_selected"]:
                 raise RuntimeError("PUBLICATION_DRAIN_INCOMPLETE_SELECTED_SCOPE")
             if publication["network"].get("budget_exhausted"):
