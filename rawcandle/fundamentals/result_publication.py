@@ -7,7 +7,7 @@ import sqlite3
 import statistics
 import time
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -338,6 +338,60 @@ def resolve_sec_filings_detailed(
             "accessions": sorted({str(row["accession_number"]) for row in candidates}),
         }
     return matches, unresolved, diagnostics
+
+
+def resolve_sec_filings_with_event_policy(
+    quarters: Sequence[Mapping[str, Any]], filings: Sequence[SecFiling], *,
+    policy_version: str,
+    observations: Mapping[str, Mapping[str, Any]],
+    relations: Sequence[Mapping[str, Any]] = (),
+    existing_authorities: Mapping[tuple[int, int, str], Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Explicit copy-only proposals; never replace the legacy apply input.
+
+    The caller supplies reviewed, source-bound semantic observations. Missing
+    observations fail closed. Existing VERIFIED quarters are not re-evaluated.
+    No production orchestrator or reviewed-plan writer invokes this function.
+    """
+    from rawcandle.fundamentals.publication_event_policy import (
+        PUBLICATION_EVENT_POLICY_V1, evaluate_candidates, fingerprint,
+    )
+    if policy_version != PUBLICATION_EVENT_POLICY_V1:
+        raise ValueError("UNSUPPORTED_PUBLICATION_EVENT_POLICY")
+    matches, unresolved, diagnostics = resolve_sec_filings_detailed(quarters, filings)
+    evaluations = {}
+    for quarter in quarters:
+        key = (int(quarter["company_id"]), int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"]))
+        if (existing_authorities or {}).get(key, {}).get("status") == "VERIFIED":
+            evaluations[key] = {"policy_version": policy_version, "final_result": "SKIPPED_VERIFIED"}
+            continue
+        rows = matches.get(key, [])
+        ids = {row["evidence_id"] for row in rows}
+        bound_observations = {}
+        for row in rows:
+            observation = observations.get(row["evidence_id"])
+            contexts = [filing for filing in filings
+                        if filing.accession_number == row["accession_number"]
+                        and filing.source_reference == row["source_reference"]
+                        and filing.acceptance_timestamp_utc == row["source_timestamp_utc"]]
+            if (observation and len(contexts) == 1
+                    and observation.get("resolver_context_sha256") == fingerprint(asdict(contexts[0]))):
+                bound_observations[row["evidence_id"]] = observation
+        edges = [edge for edge in relations if edge.get("from_evidence_id") in ids
+                 or edge.get("to_evidence_id") in ids]
+        proposal = evaluate_candidates(quarter, rows, observations=bound_observations,
+                                      relations=edges, policy_version=policy_version)
+        # An unresolved competing filing cannot disappear through filtering.
+        if key in unresolved:
+            proposal.update(final_result="REVIEW", precedence_result="REVIEW",
+                            selected_evidence_id=None, selected_accession=None,
+                            selected_timestamp=None, selected_first_event_reason="NO_DETERMINISTIC_FIRST_EVENT",
+                            review_reason="LEGACY_UNRESOLVED_COMPETING_CONTEXT")
+            for row in proposal["candidate_evaluations"]:
+                row.update(precedence_decision="RETAINED_NOT_SELECTED", selected_first_event_reason=None)
+        evaluations[key] = proposal
+    return {"legacy_matches": matches, "legacy_unresolved": unresolved,
+            "legacy_diagnostics": diagnostics, "event_policy_evaluations": evaluations}
 
 
 def _new_sec_context_matches(
