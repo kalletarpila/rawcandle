@@ -268,6 +268,9 @@ def _book_value_sections(snapshot: Mapping[str, Any]) -> list[str]:
             ("Status", current["status"]), ("Current P/B reason", current["reason"]),
             ("Provider P/B reason", provider["reason"]),
             ("Warnings", ", ".join(current.get("warnings", [])) or "—"),
+            *((("Ownership basis", "Reviewed"),
+               ("Share source date", current["ownership_basis"]["share_source_date"]))
+              if current.get("ownership_basis", {}).get("evidence_status") == "REVIEWED_SUPPORTED" else ()),
         ), ("left", "left")), "",
         "### Provider P/B history", "",
         _table(("Quarter", "Provider P/B", "Observation date", "Reason"), tuple(

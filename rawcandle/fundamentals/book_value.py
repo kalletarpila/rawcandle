@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from rawcandle.fundamentals.schema.parent_equity import finite
 from rawcandle.fundamentals.book_value_reviews import unresolved_basis_review
+from rawcandle.fundamentals.ownership_basis import reviewed_ownership
 
 CURRENT_CONTRACT = 'PB_CURRENT_PARENT_EQUITY_V1'
 CURRENT_MODE = 'CURRENT_REVISED_REPORTING'
@@ -85,14 +86,22 @@ def current_pb(row: Mapping[str, Any] | None, *, as_of: str, price: Mapping[str,
     if (today-date.fromisoformat(price['pvm'])).days > 3:
         return blocked('STALE_PRICE')
     factor = finite(r.get('sharefactor'))
-    if (r.get('ownership_conflict') or category not in ('Domestic Common Stock','Canadian Common Stock') or factor != 1
-        or active_classes != 1):
+    ownership = reviewed_ownership(r, as_of=as_of, price_date=price['pvm'])
+    if ownership:
+        if ownership.get('metadata'):
+            result['ownership_basis'] = ownership['metadata']
+        if ownership['reason'] != 'OK':
+            return blocked(ownership['reason'])
+    if active_classes != 1 or (not ownership and (
+        r.get('ownership_conflict') or category not in ('Domestic Common Stock','Canadian Common Stock') or factor != 1)):
         return blocked('OWNERSHIP_BASIS_UNVERIFIED')
     shares = finite(r.get('shares_outstanding'))
     if shares is None or shares <= 0:
         return blocked('MISSING_SHARES')
     if shares != finite(r.get('sharesbas')):
         return blocked('SHARE_BASIS_UNVERIFIED')
+    if ownership:
+        shares = ownership['economic_units']
     native_price, native_cap = finite(r.get('price')), finite(r.get('marketcap'))
     if (native_price is None or native_price <= 0 or native_cap is None or native_cap <= 0
         or abs(native_price*shares/native_cap-1) > EVIDENCE_MAX_DIFFERENCE):
@@ -147,6 +156,14 @@ def book_value_report(canonical: sqlite3.Connection, market: sqlite3.Connection,
     if market_name in ('nasdaq','nyse','nysemkt','amex','arca','otc','otcqx','otcqb'):
         market_name = 'usa'
     securities = canonical.execute('SELECT current_ticker FROM security WHERE company_id=? AND active=1',(company_id,)).fetchall()
+    if latest:
+        identity = canonical.execute('''SELECT s.security_id,s.current_ticker,s.valid_from,s.valid_to,c.company_key
+            FROM security s JOIN company c USING(company_id)
+            WHERE s.company_id=? AND s.current_ticker=? AND s.active=1''',(company_id,ticker)).fetchall()
+        if len(identity) == 1:
+            latest.update(security_id=identity[0]['security_id'],
+                          canonical_ticker=identity[0]['current_ticker'],company_key=identity[0]['company_key'],
+                          security_valid_from=identity[0]['valid_from'],security_valid_to=identity[0]['valid_to'])
     current_price = _valid_price(market,ticker,market_name,as_of=as_of)
     if latest and latest.get('provider_date'):
         # Corroborating history needs a usable close, not valuation-quality OHLC.

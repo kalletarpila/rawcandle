@@ -134,8 +134,11 @@ def sources(tmp_path):
         CREATE TABLE v4_quarter_financials(quarter_id INTEGER PRIMARY KEY,shares_outstanding REAL,revenue REAL);
         CREATE TABLE v4_field_provenance(provenance_id INTEGER PRIMARY KEY,quarter_id INTEGER,
         canonical_field TEXT,provider TEXT,provider_observation_id TEXT,accepted_at_utc TEXT);
-        CREATE TABLE security(company_id INTEGER,current_ticker TEXT,active INTEGER);''')
-    c.execute("INSERT INTO security VALUES(1,'TEST',1)")
+        CREATE TABLE company(company_id INTEGER PRIMARY KEY,company_key TEXT);
+        INSERT INTO company VALUES(1,'fixture-company');
+        CREATE TABLE security(security_id INTEGER,company_id INTEGER,current_ticker TEXT,active INTEGER,
+            valid_from TEXT,valid_to TEXT);''')
+    c.execute("INSERT INTO security VALUES(1,1,'TEST',1,NULL,NULL)")
     p=sqlite3.connect(pp)
     p.executescript('''CREATE TABLE provider_observation(observation_id TEXT PRIMARY KEY,provider TEXT,
         payload_json TEXT,content_hash TEXT,source_availability_date TEXT,fetched_at_utc TEXT);
