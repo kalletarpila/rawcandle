@@ -39,14 +39,11 @@ def calculate(row=None, **kwargs):
     ({'sharefactor':0},'OWNERSHIP_BASIS_UNVERIFIED'),
     ({'sharefactor':.125},'OWNERSHIP_BASIS_UNVERIFIED'),
     ({'sharefactor':None},'OWNERSHIP_BASIS_UNVERIFIED'),
-    ({'shareswa':1},'SHARE_BASIS_UNVERIFIED'),
     ({'ownership_conflict':True},'OWNERSHIP_BASIS_UNVERIFIED'),
-    ({'shareswa':None},'SHARE_BASIS_UNVERIFIED'),
     ({'shares_outstanding':101},'SHARE_BASIS_UNVERIFIED'),
     ({'shares_outstanding':None},'MISSING_SHARES'),
     ({'marketcap':2000},'SHARE_BASIS_UNVERIFIED'),
     ({'provider_date_market_close':20},'SHARE_BASIS_UNVERIFIED'),
-    ({'provider_date_market_close':None},'SHARE_BASIS_UNVERIFIED'),
 ])
 def test_null_reasons(changes,reason):
     row=ordinary() | changes
@@ -77,6 +74,45 @@ def test_current_determinism_and_parent_caveat():
     assert a['warnings']==['NEAR_ZERO_EQUITY']
     assert 'preferred-capital exclusion is not proven' in a['caveat']
     assert 'common equity' not in a['caveat']
+
+
+@pytest.mark.parametrize('average', [75, 40, 1, None, 0, float('nan')])
+def test_average_shares_are_diagnostic_not_ownership_denominator(average):
+    result=calculate(ordinary() | {'shareswa':average})
+    assert result['value']==2 and result['market_cap']==2000
+    assert ('LARGE_ENDPOINT_VS_AVERAGE_SHARE_DIFFERENCE' in result['warnings']) == (average in (75,40,1))
+
+
+def test_missing_history_is_diagnostic_and_renders_compactly():
+    result=calculate(ordinary() | {'provider_date_market_close':None})
+    assert result['value']==2
+    assert 'HISTORICAL_PRICE_CORROBORATION_UNAVAILABLE' in result['warnings']
+    rendered='\n'.join(_book_value_sections({'book_value':{'current':result,'provider':provider_reference(ordinary()),'history':[],'caveat':CAVEAT}}))
+    assert 'Warnings' in rendered and 'HISTORICAL_PRICE_CORROBORATION_UNAVAILABLE' in rendered
+
+
+@pytest.mark.parametrize('historical_close', [.5, 20])
+def test_demonstrated_historical_scale_contradiction_remains_blocked(historical_close):
+    result=calculate(ordinary() | {'provider_date_market_close':historical_close})
+    assert result['reason']=='SHARE_BASIS_UNVERIFIED'
+    assert 'HISTORICAL_PRICE_MISMATCH' in result['warnings']
+
+
+def test_review_hold_is_bound_to_company_observation_hash_and_review_date():
+    from rawcandle.fundamentals.book_value_reviews import REVIEWED_BASIS_HOLDS, unresolved_basis_review
+
+    for review in REVIEWED_BASIS_HOLDS:
+        row=ordinary() | {key:review[key] for key in ('company_id','observation_id','content_hash')}
+        result=calculate(row)
+        assert result['reason']=='SHARE_BASIS_UNVERIFIED'
+        assert result['basis_review']['reference']==review['reference']
+        assert 'REVIEWED_UNRESOLVED_BASIS' in result['warnings']
+        assert provider_reference(row)['value']==1
+        assert unresolved_basis_review(row,as_of='2026-10-06') is None
+        for key in ('company_id','observation_id','content_hash'):
+            assert calculate(row | {key:'different'})['value']==2
+        # A ticker or very large EPS denominator difference cannot create the hold.
+        assert calculate(ordinary() | {'ticker':'KALA','shareswa':.001})['value']==2
 
 
 def test_provider_rounding_absolute_not_relative():
@@ -154,6 +190,30 @@ def test_canonical_mapping_provenance_and_four_quarter_report(sources):
     c=sqlite3.connect(cp);c.row_factory=sqlite3.Row;m=sqlite3.connect(mp);m.row_factory=sqlite3.Row
     assert first==book_value_report(c,m,company_id=1,ticker='TEST',as_of='2026-10-07')
     c.close();m.close()
+
+
+@pytest.mark.parametrize('history', ['newly_listed', 'discontinuous', 'incomplete_ohlc'])
+def test_current_valid_without_complete_historical_market_data(sources,history):
+    cp,pp,mp=sources
+    migrate_parent_equity(pp,cp,accepted_at='2026-10-07')
+    with sqlite3.connect(cp) as c,sqlite3.connect(mp) as m:
+        c.row_factory=m.row_factory=sqlite3.Row
+        before=book_value_report(c,m,company_id=1,ticker='TEST',as_of='2026-10-07')
+        if history=='incomplete_ohlc':
+            m.execute("UPDATE osakedata SET high=1 WHERE pvm='2026-08-01'")
+        else:
+            m.execute("DELETE FROM osakedata WHERE pvm<'2026-10-06'")
+            if history=='discontinuous':
+                # Older bars belong to the former ticker; current target remains active.
+                m.execute("INSERT INTO osakedata VALUES('FORMER','usa','2026-08-01',10,11,9,10)")
+        after=book_value_report(c,m,company_id=1,ticker='TEST',as_of='2026-10-07')
+        assert after['current']['value']==2
+        warning='HISTORICAL_OHLC_INCOMPLETE' if history=='incomplete_ohlc' else 'HISTORICAL_PRICE_CORROBORATION_UNAVAILABLE'
+        assert warning in after['current']['warnings']
+        assert after['provider']==before['provider'] and after['history']==before['history']
+        assert after==book_value_report(c,m,company_id=1,ticker='TEST',as_of='2026-10-07')
+        m.execute("DELETE FROM osakedata WHERE pvm='2026-10-06'")
+        assert book_value_report(c,m,company_id=1,ticker='TEST',as_of='2026-10-07')['current']['reason'] in ('MISSING_PRICE','STALE_PRICE')
 
 
 def test_cross_observation_mismatch_rolls_back(sources):

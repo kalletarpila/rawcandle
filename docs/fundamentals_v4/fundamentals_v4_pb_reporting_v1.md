@@ -1,14 +1,14 @@
-# P/B.3 — Reporting-only Parent Equity and P/B V1
+# Reporting-only Parent Equity and P/B V1 — corrected in P/B.5
 
-Date: 2026-10-07, Europe/Helsinki. Implementation and copy validation complete; **live production rollout not executed**. Coverage below describes the candidate migrated from active generation `publication_drain_20261007T093516Z_fd654a20`, not the unchanged live generation.
+Date: 2026-10-07, Europe/Helsinki. P/B.3 implementation and P/B.5 gate correction/copy validation complete; **live production rollout not executed**. Coverage below describes the candidate migrated from active generation `publication_drain_20261007T093516Z_fd654a20`, not the unchanged live generation.
 
 ## Result
 
 Implemented canonical accepted parent equity, current restricted P/B, exact provider P/B reference, and a maximum four-quarter provider history in the existing company Fundamentals Markdown report. P/B is reporting-only. Valuation Score formula, weights, model version/fingerprints, relative-position logic and calibration are unchanged.
 
-Candidate operational universe: **2,468 companies**. Current P/B valid: **1,595 (64.63%)**. Latest provider reference valid: **2,133**. Four valid provider history slots: **2,081**. The valid-count distribution is four: 2,081; three: 50; two: 36; one: 25; zero: 276.
+Candidate operational universe: **2,468 companies**. Current P/B valid after P/B.5: **1,691 (68.52%)**, up **96** from the P/B.3 count of 1,595. Latest provider reference valid: **2,133**. Four valid provider history slots: **2,081**. The valid-count distribution is four: 2,081; three: 50; two: 36; one: 25; zero: 276.
 
-Compared with P/B.1, the arithmetic ceiling was 2,123 and conservative factor/class/date cohort 1,696. The new generic share-average and independent price-basis checks reduce valid current coverage further. Counts are measured, not forced to match the research estimates. Latest provider P/B can remain available when current ownership/basis validation rejects the company; provider history never uses current prices.
+Compared with P/B.1, the arithmetic ceiling was 2,123 and conservative factor/class/date cohort 1,696. P/B.4 found the share-average proximity and mandatory historical full-OHLC gates too conservative. P/B.5 replaces those with diagnostics while preserving demonstrated contradictions and bounded reviewed unresolved-basis holds. Counts are measured, not forced to match research estimates. See [the detailed correction report](fundamentals_v4_pb_reporting_v1_gate_correction.md). Latest provider P/B can remain available when current ownership/basis validation rejects the company; provider history never uses current prices.
 
 ## Canonical Storage and Acceptance
 
@@ -41,14 +41,16 @@ Output explicitly includes as-of date, actual price date, equity fiscal year/qua
 
 Initial allowed provider categories are Domestic Common Stock and Canadian Common Stock, with **factor exactly one**, one active security and target ticker among active securities. Other categories, primary/multiple-class flags, ADR/ADS, absent/nonunit/zero factor and inactive/ambiguous security ownership return `OWNERSHIP_BASIS_UNVERIFIED`. Provider metadata is drawn from fundamentals/SF1 security metadata, not an arbitrary ETF/stock metadata row. Selected canonical 6-K official evidence with provider-type conflict or ADR/ADS identification also blocks current P/B; no new ownership factor is inferred from it.
 
-Generic `SHARE_BASIS_UNVERIFIED` checks:
+Corrected `SHARE_BASIS_UNVERIFIED` checks:
 
-1. Canonical outstanding shares must be positive and equal same-observation sharesbas.
-2. Positive weighted-average basic shares must be present; absolute cover-shares/weighted-average difference must be at most **25%**.
-3. Same-row provider price × shares must reproduce same-row marketcap within **1%** for the allowed factor-one cohort.
-4. A valid complete market OHLC close must exist on the provider observation date and match native provider price within **1%**. This independently rejects observed split/price-basis discrepancies and missing historical evidence.
+1. Canonical outstanding shares must equal same-observation sharesbas. Missing/nonpositive accepted shares return MISSING_SHARES.
+2. Same-row provider price × shares must reproduce same-row marketcap within **1%** for the allowed factor-one cohort. The native price/cap inputs remain required.
+3. A demonstrated exact-date historical **positive finite close** mismatch greater than **1%** remains an unresolved basis hold. Missing historical data or invalid historical full-OHLC geometry alone cannot block Current P/B.
+4. An explicit bounded unresolved-basis review may hold the exact accepted company/observation/content-hash combination on/after its review date. The two P/B.4 NEEDS_MORE_EVIDENCE records are retained in `book_value_reviews.py`. No ticker comparison or universal percentage cutoff creates a hold. Reviews do not transfer to another company, source revision or date preceding review.
 
-These are conservative quality gates, not a corporate-action diagnosis or universal accounting calibration. Weighted-average shares remain a diagnostic, **not the denominator**. Diluted shares are retained as evidence and are not substituted for outstanding ownership. No ticker-specific exception exists. KALA/FTFT fail the generic share-base gate; SCNI fails ownership/factor validation. BABA/BIDU/ASML remain unavailable under this restricted ownership contract.
+Weighted-average EPS shares are optional diagnostic evidence, **not the denominator** and never a proximity eligibility condition. Absolute sharesbas/shareswa deviation >25% attaches `LARGE_ENDPOINT_VS_AVERAGE_SHARE_DIFFERENCE`. Missing/nonpositive averages do not block. Diluted EPS shares remain evidence only. Missing finite positive provider-date close attaches `HISTORICAL_PRICE_CORROBORATION_UNAVAILABLE`; a usable close with incomplete full OHLC attaches `HISTORICAL_OHLC_INCOMPLETE`. Actual price contradiction attaches `HISTORICAL_PRICE_MISMATCH` and remains blocked. A matched reviewed hold attaches `REVIEWED_UNRESOLVED_BASIS` with reference metadata in the report object. Existing compact Warnings rendering is reused.
+
+BRTX/IESC/MNST remain held by the generic price contradiction. KALA/FTFT remain held by the bounded reviewed-evidence mechanism, not their EPS-share deviation alone. SCNI fails ownership/factor validation. BABA/BIDU/ASML remain unavailable under the unchanged ownership contract. Missing old price history for newly listed or discontinuous securities is not an ownership failure when current/as-of inputs are valid.
 
 Near-zero positive equity at most USD 1m attaches `NEAR_ZERO_EQUITY`; it remains numeric if other gates pass. This transparent diagnostic follows P/B.1 research, not a new score policy.
 
@@ -58,12 +60,12 @@ Priority: missing/zero/negative equity, missing/future own availability, stale e
 
 | Reason | Candidate count |
 |---|---:|
-| OK | 1,595 |
+| OK | 1,691 |
 | NEGATIVE_EQUITY | 215 |
 | ZERO_EQUITY | 0 |
 | MISSING_EQUITY | 120 |
 | OWNERSHIP_BASIS_UNVERIFIED | 409 |
-| SHARE_BASIS_UNVERIFIED | 101 |
+| SHARE_BASIS_UNVERIFIED | 5 |
 | MISSING_PRICE | 10 |
 | STALE_PRICE | 12 |
 | STALE_EQUITY | 6 |
@@ -126,11 +128,11 @@ Copy source: current active immutable generation. SQLite online backup made `/tm
 
 Coverage/query output is fully rebuildable from the copied canonical accepted inputs, existing market bars, explicit as-of and rules. No persistent current P/B history/state is required. Provider/analysis Production DBs were never opened writable; no source refresh, analysis score rebuild, scheduler change or live publication was executed. Manifest bytes and Production role file size/mtime remained unchanged.
 
-The **existing** `prepare_generation_from_candidates` / `activate_generation` path was tested on isolated fixture projects with migrated canonical fields and unchanged analysis-score content. It supports the additive schema and preserves analysis values. This implementation is ready for the normal reviewed immutable-generation Administration copy/reconciliation/publication path; it does not introduce another Production publisher.
+The **existing** `prepare_generation_from_candidates` / `activate_generation` path was tested on isolated fixture projects with migrated canonical fields and unchanged analysis-score content. It supports the additive schema and preserves analysis values. The corrected candidate passed the copy validation described in the P/B.5 report; any later rollout must use the normal reviewed immutable-generation Administration copy/reconciliation/publication path. It does not introduce another Production publisher.
 
 **Production rollout: NO.** The optional live population in this phase was left unexecuted; all coverage/rendered examples are candidate evidence. Current live canonical schema still lacks the new parent-equity fields, so reports show explicit unavailable values until a normal immutable-generation publication includes the migrated candidate. No direct active SQL mutation is required or permitted. No automatic refresh was launched just to populate P/B.
 
-## Tests and Validation
+## Original P/B.3 Tests and Validation
 
 - Focused P/B tests: **32 passed**, including mapping/provenance, parent caveat, equity/price reasons, ADR/classes/factors, share discontinuities, determinism, rounding tolerance, exact row binding/no richer fallback, four-quarter ordering/gaps/N/A, rendering, stale projection rejection, rollback and isolated immutable generation publication.
 - One grouped Fundamentals/reporting regression: **130 passed** across P/B, additive provenance, immutable generations, snapshot UI and V2 company snapshot tests. Three additional P/B tests added after this group passed in the final focused run.
@@ -139,3 +141,9 @@ The **existing** `prepare_generation_from_candidates` / `activate_generation` pa
 - Compact CSV uniqueness/count/finite/null checks and `git diff --check` complete before commit. Full suite: **not run**.
 
 Only source, focused tests and these compact documentation/coverage/validation artifacts are committed. Database copies, journals, backups, caches and unrelated worktree files are excluded. Nothing pushed.
+
+## P/B.5 Gate Correction Validation
+
+Current corrected counts and warnings are in `fundamentals_v4_pb_reporting_v1_corrected_coverage.csv`; the original P/B.3 coverage/validation CSVs remain historical evidence. The corrected validation sample contains 30 real companies. See [the detailed correction report](fundamentals_v4_pb_reporting_v1_gate_correction.md) for review bindings, warning counts, fixture semantics, full-universe provider/4Q comparisons and six complete snapshot comparisons.
+
+Focused corrected P/B tests: **42 passed**. One relevant Fundamentals/reporting regression group: **88 passed**. No full suite. Fresh active-generation backup rebuilt parent-equity on `/tmp/rawcandle_pb5/fundamentals_v4.db`; original canonical tables/old financial columns retained identical logical fingerprints. All 2,468 provider references/4Q histories equal the P/B.3 baseline. All non-P/B snapshot fields, including score fingerprints and financial/valuation history, compare exactly for six real companies. Production DBs, market DB and active manifest unchanged; no scheduler change, live workflow or Production rollout.

@@ -7,12 +7,13 @@ from datetime import date
 from typing import Any, Mapping
 
 from rawcandle.fundamentals.schema.parent_equity import finite
+from rawcandle.fundamentals.book_value_reviews import unresolved_basis_review
 
 CURRENT_CONTRACT = 'PB_CURRENT_PARENT_EQUITY_V1'
 CURRENT_MODE = 'CURRENT_REVISED_REPORTING'
 PROVIDER_MODE = 'PROVIDER_OBSERVATION_REFERENCE'
 ROUNDING_TOLERANCE = 0.0005001
-SHARE_AVERAGE_MAX_DIFFERENCE = 0.25
+SHARE_AVERAGE_WARNING_DIFFERENCE = 0.25
 EVIDENCE_MAX_DIFFERENCE = 0.01
 CAVEAT = 'Parent equity attributable to parent shareholders as supplied by Sharadar; preferred-capital exclusion is not proven.'
 
@@ -47,6 +48,26 @@ def current_pb(row: Mapping[str, Any] | None, *, as_of: str, price: Mapping[str,
               'equity_reportperiod': r.get('reportperiod'), 'equity_source_availability_date': r.get('source_availability_date'),
               'price_date': price.get('pvm') if price else None, 'price': finite(price.get('close')) if price else None,
               'market_cap': None, 'warnings': [], 'caveat': CAVEAT}
+    shares, avg = (finite(r.get(k)) for k in ('shares_outstanding', 'shareswa'))
+    if shares is not None and shares > 0 and avg is not None and avg > 0:
+        if abs(shares / avg - 1) > SHARE_AVERAGE_WARNING_DIFFERENCE:
+            result['warnings'].append('LARGE_ENDPOINT_VS_AVERAGE_SHARE_DIFFERENCE')
+    native_price = finite(r.get('price'))
+    evidence_close = finite(r.get('provider_date_market_close'))
+    if evidence_close is None or evidence_close <= 0:
+        result['warnings'].append('HISTORICAL_PRICE_CORROBORATION_UNAVAILABLE')
+    elif r.get('provider_date_ohlc_incomplete'):
+        result['warnings'].append('HISTORICAL_OHLC_INCOMPLETE')
+    historical_mismatch = (
+        evidence_close is not None and evidence_close > 0 and native_price is not None
+        and native_price > 0 and abs(evidence_close / native_price - 1) > EVIDENCE_MAX_DIFFERENCE
+    )
+    if historical_mismatch:
+        result['warnings'].append('HISTORICAL_PRICE_MISMATCH')
+    review = unresolved_basis_review(r, as_of=as_of)
+    if review:
+        result['basis_review'] = review
+        result['warnings'].append('REVIEWED_UNRESOLVED_BASIS')
     def blocked(reason: str) -> dict[str, Any]:
         return {**result, 'reason': reason}
     equity = result['parent_equity_usd']
@@ -72,24 +93,21 @@ def current_pb(row: Mapping[str, Any] | None, *, as_of: str, price: Mapping[str,
         return blocked('MISSING_SHARES')
     if shares != finite(r.get('sharesbas')):
         return blocked('SHARE_BASIS_UNVERIFIED')
-    # Cover outstanding versus duration-average: a conservative discontinuity gate.
-    avg = finite(r.get('shareswa'))
-    if avg is None or avg <= 0 or abs(shares/avg-1) > SHARE_AVERAGE_MAX_DIFFERENCE:
-        return blocked('SHARE_BASIS_UNVERIFIED')
     native_price, native_cap = finite(r.get('price')), finite(r.get('marketcap'))
     if (native_price is None or native_price <= 0 or native_cap is None or native_cap <= 0
         or abs(native_price*shares/native_cap-1) > EVIDENCE_MAX_DIFFERENCE):
         return blocked('SHARE_BASIS_UNVERIFIED')
-    # Independently compare split bases using the provider-date close.
-    evidence_close = finite(r.get('provider_date_market_close'))
-    if evidence_close is None or evidence_close <= 0 or abs(evidence_close/native_price-1)>EVIDENCE_MAX_DIFFERENCE:
+    # Missing history is diagnostic; demonstrated contradictory bases still need review.
+    if historical_mismatch or review:
         return blocked('SHARE_BASIS_UNVERIFIED')
     cap = result['price']*shares
     value = cap/equity
-    if not math.isfinite(cap) or not math.isfinite(value):
+    if not math.isfinite(cap) or not math.isfinite(value) or value <= 0:
         return blocked('PB_NONFINITE')
+    if equity <= 1_000_000:
+        result['warnings'].append('NEAR_ZERO_EQUITY')
     return {**result, 'market_cap': cap, 'value': value, 'status': 'OK', 'reason': 'OK',
-            'warnings': ['NEAR_ZERO_EQUITY'] if equity <= 1_000_000 else []}
+            'warnings': result['warnings']}
 
 
 def _valid_price(conn: sqlite3.Connection, ticker: str, market: str, *, as_of: str, exact: bool=False) -> dict[str, Any] | None:
@@ -109,7 +127,7 @@ def book_value_report(canonical: sqlite3.Connection, market: sqlite3.Connection,
         return {'current': current_pb(None,as_of=as_of,price=None,category=None,active_classes=0),
                 'provider': {'value': None, 'reason': 'PARENT_EQUITY_NOT_MIGRATED', 'semantic_mode': PROVIDER_MODE}, 'history': [], 'caveat': CAVEAT}
     # Limit quarters before validating P/B: never replace a missing latest slot by an older valid one.
-    quarters = [dict(r) for r in canonical.execute("""SELECT q.quarter_id,q.fiscal_year,q.fiscal_quarter,
+    quarters = [dict(r) for r in canonical.execute("""SELECT q.quarter_id,q.company_id,q.fiscal_year,q.fiscal_quarter,
         q.source_reportperiod AS reportperiod,
         CASE WHEN s.quarter_id IS NOT NULL THEN f.parent_equity END AS parent_equity,
         CASE WHEN s.quarter_id IS NOT NULL THEN f.parent_equity_usd END AS parent_equity_usd,
@@ -131,8 +149,12 @@ def book_value_report(canonical: sqlite3.Connection, market: sqlite3.Connection,
     securities = canonical.execute('SELECT current_ticker FROM security WHERE company_id=? AND active=1',(company_id,)).fetchall()
     current_price = _valid_price(market,ticker,market_name,as_of=as_of)
     if latest and latest.get('provider_date'):
-        evidence = _valid_price(market,ticker,market_name,as_of=latest['provider_date'],exact=True)
+        # Corroborating history needs a usable close, not valuation-quality OHLC.
+        evidence = market.execute("""SELECT close,open,high,low FROM osakedata
+            WHERE osake=? AND market=? AND pvm=?""", (ticker,market_name,latest['provider_date'])).fetchone()
         latest['provider_date_market_close'] = evidence['close'] if evidence else None
+        valid_ohlc = _valid_price(market,ticker,market_name,as_of=latest['provider_date'],exact=True)
+        latest['provider_date_ohlc_incomplete'] = bool(evidence and not valid_ohlc)
     if latest and canonical.execute("SELECT 1 FROM sqlite_master WHERE name='v4_result_publication_authority'").fetchone():
         evidence = canonical.execute("""SELECT e.matching_method FROM v4_result_publication_authority a
             JOIN v4_result_publication_evidence e ON e.evidence_id=a.selected_evidence_id
