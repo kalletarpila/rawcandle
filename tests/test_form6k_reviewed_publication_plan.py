@@ -196,11 +196,11 @@ def test_recovery_missing_binding_rejected(tmp_path,monkeypatch,field):
         drain.run_backlog_drain(**kwargs)
 
 
-def test_copy_only_guard(tmp_path,monkeypatch):
+def test_live_root_confirmation_guard(tmp_path,monkeypatch):
     root,path,_,_=prepare(tmp_path)
     monkeypatch.setattr(drain,"ROOT",root)
-    with pytest.raises(PermissionError,match="COPY_ONLY"):
-        drain.run_backlog_drain(project_root=root,apply=True,confirm_production=True,reviewed_apply_plan=path)
+    with pytest.raises(PermissionError,match="CONFIRMATION_REQUIRED"):
+        drain.run_backlog_drain(project_root=root,apply=True,reviewed_apply_plan=path)
 
 
 def test_zero_key_plan_never_falls_through(tmp_path,monkeypatch):

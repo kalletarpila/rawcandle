@@ -47,9 +47,8 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
     if reviewed_apply_plan is not None and (exact_quarter_allowlist is not None or client is not None):
         raise ValueError("PUBLICATION_PLAN_INPUT_MODES_INCOMPATIBLE")
     plan = load_plan(reviewed_apply_plan) if reviewed_apply_plan is not None else None
-    if (apply and root == ROOT.resolve() and plan is not None
-            and plan.get("policy_mode") == "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"):
-        raise PermissionError("PUBLICATION_FORM6K_COPY_ONLY_PRODUCTION_APPLY_FORBIDDEN")
+    # Form 6-K is authorized only by a fully validated schema-3 reviewed plan.
+    # It still passes confirmation, journal/recovery and locked state guards below.
     allowed = (normalize_allowlist(plan["prepared_keys"]) if plan is not None else
                normalize_allowlist(exact_quarter_allowlist) if exact_quarter_allowlist is not None else None)
     journal_path = root / "data/.fundamentals_admin_publication_journal.json"
