@@ -82,3 +82,51 @@ def ensure_result_publication_schema(connection: sqlite3.Connection) -> dict[str
         )
     }
     return {"tables_added": len(after - before)}
+
+
+def upgrade_form6k_candidate_schema(connection: sqlite3.Connection) -> bool:
+    """Transactional CHECK extension, called only by the reviewed candidate adapter.
+
+    Keep the original table definitions, rows, indexes and triggers. Do not rename
+    tables: views and authority's evidence FK must keep their original targets.
+    """
+    tables = ("v4_result_publication_evidence", "v4_result_publication_authority")
+    definitions = {
+        name: connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()[0] for name in tables
+    }
+    if all("'SEC_FORM_6K_RESULT'" in sql for sql in definitions.values()):
+        return False
+    if any("'SEC_FORM_6K_RESULT'" in sql or sql.count("'SEC_8K_ITEM_2_02'") != 1
+           for sql in definitions.values()):
+        raise ValueError("FORM6K_SCHEMA_UNRECOGNIZED")
+    for (table,) in connection.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+        for fk in connection.execute(f'PRAGMA foreign_key_list("{table.replace(chr(34), chr(34)*2)}")'):
+            if fk[2] in tables and table not in tables:
+                raise ValueError("FORM6K_SCHEMA_EXTERNAL_FOREIGN_KEY")
+    objects = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE tbl_name IN (?,?) "
+        "AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name", tables
+    ).fetchall()
+    connection.execute("SAVEPOINT form6k_schema")
+    try:
+        for name in tables:
+            connection.execute(f'CREATE TEMP TABLE _form6k_{name} AS SELECT * FROM {name}')
+        for name in reversed(tables):
+            connection.execute(f'DROP TABLE {name}')
+        for name in tables:
+            connection.execute(definitions[name].replace(
+                "'SEC_8K_ITEM_2_02'", "'SEC_8K_ITEM_2_02','SEC_FORM_6K_RESULT'", 1))
+            connection.execute(f'INSERT INTO {name} SELECT * FROM _form6k_{name}')
+            connection.execute(f'DROP TABLE _form6k_{name}')
+        for (sql,) in objects:
+            connection.execute(sql)
+        if connection.execute("PRAGMA foreign_key_check").fetchone():
+            raise ValueError("FORM6K_SCHEMA_FOREIGN_KEY_CHECK_FAILED")
+        connection.execute("RELEASE form6k_schema")
+    except Exception:
+        connection.execute("ROLLBACK TO form6k_schema")
+        connection.execute("RELEASE form6k_schema")
+        raise
+    return True

@@ -377,6 +377,32 @@ def evaluate_form6k(
     return result
 
 
+def reviewed_evidence_payload(case: Mapping[str, Any], *, authority_version: str) -> dict[str, Any]:
+    """Reproduce event eligibility before supplying evidence to the common writer."""
+    import json
+
+    decision = evaluate_form6k(case["quarter"], case["candidates"],
+                              relations=case.get("relations", []), authority_version=authority_version)
+    if decision["final_result"] != "UNIQUE":
+        raise ValueError("FORM6K_REVIEWED_EVIDENCE_NOT_UNIQUE")
+    candidate = next(c for c in case["candidates"]
+                     if c["candidate_id"] == decision["selected_candidate_id"])
+    quarter = case["quarter"]
+    stable = {
+        "company_id": quarter["company_id"], "fiscal_year": quarter["fiscal_year"],
+        "fiscal_quarter": quarter["fiscal_quarter"], "quarter_id": quarter["quarter_id"],
+        "source_type": SEC_FORM_6K_RESULT, "source_timestamp_utc": decision["selected_timestamp"],
+        "accession_number": candidate["accession"], "filing_form": candidate["form"],
+        "document_id": candidate["primary_document"], "source_reference": candidate["parent_url"],
+        "security_id": quarter["security_id"], "rule_version": authority_version,
+        "matching_method": json.dumps({"authority_version": authority_version, "source_rank": 2,
+            "confidence": "MEDIUM", "decision_fingerprint": decision["decision_fingerprint"],
+            "frozen_case": dict(case)}, sort_keys=True, separators=(",", ":")),
+    }
+    digest = fingerprint(stable)
+    return {**stable, "evidence_hash": digest, "evidence_id": "rpe_" + digest[:24]}
+
+
 def simulate_authority_state(
     state: Mapping[tuple[int, int, str], Mapping[str, Any]], cases: Sequence[Mapping[str, Any]], *,
     authority_version: str,

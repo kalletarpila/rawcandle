@@ -22,14 +22,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exact-allowlist", type=Path, help="CSV with company_id,fiscal_year,fiscal_quarter; dry-run by default")
     parser.add_argument("--prepare-reviewed-plan", action="store_true")
     parser.add_argument("--publication-event-policy", choices=["PUBLICATION_EVENT_POLICY_V1"])
+    parser.add_argument("--publication-authority-mode", choices=["FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"])
     parser.add_argument("--policy-evidence", type=Path, help="Explicit reviewed frozen event observations for V1 PREPARE")
     parser.add_argument("--output-plan", type=Path)
     parser.add_argument("--reviewed-apply-plan", type=Path)
     parser.add_argument("--rehearsal", action="store_true", help="Create an isolated copy and apply reviewed frozen inputs there")
     args = parser.parse_args(argv)
-    if args.policy_evidence is not None and (not args.prepare_reviewed_plan or args.publication_event_policy is None):
+    mode = args.publication_authority_mode or args.publication_event_policy
+    if args.publication_authority_mode and args.publication_event_policy:
+        parser.error("Publication event policy and authority mode are separate input modes")
+    if args.policy_evidence is not None and (not args.prepare_reviewed_plan or mode is None):
         parser.error("--policy-evidence requires explicit policy PREPARE")
-    if args.publication_event_policy is not None:
+    if mode is not None:
         if not args.prepare_reviewed_plan and args.reviewed_apply_plan is None:
             parser.error("Publication policy is only available for reviewed plans")
         if args.prepare_reviewed_plan and args.policy_evidence is None:
@@ -52,12 +56,14 @@ def main(argv: list[str] | None = None) -> int:
                                             output_plan=args.output_plan, retry_days=args.retry_days,
                                             network_budget_seconds=args.network_budget_seconds,
                                             **({"publication_event_policy":args.publication_event_policy,
-                                                "policy_evidence_path":args.policy_evidence} if args.publication_event_policy else {}))
+                                                "policy_evidence_path":args.policy_evidence} if args.publication_event_policy else
+                                               {"publication_authority_mode":args.publication_authority_mode,
+                                                "policy_evidence_path":args.policy_evidence} if args.publication_authority_mode else {}))
             print(json.dumps(report, indent=2, sort_keys=True))
             return 0
         if args.reviewed_apply_plan is not None:
             plan = load_plan(args.reviewed_apply_plan)
-            if args.publication_event_policy is not None and args.publication_event_policy != plan.get("policy_mode","LEGACY"):
+            if mode is not None and mode != plan.get("policy_mode","LEGACY"):
                 raise ValueError("PUBLICATION_PLAN_POLICY_MODE_MISMATCH")
             print(json.dumps(plan_scope_evidence(plan)), file=sys.stderr, flush=True)
             if args.rehearsal:

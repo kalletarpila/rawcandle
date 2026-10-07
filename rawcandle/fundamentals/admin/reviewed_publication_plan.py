@@ -108,6 +108,9 @@ def validate_plan(plan: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("PUBLICATION_PLAN_SHAPE_INVALID")
     mode = plan.get("policy_mode", "LEGACY")
+    if mode == "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1":
+        from rawcandle.fundamentals.admin.form6k_reviewed_publication_plan import validate_form6k_plan
+        return validate_form6k_plan(plan)
     if mode == "PUBLICATION_EVENT_POLICY_V1":
         from rawcandle.fundamentals.admin.policy_reviewed_publication_plan import validate_policy_plan
         return validate_policy_plan(plan)
@@ -241,11 +244,19 @@ def prepare_reviewed_plan(*, project_root: Path, allowlist_path: Path, output_pl
                           client: SecClient | None = None, as_of_date: str | None = None,
                           retry_days: int = 60, network_budget_seconds: float = 1800,
                           publication_event_policy: str | None = None,
+                          publication_authority_mode: str | None = None,
                           policy_evidence_path: Path | None = None) -> dict[str, Any]:
     root = project_root.resolve()
     if not math.isfinite(network_budget_seconds) or network_budget_seconds <= 0:
         raise ValueError("PUBLICATION_NETWORK_BUDGET_INVALID")
     day = as_of_date or utc_now()[:10]
+    if publication_authority_mode is not None:
+        if (publication_authority_mode != "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"
+                or publication_event_policy is not None or client is not None):
+            raise ValueError("PUBLICATION_PLAN_AUTHORITY_INPUT_MODE_INVALID")
+        from rawcandle.fundamentals.admin.form6k_reviewed_publication_plan import prepare_form6k_plan
+        return prepare_form6k_plan(project_root=project_root, allowlist_path=allowlist_path, output_plan=output_plan,
+                                  policy_evidence_path=policy_evidence_path, as_of_date=day, retry_days=retry_days)
     if publication_event_policy is not None:
         if publication_event_policy != "PUBLICATION_EVENT_POLICY_V1" or client is not None:
             raise ValueError("PUBLICATION_PLAN_POLICY_INPUT_MODE_INVALID")
@@ -360,6 +371,9 @@ def publish_plan(plan, output_plan):
 
 def revalidate_plan_state(plan, binding, *, as_of_date):
     validate_plan(plan)
+    if plan.get("policy_mode") == "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1":
+        from rawcandle.fundamentals.admin.form6k_reviewed_publication_plan import revalidate_form6k_state
+        return revalidate_form6k_state(plan, binding, as_of_date=as_of_date)
     if (binding.generation_id != plan["active_generation_id"]
             or fingerprint(binding.manifest) != plan["active_generation_manifest_fingerprint"]):
         raise RuntimeError("PUBLICATION_PLAN_GENERATION_DRIFT")
@@ -414,7 +428,10 @@ def run_plan_candidate(candidate_db, plan, *, as_of_date):
         if any(state_for_key(connection, _key(c)) != c["state"] for c in plan["per_case"]):
             raise RuntimeError("PUBLICATION_PLAN_CANDIDATE_STATE_DRIFT")
     # Existing resolver/apply remains authoritative, with only reviewed inputs supplied.
-    if plan.get("policy_mode") == "PUBLICATION_EVENT_POLICY_V1":
+    if plan.get("policy_mode") == "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1":
+        from rawcandle.fundamentals.admin.form6k_reviewed_publication_plan import run_form6k_candidate
+        result = run_form6k_candidate(candidate_db, plan, as_of_date=as_of_date)
+    elif plan.get("policy_mode") == "PUBLICATION_EVENT_POLICY_V1":
         from rawcandle.fundamentals.admin.policy_reviewed_publication_plan import run_policy_candidate
         result = run_policy_candidate(candidate_db,plan,as_of_date=as_of_date)
     else:
@@ -431,7 +448,7 @@ def run_plan_candidate(candidate_db, plan, *, as_of_date):
             evidence = case["evidence"]
             if (authority["status"] != "VERIFIED" or authority["result_publication_timestamp_utc"] != case["parent_acceptance_timestamp"]
                     or authority["selected_evidence_id"] != evidence["evidence_id"]
-                    or authority["result_publication_source"] != "SEC_8K_ITEM_2_02"):
+                    or authority["result_publication_source"] != plan.get("source_type", "SEC_8K_ITEM_2_02")):
                 raise RuntimeError("PUBLICATION_PLAN_AUTHORITY_RESULT_DRIFT")
     result["scope_mode"] = SCOPE_MODE
     return result
@@ -441,6 +458,10 @@ def plan_scope_evidence(plan):
     result = {"scope_mode": SCOPE_MODE, "plan_id": plan["plan_id"], "plan_fingerprint": plan["plan_fingerprint"],
             "prepared_keys_fingerprint": plan["prepared_keys_fingerprint"], "prepared_key_count": plan["prepared_key_count"],
             "source_allowlist_count": plan["source_allowlist_count"], "source_allowlist_fingerprint": plan["source_allowlist_fingerprint"]}
+    if plan.get("policy_mode") == "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1":
+        from rawcandle.fundamentals.admin.form6k_reviewed_publication_plan import BINDINGS
+        result.update({name: plan[name] for name in BINDINGS})
+        result["form6k_decision_fingerprints"] = {str(_key(c)): c["decision_fingerprint"] for c in plan["form6k_cases"]}
     if plan.get("policy_mode") == "PUBLICATION_EVENT_POLICY_V1":
         result.update({name:plan[name] for name in ("policy_mode","policy_version","policy_evidence_version","policy_decisions_fingerprint")})
         result["policy_decision_fingerprints"] = {str(_key(c)):c["policy_decision_fingerprint"] for c in plan["policy_cases"]}

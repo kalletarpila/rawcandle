@@ -528,18 +528,33 @@ def apply_resolution(
     unresolved: bool = False,
     reason_override: str | None = None,
     now: str | None = None,
+    form6k_reviewed_case: Mapping[str, Any] | None = None,
 ) -> str:
     now = now or utc_now()
+    ranks = SOURCE_RANK
+    rule_version = RESULT_PUBLICATION_RULE_VERSION
+    if form6k_reviewed_case is not None:
+        from rawcandle.fundamentals.form6k_authority import (
+            reviewed_evidence_payload, FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1, SEC_FORM_6K_RESULT,
+        )
+        rule_version = form6k_reviewed_case["authority_version"]
+        if rule_version != FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1:
+            raise ValueError("UNSUPPORTED_FORM6K_AUTHORITY")
+        expected = reviewed_evidence_payload(form6k_reviewed_case, authority_version=rule_version)
+        if (list(evidence) != [expected] or any(quarter[k] != form6k_reviewed_case["quarter"][k]
+                for k in ("quarter_id", "company_id", "fiscal_year", "fiscal_quarter", "period_end"))):
+            raise ValueError("FORM6K_REVIEWED_APPLY_BINDING_DRIFT")
+        ranks = {**SOURCE_RANK, SEC_FORM_6K_RESULT: 2}
     key = (int(quarter["company_id"]), int(quarter["fiscal_year"]), str(quarter["fiscal_quarter"]))
     existing = connection.execute(
         "SELECT * FROM v4_result_publication_authority WHERE company_id=? AND fiscal_year=? AND fiscal_quarter=?", key
     ).fetchone()
     for row in evidence:
-        if str(row["source_type"]) not in SOURCE_RANK:
+        if str(row["source_type"]) not in ranks:
             _insert_evidence(connection, row, "REJECTED", now)
     candidates = sorted(
-        (row for row in evidence if str(row["source_type"]) in SOURCE_RANK),
-        key=lambda row: (-SOURCE_RANK[str(row["source_type"])], str(row["source_timestamp_utc"])),
+        (row for row in evidence if str(row["source_type"]) in ranks),
+        key=lambda row: (-ranks[str(row["source_type"])], str(row["source_timestamp_utc"])),
     )
     status = "UNRESOLVED" if unresolved else "NOT_FOUND"
     reason = "ITEM_2_02_CONTEXT_DID_NOT_RESOLVE_UNIQUELY" if unresolved else "NO_AUTHORITATIVE_EVIDENCE_FOUND"
@@ -547,8 +562,8 @@ def apply_resolution(
         reason = reason_override
     selected: Mapping[str, Any] | None = None
     if candidates:
-        top_rank = SOURCE_RANK[str(candidates[0]["source_type"])]
-        top = [row for row in candidates if SOURCE_RANK[str(row["source_type"])] == top_rank]
+        top_rank = ranks[str(candidates[0]["source_type"])]
+        top = [row for row in candidates if ranks[str(row["source_type"])] == top_rank]
         timestamps = {str(row["source_timestamp_utc"]) for row in top}
         if len(timestamps) == 1:
             selected = top[0]
@@ -556,8 +571,10 @@ def apply_resolution(
         else:
             status, reason = "AMBIGUOUS", "SAME_PRIORITY_AUTHORITATIVE_EVIDENCE_CONFLICT"
     if existing is not None and existing["status"] == "VERIFIED" and selected is not None:
-        old_rank = SOURCE_RANK[str(existing["result_publication_source"])]
-        new_rank = SOURCE_RANK[str(selected["source_type"])]
+        # Read compatibility is not candidate authorization in the default path.
+        old_source = str(existing["result_publication_source"])
+        old_rank = 2 if old_source == "SEC_FORM_6K_RESULT" else SOURCE_RANK[old_source]
+        new_rank = ranks[str(selected["source_type"])]
         if old_rank > new_rank:
             selected = None
             status, reason = "VERIFIED", "EXISTING_HIGHER_PRIORITY_AUTHORITY_PRESERVED"
@@ -607,7 +624,7 @@ def apply_resolution(
             rule_version=excluded.rule_version,status_reason=excluded.status_reason,updated_at_utc=excluded.updated_at_utc
         """,
         (*key, int(quarter["quarter_id"]), status, values["timestamp"], values["source"], values["confidence"],
-         values["reference"], values["evidence_id"], values["verified"], RESULT_PUBLICATION_RULE_VERSION, reason, now),
+         values["reference"], values["evidence_id"], values["verified"], rule_version, reason, now),
     )
     return status
 
