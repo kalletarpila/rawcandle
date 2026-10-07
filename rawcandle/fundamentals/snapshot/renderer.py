@@ -245,6 +245,40 @@ def _relative_cell(relative: Mapping[str, Any], measure: str, scope: str) -> str
     return "— (NO_COVERAGE_RECORD)"
 
 
+def _book_value_sections(snapshot: Mapping[str, Any]) -> list[str]:
+    value = snapshot.get("book_value")
+    if not value:
+        return []
+    current = value["current"]
+    provider = value["provider"]
+    multiple = lambda x: "N/A" if x is None else _multiple(x)
+    quarter = lambda r: f"{r['fiscal_year']}-{r['fiscal_quarter']}"
+    return [
+        "## Book Value / P/B", "",
+        _table(("Kenttä", "Arvo"), (
+            ("Current P/B", multiple(current.get("value"))),
+            ("Provider P/B", multiple(provider.get("value"))),
+            ("Parent equity (USD)", _money(current.get("parent_equity_usd"))),
+            ("Equity quarter", f"{current['equity_fiscal_year']}-{current['equity_fiscal_quarter']}" if current.get("equity_fiscal_year") else "N/A"),
+            ("Equity report period", _text(current.get("equity_reportperiod"))),
+            ("Equity source availability date", _text(current.get("equity_source_availability_date"))),
+            ("P/B as-of date", current["as_of_date"]),
+            ("Price date", _text(current.get("price_date"))),
+            ("Provider observation date", _text(provider.get("provider_date"))),
+            ("Status", current["status"]), ("Current P/B reason", current["reason"]),
+            ("Provider P/B reason", provider["reason"]),
+            ("Warnings", ", ".join(current.get("warnings", [])) or "—"),
+        ), ("left", "left")), "",
+        "### Provider P/B history", "",
+        _table(("Quarter", "Provider P/B", "Observation date", "Reason"), tuple(
+            (quarter(row), multiple(row["value"]), _text(row.get("provider_date")), row["reason"])
+            for row in value["history"]
+        ) or (("—", "N/A", "—", "NO_ACCEPTED_QUARTERS"),)), "",
+        value["caveat"], "",
+        "Current P/B: CURRENT_REVISED_REPORTING. Provider P/B history: PROVIDER_OBSERVATION_REFERENCE. Reporting only; not PIT-safe.", "",
+    ]
+
+
 def _relative_valuation_sections(snapshot: Mapping[str, Any]) -> list[str]:
     value = snapshot.get("relative_valuation")
     if not value:
@@ -1267,6 +1301,7 @@ def _build_markdown(snapshot: Mapping[str, Any]) -> str:
             blockers = json.loads(history[-1]["ttm"].get("blocker_codes_json") or "[]")
         except (TypeError, json.JSONDecodeError):
             blockers = ["TTM_BLOCKER_DATA_INVALID"]
+    sections.extend(_book_value_sections(snapshot))
     missing_sections = _missing_sections(snapshot)
     sections.extend([
         _table(("Tarkistus", "Tila"), (

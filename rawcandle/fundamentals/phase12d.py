@@ -471,6 +471,9 @@ def reconcile_canonical(
     applied_at: str,
     inject_failure: bool = False,
 ) -> dict[str, Any]:
+    from rawcandle.fundamentals.schema.parent_equity import assert_inactive_copy, accept_parent_equity
+
+    assert_inactive_copy(canonical_db)
     winners, source = _provider_winners(provider_db)
     counts = Counter()
     changed_sample: list[dict[str, Any]] = []
@@ -563,6 +566,9 @@ def reconcile_canonical(
                     "company_id": key[0], "fiscal_year": key[1], "fiscal_quarter": key[2],
                     "classification": classification, "provider_observation_id": winner["observation_id"],
                 })
+        with sqlite3.connect(f"file:{provider_db.resolve()}?mode=ro", uri=True) as parent_provider:
+            parent_provider.row_factory = sqlite3.Row
+            accept_parent_equity(connection, parent_provider, accepted_at=applied_at)
         if inject_failure:
             raise RuntimeError("INJECTED_PHASE12D_CANONICAL_FAILURE")
         connection.commit()

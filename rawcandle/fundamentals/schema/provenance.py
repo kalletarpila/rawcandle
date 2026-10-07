@@ -31,8 +31,10 @@ PROVENANCE_COLUMNS = (
     "rule_version",
     "confidence",
 )
-KNOWN_PROVENANCE_FIELDS = frozenset(V4_CANONICAL_FINANCIAL_FIELDS)
-LEGACY_PROVENANCE_FIELDS = KNOWN_PROVENANCE_FIELDS - {COMMON_EARNINGS_FIELD, *OPERATING_WORKING_CAPITAL_NATIVE_FIELDS}
+PARENT_EQUITY_NATIVE_FIELDS = {"parent_equity": "equity", "parent_equity_usd": "equityusd"}
+PARENT_EQUITY_PROVENANCE_TABLE = "v4_parent_equity_provenance"
+KNOWN_PROVENANCE_FIELDS = frozenset(V4_CANONICAL_FINANCIAL_FIELDS) | frozenset(PARENT_EQUITY_NATIVE_FIELDS)
+LEGACY_PROVENANCE_FIELDS = KNOWN_PROVENANCE_FIELDS - {COMMON_EARNINGS_FIELD, *OPERATING_WORKING_CAPITAL_NATIVE_FIELDS, *PARENT_EQUITY_NATIVE_FIELDS}
 
 COMMON_EARNINGS_PROVENANCE_SCHEMA_SQL = f"""
 CREATE TABLE {COMMON_EARNINGS_PROVENANCE_TABLE} (
@@ -146,6 +148,8 @@ def ensure_provenance_schema(conn: sqlite3.Connection) -> None:
 def provenance_table(canonical_field: str) -> str:
     if canonical_field not in KNOWN_PROVENANCE_FIELDS:
         raise ValueError(f"UNKNOWN_CANONICAL_PROVENANCE_FIELD:{canonical_field}")
+    if canonical_field in PARENT_EQUITY_NATIVE_FIELDS:
+        return PARENT_EQUITY_PROVENANCE_TABLE
     if canonical_field == COMMON_EARNINGS_FIELD:
         return COMMON_EARNINGS_PROVENANCE_TABLE
     if canonical_field in OPERATING_WORKING_CAPITAL_NATIVE_FIELDS:
@@ -158,6 +162,7 @@ def _existing_provenance_tables(conn: sqlite3.Connection) -> tuple[str, ...]:
         LEGACY_PROVENANCE_TABLE,
         COMMON_EARNINGS_PROVENANCE_TABLE,
         OPERATING_WORKING_CAPITAL_PROVENANCE_TABLE,
+        PARENT_EQUITY_PROVENANCE_TABLE,
     )
     existing = {
         str(row[0])
@@ -179,6 +184,10 @@ def write_provenance(
     if canonical_field in OPERATING_WORKING_CAPITAL_NATIVE_FIELDS and row.get("source_native_field") != OPERATING_WORKING_CAPITAL_NATIVE_FIELDS[canonical_field]:
         raise ValueError("INVALID_OPERATING_WORKING_CAPITAL_NATIVE_FIELD")
     ensure_provenance_schema(conn)
+    if canonical_field in PARENT_EQUITY_NATIVE_FIELDS:
+        from rawcandle.fundamentals.schema.parent_equity import ensure_schema
+
+        ensure_schema(conn)
     verb = "INSERT OR IGNORE" if ignore_duplicate else "INSERT"
     columns = PROVENANCE_COLUMNS[1:]
     before = conn.total_changes
@@ -206,6 +215,10 @@ def write_provenance_many(
         if canonical_field in OPERATING_WORKING_CAPITAL_NATIVE_FIELDS and row.get("source_native_field") != OPERATING_WORKING_CAPITAL_NATIVE_FIELDS[canonical_field]:
             raise ValueError("INVALID_OPERATING_WORKING_CAPITAL_NATIVE_FIELD")
         grouped.setdefault(table, []).append(row)
+    if PARENT_EQUITY_PROVENANCE_TABLE in grouped:
+        from rawcandle.fundamentals.schema.parent_equity import ensure_schema
+
+        ensure_schema(conn)
     columns = PROVENANCE_COLUMNS[1:]
     verb = "INSERT OR IGNORE" if ignore_duplicate else "INSERT"
     before = conn.total_changes

@@ -601,6 +601,12 @@ def _assemble_company_snapshot_v2(
                     "selected_price": base["current_price_valuation"].get("selected_price"),
                     "structural_break": structural_state,
                 }
+        from rawcandle.fundamentals.book_value import book_value_report
+
+        base["book_value"] = book_value_report(
+            canonical, market, company_id=company_id,
+            ticker=base["identity"]["ticker"], as_of=report_date,
+        )
         base["valuation_multiples"] = _three_point_multiples(base["history"], base["current_price_valuation"])
         base["relative_position"] = _relative(analysis, company_id, report_date, model_map["relative_position"][1])
         base["diagnostic"] = _diagnostic(repository, company_id, anchor["fiscal_year"], anchor["fiscal_quarter"], model_map["diagnostic_flags"][1])
