@@ -62,6 +62,8 @@ class FundamentalsAdminPageControls:
     review_queue_include_resolved_checkbox: Any
     review_queue_refresh_button: Any
     review_queue_blocked_actions: Any
+    pb_ownership_column: Any
+    pb_ownership_status_field: Any
     activate: Any
     history_loader: Any
 
@@ -260,6 +262,8 @@ def build_fundamentals_admin_page(
     history_column = ft.Column(spacing=6)
     show_technical_history_checkbox = ft.Checkbox(label="Show technical and legacy runs", value=False)
     review_queue_column = ft.Column(spacing=6)
+    pb_ownership_column = ft.Column(spacing=6)
+    pb_ownership_status_field = ft.Text('Not loaded.')
     review_queue_status_field = ft.Text("Not loaded.")
     review_queue_detail_field = ft.TextField(
         label="Selected review item",
@@ -939,6 +943,91 @@ def build_fundamentals_admin_page(
             )
         review_queue_column.controls = rows or [ft.Text("No review items found.")]
 
+    def open_pb_ownership_review(item: dict[str, Any], *, hold: bool = False) -> None:
+        try:
+            effect = None if hold else admin_service.preview_pb_ownership_review(
+                item['case_id'], candidate_hash=item['candidate_hash'])
+        except Exception as exc:
+            pb_ownership_status_field.value = f'Review preview stopped: {exc}'
+            if hasattr(page, 'update'):
+                page.update()
+            return
+        operator = ft.TextField(label='Operator name', value='')
+        note = ft.TextField(label='Quarterly basis review note', value='', multiline=True)
+        confirmed = ft.Checkbox(label='I confirm this exact quarterly observation and the displayed ownership interpretation.', value=False)
+        text = f"{item['ticker']} · {item['new']['fiscal_year']}-{item['new']['fiscal_quarter']}\nObservation: {item['new']['observation_id']}\nHash: {item['new']['content_hash']}"
+        if effect:
+            hypothetical = effect.get('hypothetical_current') or {}
+            text += (f"\nPrior reviewed Current P/B reference: {effect.get('prior_current_reference', {}).get('reason')} (as of {effect.get('prior_reference_as_of')})\n"
+                     f"Held Current P/B: {effect['held_current']['reason']}\n"
+                     f"Hypothetical approved P/B: {hypothetical.get('value')} ({hypothetical.get('reason')})\n"
+                     f"New shares: {item['new']['sharesbas']} · Price: {hypothetical.get('price')}\n"
+                     f"New parent equity: {item['new']['parent_equity_usd']}\n"
+                     'Approval prepares evidence and an inactive candidate. Controlled publication is still required.')
+
+        def confirm(_event: Any) -> None:
+            try:
+                if hold:
+                    admin_service.hold_pb_ownership_review(item['case_id'], candidate_hash=item['candidate_hash'], note=str(note.value or ''))
+                    pb_ownership_status_field.value = 'Quarterly ownership review kept on hold.'
+                else:
+                    if confirmed.value is not True:
+                        raise ValueError('Explicit confirmation required')
+                    result = admin_service.approve_pb_ownership_review(item['case_id'], candidate_hash=item['candidate_hash'],
+                        operator=str(operator.value or ''), note=str(note.value or ''), confirmed=True)
+                    pb_ownership_status_field.value = f"Approved pending controlled publication. Candidate: {result['candidate_canonical']}"
+                close_dialog()
+                load_pb_ownership_reviews()
+            except Exception as exc:
+                pb_ownership_status_field.value = f'Quarterly ownership action stopped: {exc}'
+            if hasattr(page, 'update'):
+                page.update()
+
+        button = ft.ElevatedButton('Keep on hold' if hold else 'Approve quarterly ownership continuation', on_click=confirm, disabled=True)
+
+        def enable(_event: Any) -> None:
+            button.disabled = not (str(note.value or '').strip() and (hold or (str(operator.value or '').strip() and confirmed.value is True)))
+            if hasattr(page, 'update'):
+                page.update()
+        operator.on_change = note.on_change = confirmed.on_change = enable
+        dialog = ft.AlertDialog(modal=True, title=ft.Text('Keep quarterly ownership on hold?' if hold else 'Approve quarterly ownership continuation?'),
+            content=ft.Column([ft.Text(text), *([] if hold else [operator, confirmed]), note], tight=True),
+            actions=[ft.TextButton('Cancel', on_click=lambda _event: close_dialog()), button])
+        setattr(page, 'dialog', dialog)
+        if hasattr(page, 'open'):
+            page.open(dialog)
+        else:
+            dialog.open = True
+        if hasattr(page, 'update'):
+            page.update()
+
+    def load_pb_ownership_reviews() -> None:
+        reader = getattr(admin_service, 'list_pb_ownership_reviews', None)
+        if not callable(reader):
+            return
+        try:
+            items = reader(include_resolved=bool(review_queue_include_resolved_checkbox.value))
+            rows = []
+            for raw in items:
+                item = dict(raw);old,new = item['previous'],item['new'];ratio = ''
+                if old['economic_unit_rule'] == 'ADS_EQUIVALENTS':
+                    ratio = f" · Reviewed exact ratio {old['exact_factor_numerator']}/{old['exact_factor_denominator']}"
+                description = (f"{item['ticker']} · {old['fiscal_year']}-{old['fiscal_quarter']} → {new['fiscal_year']}-{new['fiscal_quarter']} · {old['release_type']}\n"
+                    f"Shares {old['accepted_sharesbas']} → {new['sharesbas']} ({item['deltas']['shares_percent']}%)\n"
+                    f"Provider factor {old['provider_declared_factor']} → {new['sharefactor']}{ratio}\n"
+                    f"Category {old['accepted_category']} → {new['category']}\n"
+                    f"{item['classification']} · {item['status']} · Current P/B: {item['current_pb_status']}")
+                rows.append(ft.Column([ft.Text(description), ft.Row([
+                    ft.ElevatedButton('Approve quarterly ownership continuation', disabled=item['status']!='OPEN' or item['classification']!='CONTINUATION_CANDIDATE',
+                        on_click=lambda _e, case=item: open_pb_ownership_review(case)),
+                    ft.TextButton('Keep on hold', disabled=item['status']!='OPEN', on_click=lambda _e, case=item: open_pb_ownership_review(case,hold=True)),
+                ])]))
+            pb_ownership_column.controls = rows or [ft.Text('No quarterly ownership reviews pending.')]
+            if not items:
+                pb_ownership_status_field.value = 'No quarterly ownership reviews pending.'
+        except Exception as exc:
+            pb_ownership_status_field.value = f'Quarterly ownership queue could not be loaded: {exc}'
+
     def refresh_review_queue(_event: Any | None = None) -> None:
         review_queue_refresh_button.disabled = True
         review_queue_status_field.value = "Loading review queue..."
@@ -975,6 +1064,7 @@ def build_fundamentals_admin_page(
             review_queue_column.controls = []
             review_queue_status_field.value = "Review queue could not be loaded."
         finally:
+            load_pb_ownership_reviews()
             review_queue_refresh_button.disabled = False
             if hasattr(page, "update"):
                 page.update()
@@ -1721,6 +1811,9 @@ def build_fundamentals_admin_page(
             review_queue_column,
             review_queue_detail_field,
             review_queue_blocked_actions,
+            ft.Text('Quarterly P/B ownership reviews', size=18, weight=ft.FontWeight.BOLD),
+            pb_ownership_status_field,
+            pb_ownership_column,
             ft.Divider(),
             ft.Text("Run history", size=18, weight=ft.FontWeight.BOLD),
             show_technical_history_checkbox,
@@ -1804,6 +1897,8 @@ def build_fundamentals_admin_page(
         review_queue_include_resolved_checkbox=review_queue_include_resolved_checkbox,
         review_queue_refresh_button=review_queue_refresh_button,
         review_queue_blocked_actions=review_queue_blocked_actions,
+        pb_ownership_column=pb_ownership_column,
+        pb_ownership_status_field=pb_ownership_status_field,
         activate=activate,
         history_loader=history_loader,
     )

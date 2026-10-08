@@ -953,6 +953,14 @@ def present_review_item(
 class RefreshReviewQueue:
     path: Path
 
+    def ownership_items(self, *, include_resolved: bool = False) -> list[dict[str, Any]]:
+        from .pb_ownership_review import list_cases
+        return list_cases(self.path, include_resolved=include_resolved)
+
+    def sync_ownership(self, canonical_db: Path, *, as_of: str, run_id: str) -> dict[str, Any]:
+        from .pb_ownership_review import sync
+        return sync(self.path, canonical_db, as_of=as_of, run_id=run_id)
+
     def pending_tickers(self) -> list[str]:
         if not self.path.exists():
             return []

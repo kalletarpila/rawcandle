@@ -470,6 +470,7 @@ def reconcile_canonical(
     *,
     applied_at: str,
     inject_failure: bool = False,
+    ownership_review_queue_path: Path | None = None,
 ) -> dict[str, Any]:
     from rawcandle.fundamentals.schema.parent_equity import assert_inactive_copy, accept_parent_equity
 
@@ -586,8 +587,23 @@ def reconcile_canonical(
             "SELECT COUNT(*) FROM (SELECT company_id,fiscal_year,fiscal_quarter,COUNT(*) n FROM v4_quarter GROUP BY 1,2,3 HAVING n<>1)"
         ).fetchone()[0])
     unexplained = canonical_count - source["winner_rows"]
+    ownership_review = {}
+    # Operational follow-up never changes financial acceptance or blocks a new Q.
+    with readonly(canonical_db) as check:
+        configured = check.execute("SELECT 1 FROM sqlite_master WHERE name='v4_pb_reporting_contract'").fetchone()
+    if configured:
+        from rawcandle.fundamentals.admin.pb_ownership_review import detect, sync
+        try:
+            if ownership_review_queue_path is not None:
+                ownership_review['pb_ownership_review'] = sync(ownership_review_queue_path, canonical_db,
+                    as_of=applied_at[:10], run_id=applied_at)
+            else:
+                with readonly(canonical_db) as check:
+                    ownership_review['pb_ownership_candidates'] = detect(check, as_of=applied_at[:10])
+        except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+            ownership_review['pb_ownership_review_error'] = str(exc)
     return {
-        **source, **dict(counts), "canonical_rows": canonical_count,
+        **source, **dict(counts), **ownership_review, "canonical_rows": canonical_count,
         "unexplained_or_stale_rows": unexplained, "duplicate_identities": duplicates,
         "orphan_financials": orphan_financials, "changed_sample": changed_sample,
         "canonical_fingerprint": canonical_logical_fingerprint(canonical_db),

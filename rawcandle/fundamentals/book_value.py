@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from rawcandle.fundamentals.schema.parent_equity import finite
 from rawcandle.fundamentals.book_value_reviews import unresolved_basis_review
 from rawcandle.fundamentals.ownership_basis import reviewed_ownership, OWNERSHIP_CONTRACT, QUARTERLY_OWNERSHIP_CONTRACT
-from rawcandle.fundamentals.pb_reporting_contract import reporting_ownership_contract
+from rawcandle.fundamentals.pb_reporting_contract import reporting_ownership_contract, reporting_ownership_records
 
 CURRENT_CONTRACT = 'PB_CURRENT_PARENT_EQUITY_V1'
 CURRENT_MODE = 'CURRENT_REVISED_REPORTING'
@@ -43,7 +43,8 @@ def provider_reference(row: Mapping[str, Any]) -> dict[str, Any]:
 
 def current_pb(row: Mapping[str, Any] | None, *, as_of: str, price: Mapping[str, Any] | None,
                category: str | None, active_classes: int,
-               ownership_contract: str = OWNERSHIP_CONTRACT) -> dict[str, Any]:
+               ownership_contract: str = OWNERSHIP_CONTRACT,
+               review_records: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any]:
     if ownership_contract not in (OWNERSHIP_CONTRACT, QUARTERLY_OWNERSHIP_CONTRACT):
         raise ValueError('Unsupported ownership review contract')
     today = date.fromisoformat(as_of)
@@ -85,7 +86,7 @@ def current_pb(row: Mapping[str, Any] | None, *, as_of: str, price: Mapping[str,
         result['warnings'].append('REVIEWED_UNRESOLVED_BASIS')
     def blocked(reason: str) -> dict[str, Any]:
         if quarterly:
-            result['ownership_basis_status'] = 'HELD'
+            result['ownership_basis_status'] = 'NEW_QUARTER_REVIEW_REQUIRED' if reason == 'OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED' else 'HELD'
         return {**result, 'reason': reason}
     equity = result['parent_equity_usd']
     if equity is None:
@@ -102,8 +103,10 @@ def current_pb(row: Mapping[str, Any] | None, *, as_of: str, price: Mapping[str,
     if (today-date.fromisoformat(price['pvm'])).days > 3:
         return blocked('STALE_PRICE')
     factor = finite(r.get('sharefactor'))
-    ownership = reviewed_ownership(r, as_of=as_of, price_date=price['pvm'], contract=ownership_contract)
+    ownership = reviewed_ownership(r, as_of=as_of, price_date=price['pvm'], contract=ownership_contract, review_records=review_records)
     if ownership:
+        if ownership.get('review_context'):
+            result['ownership_review'] = ownership['review_context']
         if ownership.get('metadata'):
             result['ownership_basis'] = ownership['metadata']
             if quarterly:
@@ -153,6 +156,7 @@ def book_value_report(canonical: sqlite3.Connection, market: sqlite3.Connection,
     """Query canonical accepted values/evidence only; no provider JSON in reporting."""
     date.fromisoformat(as_of)
     ownership_contract = reporting_ownership_contract(canonical, as_of=as_of)
+    review_records = reporting_ownership_records(canonical, as_of=as_of)
     present = canonical.execute("SELECT 1 FROM sqlite_master WHERE name='v4_parent_equity_source'").fetchone()
     if not present:
         return {'current': current_pb(None,as_of=as_of,price=None,category=None,active_classes=0,ownership_contract=ownership_contract),
@@ -213,6 +217,6 @@ def book_value_report(canonical: sqlite3.Connection, market: sqlite3.Connection,
                 latest['ownership_conflict'] = True
     current = current_pb(latest,as_of=as_of,price=current_price,category=latest.get('category') if latest else None,
                          active_classes=len(securities) if any(r['current_ticker']==ticker for r in securities) else 0,
-                         ownership_contract=ownership_contract)
+                         ownership_contract=ownership_contract, review_records=review_records)
     return {'current': current, 'provider': provider_reference(latest or {}),
             'history': [provider_reference(r) for r in quarters], 'caveat': CAVEAT}

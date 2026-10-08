@@ -205,6 +205,7 @@ class FundamentalsAdminUIService:
         cik_production_apply: Callable[..., dict[str, Any]] | None = None,
         identity_preview: Callable[..., dict[str, Any]] | None = None,
         identity_paths: Any | None = None,
+        ownership_paths: Any | None = None,
         cleanup_inspect: Callable[[str], Mapping[str, Any]] | None = None,
         cleanup_apply: Callable[[str], Mapping[str, Any]] | None = None,
         operation_lock_path: Path | None = None,
@@ -233,6 +234,7 @@ class FundamentalsAdminUIService:
         self._cik_production_apply = cik_production_apply or _admin_callable("cik_sync", "run_production_apply")
         self._identity_preview = identity_preview or _admin_callable("identity_resolution", "run_preview")
         self._identity_paths = identity_paths
+        self._ownership_paths = ownership_paths
         self._cleanup_inspect = cleanup_inspect
         self._cleanup_apply = cleanup_apply
         self.operation_lock_path = (
@@ -695,6 +697,46 @@ class FundamentalsAdminUIService:
         module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
         queue = module.RefreshReviewQueue(module.queue_path_for_run_root(self.run_root))
         return queue.list_items(include_resolved=include_resolved)
+
+    def _ownership_source_paths(self) -> Mapping[str, Path]:
+        if self._ownership_paths is not None:
+            return self._ownership_paths
+        from rawcandle.fundamentals.generations import resolved_production_paths
+        return resolved_production_paths()
+
+    def list_pb_ownership_reviews(self, *, include_resolved: bool = False) -> list[Mapping[str, Any]]:
+        from .refresh_review_queue import RefreshReviewQueue, queue_path_for_run_root
+        return RefreshReviewQueue(queue_path_for_run_root(self.run_root)).ownership_items(include_resolved=include_resolved)
+
+    def preview_pb_ownership_review(self, case_id: str, *, candidate_hash: str) -> Mapping[str, Any]:
+        from .pb_ownership_review import preview
+        from .contracts import utc_now
+        items = self.list_pb_ownership_reviews(include_resolved=True)
+        case = next((c for c in items if c['case_id'] == case_id and c['candidate_hash'] == candidate_hash), None)
+        if case is None:
+            raise ValueError('PB_OWNERSHIP_STALE_CANDIDATE')
+        paths = self._ownership_source_paths()
+        return preview(case, paths['canonical'], paths['market'], as_of=utc_now()[:10])
+
+    def approve_pb_ownership_review(self, case_id: str, *, candidate_hash: str,
+                                   operator: str, note: str, confirmed: bool = False) -> Mapping[str, Any]:
+        from .pb_ownership_review import approve
+        from .refresh_review_queue import queue_path_for_run_root
+        from .production_transaction import production_lock
+        from .publication_journal import guard_production_writes
+        from .contracts import utc_now
+        with self._operation_lock(), production_lock():
+            guard_production_writes()
+            paths = self._ownership_source_paths()
+            return approve(queue_path_for_run_root(self.run_root), case_id, candidate_hash=candidate_hash,
+                canonical_db=paths['canonical'], market_db=paths['market'], output_root=self.run_root/'pb_ownership_candidates',
+                as_of=utc_now()[:10], operator=operator, note=note, confirmed=confirmed)
+
+    def hold_pb_ownership_review(self, case_id: str, *, candidate_hash: str, note: str) -> None:
+        from .pb_ownership_review import keep_on_hold
+        from .refresh_review_queue import queue_path_for_run_root
+        with self._operation_lock():
+            keep_on_hold(queue_path_for_run_root(self.run_root), case_id, candidate_hash=candidate_hash, note=note)
 
     def list_refresh_review_queue(self, *, active_only: bool = True) -> Mapping[str, Any]:
         module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")

@@ -659,6 +659,7 @@ def build_publication_date_preservation_map(
 def fresh_rebuild_canonical(
     provider_db: Path, canonical_db: Path, *, applied_at: str,
     affected_company_ids: Sequence[int] = (),
+    ownership_review_queue_path: Path | None = None,
 ) -> dict[str, Any]:
     identity_before = _identity_mapping(canonical_db)
     before = _quarter_rows(canonical_db)
@@ -680,7 +681,8 @@ def fresh_rebuild_canonical(
             if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                 connection.execute(f"DELETE FROM {table}")
         connection.commit()
-    canonical = reconcile_canonical(provider_db, canonical_db, applied_at=applied_at)
+    canonical = reconcile_canonical(provider_db, canonical_db, applied_at=applied_at,
+                                    ownership_review_queue_path=ownership_review_queue_path)
     with sqlite3.connect(canonical_db) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
         ensure_ttm_schema(connection)
@@ -1180,6 +1182,7 @@ def run_apply(
         with _background_heartbeat(progress, "Fresh canonical rebuild is still running."):
             canonical_result = fresh_rebuild_canonical(
                 provider_candidate, canonical_candidate, applied_at=applied_at,
+                ownership_review_queue_path=queue_path_for_run_root(run_root),
                 affected_company_ids=[int(identity["company_id"]) for identity in identities.values()],
             )
         writer.write_json("publish_date_bootstrap_summary.json", canonical_result["publication_date_bootstrap"])

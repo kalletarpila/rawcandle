@@ -1,0 +1,36 @@
+kind,case,result,evidence,value
+focused_behavior,test_end_to_end_reconcile_review_approval_and_generation_rehearsal,PASS,tests/test_fundamentals_pb_new_quarter_review.py:89,
+focused_behavior,test_repeated_refresh_one_logical_case_no_duplicate_audit,PASS,tests/test_fundamentals_pb_new_quarter_review.py:136,
+focused_behavior,test_classification_and_stale_approval_on_changed_binding,PASS,tests/test_fundamentals_pb_new_quarter_review.py:152,
+focused_behavior,test_stale_candidate_hash_observation_equity_cannot_approve,PASS,tests/test_fundamentals_pb_new_quarter_review.py:166,
+focused_behavior,test_registry_version_change_prevents_approval,PASS,tests/test_fundamentals_pb_new_quarter_review.py:173,
+focused_behavior,test_explicit_confirmation_and_operator_evidence_required,PASS,tests/test_fundamentals_pb_new_quarter_review.py:180,
+focused_behavior,test_wrong_candidate_hash_and_duplicate_approval_rejected_safely,PASS,tests/test_fundamentals_pb_new_quarter_review.py:186,
+focused_behavior,test_hold_history_retry_and_separate_provider_review_not_overwritten,PASS,tests/test_fundamentals_pb_new_quarter_review.py:195,
+focused_behavior,test_unsupported_explicit_holds_excluded,PASS,tests/test_fundamentals_pb_new_quarter_review.py:208,
+focused_behavior,test_large_share_change_still_requires_human_approval,PASS,tests/test_fundamentals_pb_new_quarter_review.py:215,
+focused_behavior,test_generation_artifact_tampering_fails_closed,PASS,tests/test_fundamentals_pb_new_quarter_review.py:225,
+focused_behavior,test_queue_failure_does_not_block_financial_acceptance,PASS,tests/test_fundamentals_pb_new_quarter_review.py:231,
+focused_behavior,test_v1_and_bundled_v2_files_unchanged,PASS,tests/test_fundamentals_pb_new_quarter_review.py:238,
+focused_behavior,test_admin_ui_explicit_dialog_before_action,PASS,tests/test_fundamentals_pb_new_quarter_review.py:244,
+focused_behavior,test_later_observation_creates_new_case_preserving_held_history,PASS,tests/test_fundamentals_pb_new_quarter_review.py:271,
+focused_behavior,test_identity_override_compatible_category_continuation,PASS,tests/test_fundamentals_pb_new_quarter_review.py:282,
+focused_behavior,test_scores_and_provider_storage_unchanged_by_approval,PASS,tests/test_fundamentals_pb_new_quarter_review.py:291,
+focused_behavior,test_legacy_repin_cannot_drop_embedded_history,PASS,tests/test_fundamentals_pb_new_quarter_review.py:297,
+copy_rehearsal,ordinary,PASS,real reconcile; Q2 100/1000 -> Q3 120/2000; price 20; held -> explicit approval; later price 30; retries,1.2
+copy_rehearsal,identity_override,PASS,real reconcile; Q2 100/1000 -> Q3 120/2000; price 20; held -> explicit approval; later price 30; retries,1.2
+copy_rehearsal,ADR_factor,PASS,real reconcile; Q2 100/1000 -> Q3 120/2000; price 20; held -> explicit approval; later price 30; retries,0.4
+copy_rehearsal,zero_factor,PASS,real reconcile; Q2 100/1000 -> Q3 120/2000; price 20; held -> explicit approval; later price 30; retries,3e-05
+live_unchanged_sha256,provider,PASS,before == after; matches P/B.11 baseline,2b3a57add8b51413d98f220d4cdd313994d1a4079f987a94796bf6a2b6db5fbb
+live_unchanged_sha256,canonical,PASS,before == after; matches P/B.11 baseline,185597dc364c8cd1642d53054af485c5d4f690b49df18d38dbe911b3220fd924
+live_unchanged_sha256,analysis,PASS,before == after; matches P/B.11 baseline,a8dcc37e1a0e2442dd44023b63d8c6ba91ee5fdce3ab05e2fa5407413a0355ce
+live_unchanged_sha256,manifest,PASS,before == after; matches P/B.11 baseline,7c103baedea1f7f0808388bec8138dea238951cf9c9ab476e727cf7d07ba0fa8
+live_unchanged_sha256,v1,PASS,before == after; matches P/B.11 baseline,0baaf493afa2faa52c2179a2353fb9089d834ef2bcb91f6e088e58f1bae068bf
+live_unchanged_sha256,v2,PASS,before == after; matches P/B.11 baseline,7b7d0cdd9bce7d448b70c7c46af54d3401f4fb0005b4f94f021d29c0e0e460e6
+live_unchanged_sha256,queue,PASS,before == after; matches P/B.11 baseline,14f4fd5a9e98c49ec55f6e36cc1c78b7ac290a2c1d789dbf5074b70d755b393f
+baseline_invariance,all_active_security_reports,PASS,exact complete report equality against HEAD; not coverage denominator,2542
+baseline_invariance,new_live_candidates,PASS,previously supported V2 cohort only,0
+test_run,new_quarter_workflow,PASS,tests/test_fundamentals_pb_new_quarter_review.py (35 passed + final active-class case 1 passed),36
+test_run,existing_focused_plus_one_admin_UI_regression,PASS,reporting; ownership V1/V2; queue; phase12d; Admin UI,253
+focused_behavior,test_new_active_class_blocks_continuation,PASS,tests/test_fundamentals_pb_new_quarter_review.py:305,
+test_run,normal_admin_refresh_copy_and_production,PASS,tests/test_fundamentals_admin_refresh_copy_test.py; tests/test_fundamentals_admin_refresh_production.py,90

@@ -25,9 +25,10 @@ def ownership_reviews() -> tuple[dict[str, Any], ...]:
 
 
 def reviewed_ownership(row: Mapping[str, Any], *, as_of: str,
-                       price_date: str, contract: str = OWNERSHIP_CONTRACT) -> dict[str, Any] | None:
+                       price_date: str, contract: str = OWNERSHIP_CONTRACT,
+                       review_records: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any] | None:
     if contract == QUARTERLY_OWNERSHIP_CONTRACT:
-        return reviewed_quarterly_ownership(row, as_of=as_of, price_date=price_date)
+        return reviewed_quarterly_ownership(row, as_of=as_of, price_date=price_date, review_records=review_records)
     if contract != OWNERSHIP_CONTRACT:
         raise ValueError('Unsupported ownership review contract')
     return _reviewed_ownership_v1(row, as_of=as_of, price_date=price_date)
@@ -135,14 +136,14 @@ def ownership_reviews_v2_hash() -> str:
 
 
 def reviewed_quarterly_ownership(row: Mapping[str, Any], *, as_of: str,
-                                 price_date: str) -> dict[str, Any] | None:
+                                 price_date: str, review_records: tuple[dict[str, Any], ...] | None = None) -> dict[str, Any] | None:
     """Validate the latest accepted observation supplied by the canonical reader.
 
     This is quarterly evidence, not assurance of unchanged daily shares. Known
     contradictions remain hard holds. No prior-observation units are returned
     when the authoritative observation changes, including same-Q revisions.
     """
-    candidates = [r for r in ownership_reviews_v2() if any(
+    candidates = [r for r in (ownership_reviews_v2() if review_records is None else review_records) if any(
         row.get(k) is not None and row.get(k) == r[k]
         for k in ('company_id', 'company_key', 'security_id', 'canonical_ticker', 'observation_id'))]
     if not candidates:
@@ -153,7 +154,11 @@ def reviewed_quarterly_ownership(row: Mapping[str, Any], *, as_of: str,
     observation_binding = (*BINDING, 'fiscal_year', 'fiscal_quarter', 'reportperiod')
     exact = [r for r in identity if all(row.get(k) == r[k] for k in observation_binding)]
     if not exact:
-        return {'reason': 'OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED'}
+        previous = max(identity, key=lambda r:(r['fiscal_year'],r['fiscal_quarter'],r['reviewed_at']))
+        return {'reason': 'OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED', 'review_context': {
+            'prior_reviewed_quarter': f"{previous['fiscal_year']}-{previous['fiscal_quarter']}",
+            'new_accepted_quarter': f"{row.get('fiscal_year')}-{row.get('fiscal_quarter')}",
+            'review_status': 'NEW_QUARTER_REVIEW_REQUIRED'}}
     if len(exact) != 1:
         return {'reason': 'OWNERSHIP_REVIEW_UNVERIFIED'}
     r = deepcopy(exact[0])

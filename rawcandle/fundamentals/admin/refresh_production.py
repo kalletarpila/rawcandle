@@ -969,6 +969,7 @@ def run_production_apply(
             online_backup(source_paths.canonical_db, canonical_candidate)
             canonical_result = fresh_rebuild_canonical(
                 provider_candidate, canonical_candidate, applied_at=utc_now(),
+                ownership_review_queue_path=queue_path_for_run_root(run_root),
                 affected_company_ids=[int(identity["company_id"]) for identity in identities.values()],
             )
         if canonical_result["publication_date_bootstrap"]["repair_required"]:
@@ -1264,6 +1265,14 @@ def run_production_apply(
             }
             for item in finalized_approvals
         ]
+        # Queue bookkeeping follows successful publication and cannot roll back financials.
+        try:
+            result["pb_ownership_publication_review"] = review_queue.sync_ownership(
+                resolved_production_paths(ROOT)["canonical"],
+                as_of=calculation_as_of_date, run_id=run_id,
+            )
+        except (OSError, sqlite3.DatabaseError, ValueError) as review_error:
+            result["pb_ownership_review_error"] = str(review_error)
         result["user_message"] = "Refresh Fundamentals Production update completed. The provider, canonical, and analysis generation passed postflight."
         progress(stage, "COMPLETED", "Publication journal committed after successful postflight.")
     except Exception as exc:
