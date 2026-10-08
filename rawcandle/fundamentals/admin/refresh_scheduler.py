@@ -301,7 +301,8 @@ def run_scheduler_refresh_discovery(
         "message": (
             f"Refresh Fundamentals: {known} known tickers have pending changes: "
             f"{new_quarter} new quarters, {revision} revisions, "
-            f"{combined} new-quarter + revision. Manual refresh pending."
+            f"{combined} new-quarter + revision. Scheduler PREVIEW_ONLY completed; "
+            "Test/Production intentionally not requested."
             + (f" {held} ticker(s) held in the review queue." if held else "")
             if pending
             else f"Refresh Fundamentals: {review_count} ticker(s) require review. Manual review pending."

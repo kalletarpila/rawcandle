@@ -644,6 +644,7 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
         "## Executive Summary",
         "",
         f"- Trigger: {str(result.get('trigger_source') or 'MANUAL').title()}",
+        f"- Mode: {result.get('mode', 'FULL_WORKFLOW')}",
         f"- Overall workflow result: {result.get('outcome', 'RUNNING')}",
         f"- Total duration: {duration_text}",
         f"- Final completed stage: {result.get('final_completed_stage') or 'None'}",

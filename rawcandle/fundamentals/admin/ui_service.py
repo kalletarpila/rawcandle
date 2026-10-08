@@ -342,6 +342,7 @@ class FundamentalsAdminUIService:
         production_mode: bool = False,
         network_allowed: bool = False,
         trigger_source: str = "MANUAL",
+        workflow_mode: str = "PREVIEW_ONLY",
         progress_callback: AdminProgressCallback | None = None,
     ) -> AdminUIRunResult:
         operation = operation_type.strip().upper()
@@ -364,6 +365,7 @@ class FundamentalsAdminUIService:
                 run_root=self.run_root,
                 trigger_source=trigger_source,
                 progress_callback=progress_callback,
+                **({"workflow_mode": workflow_mode} if workflow_mode != "PREVIEW_ONLY" else {}),
             )
         elif operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
             result = self._sector_preview(
@@ -579,6 +581,7 @@ class FundamentalsAdminUIService:
                     run_root=self.run_root,
                     preview_stage=lambda callback: self._preview_unlocked(
                         operation, trigger_source=trigger_source,
+                        workflow_mode="FULL_WORKFLOW",
                         progress_callback=callback,
                     ),
                     test_stage=lambda preview, callback: self._copy_apply_unlocked(

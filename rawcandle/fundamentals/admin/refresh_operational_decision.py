@@ -45,6 +45,9 @@ def refresh_operational_decision(
     elif future_test_authorized:
         code, text = "SAFE_CHANGES_AUTHORIZED", "Safe peer changes are available and may continue." + hold_text
         action, action_text = "RUN_TEST", "Proceed to Test on copies."
+    elif test_reason_code == "SCHEDULER_PREVIEW_ONLY":
+        code, text = "SCHEDULER_PREVIEW_ONLY", "Scheduler PREVIEW_ONLY completed; Test/Production are intentionally not requested." + hold_text
+        action, action_text = "NO_ACTION_REQUIRED", "No authorization prerequisite needs resolution. Run Full Workflow separately if publication is intended."
     else:
         code, text = "TEST_NOT_AUTHORIZED", "Safe changes exist, but backend Test authorization was not granted: " + test_reason_code + "." + hold_text
         action, action_text = "REVIEW_TEST_GATE", "Resolve the backend authorization prerequisite: " + test_reason_code + "."

@@ -1698,6 +1698,7 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         "## Executive Summary",
         "",
         f"- Trigger: `{result.get('trigger_source', 'MANUAL')}`",
+        f"- Mode: {result.get('workflow_mode', 'PREVIEW_ONLY')}",
         f"- Sharadar discovery rows: `{discovery.get('returned_source_rows', 0)}`",
         f"- Changed source tickers: `{discovery.get('unique_changed_source_tickers', 0)}`",
         f"- Known tickers with effective changes: `{counts.get('effective_changed_known', 0)}`",
@@ -1858,12 +1859,15 @@ def run_preview(
     client: SharadarClient | None = None,
     progress_callback: ProgressCallback | None = None,
     trigger_source: str = "MANUAL",
+    workflow_mode: str = "PREVIEW_ONLY",
     historical_source_window_review_years: int = HISTORICAL_SOURCE_WINDOW_REVIEW_YEARS,
     as_of_date: date | None = None,
 ) -> dict[str, Any]:
     source_paths = source_paths or BatchAddTickerPaths()
     if trigger_source not in {"MANUAL", "SCHEDULER"}:
         raise ValueError("REFRESH_TRIGGER_SOURCE_INVALID")
+    if workflow_mode not in {"PREVIEW_ONLY", "FULL_WORKFLOW"}:
+        raise ValueError("REFRESH_WORKFLOW_MODE_INVALID")
     request = _request()
     policy = historical_source_window_policy(as_of_date or datetime.now(timezone.utc).date(), historical_source_window_review_years)
     policy_args = {"as_of_date": date.fromisoformat(policy["as_of_date"]),
@@ -1872,7 +1876,10 @@ def run_preview(
         operation_type=request.operation_type,
         requested_inputs=request.requested_inputs,
         normalized_inputs=request.normalized_inputs,
-        options={**request.options, "historical_source_window_policy": policy},
+        options={
+            **request.options, "historical_source_window_policy": policy,
+            "workflow_mode": workflow_mode,
+        },
     )
     state = resolve_refresh_state(source_paths.provider_db)
     request_fp = fingerprint({"request": request.as_dict(), "state": state.as_dict()})
@@ -2063,6 +2070,8 @@ def run_preview(
         progress.running(ProgressStage.REPORT, "Writing durable Preview artifacts and report.")
         preview = {
             "contract_version": CONTRACT_VERSION,
+            "trigger_source": trigger_source,
+            "workflow_mode": workflow_mode,
             "historical_source_window_policy": policy,
             "read_only": True,
             "state": state.as_dict(),
@@ -2106,8 +2115,11 @@ def run_preview(
                 ],
             },
             "refresh_set_fingerprint": refresh_set_fingerprint,
+            # Workflow intent permits scheduler progression, never review approval.
+            # The same safe-set, blocker, discovery and date gates still apply.
             "future_test_authorized": (
-                trigger_source == "MANUAL" and bool(replacement) and not global_blockers
+                (trigger_source == "MANUAL" or workflow_mode == "FULL_WORKFLOW")
+                and bool(replacement) and not global_blockers
                 and discovery["status"] == "COMPLETE"
                 and publication_date_gate_authorized(publication_state)
             ),
@@ -2126,9 +2138,9 @@ def run_preview(
         test_reason = (
             "GLOBAL_BLOCKER_PRESENT" if global_blockers
             else "NO_SAFE_CHANGES_TO_PUBLISH" if not replacement
-            else "MANUAL_PREVIEW_REQUIRED" if trigger_source != "MANUAL"
             else "DISCOVERY_INCOMPLETE" if discovery["status"] != "COMPLETE"
             else "PUBLICATION_DATE_PREREQUISITES" if not publication_date_gate_authorized(publication_state)
+            else "SCHEDULER_PREVIEW_ONLY" if trigger_source == "SCHEDULER" and workflow_mode == "PREVIEW_ONLY"
             else "SAFE_CHANGES_TEST_AUTHORIZED"
         )
         decision = refresh_operational_decision(
@@ -2193,6 +2205,7 @@ def run_preview(
             "operational_decision": decision,
             "network_used": True,
             "trigger_source": trigger_source,
+            "workflow_mode": workflow_mode,
             "database_safety": "NO_PRODUCTION_DATABASE_WRITES; OPERATIONAL_REVIEW_QUEUE_UPDATED",
         }
         after = _production_file_state(source_paths)
@@ -2230,6 +2243,7 @@ def run_preview(
         ).as_dict() | {
             "artifact_dir": str(writer.run_dir),
             "trigger_source": trigger_source,
+            "workflow_mode": workflow_mode,
             "failed_stage": failed_stage.value,
             "database_safety": "NO_PRODUCTION_DATABASE_WRITES; OPERATIONAL_REVIEW_QUEUE_MAY_BE_UPDATED",
             "production_file_state_unchanged": before == _production_file_state(source_paths),

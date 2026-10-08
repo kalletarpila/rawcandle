@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import shutil
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,14 +17,17 @@ from rawcandle.fundamentals.admin.refresh_scheduler import (
     run_scheduler_refresh_discovery,
 )
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
-from rawcandle.scheduler.config import read_scheduler_config
+from rawcandle.scheduler.config import read_scheduler_config, write_scheduler_config
 
 
 def test_full_workflow_mode_requires_explicit_persistent_config_confirmation(
     tmp_path: Path,
 ) -> None:
     config_path = tmp_path / "scheduler.json"
-    shutil.copy2("scheduler_config.json", config_path)
+    write_scheduler_config(
+        str(config_path),
+        replace(read_scheduler_config("scheduler_config.json"), fundamentals_refresh_mode="PREVIEW_ONLY"),
+    )
     original = read_scheduler_config(str(config_path))
     assert original.fundamentals_refresh_mode == "PREVIEW_ONLY"
 
@@ -45,7 +48,7 @@ def test_full_workflow_mode_requires_explicit_persistent_config_confirmation(
 
 
 def test_ui_config_builder_requires_confirmation_for_full_workflow() -> None:
-    config = read_scheduler_config("scheduler_config.json")
+    config = replace(read_scheduler_config("scheduler_config.json"), fundamentals_refresh_mode="PREVIEW_ONLY")
     kwargs = {
         "osakedata_db_path": config.osakedata_db_path,
         "analysis_db_path": config.analysis_db_path,
