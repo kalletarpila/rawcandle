@@ -1,0 +1,5 @@
+policy,definition,arithmetic_count,new_current_source_safe_count,existing_production_unchanged_count,notes
+A,Existing production contract on 2026-10-08,1690,,1690,Measured existing reporting approximation; not recertified as continuous ownership assurance
+B,Direct DAILY only with demonstrated current whole-company numerator,2114,0,1690,2114 fresh positive arithmetic candidates; no independently current share-source contract
+C,Broad DAILY excluding known ADR/multi-class/perimeter/ambiguous identities,2068,0,1690,Mechanical screening only; exclusion list cannot prove remaining counts current or perimeter safe
+D,Maximum evidenced new current-source combination,,0,1690,"No new numerator approved; preserve production and source/prerequisite STOP, do not certify legacy population as new durable evidence"
