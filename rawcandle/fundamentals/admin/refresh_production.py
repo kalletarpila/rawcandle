@@ -903,6 +903,8 @@ def run_production_apply(
         ))
         result["lock_owner"] = owner
         result["recovery_preflight"] = guard_production_writes(journal_path)
+        from .pb_ownership_publication import synchronize as synchronize_pb_publication
+        synchronize_pb_publication(review_queue.path, source_paths.canonical_db, journal_path=journal_path)
         if actual_production:
             result["git_state"] = _assert_clean_worktree()
             if result["git_state"].get("dirty"):

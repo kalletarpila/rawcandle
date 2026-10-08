@@ -151,20 +151,16 @@ def _audit(conn, case, event, run_id, evidence):
                              json.dumps({'case_id':case['case_id'],**evidence},sort_keys=True)))
 
 
-def _is_active_canonical(path: Path) -> bool:
-    from rawcandle.fundamentals.generations import resolved_production_paths
-    return path.resolve() == resolved_production_paths()['canonical'].resolve()
-
-
 def sync(queue_path: Path, canonical_db: Path, *, as_of: str, run_id: str) -> dict:
     from rawcandle.fundamentals.admin.refresh_review_queue import _connect
     with _ro(canonical_db) as canonical:
         if reporting_ownership_contract(canonical, as_of=as_of) != QUARTERLY_OWNERSHIP_CONTRACT:
             return {'candidate_count':0,'created':0}
         cases = detect(canonical, as_of=as_of)
-        artifact = generation_ownership_artifact(canonical)[0] if reporting_ownership_contract(canonical,as_of=as_of)==QUARTERLY_OWNERSHIP_CONTRACT else None
     if not cases and not queue_path.exists():
         return {'candidate_count':0,'created':0}
+    from .pb_ownership_publication import synchronize
+    synchronize(queue_path,canonical_db)
     created = 0
     with _connect(queue_path) as conn:
         conn.executescript(SCHEMA);conn.execute('BEGIN IMMEDIATE')
@@ -178,14 +174,10 @@ def sync(queue_path: Path, canonical_db: Path, *, as_of: str, run_id: str) -> di
                 conn.execute(f"UPDATE {CASE_TABLE} SET candidate_hash=?,candidate_json=?,status='OPEN',last_seen_at=?,run_id=? WHERE case_id=?",
                     (case['candidate_hash'],json.dumps(case,sort_keys=True),utc_now(),run_id,case['case_id']))
                 _audit(conn,case,'UPDATED',run_id,case)
-        # Historical cases remain visible; approval becomes consumed only when its record is in the authoritative generation.
+        # Historical cases remain visible; completed postflight receipts consume exact approvals above.
         for row in conn.execute(f"SELECT * FROM {CASE_TABLE} WHERE status IN ('OPEN','HELD','APPROVED')").fetchall():
             case=json.loads(row['candidate_json'])
-            if row['status']=='APPROVED' and artifact and _is_active_canonical(canonical_db):
-                approved=json.loads(row['approval_json'])
-                if approved['record'] in artifact['records']:
-                    conn.execute(f"UPDATE {CASE_TABLE} SET status='PUBLISHED' WHERE case_id=?",(row['case_id'],));_audit(conn,case,'PUBLISHED',run_id,{'record_hash':fingerprint(approved['record'])})
-            elif row['status'] in ('OPEN','HELD') and any(c['company_id']==row['company_id'] and c['case_id']!=row['case_id'] for c in cases):
+            if row['status'] in ('OPEN','HELD') and any(c['company_id']==row['company_id'] and c['case_id']!=row['case_id'] for c in cases):
                 conn.execute(f"UPDATE {CASE_TABLE} SET status='SUPERSEDED' WHERE case_id=?",(row['case_id'],));_audit(conn,case,'SUPERSEDED',run_id,{})
     return {'candidate_count':len(cases),'created':created}
 

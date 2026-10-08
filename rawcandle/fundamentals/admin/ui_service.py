@@ -206,6 +206,7 @@ class FundamentalsAdminUIService:
         identity_preview: Callable[..., dict[str, Any]] | None = None,
         identity_paths: Any | None = None,
         ownership_paths: Any | None = None,
+        ownership_publication_workflow: Any | None = None,
         cleanup_inspect: Callable[[str], Mapping[str, Any]] | None = None,
         cleanup_apply: Callable[[str], Mapping[str, Any]] | None = None,
         operation_lock_path: Path | None = None,
@@ -235,6 +236,7 @@ class FundamentalsAdminUIService:
         self._identity_preview = identity_preview or _admin_callable("identity_resolution", "run_preview")
         self._identity_paths = identity_paths
         self._ownership_paths = ownership_paths
+        self._ownership_publication_workflow = ownership_publication_workflow
         self._cleanup_inspect = cleanup_inspect
         self._cleanup_apply = cleanup_apply
         self.operation_lock_path = (
@@ -706,7 +708,27 @@ class FundamentalsAdminUIService:
 
     def list_pb_ownership_reviews(self, *, include_resolved: bool = False) -> list[Mapping[str, Any]]:
         from .refresh_review_queue import RefreshReviewQueue, queue_path_for_run_root
-        return RefreshReviewQueue(queue_path_for_run_root(self.run_root)).ownership_items(include_resolved=include_resolved)
+        items = RefreshReviewQueue(queue_path_for_run_root(self.run_root)).ownership_items(include_resolved=include_resolved)
+        for item in items:
+            if item['status']=='APPROVED':
+                item['publication_eligibility'] = self._pb_publication().inspect(item['case_id'])
+        return items
+
+    def _pb_publication(self):
+        if self._ownership_publication_workflow is None:
+            from .pb_ownership_publication import OwnershipPublicationWorkflow
+            self._ownership_publication_workflow = OwnershipPublicationWorkflow(run_root=self.run_root)
+        return self._ownership_publication_workflow
+
+    def preview_pb_ownership_publication(self, case_ids: list[str]) -> Mapping[str, Any]:
+        with self._operation_lock():
+            return self._pb_publication().preview(case_ids)
+
+    def publish_pb_ownership_reviews(self, preview_id: str, *, preview_hash: str,
+                                    operator: str, confirmed: bool = False) -> Mapping[str, Any]:
+        with self._operation_lock():
+            return self._pb_publication().publish(preview_id,preview_hash=preview_hash,
+                operator=operator,confirmed=confirmed,production_intent=True)
 
     def preview_pb_ownership_review(self, case_id: str, *, candidate_hash: str) -> Mapping[str, Any]:
         from .pb_ownership_review import preview

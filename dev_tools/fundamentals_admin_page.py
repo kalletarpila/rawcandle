@@ -1001,6 +1001,59 @@ def build_fundamentals_admin_page(
         if hasattr(page, 'update'):
             page.update()
 
+    def open_pb_ownership_publication(item: dict[str, Any]) -> None:
+        try:
+            preview = admin_service.preview_pb_ownership_publication([item['case_id']])
+        except Exception as exc:
+            pb_ownership_status_field.value = f'Ownership publication preview stopped: {exc}'
+            if hasattr(page, 'update'):
+                page.update()
+            return
+        comparisons = preview['comparisons']
+        lines = [f"Selected approved cases: {len(preview['selection'])}",
+            f"Active generation: {preview['source']['generation_id']}",
+            f"Candidate generation: {preview['candidate_generation_id']}",
+            f"Artifact: {preview['active_artifact_sha256']} → {preview['artifact_sha256']}",
+            f"Source canonical: {preview['source']['role_hashes']['canonical']}",
+            f"Score invariance: {preview['score_invariance']} · Source revalidation: {preview['source_revalidation']}"]
+        for result in comparisons:
+            a,b = result['before'],result['candidate']
+            lines.append(f"{result['ticker']}: Current P/B {a['value']} ({a['reason']}) → {b['value']} ({b['reason']})")
+        lines.extend(f"Candidate {role}: {sha}" for role,sha in preview['candidate_hashes'].items())
+        lines.append('Production publication: APPROVED → PUBLISHED after successful postflight. This is a separate decision from ownership approval.')
+        operator = ft.TextField(label='Publishing operator', value='')
+        confirmation = ft.Checkbox(label='I explicitly confirm Production publication of this selected approved ownership review.', value=False)
+
+        def publish(_event: Any) -> None:
+            try:
+                if confirmation.value is not True or not str(operator.value or '').strip():
+                    raise ValueError('Explicit Production confirmation and operator required')
+                result = admin_service.publish_pb_ownership_reviews(preview['preview_id'],preview_hash=preview['preview_hash'],
+                    operator=str(operator.value),confirmed=True)
+                pb_ownership_status_field.value = f"Ownership publication: {result['outcome']} · {result['generation_id']}"
+                close_dialog()
+                load_pb_ownership_reviews()
+            except Exception as exc:
+                pb_ownership_status_field.value = f'Ownership publication stopped: {exc}'
+            if hasattr(page, 'update'):
+                page.update()
+        button = ft.ElevatedButton('Publish approved P/B ownership reviews', disabled=True, on_click=publish)
+        def enable(_event: Any) -> None:
+            button.disabled = not (confirmation.value is True and str(operator.value or '').strip())
+            if hasattr(page, 'update'):
+                page.update()
+        operator.on_change = confirmation.on_change = enable
+        dialog = ft.AlertDialog(modal=True,title=ft.Text('Confirm Production ownership publication'),
+            content=ft.Column([ft.Text('\n'.join(lines)),operator,confirmation],tight=True,scroll=ft.ScrollMode.AUTO),
+            actions=[ft.TextButton('Cancel',on_click=lambda _e:close_dialog()),button])
+        setattr(page,'dialog',dialog)
+        if hasattr(page,'open'):
+            page.open(dialog)
+        else:
+            dialog.open=True
+        if hasattr(page,'update'):
+            page.update()
+
     def load_pb_ownership_reviews() -> None:
         reader = getattr(admin_service, 'list_pb_ownership_reviews', None)
         if not callable(reader):
@@ -1008,6 +1061,8 @@ def build_fundamentals_admin_page(
         try:
             items = reader(include_resolved=bool(review_queue_include_resolved_checkbox.value))
             rows = []
+            if any(item['status']=='APPROVED' for item in items):
+                rows.append(ft.Text(f"Approved ownership publications pending: {sum(item['status']=='APPROVED' for item in items)}"))
             for raw in items:
                 item = dict(raw);old,new = item['previous'],item['new'];ratio = ''
                 if old['economic_unit_rule'] == 'ADS_EQUIVALENTS':
@@ -1017,10 +1072,18 @@ def build_fundamentals_admin_page(
                     f"Provider factor {old['provider_declared_factor']} → {new['sharefactor']}{ratio}\n"
                     f"Category {old['accepted_category']} → {new['category']}\n"
                     f"{item['classification']} · {item['status']} · Current P/B: {item['current_pb_status']}")
+                if item['status']=='APPROVED':
+                    approval=item.get('approval') or {};result=item.get('result') or {};eligibility=item.get('publication_eligibility') or {}
+                    description += (f"\nApproved {approval.get('approved_at')} by {approval.get('operator')} · Observation {new['observation_id'][:12]}/{new['content_hash'][:12]}"
+                        f"\nApproval artifact {result.get('registry_sha256')} · Source canonical {result.get('source_canonical_sha256')}"
+                        f"\nCurrent source generation {eligibility.get('source_generation')} · Publishability: {eligibility.get('status','Revalidate on preview')} {eligibility.get('reason','')}")
                 rows.append(ft.Column([ft.Text(description), ft.Row([
                     ft.ElevatedButton('Approve quarterly ownership continuation', disabled=item['status']!='OPEN' or item['classification']!='CONTINUATION_CANDIDATE',
                         on_click=lambda _e, case=item: open_pb_ownership_review(case)),
                     ft.TextButton('Keep on hold', disabled=item['status']!='OPEN', on_click=lambda _e, case=item: open_pb_ownership_review(case,hold=True)),
+                    *([ft.ElevatedButton('Publish approved P/B ownership reviews',
+                        disabled=item.get('publication_eligibility',{}).get('status')=='STALE_OR_UNAVAILABLE',
+                        on_click=lambda _e,case=item:open_pb_ownership_publication(case))] if item['status']=='APPROVED' else []),
                 ])]))
             pb_ownership_column.controls = rows or [ft.Text('No quarterly ownership reviews pending.')]
             if not items:

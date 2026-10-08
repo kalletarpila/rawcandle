@@ -86,7 +86,7 @@ def approve(f,**changes):
 
 
 @pytest.mark.parametrize('kind',['ordinary','identity','adr','zero'])
-def test_end_to_end_reconcile_review_approval_and_generation_rehearsal(factory,kind,monkeypatch):
+def test_end_to_end_reconcile_review_approval_and_generation_rehearsal(factory,kind):
     f=factory(kind);case=f['case'];source_bytes=f['cp'].read_bytes();financial_before=digest_db(f['cp']);held=report(f['cp'],f['mp'])
     assert held['current']['reason']=='OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED'
     assert held['current']['ownership_review']['prior_reviewed_quarter']=='2026-Q2'
@@ -120,17 +120,16 @@ def test_end_to_end_reconcile_review_approval_and_generation_rehearsal(factory,k
     assert report(candidate,f['mp'],day='2026-10-10')['current']['value']==pytest.approx(1.8*f['ratio'])
     f['refresh']();assert len(RefreshReviewQueue(f['queue']).ownership_items())==1
     assert RefreshReviewQueue(f['queue']).ownership_items()[0]['status']=='APPROVED'
-    # A separately published generation containing this record consumes approval; no publication is done here.
+    # An inactive candidate never consumes approval; P/B.13 tests cover completed publication.
     outcome=workflow.sync(f['queue'],candidate,as_of=ASOF,run_id='candidate-consumption-rehearsal')
     assert outcome['candidate_count']==0
     assert RefreshReviewQueue(f['queue']).ownership_items()[0]['status']=='APPROVED'
-    monkeypatch.setattr(workflow,'_is_active_canonical',lambda path: path==candidate)
-    workflow.sync(f['queue'],candidate,as_of=ASOF,run_id='simulated-published-binding')
+    # Active-path resemblance alone never consumes evidence without completed postflight.
     history=RefreshReviewQueue(f['queue']).ownership_items(include_resolved=True)
-    assert history[0]['status']=='PUBLISHED'
+    assert history[0]['status']=='APPROVED'
     with ro(f['queue']) as c:
         events=[r[0] for r in c.execute('select event_type from refresh_review_queue_audit order by audit_id')]
-    assert events==['PB_OWNERSHIP_CREATED','PB_OWNERSHIP_APPROVED','PB_OWNERSHIP_PUBLISHED']
+    assert events==['PB_OWNERSHIP_CREATED','PB_OWNERSHIP_APPROVED']
 
 
 def test_repeated_refresh_one_logical_case_no_duplicate_audit(factory):
