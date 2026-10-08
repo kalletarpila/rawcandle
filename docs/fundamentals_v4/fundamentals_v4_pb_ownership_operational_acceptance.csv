@@ -1,0 +1,46 @@
+kind,case,before,after,result,evidence
+readiness,operational_acceptance,,PASS,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,queue_schema_ready,,YES,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,queue_additive_idempotent,,YES,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,Admin_review_available,,YES,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,Admin_publication_available,,YES,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,zero_case_smoke,,PASS,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,live_detector_candidates,,0,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,supported_scopes,,31,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,OPEN,,0,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,HELD,,0,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,APPROVED_unpublished,,0,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,PUBLISHED,,0,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,automatic_approval,,NO,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,automatic_publication,,NO,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,Production_publication_executed,,NO,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,financial_DBs_changed,,NO,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,active_generation_changed,,NO,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,source_changes,,NO,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,full_suite_run,,NO,PASS,Production acceptance checks and selected copy-only smoke tests
+readiness,targeted_smoke_tests_passed,,10,PASS,Production acceptance checks and selected copy-only smoke tests
+P_B_invariance,universe,2468,2468,PASS,exact complete reports equal for 2468 operational members at 2026-10-08; P/B.11 coverage also matches
+P_B_invariance,current_valid,1721,1721,PASS,exact complete reports equal for 2468 operational members at 2026-10-08; P/B.11 coverage also matches
+P_B_invariance,provider_available,2133,2133,PASS,exact complete reports equal for 2468 operational members at 2026-10-08; P/B.11 coverage also matches
+P_B_invariance,full_4Q,2081,2081,PASS,exact complete reports equal for 2468 operational members at 2026-10-08; P/B.11 coverage also matches
+P_B_invariance,reviewed_releases,31,31,PASS,exact complete reports equal for 2468 operational members at 2026-10-08; P/B.11 coverage also matches
+P_B_invariance,additional_ownership_releases,0,0,PASS,no new evidence/approval/publication
+protected_sha256,provider,2b3a57add8b51413d98f220d4cdd313994d1a4079f987a94796bf6a2b6db5fbb,2b3a57add8b51413d98f220d4cdd313994d1a4079f987a94796bf6a2b6db5fbb,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,canonical,185597dc364c8cd1642d53054af485c5d4f690b49df18d38dbe911b3220fd924,185597dc364c8cd1642d53054af485c5d4f690b49df18d38dbe911b3220fd924,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,analysis,a8dcc37e1a0e2442dd44023b63d8c6ba91ee5fdce3ab05e2fa5407413a0355ce,a8dcc37e1a0e2442dd44023b63d8c6ba91ee5fdce3ab05e2fa5407413a0355ce,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,market,79a29df1693ada78d71614219c0e9ca0e92f424244c0f307a68a1bc2ba4af655,79a29df1693ada78d71614219c0e9ca0e92f424244c0f307a68a1bc2ba4af655,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,taxonomy,e9c6240909e7d4a651086a3d1666af86792b86701a68e48acc69d9803ce22aa3,e9c6240909e7d4a651086a3d1666af86792b86701a68e48acc69d9803ce22aa3,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,manifest,7c103baedea1f7f0808388bec8138dea238951cf9c9ab476e727cf7d07ba0fa8,7c103baedea1f7f0808388bec8138dea238951cf9c9ab476e727cf7d07ba0fa8,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,journal,196c6cf98db2ef02dea6653b95aea15aa0e946f5c473a94a634acf7d702b8191,196c6cf98db2ef02dea6653b95aea15aa0e946f5c473a94a634acf7d702b8191,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,v1,0baaf493afa2faa52c2179a2353fb9089d834ef2bcb91f6e088e58f1bae068bf,0baaf493afa2faa52c2179a2353fb9089d834ef2bcb91f6e088e58f1bae068bf,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,v2,7b7d0cdd9bce7d448b70c7c46af54d3401f4fb0005b4f94f021d29c0e0e460e6,7b7d0cdd9bce7d448b70c7c46af54d3401f4fb0005b4f94f021d29c0e0e460e6,PASS,main/WAL protected; whole financial roles include score/authority/history state
+protected_sha256,scheduler,3a0b74412a0fb9cf5e7a9b370e97a6d48af031d5094d53b5689669e630c9e894,3a0b74412a0fb9cf5e7a9b370e97a6d48af031d5094d53b5689669e630c9e894,PASS,main/WAL protected; whole financial roles include score/authority/history state
+queue_existing_rows,refresh_review_queue,6,6,PASS,existing schema and ordered-row contents unchanged
+queue_ordered_row_sha256,refresh_review_queue,f7266ad08dad1487fd812944c1efa48fdd91f091c86082487039f0da046039df,f7266ad08dad1487fd812944c1efa48fdd91f091c86082487039f0da046039df,PASS,idempotent additive migration; no audit events or cases created
+queue_existing_rows,refresh_review_queue_audit,38,38,PASS,existing schema and ordered-row contents unchanged
+queue_ordered_row_sha256,refresh_review_queue_audit,3f8d56c3bdf9fc5cc6adcc8ce52b86e357157fb544a5daebdba8ef55aa52dfa0,3f8d56c3bdf9fc5cc6adcc8ce52b86e357157fb544a5daebdba8ef55aa52dfa0,PASS,idempotent additive migration; no audit events or cases created
+queue_existing_rows,sqlite_sequence,1,1,PASS,existing schema and ordered-row contents unchanged
+queue_ordered_row_sha256,sqlite_sequence,42033a9883a7a9e66e0e8cff013cc4100e569a33471578d965d55bccb56d2f27,42033a9883a7a9e66e0e8cff013cc4100e569a33471578d965d55bccb56d2f27,PASS,idempotent additive migration; no audit events or cases created
+queue_migration,pb_ownership_review,ABSENT,READY; 0 rows,PASS,existing RefreshReviewQueue.sync_ownership path; two equal runs
+queue_migration,physical_main_sha256,14f4fd5a9e98c49ec55f6e36cc1c78b7ac290a2c1d789dbf5074b70d755b393f,84c18a698ef541a355950c91805ba0e949c9dd4d1a1d4d7d991a7bebc5d3e15b,PASS,physical change expected for additive schema; all pre-existing rows unchanged
+queue_migration,integrity,accessible,quick_check ok; FK 0,PASS,post-migration existing SQLite verification
