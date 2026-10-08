@@ -54,6 +54,7 @@ class FundamentalsAdminPageControls:
     progress_summary: Any
     progress_details: Any
     history_show_more_button: Any
+    history_refresh_button: Any
     cleanup_status_field: Any
     cleanup_button: Any
     review_queue_column: Any
@@ -1202,15 +1203,18 @@ def build_fundamentals_admin_page(
             pending_refresh_field.visible = False
         render_history(payload.get("entries") or [])
         history_show_more_button.disabled = False
+        history_refresh_button.disabled = False
 
     def history_failed(_exc: Exception) -> None:
         history_column.controls = [ft.Text("Administration history could not be loaded.")]
         history_show_more_button.visible = False
         history_show_more_button.disabled = False
+        history_refresh_button.disabled = False
 
     def history_loading() -> None:
         history_column.controls = [ft.Text("Loading administration history...")]
         history_show_more_button.disabled = True
+        history_refresh_button.disabled = True
 
     history_loader = DeferredLoadController(
         page=page,
@@ -1248,6 +1252,17 @@ def build_fundamentals_admin_page(
         icon=ft.Icons.EXPAND_MORE,
         on_click=show_more_history,
         visible=False,
+    )
+
+    def on_history_refresh(_event: Any) -> None:
+        refresh_history(force=True)
+        if hasattr(page, "update"):
+            page.update()
+
+    history_refresh_button = ft.IconButton(
+        icon=ft.Icons.REFRESH,
+        tooltip="Refresh run history",
+        on_click=on_history_refresh,
     )
 
     def apply_cleanup_eligibility(run_id: str, *, force: bool = False) -> dict[str, Any]:
@@ -1878,7 +1893,10 @@ def build_fundamentals_admin_page(
             pb_ownership_status_field,
             pb_ownership_column,
             ft.Divider(),
-            ft.Text("Run history", size=18, weight=ft.FontWeight.BOLD),
+            ft.Row([
+                ft.Text("Run history", size=18, weight=ft.FontWeight.BOLD),
+                history_refresh_button,
+            ]),
             show_technical_history_checkbox,
             ft.Row(
                 [
@@ -1952,6 +1970,7 @@ def build_fundamentals_admin_page(
         progress_summary=progress_summary,
         progress_details=progress_details,
         history_show_more_button=history_show_more_button,
+        history_refresh_button=history_refresh_button,
         cleanup_status_field=cleanup_status_field,
         cleanup_button=cleanup_button,
         review_queue_column=review_queue_column,
