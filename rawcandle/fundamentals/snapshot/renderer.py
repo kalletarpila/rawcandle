@@ -264,6 +264,11 @@ def _book_value_sections(snapshot: Mapping[str, Any]) -> list[str]:
             ("Equity source availability date", _text(current.get("equity_source_availability_date"))),
             ("P/B as-of date", current["as_of_date"]),
             ("Price date", _text(current.get("price_date"))),
+            *((("Share basis quarter", f"{current['share_basis_fiscal_year']}-{current['share_basis_fiscal_quarter']}" if current.get('share_basis_fiscal_year') else 'N/A'),
+               ("Share basis date", _text(current.get('share_basis_date'))),
+               ("Share basis date basis", _text(current.get('share_basis_date_basis'))),
+               ("Ownership basis status", _text(current.get('ownership_basis_status'))))
+              if current.get('quarterly_basis_disclosure') else ()),
             ("Provider observation date", _text(provider.get("provider_date"))),
             ("Status", current["status"]), ("Current P/B reason", current["reason"]),
             ("Provider P/B reason", provider["reason"]),
@@ -278,6 +283,7 @@ def _book_value_sections(snapshot: Mapping[str, Any]) -> list[str]:
             for row in value["history"]
         ) or (("—", "N/A", "—", "NO_ACCEPTED_QUARTERS"),)), "",
         value["caveat"], "",
+        *((current['quarterly_basis_disclosure'], "") if current.get('quarterly_basis_disclosure') else ()),
         "Current P/B: CURRENT_REVISED_REPORTING. Provider P/B history: PROVIDER_OBSERVATION_REFERENCE. Reporting only; not PIT-safe.", "",
     ]
 
