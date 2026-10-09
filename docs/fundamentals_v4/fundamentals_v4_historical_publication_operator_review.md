@@ -1,6 +1,14 @@
-# Historical publication operator review — Stage 1
+# Historical publication operator review — Stage 2 completed
 
-Prepared 2026-10-09. **Awaiting explicit operator confirmation. No approval artifact exists.**
+Prepared 2026-10-09. **Operator approval recorded: YES, exactly 85 cases.** The 514 holds remain excluded.
+
+Approval fingerprint: `0d82b233adec0e0d85a6e1ad568b72d061881103dd2442c0922b42b1786bf651`.
+
+[Immutable approval receipt](review_approvals/historical_publication_review_approval_v1.0d82b233adec0e0d85a6e1ad568b72d061881103dd2442c0922b42b1786bf651.json), recorded after explicit YES at `2026-10-09T10:22:53Z`; Stage 2 commit `b3ff5235e72b34684b62e882f1e8bedfc92e534b`, following Stage 1 commit `1c7fa3e1dcf64295db700092bb0e99f93a54c432`.
+
+Receipt flags: `runtime_use_permitted=false`, `publication_authorized=false`, `production_apply_authorized=false`, `authority_mutation_authorized=false`. Deterministic approval binding passed; Production state remained unchanged. Authoritative observations were not installed and no publication plan was prepared or executed in Stage 2. The next phase is current-state revalidation and exact-evidence publication-plan preparation.
+
+The following Stage 1 review evidence and gate description are preserved as historical preparation records; statements below about awaiting approval or absence of a receipt refer to Stage 1.
 
 All **85** P1.4 proposals remain stable and approvable across 32 companies; **0** stale/removed. The **514** holds remain excluded (102 period, 13 event, 394 financial, 5 entity/perimeter). No hold was researched, replayed as an approval candidate, or included in the selection.
 
