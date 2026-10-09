@@ -1,0 +1,2917 @@
+{
+  "candidate": {
+    "approved": false,
+    "artifact_fingerprint": "5faea82e92b9887b00cea21e227a02860874964036a3caadaac31e1d50d691a6",
+    "baseline_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+    "current_state_fingerprint": "601b232eb81ad4d7c3a3427ff0b42a10598b9e4246b5e6b374bf2f7b1f8956ab",
+    "excluded_hold_count": 514,
+    "proposal_artifact_fingerprint": "ea28d203681fa6c331ef3ef1741d80908f7520fd1c3924e9703284c313614657",
+    "proposal_baseline_fingerprint": "41e710eb4dca4418d48e403fde8c70777efa1c02be24cb48e7eb3a6a4ccce577",
+    "proposal_bundle_path": "docs/fundamentals_v4/review_proposals/historical_publication_review_proposal_v1.ea28d203681fa6c331ef3ef1741d80908f7520fd1c3924e9703284c313614657.json",
+    "rule_version": "HISTORICAL_PUBLICATION_OPERATOR_REVIEW_V1",
+    "runtime_use_permitted": false,
+    "stable_cases": [
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001739445",
+        "complete_evidence_fingerprint": "1cb1fffd257ad694d0a792e3cf58b2d02d775b8e90fcc791d8a3135ef2ada82f",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "1f8d2006f8dcc6ce5c7b43796fc37e87a49b7f840c29f3391785054360762c6e",
+        "current_canonical_quarter_id": 800,
+        "current_state_fingerprint": "f0b7899b85d2bd23d496a82885dc5d276733b0364fe3a1bcb279784e5dbcf5d2",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm",
+        "natural_key": [
+          22,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "91746175626a5dc0a8aa2d977092e290dbc52d029423089a75168cfc1b88c0e1",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "dbcb566147c73014d10d69c6d0277a04e971e633a935365f1728a7424de96bbc",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm": "a4008daa2d9819c3148aaab02d65090787c332663c3eaae9e081a3131ae30803",
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm": "a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm",
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001739445",
+        "complete_evidence_fingerprint": "7ed501a11c3e7c9efc89d8f8160e10682b977c2ddc062a4572c44ad228f260e6",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "dbe466a56f97608df7ce2b021d2f9858f79e39d60389042ab07f5c2d1a6091f8",
+        "current_canonical_quarter_id": 801,
+        "current_state_fingerprint": "a642216e31f7fd0b30eec405ea37ed7b2fcd2e1a6ef10ebfb3577ed5624caa16",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm",
+        "natural_key": [
+          22,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "eaed7a1e9f7e5b36b7768887e1b800f49d6d048a790860b0e2e3145b3eedbf77",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "d198a74fbaf3e26fa53f75f84106f1bf9b0ab23a8d8fbfc8500874a28a1c1ea1",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm": "41b92e9be71715a750a841f4200951bf090dade64e74be7547b8b2e0ab7e2a13",
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm": "65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm",
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001739445",
+        "complete_evidence_fingerprint": "cdaf38c086a54c888756e9b6c0b3817bdc71b3cb6edd4bebe6fd394b02f4b239",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "2d8aa80d3245b56b4d41941a5ef75de342a1bca06f3c85c65fcb4912a57bb6ba",
+        "current_canonical_quarter_id": 804,
+        "current_state_fingerprint": "99dc7aa4715085c8bab229af13c16eb65ca80d7f0ae5b694592ee87b56d9cd4a",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000064/exh991earningsrelease33120.htm",
+        "natural_key": [
+          22,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "94cc1b13f0f52e79b1b90d76a94d027d869e6be9ba05abfd95ca36422f48fc79",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "0be83767f171fe5a80779bda7de712ba1017ea9d2453e2cb8ef22514dfebc3ec",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000064/aca-20260430.htm": "c2075c13e3e1f124f600c871cdceacb6590333df1f89c05e6a0fba02c58388dc",
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000064/exh991earningsrelease33120.htm": "dbd069cb60652f024770ca1d3cf599ab08ea32795035f52385e3c6fa7b64602b"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000064/aca-20260430.htm",
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000064/exh991earningsrelease33120.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001739445",
+        "complete_evidence_fingerprint": "15342cda8fba5015bf518faa22b043de734991f88beadaf877a8a361f160b8e8",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "27cbb003131fa228b590d63d0a505f19960a51e6e5d4363fec075dc0ed056a52",
+        "current_canonical_quarter_id": 805,
+        "current_state_fingerprint": "f075b7ecda35356d0b686968909e5ddec14d74b33bf86c736e8878fb8e0be406",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000124/exh991earningsrelease63020.htm",
+        "natural_key": [
+          22,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "40c4203ca6c978009c479f354adefd1fe4b19ebdd28df44eaeafc059b8f1c5e1",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "71cae97caf834846f33597dda13cde161cd93451a0e80c584436258f22c3a09d",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000124/aca-20260805.htm": "0855ba85d21bd2ce2fd9dde498e9ba1ce16e9dc795c34dad064481b9511d16d0",
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000124/exh991earningsrelease63020.htm": "80a80071c1ea20674b3f59fa1924bef90e71c7513db189e9396af6c3f329c145"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000124/aca-20260805.htm",
+          "https://www.sec.gov/Archives/edgar/data/1739445/000173944526000124/exh991earningsrelease63020.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000935036",
+        "complete_evidence_fingerprint": "99fd8ba12cd55d1a6e399d0b29b4518248a7e959d29e22686a9ae9a4bf7c4c3d",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "fb0dfee80002a390088806d8794261d38c9b457092e874db760e0aa5d1c3fcef",
+        "current_canonical_quarter_id": 1125,
+        "current_state_fingerprint": "9edc518d0ed2a9734658d5526994090fdd399982e43b3e9e39c16588ca1c88ab",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/935036/000093503626000026/aciw-20260806_exx991.htm",
+        "natural_key": [
+          31,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "60926ebc6fb8389aa71cf15cf732ef908502bec458074d1ea09d01895201946b",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "f3f39ea2c79413efc5a68be51b7b6ac9410190e59362a6296162fe24c944a5bf",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/935036/000093503626000026/aciw-20260806.htm": "1237eb75263631cc32b1ff734a9d7aedd839ee59b0ec682757fa45050daaefa8",
+          "https://www.sec.gov/Archives/edgar/data/935036/000093503626000026/aciw-20260806_exx991.htm": "d207539a09795319eca0f9b6d3dc7f86eb97a3ac3a17f42b463a01b4a863fb02"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/935036/000093503626000026/aciw-20260806.htm",
+          "https://www.sec.gov/Archives/edgar/data/935036/000093503626000026/aciw-20260806_exx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000006845",
+        "complete_evidence_fingerprint": "154cf932613d525c3a0ab73b7d4276842d0f46b8fa4d9939fec32121f01f99cf",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "97f976d04db80a2072edf172446fd0009e4e309a0a5ed16ec25f86fc8388e402",
+        "current_canonical_quarter_id": 6216,
+        "current_state_fingerprint": "ef9bb2654305852c44ed7ba6c3a939cdff25ac1b26b857a24eda662e3b784bc8",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/6845/000000684526000020/a22826fy26q4results.htm",
+        "natural_key": [
+          176,
+          2026,
+          "Q4"
+        ],
+        "observation_fingerprint": "aec437044cf20d1a2c9d3d771ff2dcdd02c26fa3244f345109b2e3e0a93da052",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "29a03116b66bb9031dd3318fd2f49e652edd37f33e9cd9f10e24ec333981f894",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/6845/000000684526000020/a22826fy26q4results.htm": "bdde4d8520fd88a7ef685b8fb20082c5e39674d7344d8a88bfb4a6e62d77a5a0",
+          "https://www.sec.gov/Archives/edgar/data/6845/000000684526000020/apog-20260424.htm": "973dea931534bbe6624e68cc5d891202f44c5ac46effc60606ef7f32f23d451e"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/6845/000000684526000020/apog-20260424.htm",
+          "https://www.sec.gov/Archives/edgar/data/6845/000000684526000020/a22826fy26q4results.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001666134",
+        "complete_evidence_fingerprint": "488e17ee03434d3b1b5559627ba2883c11b74375dc779252ee519c95cc837998",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "e58ee439f6888ac0759a02931df150d25748c98919e4efeb02673f759b2caa3f",
+        "current_canonical_quarter_id": 11682,
+        "current_state_fingerprint": "73d0de08b46bec076729aa34d6ad621779a5284fe33cf5c92456b19bc329e231",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1666134/000117184325002819/exh_991.htm",
+        "natural_key": [
+          330,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "0e392c586decdcd31c054fc8f345eea5a85d022f4228909312f8b30a2ba229c9",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "dae0db94faddd89ac4ef955c66d1eb42aba943af19a3a2d68847192a8f2a302f",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325002819/exh_991.htm": "f612a18099bb5f817999d30801be06ec39eea6297969c8f44a30d40058eb768c",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325002819/f8k_050625.htm": "31209a592cd2d096b737bc0f3b587efc7293c019215ef83a4729c9818b6ab257"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325002819/f8k_050625.htm",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325002819/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001666134",
+        "complete_evidence_fingerprint": "593403d1dc7a1a9d8f16480646d99aedb0f37a38938675aa5a8c9156b27818e7",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "6bfbf0c5133ccb9ce010e2c8ef33da44fc15742d7cb944b88a56a5e29a8f8dbc",
+        "current_canonical_quarter_id": 11683,
+        "current_state_fingerprint": "cb9251575bd05eccc5610a2d1c8dc690a0a00b65f1dda89e88ff0d9b869153f5",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1666134/000117184325005050/exh_991.htm",
+        "natural_key": [
+          330,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "b0723fcc5dbe33ecae947ec6417927b2f30dc5a6276a90619b2ef3886c10e2d7",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "ea00e98edbe5822e2dc9b72c031c3d50c802ef442234bb1ba29c33b10f6666bd",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325005050/exh_991.htm": "1a332a03c69d01b2b42403a8b70db7f6b5d0290e93f66237b846040aacd4ed55",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325005050/f8k_080525.htm": "f58bc74ed0595c6b8414fbd04d0c258e82e5dca87fe4be77678e0fbb1f5e52ea"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325005050/f8k_080525.htm",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325005050/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001666134",
+        "complete_evidence_fingerprint": "036ef9a95d4ac595f61a0c0fecb42f9be1928ace3bfd8801758881c963014adc",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "3892c3d32125ebfbe1189c3d3e684e9a6d6d52dd3f72090efe711b8a17a5c982",
+        "current_canonical_quarter_id": 11684,
+        "current_state_fingerprint": "5a20b4c31be03ba3689a460e2a855d9f41da9fb854a3224f2f34b6b76baaced1",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1666134/000117184325007093/exh_991.htm",
+        "natural_key": [
+          330,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "b27c0df65afa35727f9050b8c35874911e6d5380251a875afc8f48a267f38235",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "7c555066d7306805d83bc71afed11bbb66db81f14ad2189cbb71663bac95631b",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325007093/exh_991.htm": "3a195d1791dc885b1547a0084003a9c5b4faa5e9439b6630e4283648b5a29ec6",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325007093/f8k_110625.htm": "509b2780e0d1556945e95c51e9f5ee7e4c692ba31942b737f329d928a7641006"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325007093/f8k_110625.htm",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184325007093/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001666134",
+        "complete_evidence_fingerprint": "f9aa623f10ad0a06bd410744a3f900b1ad4e16799e7969644bf7604676c0d79a",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "f7e8c5ab66bdff50743621849bd08df4bbe76b557a4905e64d70df509a57e4df",
+        "current_canonical_quarter_id": 11685,
+        "current_state_fingerprint": "4de9bc5e515d6a8d4385353e32e54bfb9012b58f50a4c800ff7cb0d950332fe7",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1666134/000117184326000734/exh_991.htm",
+        "natural_key": [
+          330,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "8c04b6e7420a7cd32b26e00e72694b4cb5575fd2c52eeda641b03c33c4de2f6e",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "b7f7fd03de6f22e53a195346bc5063c214acbcfc8849255b67abdc34a6c69524",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326000734/exh_991.htm": "a900fe74ebd05557fb34ba53f7fbc6d8c096b768e53395288766076904a158cf",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326000734/f8k_021026.htm": "b5d2e12f64feac98d537a9d6a29f6e373f56042b9c8b641e9d8ddc258b531f9a"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326000734/f8k_021026.htm",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326000734/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001666134",
+        "complete_evidence_fingerprint": "a30c709d57b4784fac64c1346b18086ab74a2bbf939c4766b817d77de3f69769",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "8c9e55f82db6c36f048659c894ec4198d779915f984d91fe9aa4289feb5ed40e",
+        "current_canonical_quarter_id": 11686,
+        "current_state_fingerprint": "d18f624b3d4aceb2dafa8660fcc8061c3f87bb943a4f3693543dd5749243cd4e",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1666134/000117184326003023/exh_991.htm",
+        "natural_key": [
+          330,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "7e1f63a08c11200a622aa3137320727061f8b5dd8cc0222a07e2be714babb5d8",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "b359dd5dd855a73680b8f7cf3d17767d0059457238fd1ad97b25a0d0cf57b8e2",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326003023/exh_991.htm": "4a6c23d28b46b32ba38673c2e14ae21bb29bfeb6af371a48c29de5b3d6102a94",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326003023/f8k_050526.htm": "d4e7f728d46b0fe66cac5bed07d38d38af1ba85c017c08c83244749c3ff4dab9"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326003023/f8k_050526.htm",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326003023/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001666134",
+        "complete_evidence_fingerprint": "733c823e10ed5426204d2bbe48b9e6b0f5cfbe82f535dc1361b773e6a1e44f56",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "491cdaa62feafde24e47fb72fb807aca41f1c56d361d6f0348e3daf4693fbe1e",
+        "current_canonical_quarter_id": 11687,
+        "current_state_fingerprint": "a87e12b5bd4687e4b1afecbd93c74bc1b411676569e3bd471580537a90d72d3a",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1666134/000117184326005201/exh_991.htm",
+        "natural_key": [
+          330,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "46167695051f8f8b54f72777a913b8891dcd384adabe42f7e7fa12fc54ecf7bb",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "1eab5938cf05d58ecb430166ff24485a275a4d1141220ec1b8f7489b12ac69b1",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326005201/exh_991.htm": "7cb961a130e25b3708942f8b3faa5a65354b5c8612717fcd8cb03654ee301281",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326005201/f8k_080426.htm": "f2f711ee17b50c2fb5109cd8a93186e9b62ab8ae5110177c9dadeca62a24fd32"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326005201/f8k_080426.htm",
+          "https://www.sec.gov/Archives/edgar/data/1666134/000117184326005201/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000746598",
+        "complete_evidence_fingerprint": "2bad51b16349ec009f80c3b8f0749941e1807ca62cf459898cff8c21f1d1cd02",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "034290edbddf6bf414a59c9bf17f8afbcbcac4ae8dd621a03336f52b53dfeb47",
+        "current_canonical_quarter_id": 12644,
+        "current_state_fingerprint": "72d56fa02b37813957f51f2df5f58b060d81f1d26f7dc52df987231984070f16",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/746598/000074659824000137/exhibit991pressrelease1031.htm",
+        "natural_key": [
+          358,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "fabd76a67416d6a49be3dce16a9e622a60b7e3cc500cabb4be692e8b00c70804",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "bdae039ba1a21e9dee06316e73332ad4db54c0e287248b566a145bc27083c1f8",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659824000137/brc-20241118.htm": "2d87d14636604f2396f819d1880a98bdec16b680a15e4f464519b5b33fb565bc",
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659824000137/exhibit991pressrelease1031.htm": "f3048a4354a5ec53abaa96441922cdebeadc474701910b4e6694d8dafe6cd403"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659824000137/brc-20241118.htm",
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659824000137/exhibit991pressrelease1031.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000746598",
+        "complete_evidence_fingerprint": "e018cd3cdfa2bd4c6a1666cbe3670915dc9f396e6d11e1f1fcd1805a72b8a889",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "b6a501b88d3befe87c500c911b619267c72e04fc05ea389c3932bf2d67235e34",
+        "current_canonical_quarter_id": 12645,
+        "current_state_fingerprint": "629474633b7d8703b65439d3a4f3e8dcefde111732e785e8d428e73f59ca6e84",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/746598/000074659825000007/exhibit991pressrelease0131.htm",
+        "natural_key": [
+          358,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "8d19975fcfcae38e8215208bd8f006b914e910bad3c01eb4e1762765f7dedf44",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "2d208dfe43c5c7d4e6f5c8780fde18ac78534f884da9125fadb986c500f371e9",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659825000007/brc-20250221.htm": "e6a6599b2b24752b68ba5c17bc4a6dc2bff9835823cd0723f10e81706d4287b9",
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659825000007/exhibit991pressrelease0131.htm": "5148444032fa15c0d47ff9c1250f3347b6a817a28d3788d97eccf3ba2bd48785"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659825000007/brc-20250221.htm",
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659825000007/exhibit991pressrelease0131.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000746598",
+        "complete_evidence_fingerprint": "1c5dcde32ca2e7ef701a6a7f0c5946f511b282130cf876b7efdaa591834926f4",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "5a6c94e9410be8c53bf240128249627ba9e4ebb2e6f57fae2269f4144fad64e7",
+        "current_canonical_quarter_id": 12648,
+        "current_state_fingerprint": "31f344793ab9529a1a55e3e56bfff7cc8c012d9481ca35f53f2f021056fa827d",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/746598/000074659825000059/exhibit991pressrelease1031.htm",
+        "natural_key": [
+          358,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "ef174979b57cb60438ea8b59671a6a1f73f55fdee7f4539be9a7e5724bf745e2",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "6f7adcc7d90c5653427050a664500f7df092aa31fe1feea8b5e86cbdf7c119f8",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659825000059/brc-20251117.htm": "72beb7361c0d1c2a87c78a0d0a8dacfaa9cb7eb54fd26e03827bf72df600e1bd",
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659825000059/exhibit991pressrelease1031.htm": "25321df6d2324682d82fa442b7bc9ccd9468b09f8bede1f88ccf47f81c1b5e7b"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659825000059/brc-20251117.htm",
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659825000059/exhibit991pressrelease1031.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000746598",
+        "complete_evidence_fingerprint": "33cb76db1203e909a3cc53730e52a9d59e402623d218f5f3298eb4fb4c653899",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "9de3f777f48eef8057daa478a2318092c48287ba34269c6bcb138b9b1c1eebf8",
+        "current_canonical_quarter_id": 12649,
+        "current_state_fingerprint": "7e209b7bee8d501275ca93b21092226fe13f7b1a0c57c71f98761c7b7c24a57c",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/746598/000074659826000005/exhibit991pressrelease0131.htm",
+        "natural_key": [
+          358,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "6c6b8475af5fa1b1219d748821f9c161853ed553b3abe1bcf2cd871b5a648800",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "ef00506f1c9e0d7187d262c8dcf59527442ce83ee3b2c02fded4a642c67b622c",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659826000005/brc-20260219.htm": "f2c3e48ab0ee6a00b36e61a5d6f12d57522f9eb149e59ab968f2404eb4336fc4",
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659826000005/exhibit991pressrelease0131.htm": "17d8c33922c02ec7b8474cd9a72cc68fe865ed0d0c52e5aeba5b7faff89e448f"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659826000005/brc-20260219.htm",
+          "https://www.sec.gov/Archives/edgar/data/746598/000074659826000005/exhibit991pressrelease0131.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001582982",
+        "complete_evidence_fingerprint": "8de75c5bbdbba165952808a51d5f0127c3df2ba23a99da801191c8f4c4be2a78",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "273cbc0896dbca988e6aebe3c166fcff6c1cc9d8320701e824b63632a01ef11b",
+        "current_canonical_quarter_id": 14759,
+        "current_state_fingerprint": "51807b6c82b35e8ab6af152f94d4e67d2b81bef613e08fac9dc50f75a2d75895",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1582982/000149315225011596/ex99-1.htm",
+        "natural_key": [
+          421,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "d4fa3369567043556f822682300230d994735f87a490d748317611bc9ff66327",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "8c6025b0ae3ea2c69dc70c5061850133fc91b259440074fb7c8fb3b46cdf67e0",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1582982/000149315225011596/ex99-1.htm": "ceadf5ad0da2d4d5be0b0d5517f37ea04a66fb8a6f1d9d38f44aba4958a2160e",
+          "https://www.sec.gov/Archives/edgar/data/1582982/000149315225011596/form8-k.htm": "7c409a74d22c2408138df4ffe21b9264ffdff4f10ce35c1c6c72e813dcbb948a"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1582982/000149315225011596/form8-k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1582982/000149315225011596/ex99-1.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000851205",
+        "complete_evidence_fingerprint": "bf9671991f53f29f890f99463a025d6875e064219f1475d75238044f8d3cffef",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "69756089137ad4cce4366a92be43d5cb0c70f22528612b833dafd284b465b76c",
+        "current_canonical_quarter_id": 15831,
+        "current_state_fingerprint": "bbafd9614493cd937fe543db094454b23a2bba42ddd6bf0e61e94bb84780c4f5",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/851205/000085120526000061/a07052026-xex991xq22026ear.htm",
+        "natural_key": [
+          451,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "3445b9f582daa3846e594909efee21e7c0a59b06ef7c365b1cdc3899e06120d6",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "42b2c086233d81556e7fe0ccadd05eb8b23ea5a393cfee28f02fe38cb7e2fcf4",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/851205/000085120526000061/a07052026-xex991xq22026ear.htm": "da73fddb3819d2b8f941e9be31621be35973c010fa24b184063eaf105f14ce37",
+          "https://www.sec.gov/Archives/edgar/data/851205/000085120526000061/cgnx-20260805.htm": "f80cbf3a12fde22dbd1a6d597f1cd396b4394c47b1d2aae5ca552acaa00d3e3e"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/851205/000085120526000061/cgnx-20260805.htm",
+          "https://www.sec.gov/Archives/edgar/data/851205/000085120526000061/a07052026-xex991xq22026ear.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000820318",
+        "complete_evidence_fingerprint": "b126101d930418da4bf6a5e26f6e755d1632e164a029096a14ac90873f2d0444",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "bc5e2929f0d65fc8566ba8afa2a00707cf01bf871143a8db293fccdb921c7604",
+        "current_canonical_quarter_id": 18488,
+        "current_state_fingerprint": "685e398b4965e902d997b55b1a983caa64389a1ed39a8c106f6af7a5263aec02",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/820318/000119312524252062/d857703dex991.htm",
+        "natural_key": [
+          524,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "e270202042cd1997be89291aa27d0e18c2820433bdf956d6b574e5d48411f046",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "bc495a2269103b017660b3654473b329eef9c0ee02c850770c4941b3933713f7",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312524252062/d857703d8k.htm": "b4087b80cdbe88b6b90d2e14d7df12f7da11eb23c54c2e5e56257bb8dde87519",
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312524252062/d857703dex991.htm": "ac9e2ed2d49d64fe8e5c79a6fd112ad1ed93832694ac3ecf7993a49d1126617a"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312524252062/d857703d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312524252062/d857703dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000820318",
+        "complete_evidence_fingerprint": "34e5f3b051f38a28ed0899514613fc305f978f983945fc47f6e7703cfbf42e61",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "8ba065ec4ff8fb0b55fa926cb3cc50e058719f5282ab059af6cfa8de195594e2",
+        "current_canonical_quarter_id": 18489,
+        "current_state_fingerprint": "859a82fe2a893495dbca23af378684ea09bb7d61de0e7dd026e6d85e56d4eda8",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/820318/000119312525020821/d835094dex991.htm",
+        "natural_key": [
+          524,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "55a10c80459d253cf1b35a18f499d775c1f81e41b60821cc47f0b8d73a73ac0a",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "cf4c7952bc80109fde72b68b4bbdb3b9906f9298ae598e52467a62f87945bb4a",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312525020821/d835094d8k.htm": "b027c15af99337f3a294367eb1fda5be72c95da750b811650487bdb695fed708",
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312525020821/d835094dex991.htm": "c2f10707f1db2ad4acf4f95c9a104302e894e88e3012fb41f0199335e7a17100"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312525020821/d835094d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312525020821/d835094dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000820318",
+        "complete_evidence_fingerprint": "c4d377d8fda53960727d68ff29da8bf05a0353f2cdc5f6c50b1cfa245a2fb37d",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "f562ef407b1f23fad916898901797da110e10d5f403c5586fe3264dfa67f81a0",
+        "current_canonical_quarter_id": 18490,
+        "current_state_fingerprint": "a727e35a326096fd0dbb4eefae0383d227db321db7f49caeedc6bbc6c87fcec7",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/820318/000119312525114882/d930395dex991.htm",
+        "natural_key": [
+          524,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "0303b2e7f67a20b692ae1210c142496c91d3bd686975e31c95aab76a2d88183f",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "46369d82c33f161ffcd9573900509500fd34720c89e87e3a20c12cb6e3bf6e7f",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312525114882/d930395d8k.htm": "d7ce7c639f52098a8ca1e86e506b871e3bb749556ff08505a863135b99fe8431",
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312525114882/d930395dex991.htm": "1d2c22f1ab74bbfcaf5d07aad1a3204865b53880f648a4f703a374d629274ec5"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312525114882/d930395d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/820318/000119312525114882/d930395dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001506251",
+        "complete_evidence_fingerprint": "f093df590003aa2f3c09ffebe1ed68ce66eebe775a9d87bf4b08af6fb020ff09",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "ca8e2bf57a404bc3d6743b49591a27dd2e11ad28bc3a34807eb98313aaaf3d1e",
+        "current_canonical_quarter_id": 21243,
+        "current_state_fingerprint": "05e11afc3aed4a9238130bde0275d749ff62728d79c572cc66e9e3fd0e65f9ed",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1506251/000121390026015895/ea027694801ex99-1_citius.htm",
+        "natural_key": [
+          602,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "341a039afdb431bb7240d37869e1c6c2d86b1424bc262ab246956f326b46b81b",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "1c4f035cb3bffb49b6980e13a82adc19a244bdf18c1f70168c41673f0cf27e0d",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1506251/000121390026015895/ea0276948-8k_citius.htm": "04e360a185d5c67957a353d612a2e3f45283bb6403df03601be4fa96b0c8f844",
+          "https://www.sec.gov/Archives/edgar/data/1506251/000121390026015895/ea027694801ex99-1_citius.htm": "632f687d3f1b807a2b9556bba3dbc496e93004977651488ed819d8b16c1bb653"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1506251/000121390026015895/ea0276948-8k_citius.htm",
+          "https://www.sec.gov/Archives/edgar/data/1506251/000121390026015895/ea027694801ex99-1_citius.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000026780",
+        "complete_evidence_fingerprint": "9e1223824ff7a719b5caa500455d1690d14aa522412eaddc8ebbfdddd5a75087",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "d6f741f85d3bc213028b5b5f5430b83ead16ee71878ed66eb94d4cca87ce7e35",
+        "current_canonical_quarter_id": 22530,
+        "current_state_fingerprint": "dd606e046bd8a4f263826861f341644c3e07863afb025ab6ce87960f4b853b0f",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/26780/000119312526336664/d125905dex991.htm",
+        "natural_key": [
+          636,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "f544de4ab9c7fe0049a5207e9d6c6288dbfa245fff9580a3fb872c8c75f926d6",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "3436ecfbc7ffb5fd05643155ad5867fc497ea68d6b7fc153d7ce9487a9ec5608",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/26780/000119312526336664/d125905d8k.htm": "57b2fc8a9839e8531ecc8b12eef151f44f0330c4d7337c301f1e6667c2a31d76",
+          "https://www.sec.gov/Archives/edgar/data/26780/000119312526336664/d125905dex991.htm": "e6a6b4ffb61c589625951fc9cfadc9f32c9fd17767de0006b61f3ef94b47b370"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/26780/000119312526336664/d125905d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/26780/000119312526336664/d125905dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001516513",
+        "complete_evidence_fingerprint": "918043acb58357ed9174f29d6e8d1e50b0a1847c606122cbc40bcfc0448f7c89",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "345c7db93170abb5c354d1768f19050aa98812781537ba9cbcfdf5a54368ef4a",
+        "current_canonical_quarter_id": 24643,
+        "current_state_fingerprint": "6d8abb28b452316822d848b66bd4ea3800eee68cf08c04d27ac3952807662f89",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1516513/000151651326000038/doximity-2026630xex991.htm",
+        "natural_key": [
+          697,
+          2027,
+          "Q1"
+        ],
+        "observation_fingerprint": "47bf23ac5f5d0ddebf3070bf7fccf30675550ffdff0a619ece2116263e62aecd",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "2463a5ea58fef4a00a9b84435cf04a69d29fd966151b1e97861ddcdbb02fc3dd",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1516513/000151651326000038/docs-20260806.htm": "de0cea72ef61ea2260689621aa0873e795a47d0974ae3711ee11ff42972256b7",
+          "https://www.sec.gov/Archives/edgar/data/1516513/000151651326000038/doximity-2026630xex991.htm": "2da80bfefc5bdf3ffdcbd1b3f7f775421170379c24cb7a4555a9505c874fdf69"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1516513/000151651326000038/docs-20260806.htm",
+          "https://www.sec.gov/Archives/edgar/data/1516513/000151651326000038/doximity-2026630xex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001096752",
+        "complete_evidence_fingerprint": "93374d5dd5a084abfeb2ad791ad61fb6cae53860f673f55363f0c0194333401e",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "881d82091d968e659a0df3571b8950d99e08daf50af1230fe60d9afc71718c1f",
+        "current_canonical_quarter_id": 27584,
+        "current_state_fingerprint": "3737d85a652a2f940132002d16862bbe81bb35f89e993cd2d5986434c6f692cb",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1096752/000162828025022844/epcexhibit99103312025.htm",
+        "natural_key": [
+          780,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "fa9b55ace6a2c817ed2352d5e53d68a14376a9a88aaed7354bee9b53099b0511",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "f49cca6ca18de2f494056ac3fc00472da6a90e801c43daa55529a3b43bfcf6be",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828025022844/epc-20250507.htm": "a32c9a01863d83ea7b16fffff73f1615403f0a1cd79d9d97889ff54feeeb9b83",
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828025022844/epcexhibit99103312025.htm": "a1b782fbe096b85badeba1c70b3af74226b773d75d13004ac69475e3367fdde8"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828025022844/epc-20250507.htm",
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828025022844/epcexhibit99103312025.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001096752",
+        "complete_evidence_fingerprint": "afddebe97647d1ae614b42e8091339598aa881d678eea15c4429dcf686dd08be",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "1d17f989b69ecbb15b4e60ef0664710ca1fcba30d3c7bd21ddb89bfd3eb77894",
+        "current_canonical_quarter_id": 27585,
+        "current_state_fingerprint": "5f089795e5385d0018717fa58f7cb18b80eade38e80f30cc737c08dbe0803bb2",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1096752/000162828025037579/epcexhibit99106302025.htm",
+        "natural_key": [
+          780,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "df3a83e0deafa1a742a97a48e000ba2635fdb2c24a1634fccfb31fd752220a5c",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "483ae094031151a895be3d9b28e949773dc3a198d9ca81d9b598583de04071ae",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828025037579/epc-20250805.htm": "022e1592e94c7140e7089426cf43c1f48cf1fe952b9733bda302f6129c653cc8",
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828025037579/epcexhibit99106302025.htm": "0b986ffb11997178942ebf90719534ed5cb814c7d64292d8d32b9562ae2ab5b2"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828025037579/epc-20250805.htm",
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828025037579/epcexhibit99106302025.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001096752",
+        "complete_evidence_fingerprint": "aa7d2916f53f4f4ee6a4735be929b7eee3466ff47d37d0e86a8cc954dff8f6f4",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "f03accc8c9778ca5bd29c7eb1ad4cfebccd7207da01ededde5143e8264e25e7a",
+        "current_canonical_quarter_id": 27589,
+        "current_state_fingerprint": "2287458adcc154fcecaf83cb3300d7180eab75114838d3209ab9eb9ec655652f",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1096752/000162828026052881/q3fy26-epcexhibit991.htm",
+        "natural_key": [
+          780,
+          2026,
+          "Q3"
+        ],
+        "observation_fingerprint": "6be301ab0898773713f78c4e0b391a63b9c272d5e139d68d04f86c18d5537ea7",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "38b5c4e1786c1ed7baed1d8a81d14ea5d58dc97ce6751c1bbd7ef35213c54196",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828026052881/epc-20260805.htm": "9ab56266e078b9cfb434a8eaeaf9fea7a32354f92039334a03ebd53be204791a",
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828026052881/q3fy26-epcexhibit991.htm": "b7561beda6935b0fb93f995bed27259e1facfd84dc48f28b0081a7f3445722b2"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828026052881/epc-20260805.htm",
+          "https://www.sec.gov/Archives/edgar/data/1096752/000162828026052881/q3fy26-epcexhibit991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000815556",
+        "complete_evidence_fingerprint": "795688e7ee33aadb3d23fe2a5731944299de7c6437a6131059eb493c9b1b68e6",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "ed804ad029abca1e258a909a2e77a4776c8df7f0ffe8ba1cf5fbd5732675bc9a",
+        "current_canonical_quarter_id": 29570,
+        "current_state_fingerprint": "ecc6e840bc55a0abcc430404201fc74bf9f803cd55a8821d3cfa11a734fcf90e",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/815556/000081555626000037/ex_99106302026earningsrele.htm",
+        "natural_key": [
+          835,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "1446815fce58809d0457611ea1c3221d651e2a7ddf3108f11d690fac16caf4d5",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "ce65c1fcc037d8ff6daed221fe963073b5b4f2542a1fed5777cf707f012dccf4",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/815556/000081555626000037/ex_99106302026earningsrele.htm": "4e0b3baf1f2d81383f18d57968021a3523ee1ad65645cb3ccfdc690ba5401280",
+          "https://www.sec.gov/Archives/edgar/data/815556/000081555626000037/fast-20260714.htm": "814720684eecba8842cdd15db99713c36243fbd83c1029b41993c725a959a5b1"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/815556/000081555626000037/fast-20260714.htm",
+          "https://www.sec.gov/Archives/edgar/data/815556/000081555626000037/ex_99106302026earningsrele.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000766829",
+        "complete_evidence_fingerprint": "770d18609e435e50a870f2c917d4035d6719aa6a9f1e5bad175835aa36d29d29",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "137ac1b2b916f120ff132b6ea70f2716ba3604029e46cef7845901eacf4d1a15",
+        "current_canonical_quarter_id": 37898,
+        "current_state_fingerprint": "b2fdd7626d25dd29cdd24a2ae76d83c895da1096d83b89de3c00df45da1e0af8",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/766829/000076682925000035/exhibit991-1qtr2025.htm",
+        "natural_key": [
+          1067,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "f4fada888c545afdca069386af27ba38f559410713d22863240eaa3f44e6ab2f",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "a61075524c5ce2a9728623fe19ab8d078ec258082d01720dafcac96e3eafe9b7",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/766829/000076682925000035/exhibit991-1qtr2025.htm": "1d212022a98efb2cf545d87e9ed4b896edf5f3750e29ecf32f8466de2d44b6d8",
+          "https://www.sec.gov/Archives/edgar/data/766829/000076682925000035/sjw-20250428.htm": "07074d388fd3c898e490e03948e5538900e8f7570565169567903d6d83eee17e"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/766829/000076682925000035/sjw-20250428.htm",
+          "https://www.sec.gov/Archives/edgar/data/766829/000076682925000035/exhibit991-1qtr2025.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000832101",
+        "complete_evidence_fingerprint": "a4e3cb144bc44de2fb85b78f1e92f24885a44178e26125dde4899792d45d2099",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "db21740962790849ddafbc14d97394edf6319eb877334779d36338ef33b9aa6e",
+        "current_canonical_quarter_id": 39239,
+        "current_state_fingerprint": "a40df67e02ab5ebb017e58d523fbcd7dc07546668a716a2c58a8c32ed8a67ac5",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/832101/000162828025046909/iex-20250930xex991.htm",
+        "natural_key": [
+          1103,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "edbe346bbdec8df9472f709ca3ca7bd62c64af8b0459e9b1dbac6b1a6e874c60",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "9aae2f2f5619924aeb95a2472794f6f3a45485578aeed5774407d058b4c70eca",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/832101/000162828025046909/iex-20250930xex991.htm": "3e9a812b5dfed1c6f774f0c8d98726a3816cd189ed2eb009c6d03a8c9cd5ead5",
+          "https://www.sec.gov/Archives/edgar/data/832101/000162828025046909/iex-20251029.htm": "5095393144b2fd615783daf8a8e045bf96e2c13085139da93940b96ef1a33e9d"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/832101/000162828025046909/iex-20251029.htm",
+          "https://www.sec.gov/Archives/edgar/data/832101/000162828025046909/iex-20250930xex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001099590",
+        "complete_evidence_fingerprint": "73192b263aea8a9b92f482ca7ce1706f4dc3f06c6add80cb41ca4109f8c7cc1e",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "63314f32dfb4df0ce8b0fcf597c4fcbe9b75f0895860e1d5083f4e22f22e3214",
+        "current_canonical_quarter_id": 50040,
+        "current_state_fingerprint": "769b225b589805e2379910c2a75bf5ebabd63f50a08f32302a6d133f19ac18c8",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000025/meli-20250507xex991.htm",
+        "natural_key": [
+          1404,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "548e46cb68feca7d7078d5dc68d123bebe021d3b03adf2d56128cfaa4cd9b6a0",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "748566267b8aa977807b532c195272cebe06c6c193ed0edff8809098389b48be",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000025/meli-20250507.htm": "6aee8e373fdce04d39224fc7b5906166315fe2435b526da97a8e7286ae082861",
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000025/meli-20250507xex991.htm": "ed18a0041fc8cabcd83fde605c8fa1d24c0b5408762a7c285c327a4841672fef"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000025/meli-20250507.htm",
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000025/meli-20250507xex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001099590",
+        "complete_evidence_fingerprint": "45c2b024a51683d55632bd7ccf891564c9bf2b082bf2e0c6a03138955875edb4",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "a6733608b65938e2684b4a4d233043279c363289318b96e3cb564b1f511ba2f3",
+        "current_canonical_quarter_id": 50041,
+        "current_state_fingerprint": "084aca13809c34c383790719be9744e26a4185abb378049dfcced35b21e46a1d",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000041/meli-20250804xex991.htm",
+        "natural_key": [
+          1404,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "7efcbe8daa9c507f54150eadc4f645b721706752688b1ba38c94669a84979cc4",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "012a15f65baa1d22285cfe766d1d042988efcd43470476869f993aadcaf22822",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000041/meli-20250804.htm": "2100e0cbcf93803e646a62728a37d8134db41301141a46610b60a0e8bfceb237",
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000041/meli-20250804xex991.htm": "8887104c6265ea372ebed49755545fcf6dcf82395079bb2d77f6d452965bbd87"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000041/meli-20250804.htm",
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959025000041/meli-20250804xex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001099590",
+        "complete_evidence_fingerprint": "8910ce9c4db65672c9d3bdbf5c4b438921dcbec828d8f937429bc5a465857214",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "7c371724cc2c1e4ae6c68116225164bd0439094502f54136b3fa2a07a2eb163e",
+        "current_canonical_quarter_id": 50044,
+        "current_state_fingerprint": "2067c57fb941e1fc660854b4f45882a1c1397c0dfca2f8c01eee6623ccf15996",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000014/meli-20260507xex991.htm",
+        "natural_key": [
+          1404,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "bae6bd8ebcd1312c9d0bfb56ed1da97c69d4553f17b0f34a722df1def612af2e",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "81467a20a8663c3b664643ef111ea1811f4a298b01fb2b4d5d778fd21b40c89d",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000014/meli-20260507.htm": "017b18dda23678dcd0d18c8a3ac541a151c9a8ec678d66eb0890ebe294b33c2c",
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000014/meli-20260507xex991.htm": "f92813fe9076bb2c0f62cda7c02da466f4b1adede85041fe8bed1aa79f42fa6d"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000014/meli-20260507.htm",
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000014/meli-20260507xex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001099590",
+        "complete_evidence_fingerprint": "e7d4c1b579f6ba85718c7c192f4b6764701617ded8c947f333bcde19b752fb24",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "e642bba576deb2b3eb57c057f110dc960ffe968345374ddcf4a64fad458ef73d",
+        "current_canonical_quarter_id": 50045,
+        "current_state_fingerprint": "a151c16195e2673ee585c89038e75504baa5396ee5ccd541c4fc311bf0e7f41d",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000021/meli-20260805xex991.htm",
+        "natural_key": [
+          1404,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "071a9e7395e92d73f4e58e1d276fd577d6f6402547c4d675d25c8462824335f0",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "06ff56e079d0c68e75e3938f81150b8f0a4bdb6d125796cd6e9319fc3619746a",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000021/meli-20260805.htm": "e805521626d0380df5087ea052ecae5ed9964d4bd8fe5a291c10a4f4c2188955",
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000021/meli-20260805xex991.htm": "e8d9199d1c5a3eef1214f2db731837b52a4a2a6847bd1df5b8baebb6cb047b87"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000021/meli-20260805.htm",
+          "https://www.sec.gov/Archives/edgar/data/1099590/000109959026000021/meli-20260805xex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000899460",
+        "complete_evidence_fingerprint": "527f915b99508edb80393cbae4cf10468eaea82a739aea05232286c16bb257c3",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "f70ac3ecc7a5d3aec8183761a3a4b2a30c648c7483b0edee4d21b6dde558daf9",
+        "current_canonical_quarter_id": 51444,
+        "current_state_fingerprint": "f8786e68d4b3bd96926757354ca5911fb638e4e60ef536124bf573bfc9699527",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/899460/000095017025066426/mnkd-ex99_1.htm",
+        "natural_key": [
+          1443,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "72f2302fd73509116939e96ec35e74b499d2b6213835a69ff01e775a5e037e47",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "6e68d58adda1378626bf9836a1de3b496845acb0e49ccf712310861d8170e9c0",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/899460/000095017025066426/mnkd-20250508.htm": "2e7f70eea2fa7a1f530c85a0f083b1c12c6f84d2b2dacef455a4fa7e00629498",
+          "https://www.sec.gov/Archives/edgar/data/899460/000095017025066426/mnkd-ex99_1.htm": "f262480e50e5229ce930569ed7e855ce2deb88e4eb88565376ae37ea4563544c"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/899460/000095017025066426/mnkd-20250508.htm",
+          "https://www.sec.gov/Archives/edgar/data/899460/000095017025066426/mnkd-ex99_1.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000918251",
+        "complete_evidence_fingerprint": "7ec1f7e7f0d99d2b7a3366e5faad3f0908535b50394cdd419a73ed2bb5f6f173",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "3a8fe5237e8bc795dc06dc81e761568a3c7edabc932f7b3553d5f5d4adfcfaaa",
+        "current_canonical_quarter_id": 51924,
+        "current_state_fingerprint": "aad91a8f5eb8cf99f2ea3e61b4c0e32ad54791dddef0352f80792d4809019b2f",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/918251/000114036124036287/ef20033577_ex99-1.htm",
+        "natural_key": [
+          1457,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "bd989942531d4bd78c27da786d9c6efd4e498ce6661126cc1dcdb5066c8aa29f",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "e2923f11f15c407e76fc4f3fc66fde0658e0d169c25662e4ffba53fa48c2766a",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036124036287/ef20033577_8k.htm": "9af4b5e67e808795721a71b9e2f43782e3c078bffc7c5017a616e0c56938dfa5",
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036124036287/ef20033577_ex99-1.htm": "bc2171efc9e2c531db0950d4338b374b4e4ec2a9e19e045864ad5a28fe13a7b1"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036124036287/ef20033577_8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036124036287/ef20033577_ex99-1.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000918251",
+        "complete_evidence_fingerprint": "823db11e06062b83498da6b1a6e9357c8a22ed154daddaee923a6263c3ffe6fc",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "2edd6b78e11e65649bf7ed6aa152e7ffd880acb083667ec29e5154413a9ef3ca",
+        "current_canonical_quarter_id": 51925,
+        "current_state_fingerprint": "af1607da6a3c14ef723ec8b03553a25dad94da1658c6a724dfbe357ee8fe4b97",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/918251/000114036124046024/ef20038262_ex99-1.htm",
+        "natural_key": [
+          1457,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "9e216557eab86e89ef162ec3bf4686d218ec2421d0a81ed57958be424419d5b1",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "473c7ffa5882dfe17c9c658a1e50e11877b9ebcd8b6e36966b3cd8cdc56889e1",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036124046024/ef20038262_8k.htm": "4cd07491cfd82389cd0eba1282d2a67c4babded0259bffe8114ff6e72ba72492",
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036124046024/ef20038262_ex99-1.htm": "225ff4abb013de19495c71b68203a49ff92635dd855dc40cc410ae5fec71ef8e"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036124046024/ef20038262_8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036124046024/ef20038262_ex99-1.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000918251",
+        "complete_evidence_fingerprint": "5b8676c15d4f3837e9a6c376620347a0248f443980eaf5594e6878c354d6c341",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "3e2ee4c6941b68e2c53f5babfc1978a709e48d08f8fbbdd33064659764cc5463",
+        "current_canonical_quarter_id": 51926,
+        "current_state_fingerprint": "c810bb23af01fa4dd25142f2b1a8c917189e3b4f83e03f535db10d2e7ff4ba53",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/918251/000114036125003643/ef20042936_ex99-1.htm",
+        "natural_key": [
+          1457,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "c61acedd001f254e73cc2246949c96292552db721a6d7e3003253f27a7ac7e79",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "4c7c08649a256d80e5f1145124b7cff239459226fbbc3f7de51eb8cdadddd32c",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036125003643/ef20042936_8k.htm": "8906d1e9c2c36c5973da8e3d38e7165f5cacdb6e55407f19a550dbb7f2ece382",
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036125003643/ef20042936_ex99-1.htm": "5f004300ef108cbff0233ab15c71c4632b02015c07b36fba442dfe9f62c54819"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036125003643/ef20042936_8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/918251/000114036125003643/ef20042936_ex99-1.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000866273",
+        "complete_evidence_fingerprint": "ea2df02df3842e32f0120c1a555daef0122543a2b2fe6133751b5cdc2f3de246",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "4079753c272e5dc84853dc55898bcf4e07ba92cf02846a9e51cd639bc5149d82",
+        "current_canonical_quarter_id": 53034,
+        "current_state_fingerprint": "20bab4040c62f383d8d221554512efb456cd1532969964a9aa6fc76a0ddb6abf",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/866273/000086627324000112/a093024ex99earningsrelease.htm",
+        "natural_key": [
+          1487,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "5fdbb1f3a9fc8ddd4745f3d23619b0af30f4ba090f8cbb187033d7df6bb9b1f6",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "3a53812165ba891ce032f493188f2017595b1442d3f679ac6df15a1880c8f827",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627324000112/a093024ex99earningsrelease.htm": "269dec141f0058b535f631ceb8c07ad4304314ae63319fa12bc6cba036cd3cda",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627324000112/mtrx-20241106.htm": "23e8a115e0420263ccebd8473d42fd64c30f65f73102a7032f3f45338d4d6cd9"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627324000112/mtrx-20241106.htm",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627324000112/a093024ex99earningsrelease.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000866273",
+        "complete_evidence_fingerprint": "8556999a50b98bf3f29d689c79b3989c2e5c2df182f31c0e535c3359d1f268e6",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "2b0e4be13c49908692a5bf9fac4efce0d7e4f7d9f067d6406799d7f4ef5980d6",
+        "current_canonical_quarter_id": 53035,
+        "current_state_fingerprint": "9fdff9d6231f0e39e990e0c8fc87c4d18363065b038393df04e933a0a4191c48",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/866273/000086627325000013/a123124ex99earningsrelease.htm",
+        "natural_key": [
+          1487,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "0081ae2dfeea394562537c5ee377f5ae0b3215fb554a095ff2a2686ddd796b24",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "7ae6e7a93e47fbf148b078a5c2f71526e8830ff8069562d764b1223a4c5f93b2",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000013/a123124ex99earningsrelease.htm": "5adfa8326a884c92a20ed7fc444aaee7600eb1ad16ad7be12651296497dc9fe3",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000013/mtrx-20250205.htm": "b625a0479026a10bc74f2442a2ec270d943978a02ab8fe5b7cf982083d91c075"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000013/mtrx-20250205.htm",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000013/a123124ex99earningsrelease.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000866273",
+        "complete_evidence_fingerprint": "3f9fe900e0c0d247c85c4b5d76013edcb0238609cc23702bb0195246393009e3",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "dce836f8d0342cb1db02b467ec7dc12eda18e1b941cd761c17a9a8196613fb13",
+        "current_canonical_quarter_id": 53036,
+        "current_state_fingerprint": "6742653b44182099f844ceaca8482382855daf7c6ac80671cae6a80cbaed7fa4",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/866273/000086627325000027/a033125ex99earningsrelease.htm",
+        "natural_key": [
+          1487,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "ea376fa47efb080b2c19b2016af47a0cae9e66c32c3d5e0d1bfb9218de8af8b4",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "11c894cab99de8ae6e60151898d1f4e1bbdd176af3799a971c6473246719a8bc",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000027/a033125ex99earningsrelease.htm": "4876a7cfc6c47d1d6646bb082a5a35ba0bf8f5485fbca67ead22902b2c97b3c1",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000027/mtrx-20250507.htm": "7b95587a639b832cddf95c3bf88b12c6a48d9bfb0f1b9a71e904dc5f5dc4d390"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000027/mtrx-20250507.htm",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000027/a033125ex99earningsrelease.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000866273",
+        "complete_evidence_fingerprint": "2685e2de0b4ee5e293f048d293cd8dbb707c5a06cc0ad000515b33b9a62136d2",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "99b5fafddcd3f92276789ede605daba82a29fbe9b8576d23b5be2ea8e6cb542f",
+        "current_canonical_quarter_id": 53037,
+        "current_state_fingerprint": "cb8bb5418af41057053f847774c4b473e06549206dc1af48ff4c0c56cb492868",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/866273/000086627325000066/a063025ex99earningsrelease.htm",
+        "natural_key": [
+          1487,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "c42f798fd48a3322be00108cc15a73f8bdb28467589946485be88d86b225e6a7",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "8bc670884ded805bbb7743c14867f4b36e34e15c58042277931979334e58de25",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000066/a063025ex99earningsrelease.htm": "f4d6c6a1e1b01a5f404acb16ddc8a5f058ab3a5ffe7078567911634716f3fd02",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000066/mtrx-20250909.htm": "ad42e131ecf88b9973cf0d03afd9363d5a4a83fe86c083e9e96b1b1e500781e6"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000066/mtrx-20250909.htm",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000066/a063025ex99earningsrelease.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000866273",
+        "complete_evidence_fingerprint": "14cd933dddd7cf1235acbe41605bc6f5d3d11bd435439a312a24984efd0c7c96",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "af5abae469843a56ea9ce0fb8f9964fb480dd946ca1a397e77c5ee440e2975c8",
+        "current_canonical_quarter_id": 53038,
+        "current_state_fingerprint": "c4057c558ac14c17e2bd2bb64702488a0b7595b8414a17fc08c45a9bfb5e7a33",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/866273/000086627325000098/a093025ex99earningsrelease.htm",
+        "natural_key": [
+          1487,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "6ff139a85d6e8c35bec2689195f0b41f0feb97045de69a274de0eb10af7fa70b",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "68d2c08e46b8de298066eb2781fd0c0b2c95d9c407e9fc032b767139f76e6be3",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000098/a093025ex99earningsrelease.htm": "1a3d779d493fe3b2bbf84c78c8a254bcdb7a93cea9506057160af90be24a6f18",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000098/mtrx-20251105.htm": "2e95e3b6615393a80ec169a968a62769248a5b4330112f1eb3090e6c7ccc2ac1"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000098/mtrx-20251105.htm",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627325000098/a093025ex99earningsrelease.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000866273",
+        "complete_evidence_fingerprint": "79ad6931da9e6aeb6becf7f7bb2dd0726a17da23c9c59b567dd56d2b760059cb",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "5869e6410a0cc642edf03412de411bfb2e097841f57a0653353631b8499037d5",
+        "current_canonical_quarter_id": 53039,
+        "current_state_fingerprint": "c4975c8018b213ff8057caa501403eeb1a118b167cfc3ffb28d434448568435b",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/866273/000086627326000012/a123125ex99earningsrelease.htm",
+        "natural_key": [
+          1487,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "47913d087da66cdf7436e044dd6cb7ebfa10d03c5a5298665416326c56970837",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "214bca414d2e3045789ac5da6c8b4ef5438879e3b87650beae63832519f684e7",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627326000012/a123125ex99earningsrelease.htm": "9f64e11b97d87cc929c6a580583881f88b6339ca58a79ca69a65caf9a5c38282",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627326000012/mtrx-20260204.htm": "c5c76f42bf5c8660fffea18d3f681230c8147f7fa182f7f02b3c83132253ae5f"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627326000012/mtrx-20260204.htm",
+          "https://www.sec.gov/Archives/edgar/data/866273/000086627326000012/a123125ex99earningsrelease.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001423221",
+        "complete_evidence_fingerprint": "c8cf7bb0dd371e31ad07568d337316c49fae13384c58b414ca53e2395c8833ee",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "52ad9222f53cebb2959a6aa7950b6023748f7640fa4d5f6d134c0391f1b9f066",
+        "current_canonical_quarter_id": 57074,
+        "current_state_fingerprint": "1ee09ec21a7b35b5bc7550b0cac57df07daf0e17586cf51030a60169aeb0c6ff",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1423221/000117184325003726/exh_991.htm",
+        "natural_key": [
+          1602,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "0334ac8ff51babcdd085882afa1500d3a2b064d01cf251200b6b4e333d5a88ec",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "0fd2d717fb43563b6ca47d2b0f978817469b2ecc0c7242851c2782a43496f28d",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184325003726/exh_991.htm": "4eaf5b70c98d2a5b9608c8fb78b1c1bd79c365a8530f5f738fa57f264315c793",
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184325003726/f8k_060525.htm": "a07f6fd49d3a8edf40505deff3afb07d4e2f96d0773d772531e170d48317179f"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184325003726/f8k_060525.htm",
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184325003726/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001423221",
+        "complete_evidence_fingerprint": "89a65aa4a7af464f9c32f0129eaf01565f3af45b992e41ca98bdafc5a7549c84",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "0acd55b85f6411213b1359d2e496f3324cd3a3158b9c3be0ac6cfb10352eedc4",
+        "current_canonical_quarter_id": 57076,
+        "current_state_fingerprint": "259abe4434fb9da0d3e087c090bf1c08f5062e2f2a9fc5b8c0ca2a8233e31f9d",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1423221/000117184325007891/exh_991.htm",
+        "natural_key": [
+          1602,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "8317a626cc460efa9321c3e0f11f50f43a87e9059867deaeaa13ed8d6461fc67",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "af421ce4c4c522fbbe0609601a3d0998c65fb2a2f30d87d95d61af3b2d98797c",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184325007891/exh_991.htm": "d6f77d267c0ff0386c129f0dbbe9c3550de5460ef79fdfc7fce91ecb7ec26f16",
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184325007891/f8k_121125.htm": "1f203343c359df59b5b0f4db7daaf092592905510e89a163b06de20c86012e02"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184325007891/f8k_121125.htm",
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184325007891/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001423221",
+        "complete_evidence_fingerprint": "420831cab508108887854fe3d374bae0659f9b4f373174e0c11fb9eeada16cc3",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "c3071337fdbfe7878601c8a69038d04098948768215f3ccd7b8ab3b3f15ff4f6",
+        "current_canonical_quarter_id": 57077,
+        "current_state_fingerprint": "cf30315f153117eaef965a986ef0b0e5f4808710c9710a305a77c388235e4cdc",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1423221/000117184326001364/exh_991.htm",
+        "natural_key": [
+          1602,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "6e2e199adbf6abc45c13a9a48692eb26d06259a0bbf2d13b8ac9ff30f6085b77",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "6e7dbcfcb4806e0beefca7b6e85996e8f3c521ea4cffa5f15fc457e8fd7370d4",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184326001364/exh_991.htm": "28cc6722c27a973946615e3324951ed85b9b495c712e5be07b8b3b53d27dafc7",
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184326001364/f8k_030526.htm": "59a579ca3f26a67d2994db13a105077c1968e0af4fa56b2b375c865d505f1c39"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184326001364/f8k_030526.htm",
+          "https://www.sec.gov/Archives/edgar/data/1423221/000117184326001364/exh_991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000802481",
+        "complete_evidence_fingerprint": "ff25ac9b2e86dcc852d18f5044107c751a3e5e20ff78ced549c69056a714a93c",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "7a59e1030988f2adf8d451f3c3800b6259dd70a24df3dc5016987ecc6918b5bb",
+        "current_canonical_quarter_id": 63225,
+        "current_state_fingerprint": "922aa0d25e42ba16303e30da76ad01c5b200fc771f69da325d26a730b52c132a",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/802481/000080248125000059/a2025_q1ppcex991earningsre.htm",
+        "natural_key": [
+          1772,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "90b2adbc81a62295b4ec4229f9639f1d6a37c49a38e2b5da85b33261edbfd3aa",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "b77e3de489ac8c7ac3d85a8c95a94ba898d037bbc58393e70a10aa1a5c09a1cc",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/802481/000080248125000059/a2025_q1ppcex991earningsre.htm": "4eeee147d77a3b10a0818d613513e742638a3275d0e9e58e59946fb956238757",
+          "https://www.sec.gov/Archives/edgar/data/802481/000080248125000059/ppc-20250430.htm": "029f45d98d17bd4c484317714639f0ae64f71da3f7046612516c8b398383bdd7"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/802481/000080248125000059/ppc-20250430.htm",
+          "https://www.sec.gov/Archives/edgar/data/802481/000080248125000059/a2025_q1ppcex991earningsre.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000802481",
+        "complete_evidence_fingerprint": "53537090c0ced0c6b13a2ec413b2900534acdda8553cb51b863fd735bd69bf74",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "f3acc0c97699ca4bfff13e0e2499d3e9c05a29f933e52ab187391819f4ab6eaa",
+        "current_canonical_quarter_id": 63226,
+        "current_state_fingerprint": "faa314fa24fed9897ed4efefb89b60d3b3895aa892c84d83ff7d5be7ce542367",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/802481/000080248125000108/a2025_q2ppcex991earningsre.htm",
+        "natural_key": [
+          1772,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "413986aa2593b169436ebd6866ca866bf845b4e145a95c51f4638121e2fdfb50",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "27a0fd9595df838bdecb84a5f67c7a7b062a19420efc73e26e97586c52014fb9",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/802481/000080248125000108/a2025_q2ppcex991earningsre.htm": "498623aa2dd2d622c721b63b99f60fc62e9f3e3b4d1245fff279058473afc5cc",
+          "https://www.sec.gov/Archives/edgar/data/802481/000080248125000108/ppc-20250730.htm": "67a020685c168a4dcc24d5f1ee80f532b543f988495a53bdb1d8fc8588bd6473"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/802481/000080248125000108/ppc-20250730.htm",
+          "https://www.sec.gov/Archives/edgar/data/802481/000080248125000108/a2025_q2ppcex991earningsre.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000804328",
+        "complete_evidence_fingerprint": "81825f43a1230710af388c6405a87d206a604d2fb65dfc0b9b64a7a84066e77e",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "1e08f6f2be15827d0f9747274a436660f1a931a8c69666993148d2cef4e6b76d",
+        "current_canonical_quarter_id": 65076,
+        "current_state_fingerprint": "a62a6a127fc7747957ad2d01e7f63d27f0a99558961087dd71ff3a59c522242b",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/804328/000080432825000010/qcom122924erex991.htm",
+        "natural_key": [
+          1826,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "926249c5849e875aad8392f86f1994f9b119540f525ab84e12ad15396eebfb82",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "702cd11ea45c1a38b3b692deb8f807af4356e2cfcfbdb44e9b1b432ea6dd3b30",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432825000010/qcom-20250205.htm": "0d81b14934391aaa9231d918f922fc37bed1a57a20ab3c61f5e0342f12d3fb7e",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432825000010/qcom122924erex991.htm": "feecda5559552f8cd86b78eb130b93fb63ccae5e0845277bf0f58dc406208be6"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432825000010/qcom-20250205.htm",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432825000010/qcom122924erex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000804328",
+        "complete_evidence_fingerprint": "2b30be8da62a9e38c17404704d2cd8f2c7fc8092e334ae0d5a3dabcd12c557a2",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "047012c4150a676794909cf78108068ea698a3d67b328367672d84f5cfa4bcba",
+        "current_canonical_quarter_id": 65077,
+        "current_state_fingerprint": "da4fa290330111ef29dd47160977d8e5c406dfabeeb8762c73647823121d6e2f",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/804328/000080432825000029/qcom033025erex991.htm",
+        "natural_key": [
+          1826,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "b25600a9359350c7e1265f80cbc0b7ef4feaa9dab3e244ed42375ae47066be08",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "edd2c6a6b0085739b89568827f0f713d1d43674ed1684cc58d95bf5ca111658d",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432825000029/qcom-20250430.htm": "15ecf8ea0fa9ac262ac0044386f5755d952191d7675d1046695d6c468e724737",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432825000029/qcom033025erex991.htm": "99bb80cc7701d66f26406f7726d0b3423145b32cc4d7d63d07d754d5f1a19ea7"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432825000029/qcom-20250430.htm",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432825000029/qcom033025erex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000804328",
+        "complete_evidence_fingerprint": "c28098943f80c0d2b25311989ddc77dce286c6e7edf87e6a9593e313e7a86a23",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "52f8c2523a2e5a1bdfaa7f1c3bf4a4f9e095ef1acfe18fc92bde35fa6df2f349",
+        "current_canonical_quarter_id": 65080,
+        "current_state_fingerprint": "262e4c7d3690d7cf61dc470c578d13737c42f7c372c5ef65ae75a82d751301ab",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/804328/000080432826000016/qcom122825erex991.htm",
+        "natural_key": [
+          1826,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "d30ae59aaf30020d02791d5e66fc0c1d435ab02bf1d45ad06fa7318854fd9eab",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "5032a167b893766e3fc1bec6d0220078bee5fbd667ae6bf45a263e1f99664cb7",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000016/qcom-20260204.htm": "16577607590e272a85e37dd23848cfcd0abfd2dcb1c462cb78c9b63244f7c3d7",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000016/qcom122825erex991.htm": "c5cc7e02c51d11385c00cc6a1f5888964295f7b36a0212f3190aab6df6b7d71e"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000016/qcom-20260204.htm",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000016/qcom122825erex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000804328",
+        "complete_evidence_fingerprint": "ad53e7c65501f9f370334c63089d480219622cf65c8f189a25cdb46b4ed193fe",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "f6b6e981fd1b15208dafd4bebc2ed9c699c23a98e113b4d58a8d8354c3fa329b",
+        "current_canonical_quarter_id": 65081,
+        "current_state_fingerprint": "ee1fab290c45bc4c22bf79475e5f9332824391cafd2b228369366109350eb869",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/804328/000080432826000060/qcom032926erex991.htm",
+        "natural_key": [
+          1826,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "1d735b9e8c21aaf94a96668b2b36d5b765e9c900188cf01f72f3b906de7e05b6",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "9dd16c700c0d4d0fd133cf007430620040f22526249f099ddf53b62fd7c833ce",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000060/qcom-20260429.htm": "5c009105b734c3940b727ec484d7d8fe1866a418db9027af47d9532783210472",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000060/qcom032926erex991.htm": "32b92c50aad7cf6c33786c95c92a2e46b95ffe33785c00fe8782c55ae807386c"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000060/qcom-20260429.htm",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000060/qcom032926erex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000804328",
+        "complete_evidence_fingerprint": "dcc88f3b6a93eb040e3c11524b0e7bd2925e074f866b08b259ec00064d770513",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "c50fd00bfe810f5e82dd8a99619cf1048d8d52229627f97cb73173d010129035",
+        "current_canonical_quarter_id": 65082,
+        "current_state_fingerprint": "db680e0189b346ec6b008c2ec28cf93ca458a61339f2b1605e13c29c373837e1",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/804328/000080432826000085/qcom062826erex991.htm",
+        "natural_key": [
+          1826,
+          2026,
+          "Q3"
+        ],
+        "observation_fingerprint": "a5825d89d08b2630c5d871eba3150ace16b81eed1cec3014341d16d2a8520b64",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "b514fe78f82626df8fa5bb5dbe2648f639e9f77e5780942f60bcc68d3ac8db07",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000085/qcom-20260729.htm": "82f7a74754a5467d595e9f2a3c288e5996c530bc70c601a8d847a3f945dfcc54",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000085/qcom062826erex991.htm": "89c4d4a84f8ada81db66fb005567a02f480f3c3a9bc6cc6280a44de2b894bd97"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000085/qcom-20260729.htm",
+          "https://www.sec.gov/Archives/edgar/data/804328/000080432826000085/qcom062826erex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001819810",
+        "complete_evidence_fingerprint": "35872cc5291048440775cd376018c71fb6810738bca067622c901dc19b10187e",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "38bae6fa05631cbf21216bc940c21f68263828b0b83e14cdad1d8e44ff86e1e1",
+        "current_canonical_quarter_id": 66352,
+        "current_state_fingerprint": "6f5bc64eeb691e1c4b8cd4dfb0e9e3a6a4ce99de73373de563310eead2435a55",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1819810/000181981026000121/exhibit991redwire06302026e.htm",
+        "natural_key": [
+          1861,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "cbe175e4aba7b62c25a94d8d0141c7a0c72baba0fbe6827011cdbe4d37be9426",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "b25b99a93e598f935951ba2ff27d4484edf79b62d71f2d3544485202051b3da1",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1819810/000181981026000121/exhibit991redwire06302026e.htm": "65d613962478df5bbd466dd6b5f487fa7d32abfec9b1af624daff7a7168ec17f",
+          "https://www.sec.gov/Archives/edgar/data/1819810/000181981026000121/rdw-20260805.htm": "ef6991e0ebf94745cead566b22beab261532f96771883c4146843e4f7a13b543"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1819810/000181981026000121/rdw-20260805.htm",
+          "https://www.sec.gov/Archives/edgar/data/1819810/000181981026000121/exhibit991redwire06302026e.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001653653",
+        "complete_evidence_fingerprint": "cb1c47566ad7e90eaf9f9df2d46ff149b287fd9747f4e3481513ae51536d9512",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "563603d1873535ef7eca8676303d6cb980355e7ff97645f7bc0e4a8438f118de",
+        "current_canonical_quarter_id": 68561,
+        "current_state_fingerprint": "c6cd9d6a199b9d2b9fc2b352d22664fb9134b903c44e7d3a60cf371c7641f6f8",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1653653/000119312525109965/d935648dex991.htm",
+        "natural_key": [
+          1923,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "4bf7a653ca7aeab52abc72b2320a1fdd352f0c3b1b18d7af5c558ce18ba8b1de",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "363a30669e4bd96b6fe8d8a89515df51c7baede9f0b321f55c06acb1ec280a7b",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525109965/d935648d8k.htm": "bab0af35a48fec7b2050823a588222870cd06d491f4e6338080c54fb4a253f95",
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525109965/d935648dex991.htm": "e6e1616524b361169a377655cc7d48cb9c66a7a8e24d9c534c627eed5f18085b"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525109965/d935648d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525109965/d935648dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001653653",
+        "complete_evidence_fingerprint": "a01dc7555a81c1dd00588f02af4ae3bdb08755bb227c819954ac032aec151123",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "d75bdece58e5c3f0951e2a1ceeaf8a466e3b51dc31f64f02c67935efb74e12be",
+        "current_canonical_quarter_id": 68562,
+        "current_state_fingerprint": "36e993b3d43f762db3ea9a851c513be5ef6b59aa88ed82d54b81d73d6c533057",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1653653/000119312525167977/d927857dex991.htm",
+        "natural_key": [
+          1923,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "ff6b1160fd658a030028dfe353a13d31bbfdae3de0c197dd0210249f5d4ffec1",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "621357a72cc0360e8a46de75b04d9ccc697328798cfa91b7a167bc6e39ea9973",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525167977/d927857d8k.htm": "4d3724b1cc95ea064eb37b84c3e0594669b5ed4298298e05f9fa6f37469d5530",
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525167977/d927857dex991.htm": "c14db87db80a24002bb56639c12f8a35263f5b1dc259d99a51062955ec15e325"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525167977/d927857d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525167977/d927857dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001653653",
+        "complete_evidence_fingerprint": "bc5235e41f92fbf2022afa29e3d1ce0b8c929b9d02bf47ebf714e460b74f5b21",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "90cb950298dff4f557f5f0f92aa4358914c0255ecf2825fb84631b6a75b8814c",
+        "current_canonical_quarter_id": 68563,
+        "current_state_fingerprint": "acef49227787cb055cdc11979bc56690b9a18a4d2d3e90bda566041a9e626d02",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1653653/000119312525253457/d31085dex991.htm",
+        "natural_key": [
+          1923,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "b2b925a7484da151f57a30ec58b0f00ce8454fe5faf8107a2cf1e560f3856d8a",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "0bcd1bc72ed40bf48ec7cd179b22a43fd29733e19129a8fa9725ecfcf01af731",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525253457/d31085d8k.htm": "66ba720a6972c2cee864025521b45f8fc8f40a9cefdd574e2414d83968520d80",
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525253457/d31085dex991.htm": "11ce6e95163091344072520cd70a4be623c64bc58cc0ec770c124fa2257757b8"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525253457/d31085d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312525253457/d31085dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001653653",
+        "complete_evidence_fingerprint": "763012d17fd52009b909ec4fe119cd35d2ea368941b2c535819b111a8b8336b5",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "fc5f166467604e891a5f28d4cb89bb5bd000684767853ddd240cc73a917222d2",
+        "current_canonical_quarter_id": 68564,
+        "current_state_fingerprint": "aa81c3e948648bac33d11288a2eeaba7b4bc60f1f1273bbbf143a336607176b7",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1653653/000119312526044612/d72367dex991.htm",
+        "natural_key": [
+          1923,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "6118afb8966f1e45b5be19a36e391b8d2ae6e3891b1135562f09603b218cc34d",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "26c0b4b6e3a5bf8b3d64b897af4bf77aca0e5730bc6c6cc93feca459e6503f70",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312526044612/d72367d8k.htm": "501f33ac31e8594021ebf120c33966b8c98855d20b11501701d8a9d2134a7738",
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312526044612/d72367dex991.htm": "452eff7a6ae0f8ee803e5ec544d63601fcfb2068c3b622ce713c556912470d4f"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312526044612/d72367d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1653653/000119312526044612/d72367dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001964738",
+        "complete_evidence_fingerprint": "1a6c436a9a52d38434ed4e37457fcf82629963e362523f5ba0c928786f845150",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "d1c142581b07f83d6ac5e98205e5b037e1052e9befc4d9a091f0eba163bb4ea3",
+        "current_canonical_quarter_id": 72833,
+        "current_state_fingerprint": "f08a8e64704d28bacf51ab471f525190b2c6e8ccd0e118f35cb4ca933f7e3ed9",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000049/q12025-8kerexx991.htm",
+        "natural_key": [
+          2050,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "24c68d2e8eae92f41c0883f0fe72b66c797e5da43d3f60a88c2db23a11dc5457",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "6a6f05f8cacd5d2c895cee68f4d9dfeb051bf80bca6c5bd7976b0b1769d15b7d",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000049/q12025-8kerexx991.htm": "c74c395bbc3c06616c3c437d5a800aa1a9c970ff756b894130ad2b2f2c99e7fc",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000049/solv-20250508.htm": "0e7efffb8f4447879d0d8341a1a0a33f79a760a8ff165aa37ce4eeb00b3dae7a"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000049/solv-20250508.htm",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000049/q12025-8kerexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001964738",
+        "complete_evidence_fingerprint": "0c5366941642f68aeb85c52a9e37cf130027fcec0b02e6e2d90de88e085ae01a",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "e207e95d8ab6177fa48278c3b47e33e69bd51d61ad4c1883e4966589249a07e6",
+        "current_canonical_quarter_id": 72834,
+        "current_state_fingerprint": "35254845802f0a81e1c1fb838ee1ca97953ba1e4eb175c52b9e002ad987d27dd",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000062/q22025-8kerexx991.htm",
+        "natural_key": [
+          2050,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "3b27bec4fa4b7119e19b89351a4fbe05cf0ca06902e903f6b00e8887e7605928",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "75413853b24d1760343a4fa02203a17737b0fab46a658b08425b023eeb611188",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000062/q22025-8kerexx991.htm": "4d3d4906e54e448584a83cd26730cf2d318c788a8758b58adbe194871b79fa52",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000062/solv-20250807.htm": "c71af055fc8010f2b6acc2b4a6b01ef7612f92ac0e654ff7f48b517d3a6c016c"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000062/solv-20250807.htm",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000062/q22025-8kerexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001964738",
+        "complete_evidence_fingerprint": "14fef6abbe066943000d831f4796a786c11fbb8f663f9b7745e7e02037ea312f",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "20ea068ba95fb4dd0e320776b833ba20ac66e4e755ca5f8a4fef13bd72e6fe00",
+        "current_canonical_quarter_id": 72835,
+        "current_state_fingerprint": "f76b80f774208b2d205b804255ab500f383aefe14bb5ffabe963077cdb23de8e",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000089/q32025-8kerexx991.htm",
+        "natural_key": [
+          2050,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "495fff842fbe6d7d111bd919635a7d10c3894435eba01b2373f3f3b76649a941",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "2df05e9175c65ca8fb1d3839ac8e30dbc674eec2bb8b7e14771725f10284d0d0",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000089/q32025-8kerexx991.htm": "ed5b87114505bb1bce80598af3d310b02b482fc442343f16f0cb82a7666caead",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000089/solv-20251106.htm": "db8c1b5b55e7fd0f1740919b828652e8fde142519ef17c2c8ef67f1c5372b36f"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000089/solv-20251106.htm",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473825000089/q32025-8kerexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001964738",
+        "complete_evidence_fingerprint": "a35545e4c85154274c37a25f6d18fd7727206a2ea178dde1261ac1017dddf58d",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "885d44ce6bfb0ccde72ff7c4383cf074a55f8efe2a68750a0412ffb09498f84a",
+        "current_canonical_quarter_id": 72836,
+        "current_state_fingerprint": "ce36a5be6fb7a65ca324b55fdf86c673ba99661ace8ff11f9f2f3a5a88f6c250",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000005/q42025-8kerexx991.htm",
+        "natural_key": [
+          2050,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "f37a030ccb1d7287445a1775957bf26a4507a212cf33fed1341c1d3dc680ecac",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "8aecf4460df6d8356607a407acf2ffd2f986309819071d422b4660d26e4a966f",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000005/q42025-8kerexx991.htm": "fe383f4262e352e1dd224a32d587ec5babe9f2ad39b180383d09e30a495f6de5",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000005/solv-20260226.htm": "5a0c191f1b268c66ed00f9cd1a297e7d81862ed4cd6052b6bfd6f257dc67df23"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000005/solv-20260226.htm",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000005/q42025-8kerexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001964738",
+        "complete_evidence_fingerprint": "697a6577fda6f861e2c2210b7b0637c908987496525a7c7e490786bb37b58ce1",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "4dd89a8d6526ebadda2978957b239a98f4e9117783f84f26b8577731a9258a55",
+        "current_canonical_quarter_id": 72837,
+        "current_state_fingerprint": "9d31a3322d9bc529860b76337ec6b6b144eaefaea2e826729e9b46040479f568",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000022/q12026-8kerexx991.htm",
+        "natural_key": [
+          2050,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "694e693af2e75e076fd13757ed857bdd451cf9fa52435a64f5d0a600ff620767",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "e7ad900cc6f6e9083c228e6934d765ddd2453974274b0a48d0759aaa97cff685",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000022/q12026-8kerexx991.htm": "320fc3ed11d83b9260df45254451805ea3b28e5c8b9f2c08dbf2b44a1502c8a3",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000022/solv-20260505.htm": "caacc251223dc6bc3eb44c5d29e7b62edbf41693a046917638231001929c5178"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000022/solv-20260505.htm",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000022/q12026-8kerexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001964738",
+        "complete_evidence_fingerprint": "a61e05170e0ec17cdf033e2c20b4f639d67bd515d8291dd7dea04bfc6f2c1cc9",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "e13d4a8a0c9c9ce4c7af973159e6da2440160462cf145cf5ca2182efd9adfb8a",
+        "current_canonical_quarter_id": 72838,
+        "current_state_fingerprint": "66cfc0634ed60f67db5e5b649fff782a019b1deb921c0cdf54e436c912d9398a",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000045/q22026-8kerexx991.htm",
+        "natural_key": [
+          2050,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "92e5eba1572922a29ec9614afd46873567cad48af0f2acf138d12c5b4c168901",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "49777d1d93ff37b03eefe2d36f04a747b0646bf381319b033064d0086282b905",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000045/q22026-8kerexx991.htm": "69bd0abd7075b632e55748f81c706d126c5972f28eb25bbe2fbedb2cf25459c2",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000045/solv-20260805.htm": "f1f4fc424a2a81f41e56fdb94ba01df564668e26f9ba802b2884a5d11742ae98"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000045/solv-20260805.htm",
+          "https://www.sec.gov/Archives/edgar/data/1964738/000196473826000045/q22026-8kerexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001092796",
+        "complete_evidence_fingerprint": "eb6025d152b9ce32e2bc60b59ecb00efd2a8e222a0d50ee02fdae85f70c9d90d",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "2ef39f1f845e1df738d67d8cb6082ba9f0737d164212eac5b359efbe11bde93f",
+        "current_canonical_quarter_id": 75010,
+        "current_state_fingerprint": "44ee4c93b0bd981bd9b23355eaaf4c91c808dbdac0584a2e13b0c60652294b53",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1092796/000119312524271518/d915227dex991.htm",
+        "natural_key": [
+          2110,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "f1eb41751d643b04d2d4f5434c7df55839fc2783ee707774821751c908218a0f",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "f071468fa05a5a4a72ec6103fc6f44837a5d2e2e95ef9a25ddfb30171b8d987e",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312524271518/d915227d8k.htm": "0f53603d4900b7cbb5e132e0b15959320f56b5f86a24680c6073653a3a26256e",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312524271518/d915227dex991.htm": "0678fc32b4c0fb09f40fc802e060134f7f96b8317cabafa0463b9ddf56ec5750"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312524271518/d915227d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312524271518/d915227dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001092796",
+        "complete_evidence_fingerprint": "fdd05460442c4fcdfacb50691627c10ded2c8db5869525f338268f99a14bbe13",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "61c675e18c9fc11f28a9cb07ff7c52791d7cb467babd7be47508156c0e6304d1",
+        "current_canonical_quarter_id": 75011,
+        "current_state_fingerprint": "308548c4fad7f32798333ca3ae1f21c3fa2ced419c2120d130de58de51c1dd93",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1092796/000119312525048413/d894656dex991.htm",
+        "natural_key": [
+          2110,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "5a9f64598f48909d622b9ed9c2aee60a888c995c746f4214b25fabbd5c9bdcf9",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "29f1a63bbed450b1fc0ca44ae98d4bd3fbed27a91c0ea494f64555ffb7d21d94",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525048413/d894656d8k.htm": "22d6a83f187a02c5d633549de1f97f313a0bde960eaee5f951708f2cc705c9f9",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525048413/d894656dex991.htm": "d4605e7a7cebc947b4987aaa099722762f5626ec7604a54b4cc28252ea68fab2"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525048413/d894656d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525048413/d894656dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001092796",
+        "complete_evidence_fingerprint": "294050a0a50e281cd470fd9134f79bcbffc2baba519fc34a13232f59bd7f7617",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "158f6d5aaf396fdf9a382aaf7dae1fe0464524e63502c3607f7254dd2d084329",
+        "current_canonical_quarter_id": 75012,
+        "current_state_fingerprint": "92af7f2dff05386542ebe73b03dda6d4ff08ed79d46f8906f619900c25ae9a3e",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1092796/000119312525142704/d19177dex991.htm",
+        "natural_key": [
+          2110,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "a9a5282008971c6f74e70a7ada6141953a8c3d4ce17456a39cae8e943deffd16",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "56c6737ef801a360d2038821935993ca183589eca26821b5975df357e1f03091",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525142704/d19177d8k.htm": "92a09a382dfdf4ecb0174e500c4fd78111aace72a6b0ba68acdaefa5e1d5eeee",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525142704/d19177dex991.htm": "8c597dc2dcc52d75ae7806d066a08a9fdf6a27902258955a195a5b479918c98d"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525142704/d19177d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525142704/d19177dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001092796",
+        "complete_evidence_fingerprint": "fbd30338c4442b83e870f564cff30604648d8a85578894d0dcbfbf251c7b5888",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "ec90ec7c33fde422e5570357ab9e4db8e6320e5585302634b315142130cbccc6",
+        "current_canonical_quarter_id": 75013,
+        "current_state_fingerprint": "3780909fa8a02ad8922a0dd10a49ac1962faa7a6979e48498240406c3a96cc85",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1092796/000119312525196031/d24388dex991.htm",
+        "natural_key": [
+          2110,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "6c992841d3077d32203a09f2934629bb26b85e62755c993e2b51dbd62288e6ec",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "227d9faa3ae1b8a08f888580c6c2840a038c4983ae949f5f4a5d476886bf0e06",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525196031/d24388d8k.htm": "cbff6d4d41c72af06c38b41fcec25dec4e1f61af41451d29e366892bb1a8004b",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525196031/d24388dex991.htm": "8d27c6a26a3a7a41fefa8aae1ab8a3354cf8af743415fd39124a946fe730eda0"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525196031/d24388d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312525196031/d24388dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001092796",
+        "complete_evidence_fingerprint": "28e45a4d8d4f5c3e330303f149a2772b5c15f993478af8f1109c6c96f50b233e",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "ccc51fc95575b8f0423597d7be6dad8fb5e3456676673ece258d1966ba875e76",
+        "current_canonical_quarter_id": 75015,
+        "current_state_fingerprint": "4cd75a4d40bc6239682ec4812d2f4bd5a598d5908505e4124fb7b3aff3648fe7",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1092796/000119312526093923/d120095dex991.htm",
+        "natural_key": [
+          2110,
+          2026,
+          "Q3"
+        ],
+        "observation_fingerprint": "6421dd507ceb18637e010ebe99e24c08adb50e3efffef90cecafee975eb34ca8",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "b26b49a5aee36ebdbaf2dd2772770b3907ca050577fd2d24636b5caf4eb071e2",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312526093923/d120095d8k.htm": "89a03e3c6b387c545d4c922b081d5c4c9bda7328becd606e63c76713f3a58dbe",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312526093923/d120095dex991.htm": "d8b0c928d6cd72d5d68e560a9169ed967275539413f634ff09121f9bbb786440"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312526093923/d120095d8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1092796/000119312526093923/d120095dex991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001493761",
+        "complete_evidence_fingerprint": "c5340f2c04e4756eb52e82ad825d85d8e01f1b946f429d9b7d6b4091cc3d5f04",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "f082979ac1d008b1dd93d5a8ee36217fd90fee473dede9805bc22d7aff0e41e8",
+        "current_canonical_quarter_id": 75743,
+        "current_state_fingerprint": "f2338de23aba3a1ce7942cee2202f19a0c9b76b47549edeff9467c51c874174d",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1493761/000119312526104292/tbch-ex99_1.htm",
+        "natural_key": [
+          2131,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "8c78329ba429ed259f413c7bd46df35b0b0b52025bbe2a85a387e6ac6f4cc1c0",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "6846296f5e194ffada0c3c603c723989398d13afcf35dae65a24f808f8a14e6a",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1493761/000119312526104292/tbch-20260312.htm": "1002f9dc9c774d1d75bb6e2522bc5d8169045bf04133bb6a31bb8ddd29b26815",
+          "https://www.sec.gov/Archives/edgar/data/1493761/000119312526104292/tbch-ex99_1.htm": "1d8ad7e354ef3318bdfd849e9bfddd9b35aeb92ae3be2c3b9f64d2596b00c926"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1493761/000119312526104292/tbch-20260312.htm",
+          "https://www.sec.gov/Archives/edgar/data/1493761/000119312526104292/tbch-ex99_1.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001493761",
+        "complete_evidence_fingerprint": "357289038fa688be45537d68b0f9e8d5b2518d6cf2096cdb89762f590fe0e4c9",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "7671a9932bb364a1606f373645589c23e733d70497455d3fe6c7b6e4801cdc51",
+        "current_canonical_quarter_id": 75745,
+        "current_state_fingerprint": "f587a15f2b1eaf56908a1e6139f1f49d605e2dc23874988d0826489d896f1c2d",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1493761/000119312526338051/tbch-ex99_1.htm",
+        "natural_key": [
+          2131,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "1c4475c98c9e3ede8aacb7d169b71343852a9171a8cda882f061e7066b8cb580",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "2802cc9226edd068d2d29f0568e7e607a86a6502e6a6dd909f914ac1e13b7d69",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1493761/000119312526338051/tbch-20260806.htm": "7ef456a62fab051d72e6a72514dd3338117a877d065fd2767e51b3a0fbbb01ff",
+          "https://www.sec.gov/Archives/edgar/data/1493761/000119312526338051/tbch-ex99_1.htm": "24bbeb0e31a4eb12330007fdc832a47e672c41f60593024108ab2847923fbf4f"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1493761/000119312526338051/tbch-20260806.htm",
+          "https://www.sec.gov/Archives/edgar/data/1493761/000119312526338051/tbch-ex99_1.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000097134",
+        "complete_evidence_fingerprint": "d8cf56394d9ebef9f185640ba1742ea10b29b6036e89f5420f2df265fc0a6f0a",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "70a0a19b3433be0e5205e30bd28df80ac76c003f7477cfb61c6d363ff8fd1fd9",
+        "current_canonical_quarter_id": 77427,
+        "current_state_fingerprint": "f4567f9e6eb014d7f5d9ffbf4bab644b958141a451d890b97ba31a98602c7f3c",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/97134/000009713425000011/tnc-20250501xexx991.htm",
+        "natural_key": [
+          2180,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "97f6ddc6289b2fc44bc660560257b83b684d23fad8f393ddc42d1131352b5479",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "a362a170fb8c19d4b2c3745478c6050eabeca983784c27fd83407a9566f11887",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000011/tnc-20250430.htm": "54b0892c4e0025932805709a78433d167ac4412b9214b95d8cf62ef7d324d30e",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000011/tnc-20250501xexx991.htm": "558d473d4a8bd1098d0f74edf407a3f1f618c15ed3b59847571ff7bb44348350"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000011/tnc-20250430.htm",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000011/tnc-20250501xexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000097134",
+        "complete_evidence_fingerprint": "2ee9eb55ed36a192e1aae3094a22b6ce7ca13cd0229b89776515e990f60c4a1e",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "1752c0edec4107fb8c29f8e483ed5df42efc190358cc3977c69f437300e057c4",
+        "current_canonical_quarter_id": 77428,
+        "current_state_fingerprint": "6e4dbfc6913001ee9c53d3193a60f762a74a6069fa8e33624ee3eabcc8f169ff",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/97134/000009713425000024/tnc-20250807xexx991.htm",
+        "natural_key": [
+          2180,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "d1fd7b492059887df46a0e987c8c5e3bd3414ff07467187b733a088d8feaab08",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "f41633a02908517fff9c2a314d6a9ec45212bcd52d54592b8db73447c5a2d9f6",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000024/tnc-20250806.htm": "7e14ecedd60ebde31a11947a6f0f0506dfc2d8261df4d9728cf0143327641f7c",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000024/tnc-20250807xexx991.htm": "dd2b711964b0bf853d0a28343027b976d57aa946ad49fd092bc8d5980ae0b5fa"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000024/tnc-20250806.htm",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000024/tnc-20250807xexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000097134",
+        "complete_evidence_fingerprint": "f02c3dc48a46804f65a4b3995b797a388eeb1b4760b49946aab941f6fa57b292",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "ba15309679dfc029b780976eaf4c480d0314ff740e556fe4c02ba762e3dff2c2",
+        "current_canonical_quarter_id": 77429,
+        "current_state_fingerprint": "bd92aabbc67ac28f3376ea2f2e569905f0a014151e6e361386f776ff7237673d",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/97134/000009713425000034/tnc-20251103xexx991.htm",
+        "natural_key": [
+          2180,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "3aebc8c5d16c7297c5d6c15a976fd42564d20aabdaf22333502864fbd3b0bc7f",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "95879427a8521b8edd513d5ace11480875a8806cbe541eb6160d2e87bca261c8",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000034/tnc-20251103.htm": "716eb26c71132e2a777fdb3ef616a5c1e0086502b3b42476413997bbc471d6f7",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000034/tnc-20251103xexx991.htm": "51b5eb160663926ea5012e03a9a09e0f873e7b7fdf8ed33f29319871c860c01c"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000034/tnc-20251103.htm",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713425000034/tnc-20251103xexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000097134",
+        "complete_evidence_fingerprint": "094fd1f425ce6e8f468982dee701486d01d3d6d7e5abb5943a3d2305e5cac71a",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "40d60cadc7ada93b429a242581e28e5ebee23491c2209f41d05406b139b5b1cc",
+        "current_canonical_quarter_id": 77431,
+        "current_state_fingerprint": "34972d7d0998775dfd638ef8c112c78ca596c1a436f9e4034e82da69d4a825ac",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/97134/000009713426000012/tnc-20260504xexx991.htm",
+        "natural_key": [
+          2180,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "4555fb2970bd23606beae603720cbf3c17ef81ce7cb36f95dfa851b3c315d87e",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "c56796b421e6a8449d3d274e8c307e58422de4a09407a95a878441c12d0b9212",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713426000012/tnc-20260504.htm": "fe848c094df67a41ef14d048361bec6b66bbd7a0827aaefb9bec39a5992cc00d",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713426000012/tnc-20260504xexx991.htm": "232160aca2e77f2d6a18b9177cfc518521cc552b75a7cd76c4eb7c6d09fbe720"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713426000012/tnc-20260504.htm",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713426000012/tnc-20260504xexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000097134",
+        "complete_evidence_fingerprint": "0b01fbc33ff9e5a191f6edfe1d297d79f3d00afcee533ee7dcbb512200ef4e85",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "9b5bf454322bf6ccff405e74b9e335a613b61afa638681bb1de8155736ee0574",
+        "current_canonical_quarter_id": 77432,
+        "current_state_fingerprint": "ce98f76c98987c378c90c64478396be0139491e36737c219b087a1fd040628d9",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/97134/000009713426000022/tnc-20260805xexx991.htm",
+        "natural_key": [
+          2180,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "b6ea4d980f732fcd8ac9f520c4c877596fbc9110909461796b3139bfdf994c55",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "7a69b7e07fffb9d3d5d43f043956cc7f72fda5f6a73c64383ebd92047b3b39e6",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713426000022/tnc-20260805.htm": "00eb62c299cbd8b6c5b3cfd65c44ba78e75d343a5267ce2759b7d1297630bd2f",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713426000022/tnc-20260805xexx991.htm": "237865c7cbada20230397eb6eaa8f5a9d482539bc72252047cf9718474100cee"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713426000022/tnc-20260805.htm",
+          "https://www.sec.gov/Archives/edgar/data/97134/000009713426000022/tnc-20260805xexx991.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001261654",
+        "complete_evidence_fingerprint": "9f209fda9d256eeee6fd647f8faaedd238ee30fe395f30a2f960dc179be6ad0c",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "c2a9684325daaa99be5db1e658bf4ce122c4b77d913acbf902db6876e07f9c5e",
+        "current_canonical_quarter_id": 81208,
+        "current_state_fingerprint": "a365f9bf94bff9fab2787e70a80978cd25d57ecddb30de9fb1a78c22323f5f68",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1261654/000126165425000003/exhibit991-q12025earningsp.htm",
+        "natural_key": [
+          2283,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "3f0aa7d49b80d673f02a6bc883ae18417969a05a10eff95dada971aa01f3a2c4",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "c07c36995c144656c39c13f071047568829dfd8d29d561059372acf5a1916877",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1261654/000126165425000003/exhibit991-q12025earningsp.htm": "dd6d4403d42d0db5b2d86e30c0bf16977c76bf11e5bf9f1dd951a7bc6201fce5",
+          "https://www.sec.gov/Archives/edgar/data/1261654/000126165425000003/uti-20250205.htm": "fb9107cc309413854bfd98b448b4b12ad08998f87b4bec04d588058e9960ff1a"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1261654/000126165425000003/uti-20250205.htm",
+          "https://www.sec.gov/Archives/edgar/data/1261654/000126165425000003/exhibit991-q12025earningsp.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001487952",
+        "complete_evidence_fingerprint": "eefd336e4726a3f9a011e0d59c24900476f8cc5ae3bc75259943f2f777101e47",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "95e8be6627a1bfb482eea2ad3e799e084360b4d47e6adaa329bc100d302aff92",
+        "current_canonical_quarter_id": 82564,
+        "current_state_fingerprint": "56929968d91f5c5db893724daa02756672c1b8f2392e16cca53b3a199a7c58ab",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1487952/000143774926003697/ex_880014.htm",
+        "natural_key": [
+          2321,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "90a9d23440d51f9b0855006695188f7770d2305b6aa4c78b30bd440a5cac1155",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "19212d1300f731ab6f9b17eca288d5de515dca6074d7b283a2cc9d1adbc20961",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1487952/000143774926003697/ex_880014.htm": "d05ba8f12dfdd128d22c228aa7828ad5a4050076d26c1034cde51c3742255db8",
+          "https://www.sec.gov/Archives/edgar/data/1487952/000143774926003697/vpg20251030_8k.htm": "108b72bbe7a58ec976e488d05f592e2118dbc21c933f3246767a239c57588215"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1487952/000143774926003697/vpg20251030_8k.htm",
+          "https://www.sec.gov/Archives/edgar/data/1487952/000143774926003697/ex_880014.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000105770",
+        "complete_evidence_fingerprint": "5974dd4826211244b87840d4860afb526d5b15522d7980e1acc6828c22dbb32c",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "c1c8df0bf354ec80f202a1dd364639f19e4565cb45abbc082e1a00427e007451",
+        "current_canonical_quarter_id": 85524,
+        "current_state_fingerprint": "b131d917afe9a692a99c71daa7a2a0ea310378fb265d51affcf7c27dc7169b0a",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/105770/000010577026000047/exh991q12026earningsrelease.htm",
+        "natural_key": [
+          2400,
+          2026,
+          "Q1"
+        ],
+        "observation_fingerprint": "5a613bc6ad0fdf06a29f3cc4b490498e577b23d5b8f4b2ab9a93b6cd71bac4f3",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "d0a384e88ee189ac123a260602346e7d0c37cde74d8ee4c3291303ecf2aec76b",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/105770/000010577026000047/exh991q12026earningsrelease.htm": "f1886a07ddd1f816db2b5b8372ecf72d06e4c215d05f169e7e381ca69550b7c1",
+          "https://www.sec.gov/Archives/edgar/data/105770/000010577026000047/wst-20260423.htm": "c3fb277309d2de8d992047203330d84bbac7c8b955327dcb7bb7c924637aa33a"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/105770/000010577026000047/wst-20260423.htm",
+          "https://www.sec.gov/Archives/edgar/data/105770/000010577026000047/exh991q12026earningsrelease.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0000105770",
+        "complete_evidence_fingerprint": "44bd2f59b80fb82bbe9b5db109f96b75f6946acbe2ebc9aad2b21f60ceb3102f",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "2d906af83099c788e4b1fda9a4c6548fb5086b7deba786526a0b9f23f8b36998",
+        "current_canonical_quarter_id": 85525,
+        "current_state_fingerprint": "d358f077dadb3161d7854e06b34949bd8f5f2310fbc573a89f4c518992f1ff55",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/105770/000010577026000097/exh991q22026earningsrelease.htm",
+        "natural_key": [
+          2400,
+          2026,
+          "Q2"
+        ],
+        "observation_fingerprint": "b4954ea87855c70d696fc443c7fd3b8ff746053d14f12c9d5901bd22a9d006b5",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "9ab2bb235ab770fe7d7032ebce1fe21c67e1746936a0cfc5f2ebc7ad2db42366",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/105770/000010577026000097/exh991q22026earningsrelease.htm": "cd8d39a7e17335df2e76f73f48c8fcd19370700d36cc4fa449e293fff2c86766",
+          "https://www.sec.gov/Archives/edgar/data/105770/000010577026000097/wst-20260723.htm": "3acecb236af9e51d81b648fb208a138fb023bbb6a903e69e8ca508d4e2a07551"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/105770/000010577026000097/wst-20260723.htm",
+          "https://www.sec.gov/Archives/edgar/data/105770/000010577026000097/exh991q22026earningsrelease.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001670592",
+        "complete_evidence_fingerprint": "977427aa45e531fe495f2b34df7e1e0079d00548669b39cc2e98eb0359d08811",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "1d1f038726b54cac59fff77851d348d9f25bd4b5838034a62024f051564bea97",
+        "current_canonical_quarter_id": 86806,
+        "current_state_fingerprint": "5f898a5b1d0c2b8d9c8a0e09dfcbf0bf728f9c3c7923589d68d417a9c98fbdf9",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000022/yeti-20250508xex991pressre.htm",
+        "natural_key": [
+          2435,
+          2025,
+          "Q1"
+        ],
+        "observation_fingerprint": "bc180cf4fb8a4fa16d838ca26f68705a82740312da3e5b69afde2076285f712d",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "da2be2d8401f50cb9bdf6affbfd2af1eba7d67bb37698ea72e3acf14f8938b9d",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000022/yeti-20250508.htm": "55b98219351e34dba41dcae65e3b78034bd129f71e6e67fad666a26e23bc4d7b",
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000022/yeti-20250508xex991pressre.htm": "e8191d80b84223d336eaf5db1fb94eb41f37215a3bff0caefd2647d120d0bccb"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000022/yeti-20250508.htm",
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000022/yeti-20250508xex991pressre.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001670592",
+        "complete_evidence_fingerprint": "47bfc5db404fef314b7e0cf4f9e1f3a76512f8d443cbb1018715af6f0a47312a",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "b1e2f1f4435a2369c0c437a7e71dc9603070bff357bade7455a60610a81dac0d",
+        "current_canonical_quarter_id": 86807,
+        "current_state_fingerprint": "448998d26dd51427ea161a79de3c5adb1783767fc021e6aad96136c84e519064",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000038/yeti-20250807xex991pressre.htm",
+        "natural_key": [
+          2435,
+          2025,
+          "Q2"
+        ],
+        "observation_fingerprint": "1f826c0a78a26b8abea4ead2d6535cbd69e51447146a1b873452d2447332ba9a",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "2720e0de8b79a519899a64b1b05a930f4a71121dff4e7dd9fbd35fc6ebef814d",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000038/yeti-20250807.htm": "4b2dcf2e1992c20a37fcfb3a0f25ac6b97aad93e50fb16b682764cb4e7fa022a",
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000038/yeti-20250807xex991pressre.htm": "49d71a1f221d90e99e4fb5acbcc7db93160664250c42057723a992472917d53f"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000038/yeti-20250807.htm",
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000038/yeti-20250807xex991pressre.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001670592",
+        "complete_evidence_fingerprint": "15fe2722c01aa0cbe6b72fc84bf01ee5eec60327f74462af6eb62af50318ee38",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "ae95baeffd3b5309b1504e06f37da5c4c183f443e0fe9d23de7b8691fef64121",
+        "current_canonical_quarter_id": 86808,
+        "current_state_fingerprint": "59d15afa6d2197bb2f526fd15d620797ed69986277b4b8c63fe1b9208b1eedf9",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000046/yeti-20251106xex991pressre.htm",
+        "natural_key": [
+          2435,
+          2025,
+          "Q3"
+        ],
+        "observation_fingerprint": "0f816f9ab703270e9007d261dd9f967ec868bc3d05359d72b263b3ba47f79437",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "b7e683a7f668f0e83fb6120ec95d41d13bc1f326088d6f91a7eefd3d93c201e3",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000046/yeti-20251106.htm": "187de92418e8276350c8f8df43b3078ad367721cec9dec2e57a1eb83f7ea37f7",
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000046/yeti-20251106xex991pressre.htm": "3a36fb412de29533603305cce4c19aced26862906b0bf573b581bb04b2ea3b16"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000046/yeti-20251106.htm",
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059225000046/yeti-20251106xex991pressre.htm"
+        ]
+      },
+      {
+        "approved": false,
+        "company_key": "SEC_CIK:0001670592",
+        "complete_evidence_fingerprint": "75539e14a5c16b5ba8e867e5c9593937d9f549a8d8c027d14ae8407edfb991c3",
+        "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+        "current_authority_fingerprint": "1b6d13a31fec4cc0a3fe8240ca10b93e90910c7981dc9bb585092e057d11b605",
+        "current_canonical_quarter_id": 86809,
+        "current_state_fingerprint": "0bdb63e6740b59f311430cb4b5a5b8502f908654eec17700c8d333e55ee3edfa",
+        "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+        "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1670592/000167059226000004/yeti-20260219xex991pressre.htm",
+        "natural_key": [
+          2435,
+          2025,
+          "Q4"
+        ],
+        "observation_fingerprint": "78d9fffc8fb87c95044f0fb5537b144a08cf93e34586940cb7feca38f8ccdfde",
+        "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+        "proposal_state": "PROPOSED",
+        "proposal_timestamp": "2026-10-09T09:00:48Z",
+        "source_context_sha256": "6faa1321706de02b5c1cff600a12be0186360666e706c8946a07649447bfc427",
+        "source_hashes": {
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059226000004/yeti-20260219.htm": "7edb046627c6b4156af0c3ecf444645ac804bf76f1558cc05f049755ce7a4e87",
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059226000004/yeti-20260219xex991pressre.htm": "d277e35636f097f4f6f3030994ade3a793822d6957e19e0d8ff91b2060a94967"
+        },
+        "source_references": [
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059226000004/yeti-20260219.htm",
+          "https://www.sec.gov/Archives/edgar/data/1670592/000167059226000004/yeti-20260219xex991pressre.htm"
+        ]
+      }
+    ],
+    "stale_cases": [],
+    "status": "AWAITING_OPERATOR_CONFIRMATION"
+  },
+  "selection_for_explicit_confirmation": {
+    "approved_keys": [
+      [
+        22,
+        2025,
+        "Q1"
+      ],
+      [
+        22,
+        2025,
+        "Q2"
+      ],
+      [
+        22,
+        2026,
+        "Q1"
+      ],
+      [
+        22,
+        2026,
+        "Q2"
+      ],
+      [
+        31,
+        2026,
+        "Q2"
+      ],
+      [
+        176,
+        2026,
+        "Q4"
+      ],
+      [
+        330,
+        2025,
+        "Q1"
+      ],
+      [
+        330,
+        2025,
+        "Q2"
+      ],
+      [
+        330,
+        2025,
+        "Q3"
+      ],
+      [
+        330,
+        2025,
+        "Q4"
+      ],
+      [
+        330,
+        2026,
+        "Q1"
+      ],
+      [
+        330,
+        2026,
+        "Q2"
+      ],
+      [
+        358,
+        2025,
+        "Q1"
+      ],
+      [
+        358,
+        2025,
+        "Q2"
+      ],
+      [
+        358,
+        2026,
+        "Q1"
+      ],
+      [
+        358,
+        2026,
+        "Q2"
+      ],
+      [
+        421,
+        2025,
+        "Q2"
+      ],
+      [
+        451,
+        2026,
+        "Q2"
+      ],
+      [
+        524,
+        2025,
+        "Q1"
+      ],
+      [
+        524,
+        2025,
+        "Q2"
+      ],
+      [
+        524,
+        2025,
+        "Q3"
+      ],
+      [
+        602,
+        2026,
+        "Q1"
+      ],
+      [
+        636,
+        2026,
+        "Q2"
+      ],
+      [
+        697,
+        2027,
+        "Q1"
+      ],
+      [
+        780,
+        2025,
+        "Q2"
+      ],
+      [
+        780,
+        2025,
+        "Q3"
+      ],
+      [
+        780,
+        2026,
+        "Q3"
+      ],
+      [
+        835,
+        2026,
+        "Q2"
+      ],
+      [
+        1067,
+        2025,
+        "Q1"
+      ],
+      [
+        1103,
+        2025,
+        "Q3"
+      ],
+      [
+        1404,
+        2025,
+        "Q1"
+      ],
+      [
+        1404,
+        2025,
+        "Q2"
+      ],
+      [
+        1404,
+        2026,
+        "Q1"
+      ],
+      [
+        1404,
+        2026,
+        "Q2"
+      ],
+      [
+        1443,
+        2025,
+        "Q1"
+      ],
+      [
+        1457,
+        2025,
+        "Q1"
+      ],
+      [
+        1457,
+        2025,
+        "Q2"
+      ],
+      [
+        1457,
+        2025,
+        "Q3"
+      ],
+      [
+        1487,
+        2025,
+        "Q1"
+      ],
+      [
+        1487,
+        2025,
+        "Q2"
+      ],
+      [
+        1487,
+        2025,
+        "Q3"
+      ],
+      [
+        1487,
+        2025,
+        "Q4"
+      ],
+      [
+        1487,
+        2026,
+        "Q1"
+      ],
+      [
+        1487,
+        2026,
+        "Q2"
+      ],
+      [
+        1602,
+        2025,
+        "Q2"
+      ],
+      [
+        1602,
+        2025,
+        "Q4"
+      ],
+      [
+        1602,
+        2026,
+        "Q1"
+      ],
+      [
+        1772,
+        2025,
+        "Q1"
+      ],
+      [
+        1772,
+        2025,
+        "Q2"
+      ],
+      [
+        1826,
+        2025,
+        "Q1"
+      ],
+      [
+        1826,
+        2025,
+        "Q2"
+      ],
+      [
+        1826,
+        2026,
+        "Q1"
+      ],
+      [
+        1826,
+        2026,
+        "Q2"
+      ],
+      [
+        1826,
+        2026,
+        "Q3"
+      ],
+      [
+        1861,
+        2026,
+        "Q2"
+      ],
+      [
+        1923,
+        2025,
+        "Q1"
+      ],
+      [
+        1923,
+        2025,
+        "Q2"
+      ],
+      [
+        1923,
+        2025,
+        "Q3"
+      ],
+      [
+        1923,
+        2025,
+        "Q4"
+      ],
+      [
+        2050,
+        2025,
+        "Q1"
+      ],
+      [
+        2050,
+        2025,
+        "Q2"
+      ],
+      [
+        2050,
+        2025,
+        "Q3"
+      ],
+      [
+        2050,
+        2025,
+        "Q4"
+      ],
+      [
+        2050,
+        2026,
+        "Q1"
+      ],
+      [
+        2050,
+        2026,
+        "Q2"
+      ],
+      [
+        2110,
+        2025,
+        "Q2"
+      ],
+      [
+        2110,
+        2025,
+        "Q3"
+      ],
+      [
+        2110,
+        2025,
+        "Q4"
+      ],
+      [
+        2110,
+        2026,
+        "Q1"
+      ],
+      [
+        2110,
+        2026,
+        "Q3"
+      ],
+      [
+        2131,
+        2025,
+        "Q4"
+      ],
+      [
+        2131,
+        2026,
+        "Q2"
+      ],
+      [
+        2180,
+        2025,
+        "Q1"
+      ],
+      [
+        2180,
+        2025,
+        "Q2"
+      ],
+      [
+        2180,
+        2025,
+        "Q3"
+      ],
+      [
+        2180,
+        2026,
+        "Q1"
+      ],
+      [
+        2180,
+        2026,
+        "Q2"
+      ],
+      [
+        2283,
+        2025,
+        "Q1"
+      ],
+      [
+        2321,
+        2025,
+        "Q4"
+      ],
+      [
+        2400,
+        2026,
+        "Q1"
+      ],
+      [
+        2400,
+        2026,
+        "Q2"
+      ],
+      [
+        2435,
+        2025,
+        "Q1"
+      ],
+      [
+        2435,
+        2025,
+        "Q2"
+      ],
+      [
+        2435,
+        2025,
+        "Q3"
+      ],
+      [
+        2435,
+        2025,
+        "Q4"
+      ]
+    ],
+    "artifact_fingerprint": "8bdf27a1a754b36973e7728a1abb582fb5fd4ff1613e3040b597ca1c74d01b14",
+    "candidate_fingerprint": "5faea82e92b9887b00cea21e227a02860874964036a3caadaac31e1d50d691a6",
+    "held_keys": [],
+    "rejected_keys": [],
+    "unreviewed_keys": []
+  }
+}
