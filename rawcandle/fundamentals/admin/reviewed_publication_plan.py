@@ -245,11 +245,16 @@ def prepare_reviewed_plan(*, project_root: Path, allowlist_path: Path, output_pl
                           retry_days: int = 60, network_budget_seconds: float = 1800,
                           publication_event_policy: str | None = None,
                           publication_authority_mode: str | None = None,
-                          policy_evidence_path: Path | None = None) -> dict[str, Any]:
+                          policy_evidence_path: Path | None = None,
+                          approved_handoff_path: Path | None = None,
+                          expected_approval_fingerprint: str | None = None) -> dict[str, Any]:
     root = project_root.resolve()
     if not math.isfinite(network_budget_seconds) or network_budget_seconds <= 0:
         raise ValueError("PUBLICATION_NETWORK_BUDGET_INVALID")
     day = as_of_date or utc_now()[:10]
+    if approved_handoff_path is not None or expected_approval_fingerprint is not None:
+        if publication_event_policy != "PUBLICATION_EVENT_POLICY_V1" or publication_authority_mode is not None:
+            raise ValueError("PUBLICATION_POLICY_APPROVED_MODE_REQUIRED")
     if publication_authority_mode is not None:
         if (publication_authority_mode != "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"
                 or publication_event_policy is not None or client is not None):
@@ -262,7 +267,9 @@ def prepare_reviewed_plan(*, project_root: Path, allowlist_path: Path, output_pl
             raise ValueError("PUBLICATION_PLAN_POLICY_INPUT_MODE_INVALID")
         from rawcandle.fundamentals.admin.policy_reviewed_publication_plan import prepare_policy_plan
         return prepare_policy_plan(project_root=project_root,allowlist_path=allowlist_path,output_plan=output_plan,
-                                   policy_evidence_path=policy_evidence_path,as_of_date=day,retry_days=retry_days)
+                                   policy_evidence_path=policy_evidence_path,as_of_date=day,retry_days=retry_days,
+                                   approved_handoff_path=approved_handoff_path,
+                                   expected_approval_fingerprint=expected_approval_fingerprint)
     if policy_evidence_path is not None:
         raise ValueError("PUBLICATION_POLICY_MODE_REQUIRED")
     destination = output_plan.resolve()
@@ -392,7 +399,11 @@ def revalidate_plan_state(plan, binding, *, as_of_date):
         bound_cases = plan["policy_cases"] if policy else plan["per_case"]
         if any(state_for_key(connection, _key(c)) != c["state"] for c in bound_cases):
             raise RuntimeError("PUBLICATION_PLAN_AUTHORITY_IDENTITY_DRIFT")
-        if policy and any(_evidence_rows(connection,_key(c)) != c["original_candidate_evidence"] for c in plan["policy_cases"]):
+        frozen_mode = policy and plan["schema_version"] == 3
+        if frozen_mode:
+            from rawcandle.fundamentals.admin.approved_publication_evidence import revalidate_current
+            revalidate_current(plan, connection)
+        if policy and not frozen_mode and any(_evidence_rows(connection,_key(c)) != c["original_candidate_evidence"] for c in plan["policy_cases"]):
             raise RuntimeError("PUBLICATION_POLICY_STORED_EVIDENCE_DRIFT")
     scope["scope_mode"] = SCOPE_MODE
     return scope

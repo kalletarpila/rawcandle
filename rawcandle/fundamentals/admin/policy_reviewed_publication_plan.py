@@ -14,6 +14,7 @@ import time
 from uuid import uuid4
 
 from rawcandle.fundamentals.admin import reviewed_publication_plan as legacy
+from rawcandle.fundamentals.admin import approved_publication_evidence as approved
 from rawcandle.fundamentals.admin.publication_allowlist import (
     normalize_allowlist,
     read_allowlist_csv,
@@ -193,7 +194,7 @@ def reproduce(case, record):
 def validate_policy_plan(plan):
     try:
         if (
-            plan["schema_version"] != POLICY_SCHEMA_VERSION
+            plan["schema_version"] not in {POLICY_SCHEMA_VERSION, approved.PLAN_VERSION}
             or type(plan["schema_version"]) is not int
             or plan["policy_mode"] != V1
             or plan["policy_version"] != V1
@@ -215,6 +216,10 @@ def validate_policy_plan(plan):
             raise ValueError("PUBLICATION_POLICY_EVIDENCE_FINGERPRINT_INVALID")
         if not isinstance(plan["plan_id"], str) or not plan["plan_id"]:
             raise ValueError("PUBLICATION_PLAN_ID_INVALID")
+        if plan["schema_version"] == approved.PLAN_VERSION:
+            approved.validate_plan_extension(plan)
+        elif any(k in plan for k in ("approved_evidence_handoff", "candidate_evidence_provenance")):
+            raise ValueError("PUBLICATION_POLICY_APPROVED_MODE_VERSION_REQUIRED")
         keys, source = normalize_allowlist(plan["prepared_keys"]), normalize_allowlist(
             plan["source_allowlist_keys"]
         )
@@ -255,9 +260,9 @@ def validate_policy_plan(plan):
                 or legacy._request(record["quarters"]) != record["request"]
             ):
                 raise ValueError("PUBLICATION_PLAN_INPUT_FINGERPRINT_INVALID")
-            if len({q["company_id"] for q in record["quarters"]}) != 1 or not {
-                _key(q) for q in record["quarters"]
-            } <= set(source):
+            if len({q["company_id"] for q in record["quarters"]}) != 1 or (
+                plan["schema_version"] != approved.PLAN_VERSION and not {
+                    _key(q) for q in record["quarters"]} <= set(source)):
                 raise ValueError("PUBLICATION_PLAN_CONTEXT_SCOPE_INVALID")
             if len({_key(q) for q in record["quarters"]}) != len(
                 record["quarters"]
@@ -337,7 +342,10 @@ def validate_policy_plan(plan):
         # Reproduce narrowed apply context as well as full reviewed company context.
         for group in legacy._apply_groups(plan):
             record = inputs[group[0]["frozen_input_reference"]]
-            narrowed = {**record, "quarters": legacy._case_quarters(group, record)}
+            # V3 executes exact approved evidence against its full approved scope.
+            # Context-only quarters never become apply keys. V2 remains narrowed.
+            narrowed = (record if plan["schema_version"] == approved.PLAN_VERSION else
+                        {**record, "quarters": legacy._case_quarters(group, record)})
             if any(reproduce(c, narrowed) != c["policy_decision"] for c in group):
                 raise ValueError("PUBLICATION_PLAN_APPLY_CONTEXT_NOT_REPRODUCIBLE")
     except (KeyError, TypeError, IndexError, AttributeError, StopIteration) as exc:
@@ -353,6 +361,8 @@ def prepare_policy_plan(
     policy_evidence_path,
     as_of_date,
     retry_days,
+    approved_handoff_path=None,
+    expected_approval_fingerprint=None,
 ):
     root = project_root.resolve()
     destination = output_plan.resolve()
@@ -363,14 +373,30 @@ def prepare_policy_plan(
         raise ValueError("PUBLICATION_PLAN_OUTPUT_PATH_UNSAFE")
     if output_plan.exists() or output_plan.is_symlink():
         raise FileExistsError("PUBLICATION_PLAN_IMMUTABLE_OUTPUT_EXISTS")
-    if policy_evidence_path is None:
-        raise ValueError("PUBLICATION_POLICY_REVIEWED_EVIDENCE_REQUIRED")
-    supplied = legacy.read_unique_json(policy_evidence_path)
+    handoff = None
+    if approved_handoff_path is not None:
+        if policy_evidence_path is not None or not expected_approval_fingerprint:
+            raise ValueError("PUBLICATION_POLICY_APPROVED_EXPLICIT_INPUT_REQUIRED")
+        handoff = legacy.read_unique_json(approved_handoff_path)
+        approved_sources, approved_snapshots, approved_companies = approved.validate_handoff(
+            handoff, expected_approval_fingerprint)
+        approved.check_live_inputs(handoff)
+        supplied = handoff["proposal"]["proposed_policy_evidence"]
+    else:
+        if expected_approval_fingerprint is not None:
+            raise ValueError("PUBLICATION_POLICY_APPROVED_EXPLICIT_INPUT_REQUIRED")
+        if policy_evidence_path is None:
+            raise ValueError("PUBLICATION_POLICY_REVIEWED_EVIDENCE_REQUIRED")
+        supplied = legacy.read_unique_json(policy_evidence_path)
     if supplied["policy_version"] != V1:
         raise ValueError("PUBLICATION_POLICY_PLAN_VERSION_INVALID")
     allowed = read_allowlist_csv(allowlist_path)
     source_cases = {_key(c["quarter"]): c for c in supplied["cases"]}
-    if len(source_cases) != len(supplied["cases"]) or set(source_cases) != set(allowed):
+    if handoff is not None:
+        if not set(allowed) <= set(approved_snapshots):
+            raise ValueError("PUBLICATION_APPROVED_UNAPPROVED_KEY")
+        source_cases = {k: approved_sources[k] for k in allowed}
+    if (handoff is None and len(source_cases) != len(supplied["cases"])) or set(source_cases) != set(allowed):
         raise ValueError("PUBLICATION_POLICY_REVIEWED_EVIDENCE_SCOPE_INVALID")
     binding = resolve_active_generation(root, require_generation=True)
     legacy._require_clean_journal(root)
@@ -398,31 +424,37 @@ def prepare_policy_plan(
                 )
         for company_quarters in groups.values():
             filings = {}
-            for q in company_quarters:
-                for event in source_cases[_key(q)]["events"]:
-                    e = event["evidence"]
-                    filing = asdict(
-                        SecFiling(
-                            e["accession_number"],
-                            e["filing_form"],
-                            "2.02",
-                            e["source_timestamp_utc"],
-                            e["document_id"],
-                            e["source_reference"],
-                            event["primary_excerpt"],
+            if handoff is None:
+                for q in company_quarters:
+                    for event in source_cases[_key(q)]["events"]:
+                        e = event["evidence"]
+                        filing = asdict(
+                            SecFiling(
+                                e["accession_number"],
+                                e["filing_form"],
+                                "2.02",
+                                e["source_timestamp_utc"],
+                                e["document_id"],
+                                e["source_reference"],
+                                event["primary_excerpt"],
+                            )
                         )
-                    )
-                    if (
-                        e["accession_number"] in filings
-                        and filings[e["accession_number"]] != filing
-                    ):
-                        raise ValueError("PUBLICATION_POLICY_FILING_CONTEXT_CONFLICT")
-                    filings[e["accession_number"]] = filing
+                        if (
+                            e["accession_number"] in filings
+                            and filings[e["accession_number"]] != filing
+                        ):
+                            raise ValueError("PUBLICATION_POLICY_FILING_CONTEXT_CONFLICT")
+                        filings[e["accession_number"]] = filing
+            if handoff is not None:
+                filings = {str(i): f for i, f in enumerate(
+                    approved.company_filings(approved_companies[company_quarters[0]["company_id"]]))}
             record = json.loads(
                 json.dumps(
                     {
-                        "request": legacy._request(company_quarters),
-                        "quarters": company_quarters,
+                        "request": legacy._request(approved.resolver_quarters(
+                            approved_snapshots[_key(company_quarters[0])]) if handoff is not None else company_quarters),
+                        "quarters": (approved.resolver_quarters(approved_snapshots[_key(company_quarters[0])])
+                                     if handoff is not None else company_quarters),
                         "filings": list(filings.values()),
                     }
                 )
@@ -435,7 +467,11 @@ def prepare_policy_plan(
                     [e["evidence"] for e in source["events"]],
                     key=lambda e: e["evidence_id"],
                 )
-                if originals != _evidence_rows(db, key):
+                if handoff is not None:
+                    approved.check_current_case(db, key, approved_snapshots[key], originals,
+                                                identity_tables=approved.identity_tables_for_case(
+                                                    handoff, key, approved_snapshots[key]))
+                elif originals != _evidence_rows(db, key):
                     raise ValueError("PUBLICATION_POLICY_STORED_EVIDENCE_DRIFT")
                 if any(
                     source["quarter"][name] != q[name]
@@ -546,6 +582,15 @@ def prepare_policy_plan(
         "classifications": sorted(classifications, key=lambda r: r["natural_key"]),
         "prepare_network": {"network_requests": 0},
     }
+    if handoff is not None:
+        plan.update(schema_version=approved.PLAN_VERSION,
+                    candidate_evidence_provenance=approved.MODE,
+                    execution_context='APPROVED_FULL_COMPANY_RESOLVER_CONTEXT_V1',
+                    approved_evidence_handoff=handoff,
+                    approved_handoff_fingerprint=handoff["handoff_fingerprint"],
+                    approval_fingerprint=handoff["approval"]["artifact_fingerprint"],
+                    proposal_fingerprint=handoff["proposal"]["artifact_fingerprint"],
+                    publication_authorized=False, production_apply_authorized=False, executed=False)
     plan = json.loads(json.dumps(plan))
     plan["plan_fingerprint"] = legacy.fingerprint(plan)
     validate_policy_plan(plan)
@@ -583,7 +628,10 @@ def run_policy_candidate(candidate_db, plan, *, as_of_date):
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=ON")
         # All cohort state/evidence is bound before the first apply call.
-        for case in plan["policy_cases"]:
+        frozen_mode = plan["schema_version"] == approved.PLAN_VERSION
+        if frozen_mode:
+            approved.revalidate_current(plan, db)
+        for case in ([] if frozen_mode else plan["policy_cases"]):
             if (
                 legacy.state_for_key(db, _key(case)) != case["state"]
                 or _evidence_rows(db, _key(case)) != case["original_candidate_evidence"]
@@ -599,8 +647,9 @@ def run_policy_candidate(candidate_db, plan, *, as_of_date):
             )
             if status != "VERIFIED":
                 raise RuntimeError("PUBLICATION_POLICY_APPLY_NOT_VERIFIED")
-            # Original evidence, including filtered/completion rows, is untouched.
-            if _evidence_rows(db, _key(case)) != case["original_candidate_evidence"]:
+            # Legacy rows stay unchanged; frozen candidates may become durable only here.
+            if (not approved.compatible_evidence(_evidence_rows(db, _key(case)), case["original_candidate_evidence"])
+                    if frozen_mode else _evidence_rows(db, _key(case)) != case["original_candidate_evidence"]):
                 raise RuntimeError("PUBLICATION_POLICY_RETAINED_EVIDENCE_DRIFT")
             results.append(
                 {

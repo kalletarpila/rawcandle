@@ -1,0 +1,753 @@
+{
+  "bindings": [
+    {
+      "approved": false,
+      "company_key": "SEC_CIK:0001739445",
+      "complete_evidence_fingerprint": "1cb1fffd257ad694d0a792e3cf58b2d02d775b8e90fcc791d8a3135ef2ada82f",
+      "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+      "current_authority_fingerprint": "1f8d2006f8dcc6ce5c7b43796fc37e87a49b7f840c29f3391785054360762c6e",
+      "current_canonical_quarter_id": 800,
+      "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+      "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm",
+      "natural_key": [
+        22,
+        2025,
+        "Q1"
+      ],
+      "observation_fingerprint": "91746175626a5dc0a8aa2d977092e290dbc52d029423089a75168cfc1b88c0e1",
+      "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+      "proposal_state": "PROPOSED",
+      "proposal_timestamp": "2026-10-09T09:00:48Z",
+      "source_context_sha256": "dbcb566147c73014d10d69c6d0277a04e971e633a935365f1728a7424de96bbc",
+      "source_hashes": {
+        "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm": "a4008daa2d9819c3148aaab02d65090787c332663c3eaae9e081a3131ae30803",
+        "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm": "a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1"
+      },
+      "source_references": [
+        "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm",
+        "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm"
+      ]
+    },
+    {
+      "approved": false,
+      "company_key": "SEC_CIK:0001739445",
+      "complete_evidence_fingerprint": "7ed501a11c3e7c9efc89d8f8160e10682b977c2ddc062a4572c44ad228f260e6",
+      "current_active_generation_id": "refresh_20261009T042704Z_refresh_fundamentals_c7bbcb6dfda4_production_adc49771",
+      "current_authority_fingerprint": "dbe466a56f97608df7ce2b021d2f9858f79e39d60389042ab07f5c2d1a6091f8",
+      "current_canonical_quarter_id": 801,
+      "financial_source_kind": "LINKED_RESULT_EXHIBIT",
+      "financial_source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm",
+      "natural_key": [
+        22,
+        2025,
+        "Q2"
+      ],
+      "observation_fingerprint": "eaed7a1e9f7e5b36b7768887e1b800f49d6d048a790860b0e2e3145b3eedbf77",
+      "proposal_rule_version": "HISTORICAL_PUBLICATION_SOURCE_REVIEW_PROPOSAL_V1",
+      "proposal_state": "PROPOSED",
+      "proposal_timestamp": "2026-10-09T09:00:48Z",
+      "source_context_sha256": "d198a74fbaf3e26fa53f75f84106f1bf9b0ab23a8d8fbfc8500874a28a1c1ea1",
+      "source_hashes": {
+        "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm": "41b92e9be71715a750a841f4200951bf090dade64e74be7547b8b2e0ab7e2a13",
+        "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm": "65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94"
+      },
+      "source_references": [
+        "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm",
+        "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "events": [
+        {
+          "acceptance_index_review": null,
+          "evidence": {
+            "accession_number": "0001739445-25-000065",
+            "company_id": 22,
+            "document_id": "aca-20250506.htm",
+            "evidence_hash": "5319e5b72d21c90eafc14d87f261ebf2a5bc53f3e9350215903fb3c6b2f881bb",
+            "evidence_id": "rpe_5319e5b72d21c90eafc14d87",
+            "filing_form": "8-K",
+            "fiscal_quarter": "Q1",
+            "fiscal_year": 2025,
+            "item_2_02_status": "PRESENT_AND_DOCUMENT_CONFIRMED",
+            "matching_method": "SEC_LINKED_EXHIBIT:{\"exhibits\":[{\"method\":\"CIK_ITEM_2_02_EXACT_PERIOD_END\",\"sha256\":\"a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1\",\"url\":\"https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm\"}],\"fiscal_identity\":[22,2025,\"Q1\"],\"parent_accession\":\"0001739445-25-000065\",\"version\":1}",
+            "quarter_id": 800,
+            "reviewed_manual": 0,
+            "rule_version": "result_publication_v1",
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm",
+            "source_timestamp_utc": "2025-05-06T20:20:08Z",
+            "source_type": "SEC_8K_ITEM_2_02"
+          },
+          "observation": {
+            "actual_vs_preliminary": "ACTUAL",
+            "complete_earnings_package": true,
+            "continuing_operations_explicit": false,
+            "documents": [
+              {
+                "excerpt": "to Section 13 or 15(d) of the Securities Exchange Act of 1934 Date of Report (Date of Earliest Event Reported): May 6, 2025 Arcosa, Inc. __________________________________________ (Exact name of registrant as specified in its charter)",
+                "excerpt_sha256": "48b30a5322825696b39c497415d24d768835daa3d07334f194f6873e6471f57b",
+                "locator": {
+                  "dimension": "ENTITY",
+                  "extracted_text_sha256": "d2417d265027ca23735ef7a1ddfb83abc9e0beb0e36e9070fb4075eec46f4e4c",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 402,
+                  "unicode_start": 168
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm",
+                "source_sha256": "a4008daa2d9819c3148aaab02d65090787c332663c3eaae9e081a3131ae30803"
+              },
+              {
+                "excerpt": "Item 2.02 Results of Operation and Financial Condition. Attached as Exhibit 99.1 is the registrant\u2019s earnings release for the first quarter of 2025, issued May 6, 2025. This release is being furnished and shall not be deemed \u201cfiled\u201d for the purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise incorporated by reference into any filing pursuant to the Securities Act of 1933, as amended, or the Securities Exchange Act of 1934, as amended, except as otherwise expressly stated in such filing. ",
+                "excerpt_sha256": "70f8f1827529d1d904f51c0310f916d54be362afa613025e16e4e21d1dcb7fd2",
+                "locator": {
+                  "dimension": "EVENT",
+                  "extracted_text_sha256": "d2417d265027ca23735ef7a1ddfb83abc9e0beb0e36e9070fb4075eec46f4e4c",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 2593,
+                  "unicode_start": 2065
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm",
+                "source_sha256": "a4008daa2d9819c3148aaab02d65090787c332663c3eaae9e081a3131ae30803"
+              },
+              {
+                "excerpt": "EX-99.1 2 exh991earningsrelease03312.htm EX-99.1 Document News Release FOR IMMEDIATE RELEASE Arcosa, Inc. Announces First Quarter 2025 Results \u2013 Adjusted EBITDA Growth of 26%, Adjusting for Sale of Steel Components, Outpacing Revenue Increase of 12% \u2013 Adjusted EBITDA Margin, Excluding Divestiture, Expands 190 Basis Points \u2013 Reaffirms Full-Year 2025 Consolidated Revenue and Adjusted EBITDA Guidance DALLAS, Texas - ARCOSA, Inc. - May 6, 2025: Arcosa, Inc. (NYSE: ACA) (\u201cArcosa,\u201d the \u201cCompany,\u201d \u201cWe,\u201d or \u201cOur\u201d), a provider of infrastructure-related ",
+                "excerpt_sha256": "6aa1097b60bfc9b0268b2c906e04a7a15a529b48ac3f8b75902ae9bf80c8e15f",
+                "locator": {
+                  "dimension": "RESULT_RELEASE_IDENTITY_AND_TITLE",
+                  "extracted_text_sha256": "855ffa77aa4a6813668990c28aa77f4a8cd17b43f0168cc22d8cf41c7c13e8df",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 550,
+                  "unicode_start": 0
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm",
+                "source_sha256": "a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1"
+              },
+              {
+                "excerpt": "Condensed Consolidated Statements of Operations (in millions, except per share amounts) (unaudited) Three Months Ended March 31, 2025 2024 Revenues $ 632.0 $ 598.6",
+                "excerpt_sha256": "067899e4f2c6fce58031cda1e06cfe688f54e2c02f3109326a6d9a9551d521e6",
+                "locator": {
+                  "dimension": "PERIOD_AND_CONSOLIDATED_STATEMENT",
+                  "extracted_text_sha256": "855ffa77aa4a6813668990c28aa77f4a8cd17b43f0168cc22d8cf41c7c13e8df",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 15292,
+                  "unicode_start": 15129
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm",
+                "source_sha256": "a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1"
+              },
+              {
+                "excerpt": ", 2025 2024 Revenues $ 632.0 $ 598.6 Operating costs: Cost of revenues 506.6 487.0 Selling, general, and administrativ",
+                "excerpt_sha256": "ccf6946f739dfc26d67999adac89344b2299e9d72e53c1158d37a704249ddba5",
+                "locator": {
+                  "dimension": "CONSOLIDATED_REVENUE",
+                  "extracted_text_sha256": "855ffa77aa4a6813668990c28aa77f4a8cd17b43f0168cc22d8cf41c7c13e8df",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 15374,
+                  "unicode_start": 15256
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm",
+                "source_sha256": "a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1"
+              },
+              {
+                "excerpt": "xes 5.6 8.1 Net income $ 23.6 $ 39.2 Net income per common share: Basic $ 0.48 $ 0.81 Diluted $ 0.48 $ 0.80 Weighted av",
+                "excerpt_sha256": "fe8927e9bd79fdf1df303a1773c2eeeafb0cf8959d2fbf85354bc397e97b7f66",
+                "locator": {
+                  "dimension": "GAAP_NET_RESULT",
+                  "extracted_text_sha256": "855ffa77aa4a6813668990c28aa77f4a8cd17b43f0168cc22d8cf41c7c13e8df",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 15797,
+                  "unicode_start": 15678
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm",
+                "source_sha256": "a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1"
+              },
+              {
+                "excerpt": "2.0 $ 598.6 Operating costs: Cost of revenues 506.6 487.0 Selling, general, and administrative expenses 73.7 69.1 Gai",
+                "excerpt_sha256": "e3ee67ec7f1a1be866b540653fdfe3ffd79b6870e29149d33356449a95835fbd",
+                "locator": {
+                  "dimension": "SUPPORTING_PROFIT_AND_LOSS",
+                  "extracted_text_sha256": "855ffa77aa4a6813668990c28aa77f4a8cd17b43f0168cc22d8cf41c7c13e8df",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 15398,
+                  "unicode_start": 15281
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm",
+                "source_sha256": "a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1"
+              }
+            ],
+            "entity_confidence": "PROVEN",
+            "event_class": "FULL_PERIOD_RESULTS",
+            "evidence_binding": "13ce3f546c4a50b682a014f8dd2741cad681284c2821fb74c15d705e83240017",
+            "financial_scope": "Explicit consolidated quarter statement contains aggregate revenue, GAAP total net result and supporting costs/expenses; exact source rows and quarter header are retained as excerpts.",
+            "net_result_scope": "GAAP_TOTAL",
+            "period_confidence": "PROVEN",
+            "period_end": "2025-03-31",
+            "period_grain": "QUARTER",
+            "pre_revenue_complete_expense_statement": false,
+            "resolver_context_sha256": "dbcb566147c73014d10d69c6d0277a04e971e633a935365f1728a7424de96bbc",
+            "revenue_scope": "CONSOLIDATED",
+            "review_reference": "docs/fundamentals_v4/fundamentals_v4_historical_publication_review_observation_proposals.md#non-authoritative-proposal-boundary",
+            "supporting_p_and_l": true
+          },
+          "primary_excerpt": "Item 2.02 Results of Operation and Financial Condition. Attached as Exhibit 99.1 is the registrant\u2019s earnings release for the first quarter of 2025, issued May 6, 2025. This release is being furnished and shall not be deemed \u201cfiled\u201d for the purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise incorporated by reference into any filing pursuant to the Securities Act of 1933, as amended, or the Securities Exchange Act of 1934, as amended, except as otherwise expressly stated in such filing. "
+        }
+      ],
+      "quarter": {
+        "company_id": 22,
+        "created_at_utc": "2026-10-09T04:27:29Z",
+        "first_public_result_date": "2025-05-07",
+        "fiscal_quarter": "Q1",
+        "fiscal_year": 2025,
+        "identity_provider": "SHARADAR_ARQ",
+        "identity_status": "ACCEPTED",
+        "period_end": "2025-03-31",
+        "quarter_id": 800,
+        "source_availability_date": "2025-05-07",
+        "source_fiscalperiod": "2025-Q1",
+        "source_reportperiod": "2025-03-31",
+        "updated_at_utc": "2026-10-09T04:27:29Z"
+      },
+      "relations": [],
+      "ticker": "ACA"
+    },
+    {
+      "events": [
+        {
+          "acceptance_index_review": null,
+          "evidence": {
+            "accession_number": "0001739445-25-000113",
+            "company_id": 22,
+            "document_id": "aca-20250807.htm",
+            "evidence_hash": "6c6fdcb24c8d290c1951626739c7cc2679966454f3f2a02a184afa43f405236f",
+            "evidence_id": "rpe_6c6fdcb24c8d290c19516267",
+            "filing_form": "8-K",
+            "fiscal_quarter": "Q2",
+            "fiscal_year": 2025,
+            "item_2_02_status": "PRESENT_AND_DOCUMENT_CONFIRMED",
+            "matching_method": "SEC_LINKED_EXHIBIT:{\"exhibits\":[{\"method\":\"CIK_ITEM_2_02_EXACT_PERIOD_END\",\"sha256\":\"65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94\",\"url\":\"https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm\"}],\"fiscal_identity\":[22,2025,\"Q2\"],\"parent_accession\":\"0001739445-25-000113\",\"version\":1}",
+            "quarter_id": 801,
+            "reviewed_manual": 0,
+            "rule_version": "result_publication_v1",
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm",
+            "source_timestamp_utc": "2025-08-07T20:37:22Z",
+            "source_type": "SEC_8K_ITEM_2_02"
+          },
+          "observation": {
+            "actual_vs_preliminary": "ACTUAL",
+            "complete_earnings_package": true,
+            "continuing_operations_explicit": false,
+            "documents": [
+              {
+                "excerpt": "Section 13 or 15(d) of the Securities Exchange Act of 1934 Date of Report (Date of Earliest Event Reported): August 7, 2025 Arcosa, Inc. __________________________________________ (Exact name of registrant as specified in its charter)",
+                "excerpt_sha256": "210f33b09020fa835c46eb05fb10f8d6c53feeb0829b56031c6e01f8136a7c17",
+                "locator": {
+                  "dimension": "ENTITY",
+                  "extracted_text_sha256": "1c845eec43cc24bd52a92ebd61fc91770528ad4f364feda6f3e1cd3a360c582e",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 405,
+                  "unicode_start": 171
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm",
+                "source_sha256": "41b92e9be71715a750a841f4200951bf090dade64e74be7547b8b2e0ab7e2a13"
+              },
+              {
+                "excerpt": "Item 2.02 Results of Operation and Financial Condition. Attached as Exhibit 99.1 is the registrant\u2019s earnings release for the second quarter of 2025, issued August 7, 2025. This release is being furnished and shall not be deemed \u201cfiled\u201d for the purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise incorporated by reference into any filing pursuant to the Securities Act of 1933, as amended, or the Securities Exchange Act of 1934, as amended, except as otherwise expressly stated in such filing. ",
+                "excerpt_sha256": "0407785690441c6b539fd0de2c7b450b04df717f8ff5241aebbb49f59f06a58b",
+                "locator": {
+                  "dimension": "EVENT",
+                  "extracted_text_sha256": "1c845eec43cc24bd52a92ebd61fc91770528ad4f364feda6f3e1cd3a360c582e",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 2600,
+                  "unicode_start": 2068
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm",
+                "source_sha256": "41b92e9be71715a750a841f4200951bf090dade64e74be7547b8b2e0ab7e2a13"
+              },
+              {
+                "excerpt": "EX-99.1 2 exh991earningsrelease06302.htm EX-99.1 Document Exhibit 99.1 News Release FOR IMMEDIATE RELEASE Arcosa, Inc. Announces Record Second Quarter 2025 Results \u2013 Revenue Growth of 18% and Adjusted EBITDA Expansion of 42%, Excluding Divestiture, Highlights Success of Portfolio Transformation \u2013 Record Adjusted EBITDA Margin of 20.9%, up 360 Basis Points \u2013 Key Strategic Growth Businesses Performing Well with 15% Cash Unit Profitability Growth in Aggregates and Record Backlog in Utility Structures DALLAS, Texas - ARCOSA, Inc. - August 7, 2025: ",
+                "excerpt_sha256": "3ff077d7f1c8457e879744461c29ed5d2c34b28e2a22aa7c257263d02a5d5278",
+                "locator": {
+                  "dimension": "RESULT_RELEASE_IDENTITY_AND_TITLE",
+                  "extracted_text_sha256": "309f8a06ba30966497ed715efac035ae2941a1719798f222a27203c102e51c7d",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 550,
+                  "unicode_start": 0
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm",
+                "source_sha256": "65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94"
+              },
+              {
+                "excerpt": "Condensed Consolidated Statements of Operations (in millions, except per share amounts) (unaudited) Three Months Ended June 30, Six Months Ended June 30, 2025 2024 2025 2024 Revenues $ 736",
+                "excerpt_sha256": "58c93d68261f2df47307f6e1b25557538f711de24b9375e0cc54a2d13940e8dc",
+                "locator": {
+                  "dimension": "PERIOD_AND_CONSOLIDATED_STATEMENT",
+                  "extracted_text_sha256": "309f8a06ba30966497ed715efac035ae2941a1719798f222a27203c102e51c7d",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 15644,
+                  "unicode_start": 15456
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm",
+                "source_sha256": "65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94"
+              },
+              {
+                "excerpt": "4 2025 2024 Revenues $ 736.9 $ 664.7 $ 1,368.9 $ 1,263.3 Cost of revenues 570.8 526.7 1,077.4 1,013.7 Gross profit 166",
+                "excerpt_sha256": "35752926b86e415e6d7e6d9d1a3ffc70401296dc73bd3fa8cdfea1706e9297e3",
+                "locator": {
+                  "dimension": "CONSOLIDATED_REVENUE",
+                  "extracted_text_sha256": "309f8a06ba30966497ed715efac035ae2941a1719798f222a27203c102e51c7d",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 15736,
+                  "unicode_start": 15618
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm",
+                "source_sha256": "65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94"
+              },
+              {
+                "excerpt": "6 15.7 15.7 Net income $ 59.7 $ 45.6 $ 83.3 $ 84.8 Net income per common share: Basic $ 1.22 $ 0.93 $ 1.70 $ 1.74 Dilut",
+                "excerpt_sha256": "e905ae40b00e11fe8dd7784f420b76bce8b5e8a1aab76f68fe8098b8452bc378",
+                "locator": {
+                  "dimension": "GAAP_NET_RESULT",
+                  "extracted_text_sha256": "309f8a06ba30966497ed715efac035ae2941a1719798f222a27203c102e51c7d",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 16388,
+                  "unicode_start": 16269
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm",
+                "source_sha256": "65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94"
+              },
+              {
+                "excerpt": "9 $ 1,263.3 Cost of revenues 570.8 526.7 1,077.4 1,013.7 Gross profit 166.1 138.0 291.5 249.6 Selling, general, and ad",
+                "excerpt_sha256": "3818348939914639b3c8e5da46600d1b2e0d1e00c93c410f98834c8bfdf81525",
+                "locator": {
+                  "dimension": "SUPPORTING_PROFIT_AND_LOSS",
+                  "extracted_text_sha256": "309f8a06ba30966497ed715efac035ae2941a1719798f222a27203c102e51c7d",
+                  "representation": "result_publication.filing_text",
+                  "unicode_end": 15781,
+                  "unicode_start": 15663
+                },
+                "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm",
+                "source_sha256": "65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94"
+              }
+            ],
+            "entity_confidence": "PROVEN",
+            "event_class": "FULL_PERIOD_RESULTS",
+            "evidence_binding": "419816683a7d01db8a66509b57c0456627dc20407eb3443c8676153f6e45e52b",
+            "financial_scope": "Explicit consolidated quarter statement contains aggregate revenue, GAAP total net result and supporting costs/expenses; exact source rows and quarter header are retained as excerpts.",
+            "net_result_scope": "GAAP_TOTAL",
+            "period_confidence": "PROVEN",
+            "period_end": "2025-06-30",
+            "period_grain": "QUARTER",
+            "pre_revenue_complete_expense_statement": false,
+            "resolver_context_sha256": "d198a74fbaf3e26fa53f75f84106f1bf9b0ab23a8d8fbfc8500874a28a1c1ea1",
+            "revenue_scope": "CONSOLIDATED",
+            "review_reference": "docs/fundamentals_v4/fundamentals_v4_historical_publication_review_observation_proposals.md#non-authoritative-proposal-boundary",
+            "supporting_p_and_l": true
+          },
+          "primary_excerpt": "Item 2.02 Results of Operation and Financial Condition. Attached as Exhibit 99.1 is the registrant\u2019s earnings release for the second quarter of 2025, issued August 7, 2025. This release is being furnished and shall not be deemed \u201cfiled\u201d for the purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise incorporated by reference into any filing pursuant to the Securities Act of 1933, as amended, or the Securities Exchange Act of 1934, as amended, except as otherwise expressly stated in such filing. "
+        }
+      ],
+      "quarter": {
+        "company_id": 22,
+        "created_at_utc": "2026-10-09T04:27:29Z",
+        "first_public_result_date": "2025-08-08",
+        "fiscal_quarter": "Q2",
+        "fiscal_year": 2025,
+        "identity_provider": "SHARADAR_ARQ",
+        "identity_status": "ACCEPTED",
+        "period_end": "2025-06-30",
+        "quarter_id": 801,
+        "source_availability_date": "2025-08-08",
+        "source_fiscalperiod": "2025-Q2",
+        "source_reportperiod": "2025-06-30",
+        "updated_at_utc": "2026-10-09T04:27:29Z"
+      },
+      "relations": [],
+      "ticker": "ACA"
+    }
+  ],
+  "companies": [
+    {
+      "additional_document_texts": {},
+      "company_id": 22,
+      "filings": [
+        {
+          "acceptance_timestamp_utc": "2025-08-07T20:37:22Z",
+          "accession_number": "0001739445-25-000113",
+          "form": "8-K",
+          "items": "2.02,9.01",
+          "legacy_primary": false,
+          "primary_document": "aca-20250807.htm",
+          "result_exhibits": [
+            {
+              "sha256": "65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94",
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm",
+              "text": "EX-99.1 2 exh991earningsrelease06302.htm EX-99.1 Document Exhibit 99.1 News Release FOR IMMEDIATE RELEASE Arcosa, Inc. Announces Record Second Quarter 2025 Results \u2013 Revenue Growth of 18% and Adjusted EBITDA Expansion of 42%, Excluding Divestiture, Highlights Success of Portfolio Transformation \u2013 Record Adjusted EBITDA Margin of 20.9%, up 360 Basis Points \u2013 Key Strategic Growth Businesses Performing Well with 15% Cash Unit Profitability Growth in Aggregates and Record Backlog in Utility Structures DALLAS, Texas - ARCOSA, Inc. - August 7, 2025: Arcosa, Inc. (NYSE: ACA) (\u201cArcosa,\u201d the \u201cCompany,\u201d \u201cWe,\u201d or \u201cOur\u201d), a provider of infrastructure-related products and solutions, today announced results for the second quarter ended June 30, 2025. Second Quarter 2025 Highlights Three Months Ended June 30, 2025 2024 % Change ($ in millions, except per share amounts) Revenues $ 736.9 $ 664.7 11 % Revenues, excluding the impact of divested business (1) $ 736.9 $ 626.6 18 % Net income $ 59.7 $ 45.6 31 % Adjusted Net Income (2) $ 62.2 $ 44.7 39 % Diluted EPS $ 1.22 $ 0.93 31 % Adjusted Diluted EPS (2) $ 1.27 $ 0.91 40 % Adjusted EBITDA (2) $ 154.2 $ 112.7 37 % Adjusted EBITDA Margin (2) 20.9 % 17.0 % 390 bps Adjusted EBITDA, excluding impact from divested business (1)(2) $ 154.2 $ 108.3 42 % Adjusted EBITDA Margin, excluding impact from divested business (1)(2) 20.9 % 17.3 % 360 bps Net cash provided by operating activities $ 61.2 $ 38.3 60 % Free Cash Flow (2) $ 39.2 $ (6.1) N.M. bps - basis points N.M. - not meaningful (1) Excludes the impact of the divested steel components business. Financial results for the steel components business were included in the Transportation Products segment as part of continuing operations to the date of sale, August 16, 2024. (2) Non-GAAP financial measure. See reconciliation tables included in this release. 972.942.6500 arcosa.com Antonio Carrillo, President and Chief Executive Officer, commented, \u201cThis was a record quarter for Arcosa in many respects and highlights the impact of recent strategic actions we have taken to enhance our growth businesses, reduce our cyclicality, and expand margin. In recognition of our portfolio shift, we have expanded our disclosures around our key growth businesses, construction materials and utility structures. \u201cOne year ago, we announced our plan to acquire Stavola, an aggregates-led construction materials company. This quarter we clearly see the accretive impact of the acquisition, which increased Arcosa's consolidated revenues by 14% and consolidated Adjusted EBITDA margin by 250 basis points. Stavola has accelerated the growth of our construction materials platform, contributing to the 13% increase in gross profit for our aggregates business and 15% improvement in Aggregates Adjusted Cash Gross Profit per Ton. \u201cEngineered Structures also delivered strong results, achieving record top-line and Adjusted Segment EBITDA margin driven by strong execution in utility structures and higher wind tower volumes. The U.S. grid is facing an extended period of load growth, requiring significant additions to power generation capacity, all of which needs to be connected to the grid. These tailwinds are creating strong underlying demand reflected in record second quarter backlog for our utility structures business. \u201cOur barge business is performing in line with expectations and order activity is healthy. Including orders placed after quarter-end, we have solidified our 2025 production plans, and our backlog for both hopper and tank barges now extends into 2026.\u201d Carrillo concluded, \"We generated $61 million of operating cash flow during the quarter and ended with Net Debt to Adjusted EBITDA of 2.8 times, both a sequential improvement from the first quarter. We continue to prioritize deleveraging following the Stavola acquisition and are on track to reach our target leverage range of 2.0-2.5 times within the next three quarters, consistent with our stated goal.\u201d 2025 Outlook and Guidance The Company is tightening the range for its full year 2025 guidance, resulting in no change to the mid-point of the range for consolidated revenue and Adjusted EBITDA: \u2022 Consolidated revenues range of $2.85 billion to $2.95 billion, compared to its previous guidance range of $2.8 billion to $3.0 billion. \u2022 Consolidated Adjusted EBITDA range of $555 million to $585 million, compared to its previous guidance range of $545 million to $595 million. \u2022 Guidance range includes the direct impact of tariffs, as currently outlined, which is expected to be immaterial. \u201c Arcosa remains on track for strong growth in 2025 . Our U.S.-focused operations are well-aligned with long-term infrastructure and power market tailwinds. Given healthy overall demand in our growth businesses along with solid backlog visibility in our cyclical businesses, we are tightening our guidance range while maintaining the mid-point, to reflect increased confidence in our overall outlook,\u201d concluded Mr. Carrillo. 972.942.6500 2 arcosa.com Second Quarter 2025 Results and Commentary All comparisons are versus the prior year quarter unless noted otherwise. Construction Products \u2022 Revenues increased 28% to a record $354.5 million driven by the contribution from the construction materials business of Stavola Holding Corporation and its affiliated entities (collectively \u201cStavola\u201d), acquired in October 2024, which added $90.3 million to revenues during the quarter. \u2022 Organic revenues declined 4% as higher pricing was offset by lower volumes, which were impacted by wet weather throughout the quarter, a decrease in freight revenue, and a reduction in revenue from several small divestitures completed in the prior period. \u2022 Adjusted Segment EBITDA increased 44% to a record $100.4 million and Adjusted Segment EBITDA Margin increased 310 basis points to 28.3% from 25.2% in the prior period. Freight-Adjusted Segment EBITDA Margin was 31.0% compared to 28.0% in the prior period. \u2022 Stavola contributed $35.2 million to Adjusted Segment EBITDA during the quarter and increased Adjusted Segment EBITDA Margin by 360 basis points. \u2022 On an organic basis, Adjusted Segment EBITDA decreased 6% and Adjusted Segment EBITDA Margin decreased slightly primarily due to the decline in revenues and lower cost absorption from reduced volumes. \u2022 Within aggregates, total volumes increased 6% and Aggregates Freight-Adjusted Average Sales Price increased 8%, resulting in Aggregates Adjusted Cash Gross Profit per Ton growth of 15%. \u2022 Depreciation, depletion, and amortization expense increased $12.4 million, or 42%, primarily due to the acquisition of Stavola. Engineered Structures \u2022 Revenues increased 7% to $293.0 million primarily due to higher volumes from the fully ramped New Mexico wind towers facility. Revenues for utility and related structures decreased 2% as higher volumes and improved product mix were offset by the impact of lower steel prices. \u2022 Adjusted Segment EBITDA increased 31% to $54.8 million due to significant organic growth across our businesses. Margin expanded 350 basis points to a record 18.7% due to improved product mix and operating efficiencies in our utility and related structures business and higher wind tower volumes. \u2022 The ongoing focus on grid hardening and reliability efforts and increased demand for electricity continue to drive strong order activity for our utility structures business. We ended the second quarter with a record backlog for utility and related structures of $450.0 million, up 9% from the start of the year. \u2022 The backlog for our wind towers business at the end of the second quarter was $598.6 million, down 23% from the start of the year. We expect to deliver 30% of our current backlog during 2025 and the remainder through 2028. Following the passage of the budget reconciliation bill in July, order inquiry activity has increased as policy uncertainty has improved. 972.942.6500 3 arcosa.com Transportation Products \u2022 Prior period results included revenues and Adjusted EBITDA of $38.1 million and $4.4 million, respectively, for the steel components business, which was divested in August 2024. \u2022 Revenues for our barge business increased 18% primarily due to higher tank barge deliveries, partially offset by lower hopper barge deliveries. \u2022 Excluding the impact of the divested steel components business, Adjusted Segment EBITDA increased 10%, to $13.5 million, driven by higher tank barge deliveries. \u2022 Adjusted Segment EBITDA Margin, excluding the divested steel components business, was 15.1% down from 16.2% in the prior period, in-line with expectations. \u2022 During the quarter, we received barge orders totaling approximately $33 million primarily for hopper barges for 2025 delivery. For the first half of the year, the barge business recorded a book-to-bill of 1.0. \u2022 Our barge backlog at the end of the quarter was $277.0 million, roughly flat with the start of the year. We expect to deliver approximately 57% of our current backlog during 2025. \u2022 Third quarter order volume has increased, and we have currently received $122 million in additional orders. Backlog visibility has improved for hopper barges, now extending into 2026, and our line of sight for tank barges extends deep into the fourth quarter of next year. Corporate and Other Financial Notes \u2022 Excluding acquisition and divestiture-related costs, which have been excluded from Adjusted EBITDA, corporate expenses decreased to $14.9 million from $16.0 million in the prior period. \u2022 Acquisition and divestiture-related costs were $0.5 million in the second quarter compared to $3.9 million in the prior period. \u2022 Interest expense totaled $28.5 million, an increase of $17.1 million from the prior period driven by the additional debt incurred to finance the Stavola acquisition. \u2022 The effective tax rate for the second quarter was 14.5% compared to 14.3% in the prior period. Cash Flow and Liquidity \u2022 Operating cash flow was $61.2 million during the second quarter, an increase of $22.9 million compared to the prior period, primarily due to higher earnings, partially offset by increased working capital. \u2022 Working capital was a $75.6 million net use of cash for the quarter compared to the prior period's $49.3 million net use of cash. The increase in cash required for working capital was primarily due to higher receivables and inventories in-line with the increase to revenues. \u2022 Capital expenditures in the second quarter were $27.8 million, compared to $47.6 million in the prior period. \u2022 Free Cash Flow for the quarter was $39.2 million, up from $(6.1) million in the prior period. \u2022 Net Debt to Adjusted EBITDA was 2.8x for the trailing twelve months, down slightly from 2.9x at the end of the first quarter, as we continue to make progress reducing our leverage following the Stavola acquisition. \u2022 We ended the quarter with total liquidity of $889.7 million, including $189.7 million of cash and cash equivalents and full availability under our $700 million revolving credit facility. 972.942.6500 4 arcosa.com Non-GAAP Financial Information This earnings release contains financial measures that have not been prepared in accordance with U.S. generally accepted accounting principles (\u201cGAAP\u201d). Reconciliations of non-GAAP financial measures to the closest GAAP measure are included in the accompanying tables to this earnings release. Conference Call Information A conference call is scheduled for 8:30 a.m. Eastern Time on August 8, 2025 to discuss second quarter 2025 results. To listen to the conference call webcast, please visit the Investor Relations section of Arcosa\u2019s website at https://ir.arcosa.com. A slide presentation for this conference call will be posted on the Company\u2019s website in advance of the call at https://ir.arcosa.com. The audio conference call number is 800-723-6494 for domestic callers and 785-424-1619 for international callers. The conference ID is ARCOSA and the passcode is 10156. An audio playback will be available through 11:59 p.m. Eastern Time on August 22, 2025, by dialing 800-839-9324 for domestic callers and 402-220-6086 for international callers. A replay of the webcast will be available for one year on Arcosa\u2019s website at https://ir.arcosa.com/news-events/events-presentations. About Arcosa Arcosa, Inc. (NYSE:ACA), headquartered in Dallas, Texas, is a provider of infrastructure-related products and solutions with leading positions in construction, engineered structures, and transportation markets. Arcosa reports its financial results in three principal business segments: Construction Products, Engineered Structures, and Transportation Products. For more information, visit www.arcosa.com. 972.942.6500 5 arcosa.com Some statements in this release, which are not historical facts, are \u201cforward-looking statements\u201d as defined by the Private Securities Litigation Reform Act of 1995. Forward-looking statements include statements about Arcosa\u2019s estimates, expectations, beliefs, intentions or strategies for the future. Arcosa uses the words \u201canticipates,\u201d \u201cassumes,\u201d \u201cbelieves,\u201d \u201cestimates,\u201d \u201cexpects,\u201d \u201cintends,\u201d \u201cforecasts,\u201d \u201cmay,\u201d \u201cwill,\u201d \u201cshould,\u201d \u201cguidance,\u201d \u201coutlook,\u201d \u201cstrategy,\u201d \u201cplans,\u201d \u201cgoal,\u201d and similar expressions to identify these forward-looking statements. Forward-looking statements speak only as of the date of this release, and Arcosa expressly disclaims any obligation or undertaking to disseminate any updates or revisions to any forward-looking statement contained herein, except as required by federal securities laws. Forward-looking statements are based on management\u2019s current views and assumptions and involve risks and uncertainties that could cause actual results to differ materially from historical experience or our present expectations, including but not limited to assumptions, risks and uncertainties regarding the failure to successfully complete or integrate acquisitions, including Ameron and Stavola, or divest any business, or failure to achieve the expected benefits of acquisitions or divestitures; market conditions and customer demand for Arcosa\u2019s business products and services; the impact of Arcosa's level of indebtedness; the cyclical nature of, and seasonal or weather impact on, the industries in which Arcosa competes; competition and other competitive factors; governmental and regulatory factors; changing technologies; availability of growth opportunities; market recovery; ability to improve margins; the impact of inflation and costs of materials; impacts from the Inflation Reduction Act and One Big Beautiful Bill Act; the delivery or satisfaction of any backlog or firm orders; the impact of pandemics on Arcosa\u2019s business; the impact of tariffs; and Arcosa\u2019s ability to execute its long-term strategy, and such forward-looking statements are not guarantees of future performance. For further discussion of such risks and uncertainties, see \u201cRisk Factors\u201d and the \u201cForward-Looking Statements\u201d section of \u201cManagement's Discussion and Analysis of Financial Condition and Results of Operations\u201d in Arcosa's Form 10-K for the year ended December 31, 2024 and as may be revised and updated by Arcosa's Quarterly Reports on Form 10-Q and Current Reports on Form 8-K. INVESTOR CONTACTS Erin Drabek David Gold VP of Investor Relations ADVIS IR Y Partners T 972.942.6500 T 212.661.2220 InvestorResources@arcosa.com David.Gold@advisiry.com MEDIA CONTACT Media@arcosa.com TABLES TO FOLLOW 972.942.6500 6 arcosa.com Arcosa, Inc. Condensed Consolidated Statements of Operations (in millions, except per share amounts) (unaudited) Three Months Ended June 30, Six Months Ended June 30, 2025 2024 2025 2024 Revenues $ 736.9 $ 664.7 $ 1,368.9 $ 1,263.3 Cost of revenues 570.8 526.7 1,077.4 1,013.7 Gross profit 166.1 138.0 291.5 249.6 Selling, general, and administrative expenses 73.0 79.5 146.7 148.6 Gain on disposition of property, plant, equipment, and other assets (4.5) (2.0) (8.3) (5.9) (Gain) loss on sale of businesses 2.8 (12.5) 2.5 (19.5) Impairment charge \u2014 5.8 \u2014 5.8 Operating profit 94.8 67.2 150.6 120.6 Interest expense 28.5 11.4 56.8 19.7 Interest income (1.3) (0.7) (3.1) (2.4) Other, net (income) expense (2.2) 3.3 (2.1) 2.8 25.0 14.0 51.6 20.1 Income before income taxes 69.8 53.2 99.0 100.5 Provision for income taxes 10.1 7.6 15.7 15.7 Net income $ 59.7 $ 45.6 $ 83.3 $ 84.8 Net income per common share: Basic $ 1.22 $ 0.93 $ 1.70 $ 1.74 Diluted $ 1.22 $ 0.93 $ 1.70 $ 1.74 Weighted average number of shares outstanding: Basic 48.9 48.6 48.8 48.5 Diluted 49.0 48.7 48.9 48.7 972.942.6500 7 arcosa.com Arcosa, Inc. Condensed Segment Data (in millions) (unaudited) Three Months Ended June 30, Six Months Ended June 30, Revenues: 2025 2024 2025 2024 Aggregates $ 194.0 $ 169.7 $ 359.3 $ 328.6 Specialty materials and asphalt 133.3 66.0 206.5 129.2 Aggregates intrasegment sales (10.3) (0.2) (14.4) (0.6) Total Construction Materials 317.0 235.5 551.4 457.2 Construction site support 37.5 40.6 65.9 70.1 Construction Products 354.5 276.1 617.3 527.3 Utility and related structures 205.2 209.4 401.0 386.7 Wind towers 87.8 65.4 176.8 119.7 Engineered Structures 293.0 274.8 577.8 506.4 Inland barges 89.4 75.7 173.8 155.4 Steel components (1) \u2014 38.1 \u2014 74.2 Transportation Products 89.4 113.8 173.8 229.6 Segment Totals before Eliminations 736.9 664.7 1,368.9 1,263.3 Eliminations \u2014 \u2014 \u2014 \u2014 Consolidated Total $ 736.9 $ 664.7 $ 1,368.9 $ 1,263.3 Three Months Ended June 30, Six Months Ended June 30, Operating profit (loss): 2025 2024 2025 2024 Construction Products $ 58.6 $ 39.4 $ 76.9 $ 68.2 Engineered Structures 42.8 35.1 81.8 61.4 Transportation Products (1) 8.8 12.6 22.7 27.2 Segment Total 110.2 87.1 181.4 156.8 Corporate (15.4) (19.9) (30.8) (36.2) Consolidated Total $ 94.8 $ 67.2 $ 150.6 $ 120.6 Backlog: June 30, 2025 December 31, 2024 June 30, 2024 Engineered Structures: Utility and related structures $ 450.0 $ 414.0 $ 424.6 Wind towers $ 598.6 $ 776.8 $ 914.1 Transportation Products: Inland barges $ 277.0 $ 280.1 $ 251.5 (1) On August 16, 2024, the Company completed the divestiture of the steel components business. See Reconciliation of Adjusted EBITDA for Steel Components table for the contribution of the steel components business to operating profit, included above, for the three and six months ended June 30, 2024. 972.942.6500 8 arcosa.com Arcosa, Inc. Condensed Consolidated Balance Sheets (in millions) (unaudited) June 30, 2025 December 31, 2024 Current assets: Cash and cash equivalents $ 189.7 $ 187.3 Receivables, net of allowance 477.0 350.2 Inventories 406.8 359.9 Other 43.2 56.6 Total current assets 1,116.7 954.0 Property, plant, and equipment, net 2,100.9 2,129.4 Goodwill 1,343.4 1,361.2 Intangibles, net 324.2 338.3 Deferred income taxes 2.6 2.8 Other assets 123.8 129.8 $ 5,011.6 $ 4,915.5 Current liabilities: Accounts payable $ 297.5 $ 237.3 Accrued liabilities 161.4 166.4 Advance billings 58.4 100.2 Current portion of long-term debt 10.2 12.1 Total current liabilities 527.5 516.0 Debt 1,673.3 1,676.8 Deferred income taxes 212.5 200.6 Other liabilities 90.0 93.9 2,503.3 2,487.3 Stockholders' equity: Common stock 0.5 0.5 Capital in excess of par value 1,697.4 1,696.5 Retained earnings 827.2 748.9 Accumulated other comprehensive loss (16.8) (17.7) 2,508.3 2,428.2 $ 5,011.6 $ 4,915.5 972.942.6500 9 arcosa.com Arcosa, Inc. Consolidated Statements of Cash Flows (in millions) (unaudited) Six Months Ended June 30, 2025 2024 Operating activities: Net income $ 83.3 $ 84.8 Adjustments to reconcile net income to net cash provided by operating activities: Depreciation, depletion, and amortization 109.7 89.4 Impairment charge \u2014 5.8 Stock-based compensation expense 13.4 14.1 Provision for deferred income taxes 11.9 14.4 Gain on disposition of property, plant, equipment, and other assets (8.3) (5.9) (Gain) loss on sale of businesses 2.5 (19.5) (Increase) decrease in other assets 2.3 (4.2) Increase (decrease) in other liabilities (3.7) (9.7) Other 5.7 (5.7) Changes in current assets and liabilities: (Increase) decrease in receivables (126.3) (80.6) (Increase) decrease in inventories (50.7) 21.9 (Increase) decrease in other current assets 13.4 11.3 Increase (decrease) in accounts payable 60.1 (11.3) Increase (decrease) in advance billings (41.8) (2.3) Increase (decrease) in accrued liabilities (11.0) 16.3 Net cash provided by operating activities 60.5 118.8 Investing activities: Proceeds from disposition of property, plant, equipment, and other assets 10.8 7.4 Proceeds from sale of businesses \u2014 33.3 Capital expenditures (61.8) (102.0) Cash received (paid) for acquisitions 17.6 (179.9) Net cash required by investing activities (33.4) (241.2) Financing activities: Payments to retire debt (6.6) (63.4) Proceeds from issuance of debt \u2014 200.0 Dividends paid to common stockholders (5.0) (4.9) Purchase of shares to satisfy employee tax on vested stock (12.4) (10.4) Debt issuance costs (0.7) \u2014 Net cash (required) provided by financing activities (24.7) 121.3 Net increase (decrease) in cash and cash equivalents 2.4 (1.1) Cash and cash equivalents at beginning of period 187.3 104.8 Cash and cash equivalents at end of period $ 189.7 $ 103.7 972.942.6500 10 arcosa.com Arcosa, Inc. Reconciliation of Adjusted Net Income and Adjusted Diluted EPS (unaudited) GAAP does not define \u201cAdjusted Net Income\u201d and it should not be considered as an alternative to earnings measures defined by GAAP, including net income. We use this metric to assess the operating performance of our consolidated business. We adjust net income for certain items that are not reflective of the normal operations of our business to provide investors with what we believe is a more consistent comparison of earnings performance from period to period. Three Months Ended June 30, Six Months Ended June 30, 2025 2024 2025 2024 (in millions) Net income $ 59.7 $ 45.6 $ 83.3 $ 84.8 (Gain) loss on sale of businesses, net of tax 2.1 (9.7) 1.9 (15.0) Impact of acquisition and divestiture-related expenses, net of tax (1) 0.4 4.3 1.0 6.4 Impairment charge, net of tax \u2014 4.5 \u2014 4.5 Adjusted Net Income $ 62.2 $ 44.7 $ 86.2 $ 80.7 GAAP does not define \u201cAdjusted Diluted EPS\u201d and it should not be considered as an alternative to earnings measures defined by GAAP, including diluted EPS. We use this metric to assess the operating performance of our consolidated business. We adjust diluted EPS for certain items that are not reflective of the normal operations of our business to provide investors with what we believe is a more consistent comparison of earnings performance from period to period. Three Months Ended June 30, Six Months Ended June 30, 2025 2024 2025 2024 (in dollars per share) Diluted EPS $ 1.22 $ 0.93 $ 1.70 $ 1.74 (Gain) loss on sale of businesses 0.04 (0.20) 0.04 (0.31) Impact of acquisition and divestiture-related expenses (1) 0.01 0.09 0.02 0.13 Impairment charge \u2014 0.09 \u2014 0.09 Adjusted Diluted EPS $ 1.27 $ 0.91 $ 1.76 $ 1.65 (1) Expenses associated with acquisitions and divestitures, including the cost impact of the fair value markup of acquired inventory, advisory and professional fees, integration, separation, and other transaction costs. 972.942.6500 11 arcosa.com Arcosa, Inc. Reconciliation of Adjusted EBITDA ($ in millions) (unaudited) \u201cEBITDA\u201d is defined as net income plus interest, taxes, depreciation, depletion, and amortization. \u201cAdjusted EBITDA\u201d is defined as EBITDA adjusted for certain items that are not reflective of the normal earnings of our business. GAAP does not define EBITDA or Adjusted EBITDA and they should not be considered as alternatives to earnings measures defined by GAAP, including net income. We use Adjusted EBITDA to assess the operating performance of our consolidated business, as a metric for incentive-based compensation, as a measure within our lending arrangements, and as a basis for strategic planning and forecasting as we believe that it closely correlates to long-term shareholder value. As a widely used metric by analysts, investors, and competitors in our industry, we believe Adjusted EBITDA also assists investors in comparing a company's performance on a consistent basis without regard to depreciation, depletion, amortization, and other items which can vary significantly depending on many factors. \u201cAdjusted EBITDA Margin\u201d is defined as Adjusted EBITDA divided by Revenues. Three Months Ended June 30, Six Months Ended June 30, Full Year 2025 Guidance 2025 2024 2025 2024 Low High Revenues $ 736.9 $ 664.7 $ 1,368.9 $ 1,263.3 $ 2,850.0 $ 2,950.0 Net income 59.7 45.6 83.3 84.8 187.2 202.7 Add: Interest expense, net 27.2 10.7 53.7 17.3 100.0 103.0 Provision for income taxes 10.1 7.6 15.7 15.7 41.1 47.6 Depreciation, depletion, and amortization expense (1) 56.1 46.6 109.7 89.4 225.0 230.0 EBITDA 153.1 110.5 262.4 207.2 553.3 583.3 Add (less): (Gain) loss on sale of businesses 2.8 (12.5) 2.5 (19.5) 2.5 2.5 Impact of acquisition and divestiture-related expenses (2) 0.5 5.6 1.3 8.4 1.3 1.3 Impairment charge \u2014 5.8 \u2014 5.8 \u2014 \u2014 Other, net (income) expense (2.2) 3.3 (2.1) 2.8 (2.1) (2.1) Adjusted EBITDA $ 154.2 $ 112.7 $ 264.1 $ 204.7 $ 555.0 $ 585.0 Adjusted EBITDA Margin 20.9 % 17.0 % 19.3 % 16.2 % 19.5 % 19.8 % (1) Includes the impact of the fair value markup of acquired long-lived assets, subject to final purchase price adjustments. (2) Expenses associated with acquisitions and divestitures, including the cost impact of the fair value markup of acquired inventory, advisory and professional fees, integration, separation, and other transaction costs. 972.942.6500 12 arcosa.com Arcosa, Inc. Reconciliation of Adjusted Segment EBITDA ($ in millions) (unaudited) \u201cSegment EBITDA\u201d is defined as segment operating profit plus depreciation, depletion, and amortization. \u201cAdjusted Segment EBITDA\u201d is defined as Segment EBITDA adjusted for certain items that are not reflective of the normal earnings of our business. GAAP does not define Segment EBITDA or Adjusted Segment EBITDA and they should not be considered as alternatives to earnings measures defined by GAAP, including segment operating profit. We use Adjusted Segment EBITDA to assess the operating performance of our businesses, as a metric for incentive-based compensation, and as a basis for strategic planning and forecasting as we believe that it closely correlates to long-term shareholder value. As a widely used metric by analysts, investors, and competitors in our industry we believe Adjusted Segment EBITDA also assists investors in comparing a company's performance on a consistent basis without regard to depreciation, depletion, amortization, and other items, which can vary significantly depending on many factors. \u201cAdjusted Segment EBITDA Margin\u201d is defined as Adjusted Segment EBITDA divided by Revenues. Three Months Ended June 30, Six Months Ended June 30, Twelve Months Ended June 30, 2025 2024 2025 2024 2025 Construction Products Revenues $ 354.5 $ 276.1 $ 617.3 $ 527.3 $ 1,195.1 Operating Profit 58.6 39.4 76.9 68.2 142.6 Add: Depreciation, depletion, and amortization expense (1) 41.8 29.4 80.4 59.5 155.6 Segment EBITDA 100.4 68.8 157.3 127.7 298.2 Less: Gain on sale of businesses \u2014 (5.0) \u2014 (5.0) \u2014 Add: Impact of acquisition and divestiture-related expenses (2) \u2014 0.1 \u2014 1.3 10.9 Add: Impairment charge \u2014 5.8 \u2014 5.8 \u2014 Adjusted Segment EBITDA $ 100.4 $ 69.7 $ 157.3 $ 129.8 $ 309.1 Adjusted Segment EBITDA Margin 28.3 % 25.2 % 25.5 % 24.6 % 25.9 % Engineered Structures Revenues $ 293.0 $ 274.8 $ 577.8 $ 506.4 $ 1,118.7 Operating Profit 42.8 35.1 81.8 61.4 146.8 Add: Depreciation and amortization expense (1) 12.0 12.5 24.7 20.4 49.7 Segment EBITDA 54.8 47.6 106.5 81.8 196.5 Add: Impact of acquisition and divestiture-related expenses (2) \u2014 1.6 \u2014 1.6 \u2014 Less: Gain on sale of businesses \u2014 (7.5) \u2014 (14.5) \u2014 Adjusted Segment EBITDA $ 54.8 $ 41.7 $ 106.5 $ 68.9 $ 196.5 Adjusted Segment EBITDA Margin 18.7 % 15.2 % 18.4 % 13.6 % 17.6 % Transportation Products Revenues $ 89.4 $ 113.8 $ 173.8 $ 229.6 $ 361.8 Operating Profit 8.8 12.6 22.7 27.2 25.7 Add: Depreciation and amortization expense 1.9 4.1 3.8 8.1 8.3 Segment EBITDA 10.7 16.7 26.5 35.3 34.0 Add: Loss on sale of businesses 2.8 \u2014 2.5 \u2014 24.1 Adjusted Segment EBITDA $ 13.5 $ 16.7 $ 29.0 $ 35.3 $ 58.1 Adjusted Segment EBITDA Margin 15.1 % 14.7 % 16.7 % 15.4 % 16.1 % Operating Loss - Corporate $ (15.4) $ (19.9) $ (30.8) $ (36.2) $ (87.5) Add: Impact of acquisition and divestiture-related expenses - Corporate (2) 0.5 3.9 1.3 5.5 28.5 Add: Corporate depreciation expense 0.4 0.6 0.8 1.4 1.7 Adjusted EBITDA $ 154.2 $ 112.7 $ 264.1 $ 204.7 $ 506.4 (1) Includes the impact of the fair value markup of acquired long-lived assets, subject to final purchase price adjustments. (2) Expenses associated with acquisitions and divestitures, including the cost impact of the fair value markup of acquired inventory, advisory and professional fees, integration, separation, and other transaction costs. 972.942.6500 13 arcosa.com Arcosa, Inc. Reconciliation of Non-GAAP Measures for Construction Products (in millions, except per ton amounts) (unaudited) \u201cAggregates Freight-Adjusted Revenues\u201d is defined as aggregates revenues less freight and delivery, which are pass-through activities, and other revenues, which are largely service related. We use this metric to calculate \u201cAggregates Freight-Adjusted Average Sales Price\u201d, which is Aggregates Freight-Adjusted Revenues divided by shipments. \u201cAggregates Adjusted Cash Gross Profit\u201d is defined as aggregates gross profit plus depreciation, depletion, and amortization and adjusted for certain items that are not reflective of the normal earnings of our business. \u201cAggregates Adjusted Cash Gross Profit Per Ton\u201d is Aggregates Adjusted Cash Gross Profit divided by shipments. GAAP does not define these metrics and they should not be considered as alternatives to earnings measures defined by GAAP, including aggregates revenues and aggregates gross profit. We believe that this presentation is consistent with our competitors. These metrics are used by analysts and investors in comparing a company's performance on a consistent basis. Three Months Ended June 30, Six Months Ended June 30, 2025 2024 2025 2024 Aggregates Aggregates revenues $ 194.0 $ 169.7 $ 359.3 $ 328.6 Less: Freight and other revenues (35.3) (31.5) (62.5) (62.6) Aggregates Freight-Adjusted Revenues $ 158.7 $ 138.2 $ 296.8 $ 266.0 Aggregates gross profit 48.2 42.8 82.9 80.4 Add: Depreciation, depletion, and amortization 25.1 17.5 47.2 35.5 Add: Impact of acquisition and divestiture-related expenses \u2014 0.1 \u2014 1.3 Aggregates Adjusted Cash Gross Profit $ 73.3 $ 60.4 $ 130.1 $ 117.2 Aggregates shipments - tons 8.9 8.4 16.6 16.3 Aggregates Freight-Adjusted Average Sales Price $ 17.83 $ 16.45 $ 17.88 $ 16.32 Aggregates Adjusted Cash Gross Profit per Ton $ 8.24 $ 7.19 $ 7.84 $ 7.19 \u201cFreight-Adjusted Revenues\u201d for Construction Products is defined as segment revenues less freight and delivery, which are pass-through activities. GAAP does not define Freight-Adjusted Revenues and it should not be considered as alternatives to earnings measures defined by GAAP, including revenues. We use Freight-Adjusted Revenues in the review of our operating results. We also believe that this presentation is consistent with our competitors. As a widely used metric by analysts and investors, this metric assists in comparing a company's performance on a consistent basis. \u201cFreight-Adjusted Segment EBITDA Margin\u201d is defined as Freight-Adjusted Revenues divided by Adjusted Segment EBITDA. Three Months Ended June 30, Six Months Ended June 30, 2025 2024 2025 2024 Construction Products Revenues $ 354.5 $ 276.1 $ 617.3 $ 527.3 Less: Freight revenues (30.3) (27.1) (52.5) (51.0) Freight-Adjusted Revenues $ 324.2 $ 249.0 $ 564.8 $ 476.3 Adjusted Segment EBITDA (1) $ 100.4 $ 69.7 $ 157.3 $ 129.8 Adjusted Segment EBITDA Margin (1) 28.3 % 25.2 % 25.5 % 24.6 % Freight-Adjusted Segment EBITDA Margin 31.0 % 28.0 % 27.9 % 27.3 % (1) See Reconciliation of Adjusted Segment EBITDA table. 972.942.6500 14 arcosa.com Arcosa, Inc. Reconciliation of Free Cash Flow and Net Debt to Adjusted EBITDA ($ in millions) (unaudited) GAAP does not define \u201cFree Cash Flow\u201d and it should not be considered as an alternative to cash flow measures defined by GAAP, including cash flow from operating activities. We define Free Cash Flow as cash provided by operating activities less capital expenditures net of the proceeds from the disposition of property, plant, equipment, and other assets. We use this metric to assess the liquidity of our consolidated business. We present Free Cash Flow for the convenience of investors who use it in their analysis and for shareholders who need to understand the metric we use to assess performance and monitor our cash and liquidity positions. Three Months Ended June 30, Six Months Ended June 30, 2025 2024 2025 2024 Cash provided by operating activities $ 61.2 $ 38.3 $ 60.5 $ 118.8 Capital expenditures (27.8) (47.6) (61.8) (102.0) Proceeds from disposition of property, plant, equipment, and other assets 5.8 3.2 10.8 7.4 Free Cash Flow $ 39.2 $ (6.1) $ 9.5 $ 24.2 GAAP does not define \u201cNet Debt\u201d and it should not be considered as an alternative to cash flow or liquidity measures defined by GAAP. The Company uses Net Debt, which it defines as total debt minus cash and cash equivalents to determine the extent to which the Company\u2019s outstanding debt obligations would be satisfied by its cash and cash equivalents on hand. The Company also uses \u201cNet Debt to Adjusted EBITDA\u201d, which it defines as Net Debt divided by Adjusted EBITDA for the trailing twelve months as a metric of its current leverage position. We present this metric for the convenience of investors who use such metrics in their analysis and for shareholders who need to understand the metrics we use to assess performance and monitor our cash and liquidity positions. June 30, 2025 Total debt excluding debt issuance costs $ 1,700.5 Cash and cash equivalents 189.7 Net Debt $ 1,510.8 Adjusted EBITDA (trailing twelve months) (1) $ 544.1 Net Debt to Adjusted EBITDA 2.8 (1) Adjusted EBITDA includes an upward pro forma adjustment for Stavola, acquired on October 1, 2024, of $36.4 million, which was Stavola's Adjusted EBITDA for the three months ended September 30, 2024, to reflect the three-month pro forma impact on our Adjusted EBITDA as if the acquisition had occurred on December 31, 2023. Also included is a $1.3 million upward pro forma adjustment to exclude Adjusted EBITDA loss from the steel components business during the period, which was divested on August 16, 2024. 972.942.6500 15 arcosa.com Arcosa, Inc. Reconciliation of Adjusted EBITDA for Steel Components and Stavola (in millions) (unaudited) Three Months Ended June 30, Six Months Ended June 30, 2024 2024 Steel Components Operating Profit $ 2.0 $ 4.5 Add: Depreciation and amortization expense 2.4 4.8 Steel Components EBITDA 4.4 9.3 Steel Components Adjusted EBITDA $ 4.4 $ 9.3 Three Months Ended June 30, Six Months Ended June 30, 2025 2025 Stavola Operating Profit $ 22.9 $ 11.9 Add: Depreciation, depletion, and amortization expense 12.3 21.3 Stavola EBITDA 35.2 33.2 Stavola Adjusted EBITDA $ 35.2 $ 33.2 972.942.6500 16 arcosa.com"
+            }
+          ],
+          "result_sections": [
+            "Item 2.02 Results of Operation and Financial Condition. Attached as Exhibit 99.1 is the registrant\u2019s earnings release for the second quarter of 2025, issued August 7, 2025. This release is being furnished and shall not be deemed \u201cfiled\u201d for the purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise incorporated by reference into any filing pursuant to the Securities Act of 1933, as amended, or the Securities Exchange Act of 1934, as amended, except as otherwise expressly stated in such filing."
+          ],
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm",
+          "text": "aca-20250807 0001739445 false 0001739445 2025-08-07 2025-08-07 UNITED STATES SECURITIES AND EXCHANGE COMMISSION WASHINGTON, D.C. 20549 FORM 8-K CURRENT REPORT Pursuant to Section 13 or 15(d) of the Securities Exchange Act of 1934 Date of Report (Date of Earliest Event Reported): August 7, 2025 Arcosa, Inc. __________________________________________ (Exact name of registrant as specified in its charter) Delaware 1-38494 82-5339416 (State or other jurisdiction of incorporation) (Commission File Number) (I.R.S. Employer Identification No.) 500 N. Akard Street, Suite 400 Dallas, Texas 75201 (Address of principal executive offices) (Zip Code) Registrant's telephone number, including area code: ( 972 ) 942-6500 Not Applicable (Former name or former address, if changed since last report) Check the appropriate box below if the Form 8-K filing is intended to simultaneously satisfy the filing obligation of the registrant under any of the following provisions: \u2610 Written communications pursuant to Rule 425 under the Securities Act (17 CFR 230.425) \u2610 Soliciting material pursuant to Rule 14a-12 under the Exchange Act (17 CFR 240.14a-12) \u2610 Pre-commencement communications pursuant to Rule 14d-2(b) under the Exchange Act (17 CFR 240.14d-2(b)) \u2610 Pre-commencement communications pursuant to Rule 13e-4(c) under the Exchange Act (17 CFR 240.13e-4(c)) Securities registered pursuant to Section 12(b) of the Act: Title of each class Trading Symbol(s) Name of each exchange on which registered Common Stock ($0.01 par value) ACA New York Stock Exchange Indicate by check mark whether the registrant is an emerging growth company as defined in Rule 405 of the Securities Act of 1933 (\u00a7230.405 of this chapter) or Rule 12b-2 of the Securities Exchange Act of 1934 (\u00a7240.12b-2 of this chapter). Emerging growth company \u2610 If an emerging growth company, indicate by check mark if the registrant has elected not to use the extended transition period for complying with any new or revised financial accounting standards provided pursuant to Section 13(a) of the Exchange Act. \u2610 Item 2.02 Results of Operation and Financial Condition. Attached as Exhibit 99.1 is the registrant\u2019s earnings release for the second quarter of 2025, issued August 7, 2025. This release is being furnished and shall not be deemed \u201cfiled\u201d for the purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise incorporated by reference into any filing pursuant to the Securities Act of 1933, as amended, or the Securities Exchange Act of 1934, as amended, except as otherwise expressly stated in such filing. Item 9.01 Financial Statements and Exhibits. (d) Exhibits Exhibit No. Description 99.1 Arcosa, Inc. Earnings Release, dated August 7, 2025. 104 Cover Page Interactive Data File (embedded within the Inline XBRL document) SIGNATURES Pursuant to the requirements of the Securities Exchange Act of 1934, the registrant has duly caused this report to be signed on its behalf by the undersigned hereunto duly authorized. Arcosa, Inc. (Registrant) August 7, 2025 By: /s/ Gail M. Peck Name: Gail M. Peck Title: Chief Financial Officer"
+        },
+        {
+          "acceptance_timestamp_utc": "2025-05-06T20:20:08Z",
+          "accession_number": "0001739445-25-000065",
+          "form": "8-K",
+          "items": "2.02,9.01",
+          "legacy_primary": false,
+          "primary_document": "aca-20250506.htm",
+          "result_exhibits": [
+            {
+              "sha256": "a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1",
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm",
+              "text": "EX-99.1 2 exh991earningsrelease03312.htm EX-99.1 Document News Release FOR IMMEDIATE RELEASE Arcosa, Inc. Announces First Quarter 2025 Results \u2013 Adjusted EBITDA Growth of 26%, Adjusting for Sale of Steel Components, Outpacing Revenue Increase of 12% \u2013 Adjusted EBITDA Margin, Excluding Divestiture, Expands 190 Basis Points \u2013 Reaffirms Full-Year 2025 Consolidated Revenue and Adjusted EBITDA Guidance DALLAS, Texas - ARCOSA, Inc. - May 6, 2025: Arcosa, Inc. (NYSE: ACA) (\u201cArcosa,\u201d the \u201cCompany,\u201d \u201cWe,\u201d or \u201cOur\u201d), a provider of infrastructure-related products and solutions, today announced results for the first quarter ended March 31, 2025. First Quarter 2025 Highlights Three Months Ended March 31, 2025 2024 % Change ($ in millions, except per share amounts) Revenues $ 632.0 $ 598.6 6 % Revenues, excluding the impact of divested business (1) $ 632.0 $ 562.5 12 % Net income $ 23.6 $ 39.2 (40) % Adjusted Net Income (2) $ 24.0 $ 36.0 (33) % Diluted EPS $ 0.48 $ 0.80 (40) % Adjusted Diluted EPS (2) $ 0.49 $ 0.73 (33) % Adjusted EBITDA (2) $ 109.9 $ 92.0 19 % Adjusted EBITDA Margin (2) 17.4 % 15.4 % 200 bps Adjusted EBITDA, excluding impact from divested business (1)(2) $ 109.9 $ 87.1 26 % Adjusted EBITDA Margin, excluding impact from divested business (1)(2) 17.4 % 15.5 % 190 bps Net cash provided by operating activities $ (0.7) $ 80.5 (101) % Free Cash Flow (2) $ (29.7) $ 30.3 (198) % bps - basis points (1) Excludes the impact of the divested steel components business. Financial results for the steel components business were included in the Transportation Products segment as part of continuing operations to the date of sale, August 16, 2024. (2) Non-GAAP financial measure. See reconciliation tables included in this release. 972.942.6500 arcosa.com Antonio Carrillo, President and Chief Executive Officer, commented, \u201cOur first quarter results demonstrate solid execution of our strategic vision, driven by transformative actions undertaken over the past several years. Our strong results were driven by double-digit Adjusted EBITDA growth and approximately 275 basis points of organic margin expansion. \u201cEngineered Structures outperformed our expectations due to robust demand and operating improvements in utility structures, higher wind tower volumes, and the accretive impact of Ameron. The barge business also performed well during the quarter and continued to add to our backlog with a 1.7 book-to-bill. Construction Products faced unfavorable weather conditions, but our legacy business was able to expand margin even with lower volumes. The integration of the $1.2 billion Stavola acquisition, completed in October 2024, continues to progress very well and operations are ramping for the spring construction season in the Northeast. As expected, Stavola's contribution was dilutive to our first quarter results in its seasonally slowest quarter.\u201d Carrillo concluded, \"We are pleased to maintain leverage at 2.9 times Net Debt to Adjusted EBITDA, consistent with the start of the year despite first quarter seasonality. We remain committed to our goal of reducing leverage to 2.0-2.5 times over the next twelve months.\u201d 2025 Outlook and Guidance The Company is reaffirming its full year 2025 guidance: \u2022 Consolidated revenues range of $2.8 billion to $3.0 billion, an increase of 17% at the mid-point of the range compared to full year 2024 results excluding the divested steel components business. \u2022 Consolidated Adjusted EBITDA range of $545 million to $595 million, an increase of 30% at the mid-point of the range compared to full year 2024 results excluding the divested steel components business. \u2022 Guidance range includes the direct impact of tariffs, as currently outlined, which are expected to be immaterial. \u201c Arcosa had a strong start to 2025, and we r emain well positioned for long-term growth. With operations primarily in the U.S., we expect to benefit from continued investments in the nation's aging infrastructure and a new era of growth for the U.S. power market. Against the current backdrop of macro and policy uncertainty, most of our end markets continue to demonstrate resilience. Our teams are focused on strategic execution and operational excellence, while delivering on the solid backlogs in many of our businesses. We are encouraged by our first quarter results and are reaffirming our 2025 consolidated revenues and Adjusted EBITDA guidance,\u201d concluded Mr. Carrillo. 972.942.6500 2 arcosa.com First Quarter 2025 Results and Commentary All comparisons are versus the prior year quarter unless noted otherwise. Construction Products \u2022 Revenues increased 5% to $262.8 million driven by the contribution from the construction materials business of Stavola Holding Corporation and its affiliated entities (collectively \u201cStavola\u201d), acquired in October 2024, which added $26.4 million to revenues during the quarter. \u2022 Organic revenues declined 6% as higher pricing was offset by lower volumes, a decrease in freight revenue, and the divestiture of several small underperforming operations executed in the prior period. \u2022 Adjusted Segment EBITDA decreased 5% to $56.9 million and Adjusted Segment EBITDA Margin decreased 220 basis points to 21.7% from 23.9% in the prior period. Freight-Adjusted Segment EBITDA Margin was 23.6% compared to 26.4% in the prior period. \u2022 As expected, seasonally slow production at Stavola, located in the northeast and more impacted by the winter months than our legacy operations, negatively impacted first quarter results, reducing Adjusted Segment EBITDA by $2.0 million and Adjusted Segment EBITDA Margin by 320 basis points. \u2022 On an organic basis, Adjusted Segment EBITDA decreased 2% primarily due to lower volumes impacted by wet and abnormally cold weather at the beginning of the quarter. Improved unit profitability led by strong pricing drove 100 basis points of organic Adjusted Segment EBITDA Margin expansion. \u2022 Depreciation, depletion, and amortization expense increased $8.5 million, or 28%, primarily due to the acquisition of Stavola. Engineered Structures \u2022 Revenues for utility, wind, and related structures increased 23% to $284.8 million primarily due to higher volumes in our wind towers business and the contribution from the acquisition of Ameron Pole Products (\u201cAmeron\u201d), which closed in April 2024. Revenues for utility structures decreased slightly as higher volumes and improved product mix were offset by lower steel prices. \u2022 Adjusted Segment EBITDA increased 90% to $51.7 million, led by significant organic growth in our wind towers and utility structures businesses as well as the contribution from the acquired Ameron business. Margin expanded 650 basis points to 18.2% due to higher wind tower volumes, improved product mix and operating efficiencies in our utility structures business, and the accretive impact of Ameron. \u2022 The ongoing focus on grid hardening and reliability efforts and increased demand for electricity continue to drive strong order activity for our utility structures business. In wind towers, our backlog provides solid production visibility for 2025. We continue to engage with our customers on orders for next year while we await additional clarity on renewable energy policy discussions in Washington D.C. \u2022 At the end of the first quarter, the combined backlog for utility, wind, and related structures was $1,094.1 million compared to $1,366.7 million at the end of the first quarter of 2024. We expect to deliver approximately 59% of our current backlog during 2025 and the remainder through 2028. 972.942.6500 3 arcosa.com Transportation Products \u2022 Prior period results included revenues and Adjusted EBITDA of $36.1 million and $4.9 million, respectively, for the steel components business, which was divested in August 2024. \u2022 Revenues for our barge business increased 6% primarily due to higher tank barge deliveries. \u2022 Excluding the impact of the divested steel components business, Adjusted Segment EBITDA increased 13%, to $15.5 million, driven by higher tank barge deliveries and improved operating efficiencies. \u2022 Adjusted Segment EBITDA Margin was 18.4% compared to 17.2% in the prior period, excluding the divested steel components business. \u2022 During the quarter, we received barge orders totaling approximately $142 million representing a book-to-bill of 1.7 and extending our tank barge backlog deep into 2026. \u2022 Our barge backlog at the end of the quarter was $333.6 million compared to $294.4 million at the end of the first quarter of 2024. We expect to deliver approximately 63% of our current backlog during 2025. Corporate and Other Financial Notes \u2022 Excluding acquisition and divestiture-related costs, which have been excluded from Adjusted EBITDA, corporate expenses of $14.6 million were roughly flat with the prior period. \u2022 Acquisition and divestiture-related costs were $0.8 million in the first quarter compared to $1.6 million in the prior period. \u2022 Interest expense totaled $28.3 million, an increase of $20.0 million year-over-year driven by the additional debt incurred to finance the Stavola acquisition. \u2022 The effective tax rate for the first quarter was 19.2% compared to 17.1% in the prior period. The increase in the tax rate was primarily due to higher state taxes and foreign adjustments. Cash Flow and Liquidity \u2022 Operating cash flow was $(0.7) million during the first quarter, a decrease of $81.2 million compared to the prior period, driven by an increase in working capital. \u2022 Working capital was a $80.7 million net use of cash for the quarter compared to the prior period's $4.6 million net source of cash. The decrease in cash provided by working capital was primarily due to a $77.6 million increase in receivables. \u2022 The increase in receivables was primarily due to the timing of deliveries in our Engineered Structures and Transportation Products segments as well as Advanced Manufacturing Production tax credits recognized during the period, which were sold in April. \u2022 Capital expenditures in the first quarter were $34.0 million, compared to $54.4 million in the prior period. \u2022 Free Cash Flow for the quarter was $(29.7) million, down from $30.3 million in the prior period. \u2022 During the quarter, we received cash of $17.6 million due to escrow funds that were returned to Arcosa related to customary purchase price adjustments in connection with the Stavola acquisition. \u2022 Net Debt to Adjusted EBITDA was 2.9x for the trailing twelve months, consistent with the start of the year. \u2022 We ended the quarter with total liquidity of $867.8 million, including $167.9 million of cash and cash equivalents and full availability under our $700 million revolving credit facility. 972.942.6500 4 arcosa.com Non-GAAP Financial Information This earnings release contains financial measures that have not been prepared in accordance with U.S. generally accepted accounting principles (\u201cGAAP\u201d). Reconciliations of non-GAAP financial measures to the closest GAAP measure are included in the accompanying tables to this earnings release. Conference Call Information A conference call is scheduled for 8:30 a.m. Eastern Time on May 7, 2025 to discuss first quarter 2025 results. To listen to the conference call webcast, please visit the Investor Relations section of Arcosa\u2019s website at https://ir.arcosa.com. A slide presentation for this conference call will be posted on the Company\u2019s website in advance of the call at https://ir.arcosa.com. The audio conference call number is 800-723-6494 for domestic callers and 785-424-1619 for international callers. The conference ID is ARCOSA and the passcode is 13126. An audio playback will be available through 11:59 p.m. Eastern Time on May 21, 2025, by dialing 800-839-3012 for domestic callers and 402-220-7232 for international callers. A replay of the webcast will be available for one year on Arcosa\u2019s website at https://ir.arcosa.com/news-events/events-presentations. About Arcosa Arcosa, Inc. (NYSE:ACA), headquartered in Dallas, Texas, is a provider of infrastructure-related products and solutions with leading positions in construction, engineered structures, and transportation markets. Arcosa reports its financial results in three principal business segments: Construction Products, Engineered Structures, and Transportation Products. For more information, visit www.arcosa.com. 972.942.6500 5 arcosa.com Some statements in this release, which are not historical facts, are \u201cforward-looking statements\u201d as defined by the Private Securities Litigation Reform Act of 1995. Forward-looking statements include statements about Arcosa\u2019s estimates, expectations, beliefs, intentions or strategies for the future. Arcosa uses the words \u201canticipates,\u201d \u201cassumes,\u201d \u201cbelieves,\u201d \u201cestimates,\u201d \u201cexpects,\u201d \u201cintends,\u201d \u201cforecasts,\u201d \u201cmay,\u201d \u201cwill,\u201d \u201cshould,\u201d \u201cguidance,\u201d \u201coutlook,\u201d \u201cstrategy,\u201d \u201cplans,\u201d \u201cgoal,\u201d and similar expressions to identify these forward-looking statements. Forward-looking statements speak only as of the date of this release, and Arcosa expressly disclaims any obligation or undertaking to disseminate any updates or revisions to any forward-looking statement contained herein, except as required by federal securities laws. Forward-looking statements are based on management\u2019s current views and assumptions and involve risks and uncertainties that could cause actual results to differ materially from historical experience or our present expectations, including but not limited to assumptions, risks and uncertainties regarding the failure to successfully complete or integrate acquisitions, including Ameron and Stavola, or divest any business, or failure to achieve the expected benefits of acquisitions or divestitures; market conditions and customer demand for Arcosa\u2019s business products and services; the impact of Arcosa's level of indebtedness; the cyclical nature of, and seasonal or weather impact on, the industries in which Arcosa competes; competition and other competitive factors; governmental and regulatory factors; changing technologies; availability of growth opportunities; market recovery; ability to improve margins; the impact of inflation and costs of materials; assumptions regarding achievements of the expected benefits from the Inflation Reduction Act; the delivery or satisfaction of any backlog or firm orders; the impact of pandemics on Arcosa\u2019s business; the impact of tariffs; and Arcosa\u2019s ability to execute its long-term strategy, and such forward-looking statements are not guarantees of future performance. For further discussion of such risks and uncertainties, see \u201cRisk Factors\u201d and the \u201cForward-Looking Statements\u201d section of \u201cManagement's Discussion and Analysis of Financial Condition and Results of Operations\u201d in Arcosa's Form 10-K for the year ended December 31, 2024 and as may be revised and updated by Arcosa's Quarterly Reports on Form 10-Q and Current Reports on Form 8-K. INVESTOR CONTACTS Erin Drabek David Gold VP of Investor Relations ADVIS IR Y Partners T 972.942.6500 T 212.661.2220 InvestorResources@arcosa.com David.Gold@advisiry.com MEDIA CONTACT Media@arcosa.com TABLES TO FOLLOW 972.942.6500 6 arcosa.com Arcosa, Inc. Condensed Consolidated Statements of Operations (in millions, except per share amounts) (unaudited) Three Months Ended March 31, 2025 2024 Revenues $ 632.0 $ 598.6 Operating costs: Cost of revenues 506.6 487.0 Selling, general, and administrative expenses 73.7 69.1 Gain on disposition of property, plant, equipment, and other assets (3.8) (3.9) Gain on sale of businesses (0.3) (7.0) 576.2 545.2 Operating profit 55.8 53.4 Interest expense 28.3 8.3 Other income, net (1.7) (2.2) 26.6 6.1 Income before income taxes 29.2 47.3 Provision for income taxes 5.6 8.1 Net income $ 23.6 $ 39.2 Net income per common share: Basic $ 0.48 $ 0.81 Diluted $ 0.48 $ 0.80 Weighted average number of shares outstanding: Basic 48.7 48.5 Diluted 49.2 48.9 972.942.6500 7 arcosa.com Arcosa, Inc. Condensed Segment Data (in millions) (unaudited) Three Months Ended March 31, Revenues: 2025 2024 Aggregates $ 165.3 $ 158.9 Specialty materials and asphalt 73.2 63.2 Aggregates intrasegment sales (4.1) (0.4) Total Construction Materials 234.4 221.7 Construction site support 28.4 29.5 Construction Products 262.8 251.2 Utility, wind, and related structures 284.8 231.6 Engineered Structures 284.8 231.6 Inland barges 84.4 79.7 Steel components (1) \u2014 36.1 Transportation Products 84.4 115.8 Segment Totals before Eliminations 632.0 598.6 Eliminations \u2014 \u2014 Consolidated Total $ 632.0 $ 598.6 Three Months Ended March 31, Operating profit (loss): 2025 2024 Construction Products $ 18.3 $ 28.8 Engineered Structures 39.0 26.3 Transportation Products (1) 13.9 14.6 Segment Total 71.2 69.7 Corporate (15.4) (16.3) Consolidated Total $ 55.8 $ 53.4 Backlog: March 31, 2025 March 31, 2024 Engineered Structures: Utility, wind, and related structures $ 1,094.1 $ 1,366.7 Transportation Products: Inland barges $ 333.6 $ 294.4 (1) On August 16, 2024, the Company completed the divestiture of the steel components business. See Reconciliation of Adjusted EBITDA for Steel Components table for the contribution of the steel components business to operating profit, included above, for the three months ended March 31, 2024. 972.942.6500 8 arcosa.com Arcosa, Inc. Condensed Consolidated Balance Sheets (in millions) (unaudited) March 31, 2025 December 31, 2024 Current assets: Cash and cash equivalents $ 167.9 $ 187.3 Receivables, net of allowance 427.6 350.2 Inventories 365.0 359.9 Other 50.8 56.6 Total current assets 1,011.3 954.0 Property, plant, and equipment, net 2,117.9 2,129.4 Goodwill 1,343.2 1,361.2 Intangibles, net 331.0 338.3 Deferred income taxes 2.8 2.8 Other assets 127.7 129.8 $ 4,933.9 $ 4,915.5 Current liabilities: Accounts payable $ 283.5 $ 237.3 Accrued liabilities 144.1 166.4 Advance billings 71.2 100.2 Current portion of long-term debt 11.2 12.1 Total current liabilities 510.0 516.0 Debt 1,675.1 1,676.8 Deferred income taxes 202.8 200.6 Other liabilities 91.5 93.9 2,479.4 2,487.3 Stockholders' equity: Common stock 0.5 0.5 Capital in excess of par value 1,703.3 1,696.5 Retained earnings 770.0 748.9 Accumulated other comprehensive loss (17.7) (17.7) Treasury stock (1.6) \u2014 2,454.5 2,428.2 $ 4,933.9 $ 4,915.5 972.942.6500 9 arcosa.com Arcosa, Inc. Consolidated Statements of Cash Flows (in millions) (unaudited) Three Months Ended March 31, 2025 2024 Operating activities: Net income $ 23.6 $ 39.2 Adjustments to reconcile net income to net cash provided (required) by operating activities: Depreciation, depletion, and amortization 53.6 42.8 Stock-based compensation expense 6.7 6.7 Provision for deferred income taxes 1.3 7.1 Gain on disposition of property, plant, equipment, and other assets (3.8) (3.9) Gain on sale of businesses (0.3) (7.0) (Increase) decrease in other assets 1.4 (2.2) Increase (decrease) in other liabilities (2.9) (2.4) Other 0.4 (4.4) Changes in current assets and liabilities: (Increase) decrease in receivables (77.6) (10.2) (Increase) decrease in inventories (4.1) 4.5 (Increase) decrease in other current assets 5.8 1.2 Increase (decrease) in accounts payable 46.2 3.7 Increase (decrease) in advance billings (29.0) 5.0 Increase (decrease) in accrued liabilities (22.0) 0.4 Net cash provided (required) by operating activities (0.7) 80.5 Investing activities: Proceeds from disposition of property, plant, equipment, and other assets 5.0 4.2 Proceeds from sale of businesses \u2014 6.7 Capital expenditures (34.0) (54.4) Cash received (paid) for acquisitions 17.6 \u2014 Net cash required by investing activities (11.4) (43.5) Financing activities: Payments to retire debt (3.3) (1.7) Proceeds from issuance of debt \u2014 40.0 Dividends paid to common stockholders (2.5) (2.4) Purchase of shares to satisfy employee tax on vested stock (1.5) (1.2) Net cash provided (required) by financing activities (7.3) 34.7 Net increase (decrease) in cash and cash equivalents (19.4) 71.7 Cash and cash equivalents at beginning of period 187.3 104.8 Cash and cash equivalents at end of period $ 167.9 $ 176.5 972.942.6500 10 arcosa.com Arcosa, Inc. Reconciliation of Adjusted Net Income and Adjusted Diluted EPS (unaudited) GAAP does not define \u201cAdjusted Net Income\u201d and it should not be considered as an alternative to earnings measures defined by GAAP, including net income. We use this metric to assess the operating performance of our consolidated business. We adjust net income for certain items that are not reflective of the normal operations of our business to provide investors with what we believe is a more consistent comparison of earnings performance from period to period. Three Months Ended March 31, 2025 2024 (in millions) Net income $ 23.6 $ 39.2 Gain on sale of businesses, net of tax (0.2) (5.3) Impact of acquisition and divestiture-related expenses, net of tax (1) 0.6 2.1 Adjusted Net Income $ 24.0 $ 36.0 GAAP does not define \u201cAdjusted Diluted EPS\u201d and it should not be considered as an alternative to earnings measures defined by GAAP, including diluted EPS. We use this metric to assess the operating performance of our consolidated business. We adjust diluted EPS for certain items that are not reflective of the normal operations of our business to provide investors with what we believe is a more consistent comparison of earnings performance from period to period. Three Months Ended March 31, 2025 2024 (in dollars per share) Diluted EPS $ 0.48 $ 0.80 Gain on sale of businesses \u2014 (0.11) Impact of acquisition and divestiture-related expenses (1) 0.01 0.04 Adjusted Diluted EPS $ 0.49 $ 0.73 (1) Expenses associated with acquisitions and divestitures, including the cost impact of the fair value markup of acquired inventory, advisory and professional fees, integration, separation, and other transaction costs. 972.942.6500 11 arcosa.com Arcosa, Inc. Reconciliation of Adjusted EBITDA ($ in millions) (unaudited) \u201cEBITDA\u201d is defined as net income plus interest, taxes, depreciation, depletion, and amortization. \u201cAdjusted EBITDA\u201d is defined as EBITDA adjusted for certain items that are not reflective of the normal earnings of our business. GAAP does not define EBITDA or Adjusted EBITDA and they should not be considered as alternatives to earnings measures defined by GAAP, including net income. We use Adjusted EBITDA to assess the operating performance of our consolidated business, as a metric for incentive-based compensation, as a measure within our lending arrangements, and as a basis for strategic planning and forecasting as we believe that it closely correlates to long-term shareholder value. As a widely used metric by analysts, investors, and competitors in our industry, we believe Adjusted EBITDA also assists investors in comparing a company's performance on a consistent basis without regard to depreciation, depletion, amortization, and other items which can vary significantly depending on many factors. \u201cAdjusted EBITDA Margin\u201d is defined as Adjusted EBITDA divided by Revenues. Three Months Ended March 31, Full Year 2025 Guidance 2025 2024 Low High Revenues $ 632.0 $ 598.6 $ 2,800.0 $ 3,000.0 Net income 23.6 39.2 170.4 201.9 Add: Interest expense, net 26.5 6.6 104.0 107.0 Provision for income taxes 5.6 8.1 40.0 50.5 Depreciation, depletion, and amortization expense (1) 53.6 42.8 230.0 235.0 EBITDA 109.3 96.7 544.4 594.4 Add (less): Gain on sale of businesses (0.3) (7.0) (0.3) (0.3) Impact of acquisition and divestiture-related expenses (2) 0.8 2.8 0.8 0.8 Other, net (income) expense 0.1 (0.5) 0.1 0.1 Adjusted EBITDA $ 109.9 $ 92.0 $ 545.0 $ 595.0 Adjusted EBITDA Margin 17.4 % 15.4 % 19.5 % 19.8 % (1) Includes the impact of the fair value markup of acquired long-lived assets, subject to final purchase price adjustments. (2) Expenses associated with acquisitions and divestitures, including the cost impact of the fair value markup of acquired inventory, advisory and professional fees, integration, separation, and other transaction costs. 972.942.6500 12 arcosa.com Arcosa, Inc. Reconciliation of Adjusted Segment EBITDA ($ in millions) (unaudited) \u201cSegment EBITDA\u201d is defined as segment operating profit plus depreciation, depletion, and amortization. \u201cAdjusted Segment EBITDA\u201d is defined as Segment EBITDA adjusted for certain items that are not reflective of the normal earnings of our business. GAAP does not define Segment EBITDA or Adjusted Segment EBITDA and they should not be considered as alternatives to earnings measures defined by GAAP, including segment operating profit. We use Adjusted Segment EBITDA to assess the operating performance of our businesses, as a metric for incentive-based compensation, and as a basis for strategic planning and forecasting as we believe that it closely correlates to long-term shareholder value. As a widely used metric by analysts, investors, and competitors in our industry we believe Adjusted Segment EBITDA also assists investors in comparing a company's performance on a consistent basis without regard to depreciation, depletion, amortization, and other items, which can vary significantly depending on many factors. \u201cAdjusted Segment EBITDA Margin\u201d is defined as Adjusted Segment EBITDA divided by Revenues. Three Months Ended March 31, 2025 2024 Construction Products Revenues $ 262.8 $ 251.2 Operating Profit 18.3 28.8 Add: Depreciation, depletion, and amortization expense (1) 38.6 30.1 Segment EBITDA 56.9 58.9 Add: Impact of acquisition and divestiture-related expenses (2) \u2014 1.2 Adjusted Segment EBITDA $ 56.9 $ 60.1 Adjusted Segment EBITDA Margin 21.7 % 23.9 % Engineered Structures Revenues $ 284.8 $ 231.6 Operating Profit 39.0 26.3 Add: Depreciation and amortization expense (1) 12.7 7.9 Segment EBITDA 51.7 34.2 Less: Gain on sale of businesses \u2014 (7.0) Adjusted Segment EBITDA $ 51.7 $ 27.2 Adjusted Segment EBITDA Margin 18.2 % 11.7 % Transportation Products Revenues $ 84.4 $ 115.8 Operating Profit 13.9 14.6 Add: Depreciation and amortization expense 1.9 4.0 Segment EBITDA 15.8 18.6 Less: Gain on sale of businesses (0.3) \u2014 Adjusted Segment EBITDA $ 15.5 $ 18.6 Adjusted Segment EBITDA Margin 18.4 % 16.1 % Operating Loss - Corporate $ (15.4) $ (16.3) Add: Impact of acquisition and divestiture-related expenses - Corporate (2) 0.8 1.6 Add: Corporate depreciation expense 0.4 0.8 Adjusted EBITDA $ 109.9 $ 92.0 (1) Includes the impact of the fair value markup of acquired long-lived assets, subject to final purchase price adjustments. (2) Expenses associated with acquisitions and divestitures, including the cost impact of the fair value markup of acquired inventory, advisory and professional fees, integration, separation, and other transaction costs. 972.942.6500 13 arcosa.com Arcosa, Inc. Reconciliation of Freight-Adjusted Revenues for Construction Products ($ in millions) (unaudited) \u201cFreight-Adjusted Revenues\u201d for Construction Products is defined as segment revenues less freight and delivery, which are pass-through activities. GAAP does not define Freight-Adjusted Revenues and they should not be considered as alternatives to earnings measures defined by GAAP, including revenues. We use Freight-Adjusted Revenues in the review of our operating results. We also believe that this presentation is consistent with our competitors. As a widely used metric by analysts and investors, this metric assists in comparing a company's performance on a consistent basis. \u201cFreight-Adjusted Segment Margin\u201d is defined as Freight-Adjusted Revenues divided by Adjusted Segment EBITDA. Three Months Ended March 31, 2025 2024 Construction Products Revenues $ 262.8 $ 251.2 Less: Freight revenues 22.2 23.9 Freight-Adjusted Revenues $ 240.6 $ 227.3 Adjusted Segment EBITDA (1) $ 56.9 $ 60.1 Adjusted Segment EBITDA Margin (1) 21.7 % 23.9 % Freight-Adjusted Segment EBITDA Margin 23.6 % 26.4 % (1) See Reconciliation of Adjusted Segment EBITDA table. 972.942.6500 14 arcosa.com Arcosa, Inc. Reconciliation of Free Cash Flow and Net Debt to Adjusted EBITDA ($ in millions) (unaudited) GAAP does not define \u201cFree Cash Flow\u201d and it should not be considered as an alternative to cash flow measures defined by GAAP, including cash flow from operating activities. We define Free Cash Flow as cash provided by operating activities less capital expenditures net of the proceeds from the disposition of property, plant, equipment, and other assets. We use this metric to assess the liquidity of our consolidated business. We present Free Cash Flow for the convenience of investors who use it in their analysis and for shareholders who need to understand the metric we use to assess performance and monitor our cash and liquidity positions. Three Months Ended March 31, 2025 2024 Cash provided (required) by operating activities $ (0.7) $ 80.5 Capital expenditures (34.0) (54.4) Proceeds from disposition of property, plant, equipment, and other assets 5.0 4.2 Free Cash Flow $ (29.7) $ 30.3 GAAP does not define \u201cNet Debt\u201d and it should not be considered as an alternative to cash flow or liquidity measures defined by GAAP. The Company uses Net Debt, which it defines as total debt minus cash and cash equivalents to determine the extent to which the Company\u2019s outstanding debt obligations would be satisfied by its cash and cash equivalents on hand. The Company also uses \u201cNet Debt to Adjusted EBITDA\u201d, which it defines as Net Debt divided by Adjusted EBITDA for the trailing twelve months as a metric of its current leverage position. We present this metric for the convenience of investors who use such metrics in their analysis and for shareholders who need to understand the metrics we use to assess performance and monitor our cash and liquidity positions. March 31, 2025 Total debt excluding debt issuance costs $ 1,703.7 Cash and cash equivalents 167.9 Net Debt $ 1,535.8 Adjusted EBITDA (trailing twelve months) (1) $ 531.0 Net Debt to Adjusted EBITDA 2.9 (1) Adjusted EBITDA includes an upward pro forma adjustment for Stavola, acquired on October 1, 2024, of $69.2 million, which was Stavola's Adjusted EBITDA for the six months ended September 30, 2024, to reflect the six-month pro forma impact on our Adjusted EBITDA as if the acquisition had occurred on December 31, 2023. Also included is a $3.1 million downward pro forma adjustment to exclude Adjusted EBITDA from the steel components business during the period, which was divested on August 16, 2024. 972.942.6500 15 arcosa.com Arcosa, Inc. Reconciliation of Adjusted EBITDA for Steel Components and Stavola (in millions) (unaudited) Three Months Ended March 31, 2024 Steel Components: Operating Profit $ 2.5 Add: Depreciation and amortization expense 2.4 Steel Components EBITDA 4.9 Steel Components Adjusted EBITDA $ 4.9 Three Months Ended March 31, 2025 Stavola: Operating Profit $ (11.0) Add: Depreciation, depletion, and amortization expense 9.0 Stavola EBITDA (2.0) Stavola Adjusted EBITDA $ (2.0) 972.942.6500 16 arcosa.com"
+            }
+          ],
+          "result_sections": [
+            "Item 2.02 Results of Operation and Financial Condition. Attached as Exhibit 99.1 is the registrant\u2019s earnings release for the first quarter of 2025, issued May 6, 2025. This release is being furnished and shall not be deemed \u201cfiled\u201d for the purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise incorporated by reference into any filing pursuant to the Securities Act of 1933, as amended, or the Securities Exchange Act of 1934, as amended, except as otherwise expressly stated in such filing."
+          ],
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm",
+          "text": "aca-20250506 0001739445 false 0001739445 2025-05-06 2025-05-06 UNITED STATES SECURITIES AND EXCHANGE COMMISSION WASHINGTON, D.C. 20549 FORM 8-K CURRENT REPORT Pursuant to Section 13 or 15(d) of the Securities Exchange Act of 1934 Date of Report (Date of Earliest Event Reported): May 6, 2025 Arcosa, Inc. __________________________________________ (Exact name of registrant as specified in its charter) Delaware 1-38494 82-5339416 (State or other jurisdiction of incorporation) (Commission File Number) (I.R.S. Employer Identification No.) 500 N. Akard Street, Suite 400 Dallas, Texas 75201 (Address of principal executive offices) (Zip Code) Registrant's telephone number, including area code: ( 972 ) 942-6500 Not Applicable (Former name or former address, if changed since last report) Check the appropriate box below if the Form 8-K filing is intended to simultaneously satisfy the filing obligation of the registrant under any of the following provisions: \u2610 Written communications pursuant to Rule 425 under the Securities Act (17 CFR 230.425) \u2610 Soliciting material pursuant to Rule 14a-12 under the Exchange Act (17 CFR 240.14a-12) \u2610 Pre-commencement communications pursuant to Rule 14d-2(b) under the Exchange Act (17 CFR 240.14d-2(b)) \u2610 Pre-commencement communications pursuant to Rule 13e-4(c) under the Exchange Act (17 CFR 240.13e-4(c)) Securities registered pursuant to Section 12(b) of the Act: Title of each class Trading Symbol(s) Name of each exchange on which registered Common Stock ($0.01 par value) ACA New York Stock Exchange Indicate by check mark whether the registrant is an emerging growth company as defined in Rule 405 of the Securities Act of 1933 (\u00a7230.405 of this chapter) or Rule 12b-2 of the Securities Exchange Act of 1934 (\u00a7240.12b-2 of this chapter). Emerging growth company \u2610 If an emerging growth company, indicate by check mark if the registrant has elected not to use the extended transition period for complying with any new or revised financial accounting standards provided pursuant to Section 13(a) of the Exchange Act. \u2610 Item 2.02 Results of Operation and Financial Condition. Attached as Exhibit 99.1 is the registrant\u2019s earnings release for the first quarter of 2025, issued May 6, 2025. This release is being furnished and shall not be deemed \u201cfiled\u201d for the purposes of Section 18 of the Securities Exchange Act of 1934, as amended, or otherwise incorporated by reference into any filing pursuant to the Securities Act of 1933, as amended, or the Securities Exchange Act of 1934, as amended, except as otherwise expressly stated in such filing. Item 9.01 Financial Statements and Exhibits. (d) Exhibits Exhibit No. Description 99.1 Arcosa, Inc. Earnings Release, dated May 6, 2025. 104 Cover Page Interactive Data File (embedded within the Inline XBRL document) SIGNATURES Pursuant to the requirements of the Securities Exchange Act of 1934, the registrant has duly caused this report to be signed on its behalf by the undersigned hereunto duly authorized. Arcosa, Inc. (Registrant) May 6, 2025 By: /s/ Gail M. Peck Name: Gail M. Peck Title: Chief Financial Officer"
+        }
+      ]
+    }
+  ],
+  "origin": "Public SEC excerpts and exact filing contexts; TWO synthetic operator approvals are constructed only inside tests. This fixture contains no real approval or plan.",
+  "snapshots": [
+    {
+      "canonical": {
+        "authority": [
+          {
+            "company_id": 22,
+            "fiscal_quarter": "Q1",
+            "fiscal_year": 2025,
+            "quarter_id": 800,
+            "result_publication_confidence": null,
+            "result_publication_evidence_reference": null,
+            "result_publication_source": null,
+            "result_publication_timestamp_utc": null,
+            "rule_version": "result_publication_v1",
+            "selected_evidence_id": null,
+            "status": "NOT_FOUND",
+            "status_reason": "NO_ITEM_2_02_FOUND",
+            "updated_at_utc": "2026-09-28T17:12:42Z",
+            "verified_at_utc": null
+          }
+        ],
+        "ciks": [
+          {
+            "cik_display": "0001739445",
+            "cik_normalized": "0001739445",
+            "company_id": 22,
+            "confidence": "HIGH",
+            "created_at_utc": "2026-08-30T20:54:47Z",
+            "derivation": "PARSED_FROM_SEC_COMPANYFACTS_URL",
+            "source": "LOCAL_VERIFIED_BOOTSTRAP",
+            "source_field": "L\u00e4hde",
+            "source_name": "v3_active_tickers_99_27",
+            "source_row_id": "23",
+            "source_table": "v3_active_tickers_99_27.csv",
+            "source_type": "LOCAL_VERIFIED_BOOTSTRAP",
+            "source_value": "https://data.sec.gov/api/xbrl/companyfacts/CIK0001739445.json",
+            "status": "ACTIVE"
+          }
+        ],
+        "company": [
+          {
+            "company_id": 22,
+            "company_key": "SEC_CIK:0001739445",
+            "company_name": "ACA",
+            "created_at_utc": "2026-08-30T20:54:47Z",
+            "status": "ACTIVE",
+            "updated_at_utc": "2026-08-31T06:24:31Z"
+          }
+        ],
+        "evidence": [],
+        "key": [
+          22,
+          2025,
+          "Q1"
+        ],
+        "quarter": [
+          {
+            "company_id": 22,
+            "created_at_utc": "2026-10-09T04:27:29Z",
+            "first_public_result_date": "2025-05-07",
+            "fiscal_quarter": "Q1",
+            "fiscal_year": 2025,
+            "identity_provider": "SHARADAR_ARQ",
+            "identity_status": "ACCEPTED",
+            "period_end": "2025-03-31",
+            "quarter_id": 800,
+            "source_availability_date": "2025-05-07",
+            "source_fiscalperiod": "2025-Q1",
+            "source_reportperiod": "2025-03-31",
+            "updated_at_utc": "2026-10-09T04:27:29Z"
+          }
+        ],
+        "security": [
+          {
+            "active": 1,
+            "company_id": 22,
+            "created_at_utc": "2026-08-30T20:54:47Z",
+            "current_ticker": "ACA",
+            "exchange": "NYSE",
+            "security_id": 22,
+            "updated_at_utc": "2026-08-31T06:24:31Z",
+            "valid_from": null,
+            "valid_to": null
+          }
+        ]
+      },
+      "company_capture_sha256": "8aeda87b3c482a3fced68f501472cc6be2678fdd656e820ad420ccd83c4dcb16",
+      "company_open_scope": [
+        {
+          "canonical_quarter_id": 800,
+          "company_id": 22,
+          "company_key": "SEC_CIK:0001739445",
+          "company_name": "ACA",
+          "context_date": "2025-05-07",
+          "first_public_result_date": "2025-05-07",
+          "fiscal_quarter": "Q1",
+          "fiscal_year": 2025,
+          "identity_status": "ACCEPTED",
+          "period_end": "2025-03-31",
+          "quarter_id": 800,
+          "result_publication_confidence": null,
+          "result_publication_evidence_reference": null,
+          "result_publication_source": null,
+          "result_publication_timestamp_utc": null,
+          "rule_version": "result_publication_v1",
+          "selected_evidence_id": null,
+          "source_availability_date": "2025-05-07",
+          "status": "NOT_FOUND",
+          "status_reason": "NO_ITEM_2_02_FOUND",
+          "updated_at_utc": "2026-09-28T17:12:42Z",
+          "verified_at_utc": null
+        },
+        {
+          "canonical_quarter_id": 801,
+          "company_id": 22,
+          "company_key": "SEC_CIK:0001739445",
+          "company_name": "ACA",
+          "context_date": "2025-08-08",
+          "first_public_result_date": "2025-08-08",
+          "fiscal_quarter": "Q2",
+          "fiscal_year": 2025,
+          "identity_status": "ACCEPTED",
+          "period_end": "2025-06-30",
+          "quarter_id": 801,
+          "result_publication_confidence": null,
+          "result_publication_evidence_reference": null,
+          "result_publication_source": null,
+          "result_publication_timestamp_utc": null,
+          "rule_version": "result_publication_v1",
+          "selected_evidence_id": null,
+          "source_availability_date": "2025-08-08",
+          "status": "NOT_FOUND",
+          "status_reason": "NO_ITEM_2_02_FOUND",
+          "updated_at_utc": "2026-09-28T17:12:42Z",
+          "verified_at_utc": null
+        }
+      ],
+      "competing_context": false,
+      "evidence": [
+        {
+          "accession_number": "0001739445-25-000065",
+          "company_id": 22,
+          "document_id": "aca-20250506.htm",
+          "evidence_hash": "5319e5b72d21c90eafc14d87f261ebf2a5bc53f3e9350215903fb3c6b2f881bb",
+          "evidence_id": "rpe_5319e5b72d21c90eafc14d87",
+          "filing_form": "8-K",
+          "fiscal_quarter": "Q1",
+          "fiscal_year": 2025,
+          "item_2_02_status": "PRESENT_AND_DOCUMENT_CONFIRMED",
+          "matching_method": "SEC_LINKED_EXHIBIT:{\"exhibits\":[{\"method\":\"CIK_ITEM_2_02_EXACT_PERIOD_END\",\"sha256\":\"a473962e39360ede0326e54fa034e0bc96c7023b755737f2928d83e4480b0de1\",\"url\":\"https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/exh991earningsrelease03312.htm\"}],\"fiscal_identity\":[22,2025,\"Q1\"],\"parent_accession\":\"0001739445-25-000065\",\"version\":1}",
+          "quarter_id": 800,
+          "reviewed_manual": 0,
+          "rule_version": "result_publication_v1",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000065/aca-20250506.htm",
+          "source_timestamp_utc": "2025-05-06T20:20:08Z",
+          "source_type": "SEC_8K_ITEM_2_02"
+        }
+      ],
+      "identity_tables": {
+        "fundamentals_economic_structural_event": [],
+        "provider_security_identity": []
+      },
+      "policy_result": "UNIQUE",
+      "resolver_context_sha256": "dbcb566147c73014d10d69c6d0277a04e971e633a935365f1728a7424de96bbc",
+      "reviewed_input_hashes": {},
+      "source_proofs_valid": true
+    },
+    {
+      "canonical": {
+        "authority": [
+          {
+            "company_id": 22,
+            "fiscal_quarter": "Q2",
+            "fiscal_year": 2025,
+            "quarter_id": 801,
+            "result_publication_confidence": null,
+            "result_publication_evidence_reference": null,
+            "result_publication_source": null,
+            "result_publication_timestamp_utc": null,
+            "rule_version": "result_publication_v1",
+            "selected_evidence_id": null,
+            "status": "NOT_FOUND",
+            "status_reason": "NO_ITEM_2_02_FOUND",
+            "updated_at_utc": "2026-09-28T17:12:42Z",
+            "verified_at_utc": null
+          }
+        ],
+        "ciks": [
+          {
+            "cik_display": "0001739445",
+            "cik_normalized": "0001739445",
+            "company_id": 22,
+            "confidence": "HIGH",
+            "created_at_utc": "2026-08-30T20:54:47Z",
+            "derivation": "PARSED_FROM_SEC_COMPANYFACTS_URL",
+            "source": "LOCAL_VERIFIED_BOOTSTRAP",
+            "source_field": "L\u00e4hde",
+            "source_name": "v3_active_tickers_99_27",
+            "source_row_id": "23",
+            "source_table": "v3_active_tickers_99_27.csv",
+            "source_type": "LOCAL_VERIFIED_BOOTSTRAP",
+            "source_value": "https://data.sec.gov/api/xbrl/companyfacts/CIK0001739445.json",
+            "status": "ACTIVE"
+          }
+        ],
+        "company": [
+          {
+            "company_id": 22,
+            "company_key": "SEC_CIK:0001739445",
+            "company_name": "ACA",
+            "created_at_utc": "2026-08-30T20:54:47Z",
+            "status": "ACTIVE",
+            "updated_at_utc": "2026-08-31T06:24:31Z"
+          }
+        ],
+        "evidence": [],
+        "key": [
+          22,
+          2025,
+          "Q2"
+        ],
+        "quarter": [
+          {
+            "company_id": 22,
+            "created_at_utc": "2026-10-09T04:27:29Z",
+            "first_public_result_date": "2025-08-08",
+            "fiscal_quarter": "Q2",
+            "fiscal_year": 2025,
+            "identity_provider": "SHARADAR_ARQ",
+            "identity_status": "ACCEPTED",
+            "period_end": "2025-06-30",
+            "quarter_id": 801,
+            "source_availability_date": "2025-08-08",
+            "source_fiscalperiod": "2025-Q2",
+            "source_reportperiod": "2025-06-30",
+            "updated_at_utc": "2026-10-09T04:27:29Z"
+          }
+        ],
+        "security": [
+          {
+            "active": 1,
+            "company_id": 22,
+            "created_at_utc": "2026-08-30T20:54:47Z",
+            "current_ticker": "ACA",
+            "exchange": "NYSE",
+            "security_id": 22,
+            "updated_at_utc": "2026-08-31T06:24:31Z",
+            "valid_from": null,
+            "valid_to": null
+          }
+        ]
+      },
+      "company_capture_sha256": "8aeda87b3c482a3fced68f501472cc6be2678fdd656e820ad420ccd83c4dcb16",
+      "company_open_scope": [
+        {
+          "canonical_quarter_id": 800,
+          "company_id": 22,
+          "company_key": "SEC_CIK:0001739445",
+          "company_name": "ACA",
+          "context_date": "2025-05-07",
+          "first_public_result_date": "2025-05-07",
+          "fiscal_quarter": "Q1",
+          "fiscal_year": 2025,
+          "identity_status": "ACCEPTED",
+          "period_end": "2025-03-31",
+          "quarter_id": 800,
+          "result_publication_confidence": null,
+          "result_publication_evidence_reference": null,
+          "result_publication_source": null,
+          "result_publication_timestamp_utc": null,
+          "rule_version": "result_publication_v1",
+          "selected_evidence_id": null,
+          "source_availability_date": "2025-05-07",
+          "status": "NOT_FOUND",
+          "status_reason": "NO_ITEM_2_02_FOUND",
+          "updated_at_utc": "2026-09-28T17:12:42Z",
+          "verified_at_utc": null
+        },
+        {
+          "canonical_quarter_id": 801,
+          "company_id": 22,
+          "company_key": "SEC_CIK:0001739445",
+          "company_name": "ACA",
+          "context_date": "2025-08-08",
+          "first_public_result_date": "2025-08-08",
+          "fiscal_quarter": "Q2",
+          "fiscal_year": 2025,
+          "identity_status": "ACCEPTED",
+          "period_end": "2025-06-30",
+          "quarter_id": 801,
+          "result_publication_confidence": null,
+          "result_publication_evidence_reference": null,
+          "result_publication_source": null,
+          "result_publication_timestamp_utc": null,
+          "rule_version": "result_publication_v1",
+          "selected_evidence_id": null,
+          "source_availability_date": "2025-08-08",
+          "status": "NOT_FOUND",
+          "status_reason": "NO_ITEM_2_02_FOUND",
+          "updated_at_utc": "2026-09-28T17:12:42Z",
+          "verified_at_utc": null
+        }
+      ],
+      "competing_context": false,
+      "evidence": [
+        {
+          "accession_number": "0001739445-25-000113",
+          "company_id": 22,
+          "document_id": "aca-20250807.htm",
+          "evidence_hash": "6c6fdcb24c8d290c1951626739c7cc2679966454f3f2a02a184afa43f405236f",
+          "evidence_id": "rpe_6c6fdcb24c8d290c19516267",
+          "filing_form": "8-K",
+          "fiscal_quarter": "Q2",
+          "fiscal_year": 2025,
+          "item_2_02_status": "PRESENT_AND_DOCUMENT_CONFIRMED",
+          "matching_method": "SEC_LINKED_EXHIBIT:{\"exhibits\":[{\"method\":\"CIK_ITEM_2_02_EXACT_PERIOD_END\",\"sha256\":\"65bd65e55cb6f7ddadbdb8814f2378ab946835da605d9b75ff061ccb19cada94\",\"url\":\"https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/exh991earningsrelease06302.htm\"}],\"fiscal_identity\":[22,2025,\"Q2\"],\"parent_accession\":\"0001739445-25-000113\",\"version\":1}",
+          "quarter_id": 801,
+          "reviewed_manual": 0,
+          "rule_version": "result_publication_v1",
+          "source_reference": "https://www.sec.gov/Archives/edgar/data/1739445/000173944525000113/aca-20250807.htm",
+          "source_timestamp_utc": "2025-08-07T20:37:22Z",
+          "source_type": "SEC_8K_ITEM_2_02"
+        }
+      ],
+      "identity_tables": {
+        "fundamentals_economic_structural_event": [],
+        "provider_security_identity": []
+      },
+      "policy_result": "UNIQUE",
+      "resolver_context_sha256": "d198a74fbaf3e26fa53f75f84106f1bf9b0ab23a8d8fbfc8500874a28a1c1ea1",
+      "reviewed_input_hashes": {},
+      "source_proofs_valid": true
+    }
+  ]
+}
