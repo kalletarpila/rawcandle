@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sqlite3
 from contextlib import AbstractContextManager
 from pathlib import Path
@@ -64,8 +66,16 @@ def _run_dir(run_id: str, run_root: Path) -> Path:
     if not run_id or Path(run_id).name != run_id or "/" in run_id or "\\" in run_id:
         raise RunAcceptanceCleanupError("CLEANUP_RUN_ID_INVALID")
     root = run_root.resolve()
-    path = root / run_id
-    if path.is_symlink() or not path.is_dir() or path.resolve().parent != root:
+    roots = [root]
+    # Only the established sibling operation directory, never a recursive search.
+    if root.name == "admin_runs":
+        roots.append(root.parent / "publication_drains")
+    candidates = [base / run_id for base in roots
+                  if (base / run_id).exists() or (base / run_id).is_symlink()]
+    if len(candidates) != 1:
+        raise RunAcceptanceCleanupError("CLEANUP_RUN_DIRECTORY_INVALID")
+    path = candidates[0]
+    if path.is_symlink() or path.parent.is_symlink() or not path.is_dir() or path.resolve().parent != path.parent.resolve():
         raise RunAcceptanceCleanupError("CLEANUP_RUN_DIRECTORY_INVALID")
     return path.resolve()
 
@@ -254,6 +264,136 @@ def _validated_manifest(
     return validated
 
 
+def _drain_check(condition: bool, reason: str) -> None:
+    if not condition:
+        raise RunAcceptanceCleanupError("PUBLICATION_DRAIN_" + reason)
+
+
+def _drain_verification(record: Mapping[str, Any]) -> None:
+    _drain_check(isinstance(record, Mapping)
+                 and record.get("quick_check") == "ok"
+                 and type(record.get("foreign_key_errors")) is int
+                 and record["foreign_key_errors"] == 0
+                 and type(record.get("size")) is int and record["size"] > 0
+                 and re.fullmatch(r"[0-9a-f]{64}", str(record.get("sha256", ""))) is not None,
+                 "VERIFICATION_INVALID")
+
+
+def _publication_drain_result(result, *, run_id, journal_path, backup_root, live_paths):
+    """Read-only adapter; the existing acceptance function owns all deletion."""
+    _drain_check(("mode" not in result or result["mode"] == "PRODUCTION_APPLY")
+                 and ("outcome" not in result or result["outcome"] == "COMPLETED"), "RESULT_DISAGREEMENT")
+    _drain_check(result.get("run_id") == run_id and result.get("apply") is True
+                 and result.get("status") == "SUCCESS" and result.get("journal_state") == "COMPLETED"
+                 and result.get("rollback") == {"status": "NOT_REQUIRED"}, "TERMINAL_EVIDENCE_INVALID")
+    journal = load_journal(journal_path)
+    _drain_check(isinstance(journal, dict), "JOURNAL_MISSING")
+    _drain_check(journal.get("operation_type") == "RESULT_PUBLICATION_BACKLOG_DRAIN"
+                 and journal.get("production_run_id") == run_id
+                 and journal.get("publication_mode") == "GENERATION_POINTER", "JOURNAL_RUN_MISMATCH")
+    _drain_check(all(journal.get(k) == v for k,v in {
+        "state":"COMPLETED", "current_publication_step":"COMPLETED", "postflight_state":"PASSED",
+        "generation_activation_state":"ACTIVATED_AND_VERIFIED", "rollback_recovery_state":"NOT_REQUIRED",
+    }.items()), "JOURNAL_NOT_TERMINAL")
+    # An embedded or archived alternative is never silently preferred over the canonical journal.
+    _drain_check("journal" not in result or result["journal"] == journal, "JOURNAL_DISAGREEMENT")
+    _drain_check(result.get("activated_generation") == journal.get("new_generation_id") == run_id,
+                 "GENERATION_MISMATCH")
+    reviewed = result.get("reviewed_plan")
+    scope = result.get("scope_evidence")
+    _drain_check(isinstance(reviewed, dict) and reviewed.get("scope_mode") == "REVIEWED_APPLY_PLAN"
+                 and isinstance(scope, dict) and scope == journal.get("scope_evidence")
+                 and all(scope.get(k) == v for k,v in reviewed.items())
+                 and re.fullmatch(r"[0-9a-f]{64}",str(reviewed.get("plan_fingerprint", ""))) is not None,
+                 "REVIEWED_SCOPE_MISMATCH")
+    publication = result.get("publication", {})
+    count = reviewed.get("prepared_key_count")
+    selected = scope.get("selected_natural_keys")
+    _drain_check(type(count) is int and count > 0 and isinstance(selected,list)
+                 and len(selected) == count and len({tuple(k) for k in selected}) == count
+                 and publication.get("status") == "SUCCESS"
+                 and all(publication.get(k) == count for k in ("total_processed","new_verified","applied_count"))
+                 and publication.get("unprocessed_selected") == 0
+                 and publication.get("skipped_error_natural_keys") == []
+                 and publication.get("applied_natural_keys") == scope.get("applied_natural_keys") == selected
+                 and scope.get("selected_count") == scope.get("applied_count") == count
+                 and hashlib.sha256(json.dumps(selected,separators=(",", ":"),ensure_ascii=True).encode()).hexdigest()
+                     == reviewed.get("prepared_keys_fingerprint"), "PUBLICATION_SCOPE_MISMATCH")
+    old = journal.get("old_generation", {})
+    _drain_check(old.get("generation_id") == result.get("source_generation")
+                 and old.get("layout") == "GENERATION_DIRECTORY", "OLD_GENERATION_MISMATCH")
+    active_path = Path(journal["active_generation_manifest_path"])
+    active = _load_json(active_path)
+    new_dir = Path(journal["new_generation_dir"])
+    old_dir = Path(old["generation_dir"])
+    generation_root = active_path.parent / "fundamentals_generations"
+    _drain_check(new_dir == generation_root / run_id and not new_dir.is_symlink()
+                 and old_dir.parent == generation_root and old_dir.name == old["generation_id"]
+                 and not old_dir.is_symlink() and new_dir != old_dir, "GENERATION_PATH_INVALID")
+    published = _load_json(new_dir / "generation_manifest.json")
+    original = _load_json(old_dir / "generation_manifest.json")
+    _drain_check(active == published == journal.get("new_generation_manifest")
+                 and published.get("generation_id") == run_id
+                 and original == old.get("manifest") and original.get("generation_id") == old["generation_id"],
+                 "GENERATION_MANIFEST_MISMATCH")
+    for item in (published.get("roles"), original.get("roles"), old.get("roles"),
+                 result.get("backups"), result.get("source_verification"), result.get("postflight"), journal.get("roles")):
+        _drain_check(isinstance(item, dict) and set(item) == KNOWN_ROLES, "ROLE_SET_INVALID")
+    expected_dir = backup_root.resolve() / run_id
+    _drain_check(not expected_dir.is_symlink() and expected_dir.is_dir()
+                 and {p.name for p in expected_dir.iterdir()} == {role+".db" for role in KNOWN_ROLES},
+                 "BACKUP_INVENTORY_INVALID")
+    sources = _generation_publication_sources(dict(result, journal=journal), run_id=run_id)
+    manifest = _validated_manifest(result, run_id=run_id, backup_root=backup_root,
+                                   live_paths=live_paths, source_paths=sources)
+    for role in sorted(KNOWN_ROLES):
+        backup = result["backups"][role]; verification = backup["verification"]
+        source = result["source_verification"][role]; post = result["postflight"][role]; jr = journal["roles"][role]
+        for record in (verification, source, post):
+            _drain_verification(record)
+        old_name, new_name = original["roles"][role], published["roles"][role]
+        _drain_check(isinstance(old_name,str) and Path(old_name).name == old_name
+                     and isinstance(new_name,str) and Path(new_name).name == new_name, "ROLE_PATH_INVALID")
+        old_path, new_path = old_dir / old_name, new_dir / new_name
+        expected_backup = expected_dir / (role+".db")
+        _drain_check(sources[role] == old_path.resolve() and backup.get("source") == str(old_path)
+                     and Path(live_paths[role]).resolve() == new_path.resolve()
+                     and backup.get("backup") == jr.get("backup_path") == str(expected_backup)
+                     and jr.get("production_path") == str(new_path), "ROLE_LINEAGE_MISMATCH")
+        _drain_check(verification["sha256"] == source["sha256"] == backup.get("source_sha256")
+                     == jr.get("old_production_fingerprint") == jr.get("verified_backup_fingerprint")
+                     and verification["size"] == source["size"]
+                     and post["sha256"] == jr.get("candidate_fingerprint")
+                     and jr.get("candidate_replacement_verified") is True
+                     and jr.get("replacement_state") == "GENERATION_ACTIVATED_AND_VERIFIED",
+                     "ROLE_EVIDENCE_MISMATCH")
+        for generation,record in ((original,source),(published,post)):
+            proof=generation["role_verification"][role]
+            _drain_check(proof.get("sha256") == record["sha256"] and proof.get("size_bytes") == record["size"]
+                         and proof.get("quick_check") == "ok", "MANIFEST_ROLE_MISMATCH")
+        path=manifest[role]["path"]
+        _drain_check(path.stat().st_size == verification["size"]
+                     and sha256_file(path) == verification["sha256"], "BACKUP_HASH_OR_SIZE_MISMATCH")
+        _integrity(path)
+        _integrity(new_path)
+        _drain_check(sha256_file(new_path) == post["sha256"] and new_path.stat().st_size == post["size"],
+                     "PUBLISHED_ROLE_CHANGED")
+    _drain_check(load_journal(journal_path) == journal and _load_json(active_path) == active,
+                 "JOURNAL_OR_ACTIVE_MANIFEST_CHANGED")
+    # In-memory view only. Neither the historical result nor its journal is rewritten.
+    return dict(result, mode="PRODUCTION_APPLY", outcome="COMPLETED", journal=journal,
+                acceptance_run_kind="PUBLICATION_DRAIN")
+
+
+def _acceptance_result(result, *, directory, run_id, journal_path, backup_root, live_paths):
+    if result.get("operation") == "RESULT_PUBLICATION_BACKLOG_DRAIN":
+        return _publication_drain_result(result, run_id=run_id, journal_path=journal_path,
+                                         backup_root=backup_root, live_paths=live_paths)
+    if directory.parent.name == "publication_drains":
+        raise RunAcceptanceCleanupError("CLEANUP_RUN_KIND_UNKNOWN")
+    return dict(result, acceptance_run_kind="ADMIN_PRODUCTION_APPLY")
+
+
 def inspect_cleanup_eligibility(
     run_id: str,
     *,
@@ -262,7 +402,7 @@ def inspect_cleanup_eligibility(
     journal_path: Path = ACTIVE_JOURNAL_PATH,
     live_paths: Mapping[str, Path] | None = None,
 ) -> dict[str, Any]:
-    """Return cheap detail-view eligibility without hashing backup files."""
+    """Inspect one explicit run; publication drains additionally verify exact bytes/integrity."""
     live_paths = live_paths or BatchAddTickerPaths().as_dict()
     try:
         directory = _run_dir(run_id, run_root)
@@ -276,7 +416,9 @@ def inspect_cleanup_eligibility(
                 "backup_count": len(prior.get("files_deleted") or []),
                 "bytes_freed": int(prior.get("bytes_freed") or 0),
             }
-        result = _load_json(directory / "result.json")
+        result = _acceptance_result(_load_json(directory / "result.json"), directory=directory,
+                                    run_id=run_id, journal_path=journal_path,
+                                    backup_root=backup_root, live_paths=live_paths)
         if result.get("run_id") != run_id:
             raise RunAcceptanceCleanupError("CLEANUP_RUN_RESULT_MISMATCH")
         if result.get("mode") != "PRODUCTION_APPLY":
@@ -306,6 +448,7 @@ def inspect_cleanup_eligibility(
         return {
             "run_id": run_id,
             "status": "ELIGIBLE",
+            "run_kind": result["acceptance_run_kind"],
             "eligible": True,
             "reason": "Eligible for explicit operator acceptance",
             "backup_count": len(manifest),
@@ -313,7 +456,7 @@ def inspect_cleanup_eligibility(
             "backup_files": [str(record["path"]) for record in manifest.values()],
             "journal_state": state,
         }
-    except (OSError, KeyError, TypeError, AttributeError, RunAcceptanceCleanupError) as exc:
+    except (OSError, KeyError, TypeError, AttributeError, ValueError, PublicationRecoveryError, RunAcceptanceCleanupError) as exc:
         return {
             "run_id": run_id,
             "status": "NOT_ELIGIBLE",
@@ -369,7 +512,9 @@ def _accept_run_and_cleanup_backups_locked(
     )
     if not eligibility.get("eligible"):
         raise RunAcceptanceCleanupError(str(eligibility.get("reason") or "CLEANUP_NOT_ELIGIBLE"))
-    result = _load_json(directory / "result.json")
+    result = _acceptance_result(_load_json(directory / "result.json"), directory=directory,
+                                run_id=run_id, journal_path=journal_path,
+                                backup_root=backup_root, live_paths=live_paths)
     source_paths = _generation_publication_sources(result, run_id=run_id)
     manifest = _validated_manifest(
         result,
@@ -404,7 +549,9 @@ def _accept_run_and_cleanup_backups_locked(
         live_before[role] = live_integrity
 
     # Re-read terminal evidence and journal immediately before crossing the delete boundary.
-    current = _load_json(directory / "result.json")
+    current = _acceptance_result(_load_json(directory / "result.json"), directory=directory,
+                                 run_id=run_id, journal_path=journal_path,
+                                 backup_root=backup_root, live_paths=live_paths)
     if current != result:
         raise RunAcceptanceCleanupError("CLEANUP_RUN_RESULT_CHANGED")
     state, journal_error = _journal_state(journal_path)
