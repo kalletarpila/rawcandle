@@ -1,0 +1,2472 @@
+[
+  {
+    "ticker": "BABA",
+    "quarter": {
+      "quarter_id": 87800,
+      "company_id": 2465,
+      "fiscal_year": 2027,
+      "fiscal_quarter": "Q1",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2027-Q1",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-20",
+      "first_public_result_date": "2026-08-20",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2477,
+      "sec_cik": "0001577552"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "INSIDE",
+    "current_authority": {
+      "company_id": 2465,
+      "fiscal_year": 2027,
+      "fiscal_quarter": "Q1",
+      "quarter_id": 87800,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:50:37Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001104659-26-099220",
+        "company_id": 2465,
+        "fiscal_year": 2027,
+        "fiscal_quarter": "Q1",
+        "quarter_id": 87800,
+        "sec_cik": "0001577552",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001104659-26-099220",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1577552/000110465926099220/tm2623667d1_6k.htm",
+        "primary_document": "tm2623667d1_6k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1577552/000110465926099220/tm2623667d1_6k.htm",
+            "source_sha256": "86e938a9c207d4c2de1910c345ff43d05ff17a6b315f3b9ff9e1c9879a135b98",
+            "excerpt": "Quarter 2026 Results SIGNATURES Pursuant to the requirements of the",
+            "excerpt_sha256": "0aa4bd577d86159914acb792370abff9cf9a019c314bf5360184693c4c6c9c1d"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1577552/000110465926099220/tm2623667d1_ex99-1.htm",
+            "source_sha256": "7e758933e8865700491044dee1a9dc32f2b59af555ca21d63e23319771577966",
+            "excerpt": "Quarter 2026 Results Hong Kong, China, August 20, 2026 -",
+            "excerpt_sha256": "b1291309ff7ec44a74b51d2538780b26df59b58860d41f3553390b680674267c"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1577552/000110465926099220/tm2623667d1_ex99-1.htm",
+            "sha256": "7e758933e8865700491044dee1a9dc32f2b59af555ca21d63e23319771577966",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.76:FOREIGN_SEC_UNIQUE_REQUIRES_SOURCE_POLICY_EXTENSION",
+        "reviewed_summary": "Explicit June quarter FY2027 Q1: revenue RMB268953m and net income RMB10444m. Parent group consolidated results, not a subsidiary. Fresh metadata acceptance differs from index/full submission by four hours: timestamp held for review.",
+        "acceptance": {
+          "accession": "0001104659-26-099220",
+          "submissions_utc": "2026-08-21T00:05:09.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001577552.json",
+          "submissions_sha256": "779853c820af37ac82ef9265b6994e3a089f1c9ea15e801a948e074ddf9cd350",
+          "index_accepted_display": "2026-08-20 16:05:09",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1577552/000110465926099220/0001104659-26-099220-index.html",
+          "index_sha256": "a5059f0b2b457af8e97557006040b6a5ee23b10963f9352674a92ae9275f81a7",
+          "observed_at_utc": "2026-10-06T17:20:49.611473+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001104659-26-099220",
+              "timestamp_utc": "2026-08-20T20:05:09.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ],
+          "full_submission_header": "20260820160509",
+          "full_submission_url": "https://www.sec.gov/Archives/edgar/data/1577552/000110465926099220/0001104659-26-099220.txt",
+          "full_submission_sha256": "b5950155a7411de4edcdca8ee08080bf5b8e6bc81ae81cd1d64576039975482d"
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2477,
+          "security_company_id": 2465,
+          "underlying_company_id": 2465,
+          "canonical_cik": "0001577552",
+          "sec_reporting_cik": "0001577552",
+          "underlying_issuer": "Alibaba Group Holding Ltd",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2014-09-19",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1577552/000119312526231755/baba-20260331.htm",
+              "source_sha256": "c150d58b97130e190c22b6d6d305e7861e7d2100f1c5032674cf69890e0ca6a6",
+              "excerpt": "Ordinary Shares, par value US$0.000003125\u202c per share 9988 (HKD Counter)",
+              "excerpt_sha256": "2f05bd223db5c320897f1d6576d2262b9903bcceb27d6fd477f3f01e1e899f0b"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2027,
+          "fiscal_quarter": "Q1",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_ATTRIBUTABLE",
+          "income_perimeter_reference": "Explicit June quarter FY2027 Q1: revenue RMB268953m and net income RMB10444m. Parent group consolidated results, not a subsidiary. Fresh metadata acceptance differs from index/full submission by four hours: timestamp held for review.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1577552/000110465926099220/tm2623667d1_ex99-1.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "e4e76db60a2998ea3acf25e14bbc15caf9c607de30cf2552937bf22797848dae"
+      }
+    ],
+    "relations": [],
+    "independent_issuer_evidence": null,
+    "expected_result": "REVIEW_ACCEPTANCE_TIMESTAMP_CONFLICT",
+    "expected_timestamp": null
+  },
+  {
+    "ticker": "BIDU",
+    "quarter": {
+      "quarter_id": 87860,
+      "company_id": 2467,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2026-Q2",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-18",
+      "first_public_result_date": "2026-08-18",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2479,
+      "sec_cik": "0001329099"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "INSIDE",
+    "current_authority": {
+      "company_id": 2467,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "quarter_id": 87860,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:50:37Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001193125-26-355431",
+        "company_id": 2467,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 87860,
+        "sec_cik": "0001329099",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001193125-26-355431",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1329099/000119312526355431/d112854d6k.htm",
+        "primary_document": "d112854d6k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1329099/000119312526355431/d112854d6k.htm",
+            "source_sha256": "29a3b64dcf361c36bbac1197e18987854772cdb3980dc82bb2bbea58f71d1eb3",
+            "excerpt": "Quarter 2026 Results SIGNATURES Pursuant to the requirements of the",
+            "excerpt_sha256": "0aa4bd577d86159914acb792370abff9cf9a019c314bf5360184693c4c6c9c1d"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1329099/000119312526355431/d112854dex991.htm",
+            "source_sha256": "8a0906680700a8f4f2c5fa33261e9e0245dfffb49d1b223eb86001140effa12b",
+            "excerpt": "Quarter 2026 Results BEIJING, China, August 18, 2026 \u2013 Baidu,",
+            "excerpt_sha256": "651c76b7b479fbf81a0d3a9f96f5df6d4473b7f3afa09b586d18bcae0353caba"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1329099/000119312526355431/d112854dex991.htm",
+            "sha256": "8a0906680700a8f4f2c5fa33261e9e0245dfffb49d1b223eb86001140effa12b",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.76:FOREIGN_SEC_UNIQUE_REQUIRES_SOURCE_POLICY_EXTENSION",
+        "reviewed_summary": "Ex99.1: explicit Q2 consolidated revenue and GAAP attributable net income RMB2.3bn. September interim report has H1-only income. Fresh metadata acceptance differs from index/full submission by four hours: timestamp held for review.",
+        "acceptance": {
+          "accession": "0001193125-26-355431",
+          "submissions_utc": "2026-08-19T00:08:11.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001329099.json",
+          "submissions_sha256": "8560b1fc0826f228680dc82d4341fb34af86621be0242511bdbf9ec72c421d36",
+          "index_accepted_display": "2026-08-18 16:08:11",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1329099/000119312526355431/0001193125-26-355431-index.html",
+          "index_sha256": "0f39368c6832772cc5deefd55acfb1f0ecbfdf82b4d4ca32c07bc7ee0ca1f93a",
+          "observed_at_utc": "2026-10-06T17:21:15.469384+00:00",
+          "prior_observations": [],
+          "full_submission_header": "20260818160811",
+          "full_submission_url": "https://www.sec.gov/Archives/edgar/data/1329099/000119312526355431/0001193125-26-355431.txt",
+          "full_submission_sha256": "25f2b3e274237bff1aed15416a4fa942f36fe3e7331a1c2ea9358f096c8ac477"
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2479,
+          "security_company_id": 2467,
+          "underlying_company_id": 2467,
+          "canonical_cik": "0001329099",
+          "sec_reporting_cik": "0001329099",
+          "underlying_issuer": "Baidu, Inc.",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2005-08-05",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1329099/000119312526109289/d38065d20f.htm",
+              "source_sha256": "2cd820cbc9055ce701a7ae236aa247a01b467c6a4ff775911ed5b8f413a4e15e",
+              "excerpt": "depositary shares (each American depositary share representing eight Class A",
+              "excerpt_sha256": "6e6b858c35821a8f3dcb75ef53174383d9f891219abecc906fa6db4b154e756d"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_ATTRIBUTABLE",
+          "income_perimeter_reference": "Ex99.1: explicit Q2 consolidated revenue and GAAP attributable net income RMB2.3bn. September interim report has H1-only income. Fresh metadata acceptance differs from index/full submission by four hours: timestamp held for review.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1329099/000119312526355431/d112854dex991.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "a5617e65ad244ca44613bde3b992e006cd1733ec7bc3beca6185cbb6a3c8626a"
+      }
+    ],
+    "relations": [],
+    "independent_issuer_evidence": null,
+    "expected_result": "REVIEW_ACCEPTANCE_TIMESTAMP_CONFLICT",
+    "expected_timestamp": null
+  },
+  {
+    "ticker": "IQMX",
+    "quarter": {
+      "quarter_id": 89417,
+      "company_id": 2523,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2026-Q2",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-18",
+      "first_public_result_date": "2026-08-18",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2535,
+      "sec_cik": "0002113060"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "INSIDE",
+    "current_authority": {
+      "company_id": 2523,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "quarter_id": 89417,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:50:41Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001193125-26-331538",
+        "company_id": 2523,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 89417,
+        "sec_cik": "0002113060",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001193125-26-331538",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx_6-k_q2_aug_2026_new.htm",
+        "primary_document": "iqmx_6-k_q2_aug_2026_new.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx-ex99_1.htm",
+            "source_sha256": "3cc5e81f1758d0ecfafab7470936c6f559ff7207937746e26abb4c4ec21e982b",
+            "excerpt": "Quarter 2026 Results, and Initiates FY 2026 Guidance Supported by",
+            "excerpt_sha256": "77734b2fad504b829ad311465d176f045cc1a4a2635a6d9e8277d104da340c76"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx-ex99_2.htm",
+            "source_sha256": "12952ff2ecb477b155514e1a43b07dd6ea7e52ef288952545ae0f3a8f1a0f07e",
+            "excerpt": "Six Months ended June 30, 2026 in brief \u2022 Revenue",
+            "excerpt_sha256": "7683397c82f0aae3ab56f783d22f35ccd6068650b346a06b73a4297e748c09d3"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx_6-k_q2_aug_2026_new.htm",
+            "source_sha256": "af6ee77e873f462bcf576c2bd06b5cdedf2013b9cbfcb20d8270b44ea6aa173d",
+            "excerpt": "quarter of 2026. The full text of the press release",
+            "excerpt_sha256": "eddd9310155f0add4244bfa11a6410e9eed2caa6ab8e609a7931fa043787fce9"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx-ex99_1.htm",
+            "sha256": "3cc5e81f1758d0ecfafab7470936c6f559ff7207937746e26abb4c4ec21e982b",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx-ex99_2.htm",
+            "sha256": "12952ff2ecb477b155514e1a43b07dd6ea7e52ef288952545ae0f3a8f1a0f07e",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx-ex99_3.htm",
+            "sha256": "93ba69a98bb398d63c269e276da9152054d8899a9f563e21b5f12c647041d895",
+            "result_bearing": false
+          }
+        ],
+        "review_reference": "Phase13G.3.76:ISSUER_UNIQUE_EXISTING_AUTHORITY",
+        "reviewed_summary": "Ex99.1 and Ex99.2/official issuer report explicitly identify Q2 revenue EUR6.683m and IFRS loss EUR36.6m. Official issuer release August4 08:00 EEST supports 05:00 UTC. SEC metadata/index discrepancy is held; Ex99.3 is forward guidance. IQM consolidated operating issuer, not RAAQ predecessor or BNY depositary.",
+        "acceptance": {
+          "accession": "0001193125-26-331538",
+          "submissions_utc": "2026-08-04T15:12:58.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0002113060.json",
+          "submissions_sha256": "0f32778006ca3f5cb703a057b74359285c54b170ea6c726cf0f04374a9a3e524",
+          "index_accepted_display": "2026-08-04 07:12:58",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/0001193125-26-331538-index.html",
+          "index_sha256": "5d1c46c132b89eedfa2a3b0edc53bacb56d37175674d1f6e285bc09769b35c89",
+          "observed_at_utc": "2026-10-06T17:21:54.380025+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001193125-26-331538",
+              "timestamp_utc": "2026-08-04T11:12:58.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ],
+          "full_submission_header": "20260804071258",
+          "full_submission_url": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/0001193125-26-331538.txt",
+          "full_submission_sha256": "0a39e948817668c78f685c6c9d16b26c2e079e12942ec71b18b030c409d936b4"
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2535,
+          "security_company_id": 2523,
+          "underlying_company_id": 2523,
+          "canonical_cik": "0002113060",
+          "sec_reporting_cik": "0002113060",
+          "underlying_issuer": "IQM Quantum Computers Oyj",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock Primary Class",
+          "provider_type_conflict": false,
+          "temporal_match": "UNCERTAIN",
+          "valid_from": "2025-04-29",
+          "valid_to": null,
+          "temporal_review_reason": "PROVIDER_FIRST_PRICE_HISTORY_PREDATES_IQM_ADS_LISTING;current underlying issuer proven;historical program validity not inferred",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526292513/d61136d6k.htm",
+              "source_sha256": "d7749a6a6b539a223738f50b62a3fdcecc089af6755aa4d9bc9e721d2f40c0e4",
+              "excerpt": "ordinary shares and American Depositary Shares (\u201cADSs\u201d) to certain institutional",
+              "excerpt_sha256": "c5e94a4c7a401ecd99c521586fdb0f5a1928788d717162033f9b113cec73259b"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526292513/d61136dex991.htm",
+              "source_sha256": "dc408bdf5db235fadc4d06f5cbc7303e336c7d80fe4967f017b8d391517b76a0",
+              "excerpt": "depositary shares (the \u201c ADSs \u201d) issued by BNY (NYSE:",
+              "excerpt_sha256": "32993d336bf07dc7a87a61342d1b529178f29e371fd41e1d6af6e4751559a612"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526292513/d61136dex992.htm",
+              "source_sha256": "49e91a2867b92bd95f5d3bf569b725cde7f29567018c99ca8ba11f39d47082a1",
+              "excerpt": "EX-99.2 3 d61136dex992.htm EX-99.2 EX-99.2 Exhibit 99.2 IQM Quantum Computers",
+              "excerpt_sha256": "c5781e5c02796657f43f1523ffc8ec891d4345a5a0a0a89836bd0a6ebc5d8925"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/2113060/000119312526292513/d61136dex993.htm",
+              "source_sha256": "9d5395cc00b5e0d62f00d8114960fafffea0d2bb7b174c3bb20e00a85f8ba20f",
+              "excerpt": "EX-99.3 4 d61136dex993.htm EX-99.3 EX-99.3 Exhibit 99.3 IQM Quantum Computers",
+              "excerpt_sha256": "c4cf6311f4d5cfeef0e19ed272cb6fbe439ee95e7cb5a05469ca2ccc459f139d"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "IFRS",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "Ex99.1 and Ex99.2/official issuer report explicitly identify Q2 revenue EUR6.683m and IFRS loss EUR36.6m. Official issuer release August4 08:00 EEST supports 05:00 UTC. SEC metadata/index discrepancy is held; Ex99.3 is forward guidance. IQM consolidated operating issuer, not RAAQ predecessor or BNY depositary.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx-ex99_1.htm",
+            "https://www.sec.gov/Archives/edgar/data/2113060/000119312526331538/iqmx-ex99_2.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "7b07b2133addefd969dfd95b4272caf722d98149f5da72e8e99ed1c3df3ee84d"
+      }
+    ],
+    "relations": [],
+    "independent_issuer_evidence": {
+      "source_type": "ISSUER_EARNINGS_RELEASE",
+      "timestamp_utc": "2026-08-04T05:00:00Z",
+      "source_reference": "https://investors.iqm.tech/news-releases/news-release-details/iqm-quantum-computers-reports-first-earnings-public-company",
+      "reviewed_handoff": "NOT_IMPLEMENTED"
+    },
+    "expected_result": "IDENTITY_TEMPORAL_REVIEW",
+    "expected_timestamp": null
+  },
+  {
+    "ticker": "TSEM",
+    "quarter": {
+      "quarter_id": 87964,
+      "company_id": 2470,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2026-Q2",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-17",
+      "first_public_result_date": "2026-08-17",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2482,
+      "sec_cik": "0000928876"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "INSIDE",
+    "current_authority": {
+      "company_id": 2470,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "quarter_id": 87964,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:50:38Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001178913-26-003776",
+        "company_id": 2470,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 87964,
+        "sec_cik": "0000928876",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001178913-26-003776",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/928876/000117891326003776/zk2635828.htm",
+        "primary_document": "zk2635828.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326003776/exhibit_99-1.htm",
+            "source_sha256": "bf2c32bcd13b2b3cf99105f62624b1fea7ea703d27542b3b7a06cd8c081164db",
+            "excerpt": "Quarter 2026 with Third Quarter 2026 Record Revenue Guidance $460",
+            "excerpt_sha256": "e875355d59e3255cf35c9b227452af61fed47e068edface4cc3436d17fd462ba"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326003776/zk2635828.htm",
+            "source_sha256": "0e1945ae0a9feb5c5629712ae4bbc3791332341ce29858924ba4fd069093c263",
+            "excerpt": "three months ended June 30, 2026. Attached hereto is the",
+            "excerpt_sha256": "78dc4411a94530b061320be7795d81c32e9ba0eeb4d706ce49c1d676dedbe747"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326003776/exhibit_99-1.htm",
+            "source_sha256": "bf2c32bcd13b2b3cf99105f62624b1fea7ea703d27542b3b7a06cd8c081164db",
+            "excerpt": "CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS (UNAUDITED) (dollars and share count in thousands, except per share data) Three months ended June 30, March 31, 2026",
+            "excerpt_sha256": "32811e1bbc035a95ca693cb1825791afe0d3313afb538198ece596c63578fc76"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/928876/000117891326003776/exhibit_99-1.htm",
+            "sha256": "bf2c32bcd13b2b3cf99105f62624b1fea7ea703d27542b3b7a06cd8c081164db",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same Tower consolidated Q2 2026 GAAP package: release includes complete three-month operations; later parent explicitly furnishes interim statements and MD&A for the same three/six-month end. Revenue 460079, cost 322307, gross 137772, R&D 23569, operating 90290, total net 90619 and parent net 90769 (USD thousands) agree with their distinct labels. Later statement notes expand rather than identify another result or correction.",
+        "acceptance": {
+          "accession": "0001178913-26-003776",
+          "submissions_utc": "2026-08-04T11:04:37.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0000928876.json",
+          "submissions_sha256": "a32b8717771f67bfb81bc2894ecfb76fa19f19ae2109c01e4311763371bee36c",
+          "index_accepted_display": "2026-08-04 07:04:37",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/928876/000117891326003776/0001178913-26-003776-index.html",
+          "index_sha256": "32ed5a2583975ecafdc4ef5ed0e31b76fb5ba43de552fc5d1acd77e2ae1015d6",
+          "observed_at_utc": "2026-10-06T17:22:07.469459+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001178913-26-003776",
+              "timestamp_utc": "2026-08-04T11:04:37.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2482,
+          "security_company_id": 2470,
+          "underlying_company_id": 2470,
+          "canonical_cik": "0000928876",
+          "sec_reporting_cik": "0000928876",
+          "underlying_issuer": "TOWER SEMICONDUCTOR LTD",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "COMMON_SHARES",
+          "is_adr_or_ads": false,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": true,
+          "temporal_match": "PROVEN",
+          "valid_from": "1994-10-26",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326002318/zk2635149.htm",
+              "source_sha256": "5cc373e94c9f061447187a48bd23461936e02f5f24caa981e0c50aad67812158",
+              "excerpt": "Ordinary Shares, par value New Israeli Shekels 15.00 per share",
+              "excerpt_sha256": "dba0c508f889e378eecd80c4ec7d41e8a94306a85c1fdc1ea45a7c7ca773fdae"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_ATTRIBUTABLE",
+          "income_perimeter_reference": "August4 results and August17 statements both explicitly contain three-month Q2 revenue USD460079k and shareholder net income USD90769k. Repetition needs an approved relationship rule; no earliest/latest winner.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/928876/000117891326003776/exhibit_99-1.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "04f0fada2387dc6c0ceb8dfb98032abf6e105cf0c569caca069f2b9c2d41da45"
+      },
+      {
+        "candidate_id": "0001178913-26-004158",
+        "company_id": 2470,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 87964,
+        "sec_cik": "0000928876",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001178913-26-004158",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/zk2635857.htm",
+        "primary_document": "zk2635857.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/exhibit_99-1.htm",
+            "source_sha256": "adb3bd017a18a0f5475122cdcdf69126f621c15283b7e5f9688372306cbdd8b9",
+            "excerpt": "Six months ended June 30, Three months ended June 30,",
+            "excerpt_sha256": "51893b5b5095a9f74b071629aa4d45d102da543fb77bd9d61dfb8307eb74d3c9"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/exhibit_99-2.htm",
+            "source_sha256": "d9d7696f6c6a1814c92ced75a72330cee5d4e84272703898fe3aa6e0e6718e26",
+            "excerpt": "six months ended June 30, 2026 and 2025 and related",
+            "excerpt_sha256": "85ad614d50fa57083f595a53a6c01702cb096d7d8ca76f13f1b922fb00728df4"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/zk2635857.htm",
+            "source_sha256": "daf80330ce01cf6d239cd8dee4e052f5471733057f3a4256d1844ceb4f55dea9",
+            "excerpt": "TOWER SEMICONDUCTOR LTD - 928876 - 2026 UNITED STATES SECURITIES",
+            "excerpt_sha256": "8d76223044507147898ec714e8163c117159e6c1eac13ce3324c43d5acbeb214"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/exhibit_99-1.htm",
+            "source_sha256": "adb3bd017a18a0f5475122cdcdf69126f621c15283b7e5f9688372306cbdd8b9",
+            "excerpt": "INTERIM CONSOLIDATED STATEMENTS OF OPERATIONS (UNAUDITED) (dollars and shares in thousands, except per share data) Six months ended June 30, Three months ended June",
+            "excerpt_sha256": "d6960e6c2766e249b3273bf5d90847a28498c27d04217a0195e4db2dbaa342c4"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/exhibit_99-2.htm",
+            "sha256": "d9d7696f6c6a1814c92ced75a72330cee5d4e84272703898fe3aa6e0e6718e26",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/exhibit_99-1.htm",
+            "sha256": "adb3bd017a18a0f5475122cdcdf69126f621c15283b7e5f9688372306cbdd8b9",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same Tower consolidated Q2 2026 GAAP package: release includes complete three-month operations; later parent explicitly furnishes interim statements and MD&A for the same three/six-month end. Revenue 460079, cost 322307, gross 137772, R&D 23569, operating 90290, total net 90619 and parent net 90769 (USD thousands) agree with their distinct labels. Later statement notes expand rather than identify another result or correction.",
+        "acceptance": {
+          "accession": "0001178913-26-004158",
+          "submissions_utc": "2026-08-17T10:01:31.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0000928876.json",
+          "submissions_sha256": "a32b8717771f67bfb81bc2894ecfb76fa19f19ae2109c01e4311763371bee36c",
+          "index_accepted_display": "2026-08-17 06:01:31",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/0001178913-26-004158-index.html",
+          "index_sha256": "d42885f3e9f622e45aa7af4253ace4d1b155a4e3e14304d21d37041d20babd06",
+          "observed_at_utc": "2026-10-06T17:22:07.469459+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001178913-26-004158",
+              "timestamp_utc": "2026-08-17T10:01:31.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2482,
+          "security_company_id": 2470,
+          "underlying_company_id": 2470,
+          "canonical_cik": "0000928876",
+          "sec_reporting_cik": "0000928876",
+          "underlying_issuer": "TOWER SEMICONDUCTOR LTD",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "COMMON_SHARES",
+          "is_adr_or_ads": false,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": true,
+          "temporal_match": "PROVEN",
+          "valid_from": "1994-10-26",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326002318/zk2635149.htm",
+              "source_sha256": "5cc373e94c9f061447187a48bd23461936e02f5f24caa981e0c50aad67812158",
+              "excerpt": "Ordinary Shares, par value New Israeli Shekels 15.00 per share",
+              "excerpt_sha256": "dba0c508f889e378eecd80c4ec7d41e8a94306a85c1fdc1ea45a7c7ca773fdae"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_ATTRIBUTABLE",
+          "income_perimeter_reference": "August4 results and August17 statements both explicitly contain three-month Q2 revenue USD460079k and shareholder net income USD90769k. Repetition needs an approved relationship rule; no earliest/latest winner.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/exhibit_99-2.htm",
+            "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/exhibit_99-1.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "11f38428eb8186d03dc105791651e06db8ef6fac4722ee7a7b78bfbbd3a00dc1"
+      }
+    ],
+    "relations": [
+      {
+        "relation_type": "RESULT_TO_FINANCIAL_STATEMENT_REPUBLICATION",
+        "from_candidate_id": "0001178913-26-003776",
+        "to_candidate_id": "0001178913-26-004158",
+        "from_candidate_fingerprint": "04f0fada2387dc6c0ceb8dfb98032abf6e105cf0c569caca069f2b9c2d41da45",
+        "to_candidate_fingerprint": "11f38428eb8186d03dc105791651e06db8ef6fac4722ee7a7b78bfbbd3a00dc1",
+        "same_economic_chain": true,
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "relation_reason": "Same Tower consolidated Q2 2026 GAAP package: release includes complete three-month operations; later parent explicitly furnishes interim statements and MD&A for the same three/six-month end. Revenue 460079, cost 322307, gross 137772, R&D 23569, operating 90290, total net 90619 and parent net 90769 (USD thousands) agree with their distinct labels. Later statement notes expand rather than identify another result or correction.",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326003776/exhibit_99-1.htm",
+            "source_sha256": "bf2c32bcd13b2b3cf99105f62624b1fea7ea703d27542b3b7a06cd8c081164db",
+            "excerpt": "CONDENSED CONSOLIDATED STATEMENTS OF OPERATIONS (UNAUDITED) (dollars and share count in thousands, except per share data) Three months ended June 30, March 31, 2026",
+            "excerpt_sha256": "32811e1bbc035a95ca693cb1825791afe0d3313afb538198ece596c63578fc76"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/928876/000117891326004158/exhibit_99-1.htm",
+            "source_sha256": "adb3bd017a18a0f5475122cdcdf69126f621c15283b7e5f9688372306cbdd8b9",
+            "excerpt": "INTERIM CONSOLIDATED STATEMENTS OF OPERATIONS (UNAUDITED) (dollars and shares in thousands, except per share data) Six months ended June 30, Three months ended June",
+            "excerpt_sha256": "d6960e6c2766e249b3273bf5d90847a28498c27d04217a0195e4db2dbaa342c4"
+          }
+        ]
+      }
+    ],
+    "independent_issuer_evidence": null,
+    "expected_result": "MULTIPLE_COMPETING_EVENTS",
+    "expected_timestamp": null,
+    "authority_version": "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"
+  },
+  {
+    "ticker": "TSM",
+    "quarter": {
+      "quarter_id": 88005,
+      "company_id": 2471,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2026-Q2",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-14",
+      "first_public_result_date": "2026-08-14",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2483,
+      "sec_cik": "0001046179"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "INSIDE",
+    "current_authority": {
+      "company_id": 2471,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "quarter_id": 88005,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:50:38Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001046179-26-000451",
+        "company_id": 2471,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88005,
+        "sec_cik": "0001046179",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001046179-26-000451",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/tsm-20260716x6k.htm",
+        "primary_document": "tsm-20260716x6k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26e_withguidancexfinal.htm",
+            "source_sha256": "f335d426a89566ede7e35dadaa9c211ed330c4dc72f30829ef081e67a54ec581",
+            "excerpt": "Quarter EPS of NT$27.25 HSINCHU, Taiwan, R.O.C., Jul. 16, 2026",
+            "excerpt_sha256": "3c44cb7da12e5ded7de51699f5c31552f3e2d5ae7d8a8b32c33d7094c7f73324"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26presentatione.htm",
+            "source_sha256": "ea866b4d138a0e05ff1c9e60f6a3d6c6d40f0fa52f4e4e9a5fadd8d8a7f96fa3",
+            "excerpt": "Quarter Earnings Conference July 16, 2026 Unleash Innovation \u00a9 22026",
+            "excerpt_sha256": "66204634b902522a1fbebb38acdb4ef72fde2638f9af723d733a246c0a04ae36"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/tsm-20260716x6k.htm",
+            "source_sha256": "5e7f879be372973da1513ed5e57bc8ddb53ce7cd51f3bbb3a2205be119233ce1",
+            "excerpt": "Quarter Earnings Conference Presentation Material.",
+            "excerpt_sha256": "75c7c54339e45b5cc2055af48b55c5289f362ca5b26bb6905a6adabb0b1d6426"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26e_withguidancexfinal.htm",
+            "source_sha256": "f335d426a89566ede7e35dadaa9c211ed330c4dc72f30829ef081e67a54ec581",
+            "excerpt": "figures have not been approved by Board of Directors b: Based on 25,932 million weighted average outstanding shares c: Based on 25,929 million weighted",
+            "excerpt_sha256": "ad8267a5f81e524c50c13ccd4236ecf78b9b4392f534bb4762ff4732e556ae33"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26e_withguidancexfinal.htm",
+            "sha256": "f335d426a89566ede7e35dadaa9c211ed330c4dc72f30829ef081e67a54ec581",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26presentatione.htm",
+            "sha256": "ea866b4d138a0e05ff1c9e60f6a3d6c6d40f0fa52f4e4e9a5fadd8d8a7f96fa3",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same TSMC consolidated TIFRS Q2 2026: early release explicitly says figures not Board approved; later statements authorize issuance August 11 and include independent review. Match release rounded NT$ millions to statement NT$ thousands, including net sales 1270381 vs 1270380250, parent net 706562 vs 706561938 and EPS 27.25. Total net 706780923 is NOT equated to parent net. This is completion of the same preliminary result, not a second independent event.",
+        "acceptance": {
+          "accession": "0001046179-26-000451",
+          "submissions_utc": "2026-07-16T11:45:43.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001046179.json",
+          "submissions_sha256": "e70ab50fd6f80607949ebd8d3d47aeecce5d2d813074c34c331488cf10892ad2",
+          "index_accepted_display": "2026-07-16 07:45:43",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/0001046179-26-000451-index.html",
+          "index_sha256": "820f3513f7382df7b688d426cce48a6e7a6f5664d08e3c5e8ae33798683a4b2b",
+          "observed_at_utc": "2026-10-06T17:22:15.226176+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001046179-26-000451",
+              "timestamp_utc": "2026-07-16T11:45:43.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2483,
+          "security_company_id": 2471,
+          "underlying_company_id": 2471,
+          "canonical_cik": "0001046179",
+          "sec_reporting_cik": "0001046179",
+          "underlying_issuer": "TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock Primary Class",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "1997-10-09",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000162828026025362/tsm-20251231.htm",
+              "source_sha256": "cbd58e4cb26cb15000d35f40f18b3492dbb7b2754b5e326d4eb260f4e7bf90b8",
+              "excerpt": "Common Shares , par value NT$10.00 each* TSM The New",
+              "excerpt_sha256": "52cad0b9ab7296d47e561921df6a996f020d10efec1a1916e60f6563e21041f6"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/tsm-20260716x6k.htm",
+              "source_sha256": "5e7f879be372973da1513ed5e57bc8ddb53ce7cd51f3bbb3a2205be119233ce1",
+              "excerpt": "6-K 1 tsm-20260716x6k.htm 6-K Document 1934 Act Registration No. 1-14700",
+              "excerpt_sha256": "80da50d40b4ba294f53fec63c017cf3cadc2b5a3c2f5f67c91701a398a43c794"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26e_withguidancexfinal.htm",
+              "source_sha256": "f335d426a89566ede7e35dadaa9c211ed330c4dc72f30829ef081e67a54ec581",
+              "excerpt": "EX-99.1 2 a2q26e_withguidancexfinal.htm EX-99.1 Document TSMC Reports Second Quarter EPS",
+              "excerpt_sha256": "414e0929e305460fd7344692c0839441468a2e70434c54aa0b1a06ee3e9a8440"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26presentatione.htm",
+              "source_sha256": "ea866b4d138a0e05ff1c9e60f6a3d6c6d40f0fa52f4e4e9a5fadd8d8a7f96fa3",
+              "excerpt": "EX-99.2 3 a2q26presentatione.htm EX-99.2 a2q26presentatione Unleash Innovation \u00a9 12026 TSMC,",
+              "excerpt_sha256": "33b8f36847d3f322c87298105590855e06f340e06d3af8b2906b4d37ad4499cf"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "PRELIMINARY_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "TIFRS",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "July16 earnings and August14 reviewed TIFRS financials both explicitly contain Q2 three-month income. Early release notes provisional/Board approval status; do not silently select later/final or equate different net-income perimeters.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26e_withguidancexfinal.htm",
+            "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26presentatione.htm"
+          ],
+          "actual_vs_preliminary": "PRELIMINARY_COMPLETED_PERIOD"
+        },
+        "reviewed_binding": "902e4afef3c736c0129d0c0a01d84516b6b2e326055cf68d2e8fdc5801ac42c0"
+      },
+      {
+        "candidate_id": "0001046179-26-000541",
+        "company_id": 2471,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88005,
+        "sec_cik": "0001046179",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001046179-26-000541",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000541/tsm-fsx20260814x6k.htm",
+        "primary_document": "tsm-fsx20260814x6k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000541/a2026q2consolidatedreport-.htm",
+            "source_sha256": "ce9280e5d17fe4d80b2c625d11c0ff5f3e7597089bc999150a50e05f500228ba",
+            "excerpt": "Six Months Ended June 30, 2026 and 2025 and Independent",
+            "excerpt_sha256": "dbce1f72d37c94adcd16140508b7717e0d8d07288bf833eb93ebd3bcbb3ea2de"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000541/tsm-fsx20260814x6k.htm",
+            "source_sha256": "a695b33772cf70d0efeadf36e0ec1dd3ed598863638de882bd5507e84f4a064a",
+            "excerpt": "6-K 1 tsm-fsx20260814x6k.htm 6-K Document 1934 Act Registration No. 1-14700",
+            "excerpt_sha256": "de30d0015dd209fddf93ce490db051a14ce17e22a0474f3520c69ad67d7b209b"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000541/a2026q2consolidatedreport-.htm",
+            "source_sha256": "ce9280e5d17fe4d80b2c625d11c0ff5f3e7597089bc999150a50e05f500228ba",
+            "excerpt": "THE AUTHORIZATION OF FINANCIAL STATEMENTS The accompanying consolidated financial statements were approved and authorized for issuance by the Board of Directors on August 11",
+            "excerpt_sha256": "e7823e929106ce0057e03daa075feaa033fd9dbbca22dff5d53037b89c7dc279"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000541/a2026q2consolidatedreport-.htm",
+            "sha256": "ce9280e5d17fe4d80b2c625d11c0ff5f3e7597089bc999150a50e05f500228ba",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same TSMC consolidated TIFRS Q2 2026: early release explicitly says figures not Board approved; later statements authorize issuance August 11 and include independent review. Match release rounded NT$ millions to statement NT$ thousands, including net sales 1270381 vs 1270380250, parent net 706562 vs 706561938 and EPS 27.25. Total net 706780923 is NOT equated to parent net. This is completion of the same preliminary result, not a second independent event.",
+        "acceptance": {
+          "accession": "0001046179-26-000541",
+          "submissions_utc": "2026-08-14T10:02:33.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001046179.json",
+          "submissions_sha256": "e70ab50fd6f80607949ebd8d3d47aeecce5d2d813074c34c331488cf10892ad2",
+          "index_accepted_display": "2026-08-14 06:02:33",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000541/0001046179-26-000541-index.html",
+          "index_sha256": "bc6a9ac2bea29faf0c7e30b04d9f3561781cf79d5b63ae6dcdd2bea2f86c9a1c",
+          "observed_at_utc": "2026-10-06T17:22:15.226176+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001046179-26-000541",
+              "timestamp_utc": "2026-08-14T10:02:33.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2483,
+          "security_company_id": 2471,
+          "underlying_company_id": 2471,
+          "canonical_cik": "0001046179",
+          "sec_reporting_cik": "0001046179",
+          "underlying_issuer": "TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock Primary Class",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "1997-10-09",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000162828026025362/tsm-20251231.htm",
+              "source_sha256": "cbd58e4cb26cb15000d35f40f18b3492dbb7b2754b5e326d4eb260f4e7bf90b8",
+              "excerpt": "Common Shares , par value NT$10.00 each* TSM The New",
+              "excerpt_sha256": "52cad0b9ab7296d47e561921df6a996f020d10efec1a1916e60f6563e21041f6"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/tsm-20260716x6k.htm",
+              "source_sha256": "5e7f879be372973da1513ed5e57bc8ddb53ce7cd51f3bbb3a2205be119233ce1",
+              "excerpt": "6-K 1 tsm-20260716x6k.htm 6-K Document 1934 Act Registration No. 1-14700",
+              "excerpt_sha256": "80da50d40b4ba294f53fec63c017cf3cadc2b5a3c2f5f67c91701a398a43c794"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26e_withguidancexfinal.htm",
+              "source_sha256": "f335d426a89566ede7e35dadaa9c211ed330c4dc72f30829ef081e67a54ec581",
+              "excerpt": "EX-99.1 2 a2q26e_withguidancexfinal.htm EX-99.1 Document TSMC Reports Second Quarter EPS",
+              "excerpt_sha256": "414e0929e305460fd7344692c0839441468a2e70434c54aa0b1a06ee3e9a8440"
+            },
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26presentatione.htm",
+              "source_sha256": "ea866b4d138a0e05ff1c9e60f6a3d6c6d40f0fa52f4e4e9a5fadd8d8a7f96fa3",
+              "excerpt": "EX-99.2 3 a2q26presentatione.htm EX-99.2 a2q26presentatione Unleash Innovation \u00a9 12026 TSMC,",
+              "excerpt_sha256": "33b8f36847d3f322c87298105590855e06f340e06d3af8b2906b4d37ad4499cf"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "TIFRS",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "July16 earnings and August14 reviewed TIFRS financials both explicitly contain Q2 three-month income. Early release notes provisional/Board approval status; do not silently select later/final or equate different net-income perimeters.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000541/a2026q2consolidatedreport-.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "26f8b32504de20da17d8dd82d2a67478d629aa21a56b8c36a2aaa8f90be2372e"
+      }
+    ],
+    "relations": [
+      {
+        "relation_type": "PRELIMINARY_RESULT_TO_COMPLETION_OF_SAME_RESULT",
+        "from_candidate_id": "0001046179-26-000451",
+        "to_candidate_id": "0001046179-26-000541",
+        "from_candidate_fingerprint": "902e4afef3c736c0129d0c0a01d84516b6b2e326055cf68d2e8fdc5801ac42c0",
+        "to_candidate_fingerprint": "26f8b32504de20da17d8dd82d2a67478d629aa21a56b8c36a2aaa8f90be2372e",
+        "same_economic_chain": true,
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "relation_reason": "Same TSMC consolidated TIFRS Q2 2026: early release explicitly says figures not Board approved; later statements authorize issuance August 11 and include independent review. Match release rounded NT$ millions to statement NT$ thousands, including net sales 1270381 vs 1270380250, parent net 706562 vs 706561938 and EPS 27.25. Total net 706780923 is NOT equated to parent net. This is completion of the same preliminary result, not a second independent event.",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000451/a2q26e_withguidancexfinal.htm",
+            "source_sha256": "f335d426a89566ede7e35dadaa9c211ed330c4dc72f30829ef081e67a54ec581",
+            "excerpt": "figures have not been approved by Board of Directors b: Based on 25,932 million weighted average outstanding shares c: Based on 25,929 million weighted",
+            "excerpt_sha256": "ad8267a5f81e524c50c13ccd4236ecf78b9b4392f534bb4762ff4732e556ae33"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1046179/000104617926000541/a2026q2consolidatedreport-.htm",
+            "source_sha256": "ce9280e5d17fe4d80b2c625d11c0ff5f3e7597089bc999150a50e05f500228ba",
+            "excerpt": "THE AUTHORIZATION OF FINANCIAL STATEMENTS The accompanying consolidated financial statements were approved and authorized for issuance by the Board of Directors on August 11",
+            "excerpt_sha256": "e7823e929106ce0057e03daa075feaa033fd9dbbca22dff5d53037b89c7dc279"
+          }
+        ]
+      }
+    ],
+    "independent_issuer_evidence": null,
+    "expected_result": "MULTIPLE_COMPETING_EVENTS",
+    "expected_timestamp": null,
+    "authority_version": "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"
+  },
+  {
+    "ticker": "POET",
+    "quarter": {
+      "quarter_id": 88373,
+      "company_id": 2482,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2026-Q2",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-13",
+      "first_public_result_date": "2026-08-13",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2494,
+      "sec_cik": "0001437424"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "INSIDE",
+    "current_authority": {
+      "company_id": 2482,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "quarter_id": 88373,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:50:39Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001171843-26-005485",
+        "company_id": 2482,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88373,
+        "sec_cik": "0001437424",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001171843-26-005485",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1437424/000117184326005485/f6k_081326.htm",
+        "primary_document": "f6k_081326.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000117184326005485/exh_991.htm",
+            "source_sha256": "ffc157fbf1390b5908ffb434f46e78a26858eac630319dc8bd9e073b344a47f8",
+            "excerpt": "Quarter 2026 Results: Revenue Up 112% Year-Over-Year in Sixth Consecutive",
+            "excerpt_sha256": "35ef86698ad52397e1944d8616794eefc79cdd186a698438936aae545934e8e2"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000117184326005485/f6k_081326.htm",
+            "source_sha256": "118f2bb17c38b15f52f2e69640c32e66bcb8cda7e8b8fd265e5844abc28864e5",
+            "excerpt": "6-K 1 f6k_081326.htm FORM 6-K UNITED STATES SECURITIES AND EXCHANGE",
+            "excerpt_sha256": "19739eff81af643e4ed2dce5807bdc5a659787ce7a65d95a6b51eca683ff6b53"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000117184326005485/exh_991.htm",
+            "source_sha256": "ffc157fbf1390b5908ffb434f46e78a26858eac630319dc8bd9e073b344a47f8",
+            "excerpt": "financial statements filed on SEDAR+ on August 13, 2026. POET TECHNOLOGIES INC. PROFORMA \u2013 NON-IFRS AND IFRS PRESENTATION OF OPERATIONS (All figures are in",
+            "excerpt_sha256": "6c9597174e3282c2e4d7609c52f533223a9e9fd6a3f220133ffab03d0e5b05cd"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1437424/000117184326005485/exh_991.htm",
+            "sha256": "ffc157fbf1390b5908ffb434f46e78a26858eac630319dc8bd9e073b344a47f8",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same POET consolidated IFRS Q2 2026: release explicitly directs readers to statements filed on SEDAR+ August 13; later parent explicitly names that same August 13 press release and furnishes the three/six-month statements, MD&A and officer certifications. Q2 revenue 569925, statutory net loss 11338060 and EPS -0.07 match. Proforma presentation is not used to exclude or redefine the existing candidate.",
+        "acceptance": {
+          "accession": "0001171843-26-005485",
+          "submissions_utc": "2026-08-13T13:01:09.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001437424.json",
+          "submissions_sha256": "46a45d049734e64c85b3e71154c6a578e90bd2089ace5f24d292620268fa3903",
+          "index_accepted_display": "2026-08-13 09:01:09",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1437424/000117184326005485/0001171843-26-005485-index.html",
+          "index_sha256": "0486daaa8f3528df714150bd66b84f4148eff1aa543cc2ec627e34da44748d01",
+          "observed_at_utc": "2026-10-06T17:22:23.718060+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001171843-26-005485",
+              "timestamp_utc": "2026-08-13T13:01:09.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2494,
+          "security_company_id": 2482,
+          "underlying_company_id": 2482,
+          "canonical_cik": "0001437424",
+          "sec_reporting_cik": "0001437424",
+          "underlying_issuer": "POET TECHNOLOGIES INC.",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "COMMON_SHARES",
+          "is_adr_or_ads": false,
+          "provider_security_type": "Canadian Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2014-02-03",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226014253/form20-f.htm",
+              "source_sha256": "f6390d2b00f735b4ef27e08e684fc51f1cbe017312a5d5848509eef2a022f1a6",
+              "excerpt": "Common Shares, no par value POET Nasdaq Capital Market Securities",
+              "excerpt_sha256": "967879bfa27d52fa07acd910ff618c6c7edb749d54b9e7b0e6e872d3de96ce64"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "August13 earnings release and separate financial statements both explicitly contain Q2 revenue USD569925 and net-loss table. Twelve-minute filing separation does not establish precedence.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1437424/000117184326005485/exh_991.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "8d6036384f31634036e43fd4c58beb106ba1e2d56b90116229ecf41aaa0f27c3"
+      },
+      {
+        "candidate_id": "0001493152-26-037615",
+        "company_id": 2482,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88373,
+        "sec_cik": "0001437424",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001493152-26-037615",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/form6-k.htm",
+        "primary_document": "form6-k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-1.htm",
+            "source_sha256": "de61b3923f6563eb37e9411d772e17b6c9dc2edab2d2c70d1f142d639238615f",
+            "excerpt": "Six Months Ended June 30, 2026 (Unaudited and Expressed in",
+            "excerpt_sha256": "43d286338a68b00fa7b1aba160fe24d792bbbec32e92ab156d03a9303ebd17c6"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-2.htm",
+            "source_sha256": "90f8f1fa09005a7374a3e1ec0cd50958b21e7b647dc70a495e9533232639799f",
+            "excerpt": "Six Months Ended June 30, 2026 POET Technologies Inc. Suite",
+            "excerpt_sha256": "34aeddbc2adaecb1f6bb1da5325f0518d761072e6330fc41eaf9361ac2c5e6eb"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-3.htm",
+            "source_sha256": "f0f9814911274cf0d43bdced831b1b7e58bca2a529d297918ccf24d3571fb74d",
+            "excerpt": "EX-99.3 4 ex99-3.htm EX-99.3 Exhibit 99.3 FORM 52-109F2 CERTIFICATION OF",
+            "excerpt_sha256": "13ab185d22e9e0073f0126822960044c8fbeabc5d4273f9d9260dde83d5defc2"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-4.htm",
+            "source_sha256": "15e346888f6df8bb5df33161e6d3ea0933a29ce6452d040acf94e31da3f7f577",
+            "excerpt": "EX-99.4 5 ex99-4.htm EX-99.4 Exhibit 99.4 FORM 52-109F2 CERTIFICATION OF",
+            "excerpt_sha256": "f8c40d71851be2970158c40cd50a360052c3a6f992035e4711ad5c4b35d74e10"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/form6-k.htm",
+            "source_sha256": "787e68b0841d307214692a86100ef7fe997f2b2a14dfaeb92f81f99a2a52168c",
+            "excerpt": "six months ended June 30, 2026, attached hereto as Exhibit",
+            "excerpt_sha256": "85b20989c16859cad17ae1cb191715bbbe97c663748af7019ddaf2029e824ef5"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/form6-k.htm",
+            "source_sha256": "787e68b0841d307214692a86100ef7fe997f2b2a14dfaeb92f81f99a2a52168c",
+            "excerpt": "issued a press release announcing its financial results for the second quarter ended June 30, 2026. EXHIBIT LIST Exhibit No. Description 99.1 Condensed Unaudited",
+            "excerpt_sha256": "a3c93294c02d6a44e5d4ba8f35514fa195401449fdc115c8f06310cc96c61f50"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-1.htm",
+            "sha256": "de61b3923f6563eb37e9411d772e17b6c9dc2edab2d2c70d1f142d639238615f",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-2.htm",
+            "sha256": "90f8f1fa09005a7374a3e1ec0cd50958b21e7b647dc70a495e9533232639799f",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-3.htm",
+            "sha256": "f0f9814911274cf0d43bdced831b1b7e58bca2a529d297918ccf24d3571fb74d",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-4.htm",
+            "sha256": "15e346888f6df8bb5df33161e6d3ea0933a29ce6452d040acf94e31da3f7f577",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same POET consolidated IFRS Q2 2026: release explicitly directs readers to statements filed on SEDAR+ August 13; later parent explicitly names that same August 13 press release and furnishes the three/six-month statements, MD&A and officer certifications. Q2 revenue 569925, statutory net loss 11338060 and EPS -0.07 match. Proforma presentation is not used to exclude or redefine the existing candidate.",
+        "acceptance": {
+          "accession": "0001493152-26-037615",
+          "submissions_utc": "2026-08-13T13:13:55.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001437424.json",
+          "submissions_sha256": "46a45d049734e64c85b3e71154c6a578e90bd2089ace5f24d292620268fa3903",
+          "index_accepted_display": "2026-08-13 09:13:55",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/0001493152-26-037615-index.html",
+          "index_sha256": "970532c3ce9dafcc35104302177a16df033ace9d1753ac403be3d0b850348e0b",
+          "observed_at_utc": "2026-10-06T17:22:23.718060+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001493152-26-037615",
+              "timestamp_utc": "2026-08-13T13:13:55.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2494,
+          "security_company_id": 2482,
+          "underlying_company_id": 2482,
+          "canonical_cik": "0001437424",
+          "sec_reporting_cik": "0001437424",
+          "underlying_issuer": "POET TECHNOLOGIES INC.",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "COMMON_SHARES",
+          "is_adr_or_ads": false,
+          "provider_security_type": "Canadian Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2014-02-03",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226014253/form20-f.htm",
+              "source_sha256": "f6390d2b00f735b4ef27e08e684fc51f1cbe017312a5d5848509eef2a022f1a6",
+              "excerpt": "Common Shares, no par value POET Nasdaq Capital Market Securities",
+              "excerpt_sha256": "967879bfa27d52fa07acd910ff618c6c7edb749d54b9e7b0e6e872d3de96ce64"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "August13 earnings release and separate financial statements both explicitly contain Q2 revenue USD569925 and net-loss table. Twelve-minute filing separation does not establish precedence.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-1.htm",
+            "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-2.htm",
+            "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-3.htm",
+            "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/ex99-4.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "1cae2cd98f3ab35edf8e8d7bd94ca5b4baddf45ef9339d13d4cdcd096c193494"
+      }
+    ],
+    "relations": [
+      {
+        "relation_type": "RESULT_TO_FINANCIAL_STATEMENT_REPUBLICATION",
+        "from_candidate_id": "0001171843-26-005485",
+        "to_candidate_id": "0001493152-26-037615",
+        "from_candidate_fingerprint": "8d6036384f31634036e43fd4c58beb106ba1e2d56b90116229ecf41aaa0f27c3",
+        "to_candidate_fingerprint": "1cae2cd98f3ab35edf8e8d7bd94ca5b4baddf45ef9339d13d4cdcd096c193494",
+        "same_economic_chain": true,
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "relation_reason": "Same POET consolidated IFRS Q2 2026: release explicitly directs readers to statements filed on SEDAR+ August 13; later parent explicitly names that same August 13 press release and furnishes the three/six-month statements, MD&A and officer certifications. Q2 revenue 569925, statutory net loss 11338060 and EPS -0.07 match. Proforma presentation is not used to exclude or redefine the existing candidate.",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000117184326005485/exh_991.htm",
+            "source_sha256": "ffc157fbf1390b5908ffb434f46e78a26858eac630319dc8bd9e073b344a47f8",
+            "excerpt": "financial statements filed on SEDAR+ on August 13, 2026. POET TECHNOLOGIES INC. PROFORMA \u2013 NON-IFRS AND IFRS PRESENTATION OF OPERATIONS (All figures are in",
+            "excerpt_sha256": "6c9597174e3282c2e4d7609c52f533223a9e9fd6a3f220133ffab03d0e5b05cd"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1437424/000149315226037615/form6-k.htm",
+            "source_sha256": "787e68b0841d307214692a86100ef7fe997f2b2a14dfaeb92f81f99a2a52168c",
+            "excerpt": "issued a press release announcing its financial results for the second quarter ended June 30, 2026. EXHIBIT LIST Exhibit No. Description 99.1 Condensed Unaudited",
+            "excerpt_sha256": "a3c93294c02d6a44e5d4ba8f35514fa195401449fdc115c8f06310cc96c61f50"
+          }
+        ]
+      }
+    ],
+    "independent_issuer_evidence": null,
+    "expected_result": "MULTIPLE_COMPETING_EVENTS",
+    "expected_timestamp": null,
+    "authority_version": "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"
+  },
+  {
+    "ticker": "GDS",
+    "quarter": {
+      "quarter_id": 88549,
+      "company_id": 2492,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2026-Q2",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-13",
+      "first_public_result_date": "2026-08-13",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2504,
+      "sec_cik": "0001526125"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "INSIDE",
+    "current_authority": {
+      "company_id": 2492,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "quarter_id": 88549,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:50:40Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001104659-26-095498",
+        "company_id": 2492,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88549,
+        "sec_cik": "0001526125",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001104659-26-095498",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926095498/tm2621440d1_6k.htm",
+        "primary_document": "tm2621440d1_6k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926095498/tm2621440d1_6k.htm",
+            "source_sha256": "96fd011fffd8dcbb63865a72e0a90323a6744e8e4b32f58e1f4fa43b03d036c1",
+            "excerpt": "Quarter 2026 Results 2 SIGNATURES Pursuant to the requirements of",
+            "excerpt_sha256": "b53e7f2476e021b900e0713bfa53870db357074d5902e0db6f5f28c856971b7c"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926095498/tm2621440d1_ex99-1.htm",
+            "source_sha256": "6b43c0f7b49683f68be02248f1197bf7956ee8fb4f54b4d953aed5def6f39c63",
+            "excerpt": "Quarter 2026 Results 1 GDS Holdings Limited Reports Second Quarter",
+            "excerpt_sha256": "abe70e9618e9e45c881b0fb21ab4b664f4ac87eddf01cb5220ce23e1d3e12db3"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926095498/tm2621440d1_ex99-1.htm",
+            "source_sha256": "6b43c0f7b49683f68be02248f1197bf7956ee8fb4f54b4d953aed5def6f39c63",
+            "excerpt": "Share of results of equity method investees for the second quarter of 2026 was an income of RMB959.9 million (US$141.5 million), mainly arising from",
+            "excerpt_sha256": "3afb22da8964cb42494d2de2eedbfd5f798f31dabe99a67c776f73d623b211f6"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926095498/tm2621440d1_ex99-1.htm",
+            "sha256": "6b43c0f7b49683f68be02248f1197bf7956ee8fb4f54b4d953aed5def6f39c63",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same GDS consolidated Q2 2026 GAAP result repeated in HK listing-rule interim report: report explanatory notes establish reporting purpose, Q2 financial-highlights narrative repeats original quarter revenue 3088.0, net income 837.6, gross profit 664.2, tax 213.5 and equity-method income 959.9 RMB millions; same DayOne dilution-gain explanation, same comparative quarter and same diluted ADS EPS 3.53. H1 title is not used to infer Q2, and the report does not identify a revised Q2 result.",
+        "acceptance": {
+          "accession": "0001104659-26-095498",
+          "submissions_utc": "2026-08-13T12:15:43.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001526125.json",
+          "submissions_sha256": "62ad8ee72213ce1410d90c5c92c10719eda7fb95c2172e25bf8b2bb26d33a851",
+          "index_accepted_display": "2026-08-13 08:15:43",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926095498/0001104659-26-095498-index.html",
+          "index_sha256": "c70008c23fc38de5b682f7810a459bb363627035f9b98a250171ab655b848508",
+          "observed_at_utc": "2026-10-06T17:22:29.490608+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001104659-26-095498",
+              "timestamp_utc": "2026-08-13T12:15:43.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2504,
+          "security_company_id": 2492,
+          "underlying_company_id": 2492,
+          "canonical_cik": "0001526125",
+          "sec_reporting_cik": "0001526125",
+          "underlying_issuer": "GDS Holdings Ltd",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2016-11-02",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926051006/gds-20251231x20f.htm",
+              "source_sha256": "f90bd103bf81254f41ce50a10ec372ffb586e2e3eaa3618b14648f77753c3310",
+              "excerpt": "ordinary shares, par value $0.00005 per share* 9698 \u200b The",
+              "excerpt_sha256": "58861553e00f578cc3f45306345f32e85146968dbd773fe8c13a1dad3aeb4c5d"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "August13 release and September4 interim report both explicitly disclose Q2 revenue RMB3088m and net income RMB837.6m; H1 title does not remove Q2 highlights. Needs reviewed repeat/relationship semantics.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1526125/000110465926095498/tm2621440d1_ex99-1.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "400194da19783983707fe45500fd4bfc827cee276425febc3c64e77d2fd5f357"
+      },
+      {
+        "candidate_id": "0001104659-26-105234",
+        "company_id": 2492,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88549,
+        "sec_cik": "0001526125",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001104659-26-105234",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926105234/tm2624826d1_6k.htm",
+        "primary_document": "tm2624826d1_6k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926105234/tm2624826d1_6k.htm",
+            "source_sha256": "2c48353f9f677d5eaac03f60638dd65725b48d04e9c74b46e60f664c611ec8d9",
+            "excerpt": "6-K 1 tm2624826d1_6k.htm FORM 6-K SECURITIES AND EXCHANGE COMMISSION Washington,",
+            "excerpt_sha256": "53c94960ee7a2c4d4bce00a51d48dc4204766bbeefa218f99f1c1b9a50e3aa1c"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926105234/tm2624826d1_ex99-1.pdf",
+            "source_sha256": "3f44b0d64b6c00db696f95fe2f119cf4815d4c6034f44f83f0c87780bf6b85a0",
+            "excerpt": "six months of its fiscal year ending December 31, 2026",
+            "excerpt_sha256": "ab207bbe1451d37b60362b80927c2ae4446e1ff3407e8d41eed4d1634a137595"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926105234/tm2624826d1_ex99-1.pdf",
+            "source_sha256": "3f44b0d64b6c00db696f95fe2f119cf4815d4c6034f44f83f0c87780bf6b85a0",
+            "excerpt": "Share of results of equity method investees for the second quarter of 2026 was an income of RMB959.9 million (US$141.5 million), mainly arising from",
+            "excerpt_sha256": "3afb22da8964cb42494d2de2eedbfd5f798f31dabe99a67c776f73d623b211f6"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926105234/tm2624826d1_ex99-1.pdf",
+            "sha256": "3f44b0d64b6c00db696f95fe2f119cf4815d4c6034f44f83f0c87780bf6b85a0",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same GDS consolidated Q2 2026 GAAP result repeated in HK listing-rule interim report: report explanatory notes establish reporting purpose, Q2 financial-highlights narrative repeats original quarter revenue 3088.0, net income 837.6, gross profit 664.2, tax 213.5 and equity-method income 959.9 RMB millions; same DayOne dilution-gain explanation, same comparative quarter and same diluted ADS EPS 3.53. H1 title is not used to infer Q2, and the report does not identify a revised Q2 result.",
+        "acceptance": {
+          "accession": "0001104659-26-105234",
+          "submissions_utc": "2026-09-04T11:23:06.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001526125.json",
+          "submissions_sha256": "62ad8ee72213ce1410d90c5c92c10719eda7fb95c2172e25bf8b2bb26d33a851",
+          "index_accepted_display": "2026-09-04 07:23:06",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926105234/0001104659-26-105234-index.html",
+          "index_sha256": "7584cf7eec82e7ed8e8575a2f32fd93df45e49d64fe32a63bdb62ab31ee88155",
+          "observed_at_utc": "2026-10-06T17:22:29.490608+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001104659-26-105234",
+              "timestamp_utc": "2026-09-04T11:23:06.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2504,
+          "security_company_id": 2492,
+          "underlying_company_id": 2492,
+          "canonical_cik": "0001526125",
+          "sec_reporting_cik": "0001526125",
+          "underlying_issuer": "GDS Holdings Ltd",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2016-11-02",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926051006/gds-20251231x20f.htm",
+              "source_sha256": "f90bd103bf81254f41ce50a10ec372ffb586e2e3eaa3618b14648f77753c3310",
+              "excerpt": "ordinary shares, par value $0.00005 per share* 9698 \u200b The",
+              "excerpt_sha256": "58861553e00f578cc3f45306345f32e85146968dbd773fe8c13a1dad3aeb4c5d"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "August13 release and September4 interim report both explicitly disclose Q2 revenue RMB3088m and net income RMB837.6m; H1 title does not remove Q2 highlights. Needs reviewed repeat/relationship semantics.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1526125/000110465926105234/tm2624826d1_ex99-1.pdf"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "d2a685d72514421d0ef8faff5059fce8d5a4767a28ac3c24e62f7c96a1abb597"
+      }
+    ],
+    "relations": [
+      {
+        "relation_type": "RESULT_TO_FINANCIAL_STATEMENT_REPUBLICATION",
+        "from_candidate_id": "0001104659-26-095498",
+        "to_candidate_id": "0001104659-26-105234",
+        "from_candidate_fingerprint": "400194da19783983707fe45500fd4bfc827cee276425febc3c64e77d2fd5f357",
+        "to_candidate_fingerprint": "d2a685d72514421d0ef8faff5059fce8d5a4767a28ac3c24e62f7c96a1abb597",
+        "same_economic_chain": true,
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "relation_reason": "Same GDS consolidated Q2 2026 GAAP result repeated in HK listing-rule interim report: report explanatory notes establish reporting purpose, Q2 financial-highlights narrative repeats original quarter revenue 3088.0, net income 837.6, gross profit 664.2, tax 213.5 and equity-method income 959.9 RMB millions; same DayOne dilution-gain explanation, same comparative quarter and same diluted ADS EPS 3.53. H1 title is not used to infer Q2, and the report does not identify a revised Q2 result.",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926095498/tm2621440d1_ex99-1.htm",
+            "source_sha256": "6b43c0f7b49683f68be02248f1197bf7956ee8fb4f54b4d953aed5def6f39c63",
+            "excerpt": "Share of results of equity method investees for the second quarter of 2026 was an income of RMB959.9 million (US$141.5 million), mainly arising from",
+            "excerpt_sha256": "3afb22da8964cb42494d2de2eedbfd5f798f31dabe99a67c776f73d623b211f6"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1526125/000110465926105234/tm2624826d1_ex99-1.pdf",
+            "source_sha256": "3f44b0d64b6c00db696f95fe2f119cf4815d4c6034f44f83f0c87780bf6b85a0",
+            "excerpt": "Share of results of equity method investees for the second quarter of 2026 was an income of RMB959.9 million (US$141.5 million), mainly arising from",
+            "excerpt_sha256": "3afb22da8964cb42494d2de2eedbfd5f798f31dabe99a67c776f73d623b211f6"
+          }
+        ]
+      }
+    ],
+    "independent_issuer_evidence": null,
+    "expected_result": "MULTIPLE_COMPETING_EVENTS",
+    "expected_timestamp": null,
+    "authority_version": "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"
+  },
+  {
+    "ticker": "NBIS",
+    "quarter": {
+      "quarter_id": 88735,
+      "company_id": 2500,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2026-Q2",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-12",
+      "first_public_result_date": "2026-08-12",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2512,
+      "sec_cik": "0001513845"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "INSIDE",
+    "current_authority": {
+      "company_id": 2500,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "quarter_id": 88735,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:50:40Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001104659-26-094568",
+        "company_id": 2500,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88735,
+        "sec_cik": "0001513845",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001104659-26-094568",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_6k.htm",
+        "primary_document": "tm2622968d1_6k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_6k.htm",
+            "source_sha256": "5f03ee4368ad779770a17f2dfb3bff553e13db8afc3c429c369e50ec37bd31b8",
+            "excerpt": "quarter ended June 30, 2026. Furnished as Exhibit 99.2 to",
+            "excerpt_sha256": "aef3e372c281cd083a706ad44b992ef573b69344b44d9abf1917390429a11daf"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_ex99-1.htm",
+            "source_sha256": "3969e855be665b697d709ef5f622d5b7d0626fb445afe26b89456851d65c85b1",
+            "excerpt": "quarter 2026 financial results Amsterdam, August 12, 2026 \u2013 Nebius",
+            "excerpt_sha256": "59a7bebe3db4340de37dc695bc49dd7ea5cc6b99f69d18fbeb815c9ad075103b"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_ex99-2.htm",
+            "source_sha256": "3a5a95dfa1febdc8ab7982da8ada9c04e6916c160bfe1ac130abec66ea7e6600",
+            "excerpt": "quarter New open-weight models in Token Factory: Kimi K3 GLM",
+            "excerpt_sha256": "fe77e45318c9c7884e29932082c41909e70fe0bebae2c10c8a63283998acc505"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_ex99-1.htm",
+            "source_sha256": "3969e855be665b697d709ef5f622d5b7d0626fb445afe26b89456851d65c85b1",
+            "excerpt": "Unaudited Condensed Consolidated Statements of Operations (in millions of U.S. dollars, except share and per share data) Three months ended June 30, Six months",
+            "excerpt_sha256": "93db03a9ba583fae1f582caf53ee35f83af8d5aaa31742e74cf346fc4d3a2877"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_ex99-1.htm",
+            "sha256": "3969e855be665b697d709ef5f622d5b7d0626fb445afe26b89456851d65c85b1",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_ex99-2.htm",
+            "sha256": "3a5a95dfa1febdc8ab7982da8ada9c04e6916c160bfe1ac130abec66ea7e6600",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same Nebius consolidated GAAP three/six-month results, not an AI-segment-only event: release operations tables and later full statements reproduce Q2 revenue 582.3, cost 133.6, development 191.0, SG&A 173.9, continuing net loss 190.4 USD millions and identical Toloka discontinued-operations treatment. The later parent explicitly furnishes financial statements and operating review for the same periods. Economic republication is supported, but both acceptance conflicts prevent a valid V1 edge or selection.",
+        "acceptance": {
+          "accession": "0001104659-26-094568",
+          "submissions_utc": "2026-08-12T17:15:23.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001513845.json",
+          "submissions_sha256": "0432afbc7f9b19849626f2fe07f58f49d8a685a282d7b7e33111a88c6ed55996",
+          "index_accepted_display": "2026-08-12 09:15:23",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/0001104659-26-094568-index.html",
+          "index_sha256": "16af3131424d862a041a453275ea7659c48bba9f8de7a35c42bf8ee47cba6423",
+          "observed_at_utc": "2026-10-06T17:22:39.052254+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001104659-26-094568",
+              "timestamp_utc": "2026-08-12T13:15:23.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2512,
+          "security_company_id": 2500,
+          "underlying_company_id": 2500,
+          "canonical_cik": "0001513845",
+          "sec_reporting_cik": "0001513845",
+          "underlying_issuer": "Nebius Group N.V.",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "CLASS_A_ORDINARY_SHARES",
+          "is_adr_or_ads": false,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": true,
+          "temporal_match": "PROVEN",
+          "valid_from": "2011-05-24",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926052948/nbis-20251231x20f.htm",
+              "source_sha256": "3c74450b6ce8b4ff1e67782d1c30cec4aedd816d21ce55bd4354650dca6bd79b",
+              "excerpt": "Ordinary Shares \u200b NBIS NASDAQ Global Select Market \u200b Securities",
+              "excerpt_sha256": "3926c03d65696d1549c7ce62ba5eb6224149ea780583a06dc6fe4ac4441b76bd"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONTINUING_OPERATIONS",
+          "income_perimeter_reference": "Separate August12 release and financials both explicitly disclose Q2 revenue USD582.3m and GAAP continuing net loss USD190.4m. Shareholder letter shares first accession. Ordinary Class A shares, not ADS.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_ex99-1.htm",
+            "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_ex99-2.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "170edb99454b2cb7f4ef3e660304399baf69f1644034f7e03fc085aabd447598"
+      },
+      {
+        "candidate_id": "0001104659-26-094844",
+        "company_id": 2500,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88735,
+        "sec_cik": "0001513845",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001104659-26-094844",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812x6k.htm",
+        "primary_document": "nbis-20260812x6k.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812x6k.htm",
+            "source_sha256": "72abd002d63722d91b6e5307f50362ae8cb334c36fbf7796484bccb561a9ecca",
+            "excerpt": "Six Months Ended June 30, 2025 and 2026. Furnished as",
+            "excerpt_sha256": "2aa6ccc2e15cde1727c8a262216e62750c58b584796779ed81cb34d40490d641"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812xex99d1.htm",
+            "source_sha256": "d9f507c54c59811b6fd604b7bfc540bebf16506a6bb9fe24aba2e2f92a6b8c6b",
+            "excerpt": "Six Months Ended June 30, 2025 and 2026 You should",
+            "excerpt_sha256": "5ee35e4ebb3747790967938c2c20b88c503a4d64d9c9dfb0e2d720a98f30e070"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812xex99d2.htm",
+            "source_sha256": "5cc10e762bf95893ed27e23866abb7f35c12e106b013856bf68094d0d322f36a",
+            "excerpt": "Six Months Ended June 30, 2025 and 202 6 F-3",
+            "excerpt_sha256": "376cbca548550ce587a2aa77b3baabdac484141c0d17537027ef5cab3145dd23"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812xex99d2.htm",
+            "source_sha256": "5cc10e762bf95893ed27e23866abb7f35c12e106b013856bf68094d0d322f36a",
+            "excerpt": "Unaudited Condensed Consolidated Statements of Operations for the Three and Six Months Ended June 30, 2025 and 202 6 F-3 Unaudited Condensed Consolidated Statements",
+            "excerpt_sha256": "c05da7b7ed5fd908866efebeb96782ba2f0c436260287885c8c8a6e130ef2a9a"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812xex99d1.htm",
+            "sha256": "d9f507c54c59811b6fd604b7bfc540bebf16506a6bb9fe24aba2e2f92a6b8c6b",
+            "result_bearing": true
+          },
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812xex99d2.htm",
+            "sha256": "5cc10e762bf95893ed27e23866abb7f35c12e106b013856bf68094d0d322f36a",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same Nebius consolidated GAAP three/six-month results, not an AI-segment-only event: release operations tables and later full statements reproduce Q2 revenue 582.3, cost 133.6, development 191.0, SG&A 173.9, continuing net loss 190.4 USD millions and identical Toloka discontinued-operations treatment. The later parent explicitly furnishes financial statements and operating review for the same periods. Economic republication is supported, but both acceptance conflicts prevent a valid V1 edge or selection.",
+        "acceptance": {
+          "accession": "0001104659-26-094844",
+          "submissions_utc": "2026-08-13T00:01:08.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001513845.json",
+          "submissions_sha256": "0432afbc7f9b19849626f2fe07f58f49d8a685a282d7b7e33111a88c6ed55996",
+          "index_accepted_display": "2026-08-12 16:01:08",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/0001104659-26-094844-index.html",
+          "index_sha256": "74a3e8e9004292a325e32b49d93bd67631db31222036967fb7f075db53c9779c",
+          "observed_at_utc": "2026-10-06T17:22:39.052254+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001104659-26-094844",
+              "timestamp_utc": "2026-08-12T20:01:08.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2512,
+          "security_company_id": 2500,
+          "underlying_company_id": 2500,
+          "canonical_cik": "0001513845",
+          "sec_reporting_cik": "0001513845",
+          "underlying_issuer": "Nebius Group N.V.",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "CLASS_A_ORDINARY_SHARES",
+          "is_adr_or_ads": false,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": true,
+          "temporal_match": "PROVEN",
+          "valid_from": "2011-05-24",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926052948/nbis-20251231x20f.htm",
+              "source_sha256": "3c74450b6ce8b4ff1e67782d1c30cec4aedd816d21ce55bd4354650dca6bd79b",
+              "excerpt": "Ordinary Shares \u200b NBIS NASDAQ Global Select Market \u200b Securities",
+              "excerpt_sha256": "3926c03d65696d1549c7ce62ba5eb6224149ea780583a06dc6fe4ac4441b76bd"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "GAAP",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONTINUING_OPERATIONS",
+          "income_perimeter_reference": "Separate August12 release and financials both explicitly disclose Q2 revenue USD582.3m and GAAP continuing net loss USD190.4m. Shareholder letter shares first accession. Ordinary Class A shares, not ADS.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812xex99d1.htm",
+            "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812xex99d2.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "fdacf0dd3f0875001f8e7da34e89860817891021cb868560cdc17299d64b73fd"
+      }
+    ],
+    "relations": [
+      {
+        "relation_type": "RESULT_TO_FINANCIAL_STATEMENT_REPUBLICATION",
+        "from_candidate_id": "0001104659-26-094568",
+        "to_candidate_id": "0001104659-26-094844",
+        "from_candidate_fingerprint": "170edb99454b2cb7f4ef3e660304399baf69f1644034f7e03fc085aabd447598",
+        "to_candidate_fingerprint": "fdacf0dd3f0875001f8e7da34e89860817891021cb868560cdc17299d64b73fd",
+        "same_economic_chain": true,
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "relation_reason": "Same Nebius consolidated GAAP three/six-month results, not an AI-segment-only event: release operations tables and later full statements reproduce Q2 revenue 582.3, cost 133.6, development 191.0, SG&A 173.9, continuing net loss 190.4 USD millions and identical Toloka discontinued-operations treatment. The later parent explicitly furnishes financial statements and operating review for the same periods. Economic republication is supported, but both acceptance conflicts prevent a valid V1 edge or selection.",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094568/tm2622968d1_ex99-1.htm",
+            "source_sha256": "3969e855be665b697d709ef5f622d5b7d0626fb445afe26b89456851d65c85b1",
+            "excerpt": "Unaudited Condensed Consolidated Statements of Operations (in millions of U.S. dollars, except share and per share data) Three months ended June 30, Six months",
+            "excerpt_sha256": "93db03a9ba583fae1f582caf53ee35f83af8d5aaa31742e74cf346fc4d3a2877"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1513845/000110465926094844/nbis-20260812xex99d2.htm",
+            "source_sha256": "5cc10e762bf95893ed27e23866abb7f35c12e106b013856bf68094d0d322f36a",
+            "excerpt": "Unaudited Condensed Consolidated Statements of Operations for the Three and Six Months Ended June 30, 2025 and 202 6 F-3 Unaudited Condensed Consolidated Statements",
+            "excerpt_sha256": "c05da7b7ed5fd908866efebeb96782ba2f0c436260287885c8c8a6e130ef2a9a"
+          }
+        ]
+      }
+    ],
+    "independent_issuer_evidence": null,
+    "expected_result": "MULTIPLE_COMPETING_EVENTS",
+    "expected_timestamp": null,
+    "authority_version": "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"
+  },
+  {
+    "ticker": "CLLS",
+    "quarter": {
+      "quarter_id": 88939,
+      "company_id": 2506,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "period_end": "2026-06-30",
+      "source_fiscalperiod": "2026-Q2",
+      "source_reportperiod": "2026-06-30",
+      "identity_provider": "SHARADAR_ARQ",
+      "identity_status": "ACCEPTED",
+      "source_availability_date": "2026-08-06",
+      "first_public_result_date": "2026-08-06",
+      "created_at_utc": "2026-10-04T17:38:45Z",
+      "updated_at_utc": "2026-10-04T17:38:45Z",
+      "security_id": 2518,
+      "sec_cik": "0001627281"
+    },
+    "current_status": "NOT_FOUND",
+    "current_60d_scope": "OUTSIDE",
+    "current_authority": {
+      "company_id": 2506,
+      "fiscal_year": 2026,
+      "fiscal_quarter": "Q2",
+      "quarter_id": 88939,
+      "status": "NOT_FOUND",
+      "result_publication_timestamp_utc": null,
+      "result_publication_source": null,
+      "result_publication_confidence": null,
+      "result_publication_evidence_reference": null,
+      "selected_evidence_id": null,
+      "verified_at_utc": null,
+      "rule_version": "result_publication_v1",
+      "status_reason": "NO_ITEM_2_02_FOUND",
+      "updated_at_utc": "2026-10-05T06:51:22Z"
+    },
+    "candidates": [
+      {
+        "candidate_id": "0001171843-26-005324",
+        "company_id": 2506,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88939,
+        "sec_cik": "0001627281",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001171843-26-005324",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1627281/000117184326005324/f6k_080626.htm",
+        "primary_document": "f6k_080626.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000117184326005324/exh_991.htm",
+            "source_sha256": "4d91ec289bab6a74cbe7396378392ce6aa0e8ec9c5f610d025243c4fcc6e6e6f",
+            "excerpt": "Quarter 2026 Lasme-cel: Pivotal Phase 2 in r/r B-ALL (BALLI-01)",
+            "excerpt_sha256": "99c36852ca0b28a2874095d6addb59216f2b8aed0f037f0f2d263650138dc455"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000117184326005324/f6k_080626.htm",
+            "source_sha256": "638a18b89f1c8595328cdbe9e9f97a918c9ff8dc59726ac68f83f0dfea9d5ec2",
+            "excerpt": "6-K 1 f6k_080626.htm FORM 6-K UNITED STATES SECURITIES AND EXCHANGE",
+            "excerpt_sha256": "eae96d7cb8efb66ee0740a78efe498b25e4b5521c2b62e3d5233080c5383cff4"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000117184326005324/exh_991.htm",
+            "source_sha256": "4d91ec289bab6a74cbe7396378392ce6aa0e8ec9c5f610d025243c4fcc6e6e6f",
+            "excerpt": "interim condensed consolidated financial statements of Cellectis have been prepared in accordance with International Financial Reporting Standards, as issued by the International Accounting Standards",
+            "excerpt_sha256": "d5d2b6e66afae3b622b1211b66c54cdfdfb673e5174f0f9cea5636f24b6e2ce1"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1627281/000117184326005324/exh_991.htm",
+            "sha256": "4d91ec289bab6a74cbe7396378392ce6aa0e8ec9c5f610d025243c4fcc6e6e6f",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same Cellectis consolidated IFRS Q2 2026: earlier filed IAS34 interim statements approved August 6 and later August 6 release explicitly report those interim statements. Full Q2 statutory table agrees: revenue 5229, other income 1675, R&D 24976, SG&A 5739, operating loss 23521, financial gain 1727, net loss 21819 USD thousands, EPS -0.22. Later release is a repeat of the already furnished result, not a new financial correction. The separate XBRL-only amendment remains linked to the original statement filing.",
+        "acceptance": {
+          "accession": "0001171843-26-005324",
+          "submissions_utc": "2026-08-06T20:35:15.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001627281.json",
+          "submissions_sha256": "40f176e0dc0c785e1775b779a78f60ef0c3641e82cea60b5ee482f89f0188fc3",
+          "index_accepted_display": "2026-08-06 16:35:15",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1627281/000117184326005324/0001171843-26-005324-index.html",
+          "index_sha256": "7bf563fd8138989666ba28c1d3134d9e568abc5c7516a922f843eba4057e4741",
+          "observed_at_utc": "2026-10-06T17:23:11.971077+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001171843-26-005324",
+              "timestamp_utc": "2026-08-06T20:35:15.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2518,
+          "security_company_id": 2506,
+          "underlying_company_id": 2506,
+          "canonical_cik": "0001627281",
+          "sec_reporting_cik": "0001627281",
+          "underlying_issuer": "Cellectis S.A.",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2015-03-25",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526116428/clls-20251231.htm",
+              "source_sha256": "02a2a26340a6994a73558384e6418c0d48739395fb6dd37a5d1e3412d0496c49",
+              "excerpt": "Depositary Shares, each representing one \u201c CLLS \u201d Nasdaq Global",
+              "excerpt_sha256": "1411abeca576aee660ab0ec9660baf9fdef09d55da99921356e50b9af1a2e079"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "DUPLICATE_OR_REPEAT_PUBLICATION",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "IFRS",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "Release and separate interim statements both contain explicit Q2 tables (revenue USD5229k, other income USD1675k, net loss USD21819k), despite H1-first headings. 6-K/A 0001193125-26-389336 adds XBRL only and explicitly does not revise results: supplemental repeat, not a third event. Outside operational 60d scope.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1627281/000117184326005324/exh_991.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "0a54c0e2b69a32306874f9b45917c161ce849d83e691acfa8a0c24fc58b47f2d"
+      },
+      {
+        "candidate_id": "0001193125-26-338220",
+        "company_id": 2506,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88939,
+        "sec_cik": "0001627281",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K",
+        "accession": "0001193125-26-338220",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/clls_6-k_q2_2026.htm",
+        "primary_document": "clls_6-k_q2_2026.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/clls-ex99_1.htm",
+            "source_sha256": "46122e286f2bfae3b6c178afb0c07359e5f6b77dff1a7358f6241e4b7528ead2",
+            "excerpt": "year ended December 31, 2025 of the parent company was",
+            "excerpt_sha256": "8a38010634c800b542c577e2749438097c8fd98e74060b825e12efebb53d17a6"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/clls_6-k_q2_2026.htm",
+            "source_sha256": "c3c66bf7c5956b3531ed77541cedfba88b17b121fd19a09b239bbdd0d781c8a1",
+            "excerpt": "6-K 1 clls_6-k_q2_2026.htm 6-K 6-K xf UNITED STATES SECURITIES AND",
+            "excerpt_sha256": "367181cd90d83be54ed6f1d277f0621308f03eea58a952fdafc43c30a46a6c86"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/clls-ex99_1.htm",
+            "source_sha256": "46122e286f2bfae3b6c178afb0c07359e5f6b77dff1a7358f6241e4b7528ead2",
+            "excerpt": "approved by our Board of Directors on August 6, 2026. The Interim Condensed Consolidated Financial Statements are presented in thousands of U.S. dollars. See",
+            "excerpt_sha256": "bcad2a6ba2540b3247b425ab1c01907d4c8755455a4871acac762839fc53fed6"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/clls-ex99_1.htm",
+            "sha256": "46122e286f2bfae3b6c178afb0c07359e5f6b77dff1a7358f6241e4b7528ead2",
+            "result_bearing": true
+          }
+        ],
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "reviewed_summary": "Same Cellectis consolidated IFRS Q2 2026: earlier filed IAS34 interim statements approved August 6 and later August 6 release explicitly report those interim statements. Full Q2 statutory table agrees: revenue 5229, other income 1675, R&D 24976, SG&A 5739, operating loss 23521, financial gain 1727, net loss 21819 USD thousands, EPS -0.22. Later release is a repeat of the already furnished result, not a new financial correction. The separate XBRL-only amendment remains linked to the original statement filing.",
+        "acceptance": {
+          "accession": "0001193125-26-338220",
+          "submissions_utc": "2026-08-06T20:30:05.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001627281.json",
+          "submissions_sha256": "40f176e0dc0c785e1775b779a78f60ef0c3641e82cea60b5ee482f89f0188fc3",
+          "index_accepted_display": "2026-08-06 16:30:05",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/0001193125-26-338220-index.html",
+          "index_sha256": "726dded1eab2ecb0b5866dea37f215fe30cca9f6e7a08e27a6b66db3ec94aca8",
+          "observed_at_utc": "2026-10-06T17:23:11.971077+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001193125-26-338220",
+              "timestamp_utc": "2026-08-06T20:30:05.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2518,
+          "security_company_id": 2506,
+          "underlying_company_id": 2506,
+          "canonical_cik": "0001627281",
+          "sec_reporting_cik": "0001627281",
+          "underlying_issuer": "Cellectis S.A.",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2015-03-25",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526116428/clls-20251231.htm",
+              "source_sha256": "02a2a26340a6994a73558384e6418c0d48739395fb6dd37a5d1e3412d0496c49",
+              "excerpt": "Depositary Shares, each representing one \u201c CLLS \u201d Nasdaq Global",
+              "excerpt_sha256": "1411abeca576aee660ab0ec9660baf9fdef09d55da99921356e50b9af1a2e079"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "FULL_PERIOD_RESULTS",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "IFRS",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "Release and separate interim statements both contain explicit Q2 tables (revenue USD5229k, other income USD1675k, net loss USD21819k), despite H1-first headings. 6-K/A 0001193125-26-389336 adds XBRL only and explicitly does not revise results: supplemental repeat, not a third event. Outside operational 60d scope.",
+          "supporting_statement": true,
+          "completed_period": true,
+          "complete_package": true,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/clls-ex99_1.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "reviewed_binding": "6bb63cf72ae6dc1a53702f597d783db9ac96a458ecfa1272521dc6af93cdd811"
+      },
+      {
+        "candidate_id": "0001193125-26-389336",
+        "company_id": 2506,
+        "fiscal_year": 2026,
+        "fiscal_quarter": "Q2",
+        "quarter_id": 88939,
+        "sec_cik": "0001627281",
+        "source_type": "SEC_FORM_6K_RESULT",
+        "form": "6-K/A",
+        "accession": "0001193125-26-389336",
+        "parent_url": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526389336/clls-20260630.htm",
+        "primary_document": "clls-20260630.htm",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526389336/clls-20260630.htm",
+            "source_sha256": "4e63dac5a3e653e9f6b5baa2867773fe1d67fa7ddbca6a53717daf526acb3bb9",
+            "excerpt": "XBRL (Inline eXtensible Business Reporting Language) in accordance with Rule",
+            "excerpt_sha256": "b9911d100b4ce8db344b7f44d9c9d715030aa9afdcffdd02dbdd834907dbbf86"
+          }
+        ],
+        "linked_exhibits": [
+          {
+            "url": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526389336/clls-ex99_1.htm",
+            "sha256": "f0308aeb03a66b193ca05dc36bf3c4165ce0420724f44306caf3d539ce69527f",
+            "result_bearing": false
+          }
+        ],
+        "review_reference": "Phase13G.3.76:MULTIPLE_COMPETING_EVENTS",
+        "reviewed_summary": "Release and separate interim statements both contain explicit Q2 tables (revenue USD5229k, other income USD1675k, net loss USD21819k), despite H1-first headings. 6-K/A 0001193125-26-389336 adds XBRL only and explicitly does not revise results: supplemental repeat, not a third event. Outside operational 60d scope.",
+        "acceptance": {
+          "accession": "0001193125-26-389336",
+          "submissions_utc": "2026-09-11T20:30:29.000Z",
+          "submissions_url": "https://data.sec.gov/submissions/CIK0001627281.json",
+          "submissions_sha256": "40f176e0dc0c785e1775b779a78f60ef0c3641e82cea60b5ee482f89f0188fc3",
+          "index_accepted_display": "2026-09-11 16:30:29",
+          "index_timezone": "America/New_York",
+          "index_url": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526389336/0001193125-26-389336-index.html",
+          "index_sha256": "5b7a73394c858a2bb7df5e2c4d58e162ad40197ce7ed54f63f9e29832dbe2477",
+          "observed_at_utc": "2026-10-06T17:23:11.971077+00:00",
+          "prior_observations": [
+            {
+              "accession": "0001193125-26-389336",
+              "timestamp_utc": "2026-09-11T20:30:29.000Z",
+              "review_reference": "Phase13G.3.64 bounded metadata observation"
+            }
+          ]
+        },
+        "identity": {
+          "review_reference": "Phase13G.3.76:official-security-and-reporting-issuer-chain",
+          "security_id": 2518,
+          "security_company_id": 2506,
+          "underlying_company_id": 2506,
+          "canonical_cik": "0001627281",
+          "sec_reporting_cik": "0001627281",
+          "underlying_issuer": "Cellectis S.A.",
+          "underlying_match": "PROVEN",
+          "filer_role": "CONSOLIDATED_REPORTING_ISSUER",
+          "perimeter_match": "PROVEN_CANONICAL_CONSOLIDATED_GROUP",
+          "official_security_type": "ADS",
+          "is_adr_or_ads": true,
+          "provider_security_type": "ADR Common Stock",
+          "provider_type_conflict": false,
+          "temporal_match": "PROVEN",
+          "valid_from": "2015-03-25",
+          "valid_to": null,
+          "temporal_review_reason": "",
+          "documents": [
+            {
+              "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526116428/clls-20251231.htm",
+              "source_sha256": "02a2a26340a6994a73558384e6418c0d48739395fb6dd37a5d1e3412d0496c49",
+              "excerpt": "Depositary Shares, each representing one \u201c CLLS \u201d Nasdaq Global",
+              "excerpt_sha256": "1411abeca576aee660ab0ec9660baf9fdef09d55da99921356e50b9af1a2e079"
+            }
+          ]
+        },
+        "event": {
+          "event_class": "SUPPLEMENTAL_RESULT_INFORMATION",
+          "entity_match": "PROVEN",
+          "period_match": "PROVEN",
+          "period_end": "2026-06-30",
+          "fiscal_year": 2026,
+          "fiscal_quarter": "Q2",
+          "period_grain": "QUARTER",
+          "accounting_framework": "IFRS",
+          "revenue_scope": "CONSOLIDATED",
+          "net_scope": "STATUTORY_CONSOLIDATED",
+          "income_perimeter_reference": "Release and separate interim statements both contain explicit Q2 tables (revenue USD5229k, other income USD1675k, net loss USD21819k), despite H1-first headings. 6-K/A 0001193125-26-389336 adds XBRL only and explicitly does not revise results: supplemental repeat, not a third event. Outside operational 60d scope.",
+          "supporting_statement": false,
+          "completed_period": true,
+          "complete_package": false,
+          "derived_arithmetic": false,
+          "result_document_urls": [
+            "https://www.sec.gov/Archives/edgar/data/1627281/000119312526389336/clls-20260630.htm"
+          ],
+          "actual_vs_preliminary": "ACTUAL"
+        },
+        "amendment_role": "XBRL_ONLY_SUPPLEMENT",
+        "reviewed_binding": "dae7f2f316d1e629bcbc15217b17e9731029481ed81c4d47befb2c0d1b0de78d"
+      }
+    ],
+    "relations": [
+      {
+        "relation_type": "RESULT_TO_XBRL_ONLY_SUPPLEMENT",
+        "from_candidate_id": "0001193125-26-338220",
+        "to_candidate_id": "0001193125-26-389336",
+        "from_candidate_fingerprint": "6bb63cf72ae6dc1a53702f597d783db9ac96a458ecfa1272521dc6af93cdd811",
+        "to_candidate_fingerprint": "dae7f2f316d1e629bcbc15217b17e9731029481ed81c4d47befb2c0d1b0de78d",
+        "same_economic_chain": true,
+        "review_reference": "Phase13G.3.76:CLLS-6KA-no-financial-revision",
+        "relation_reason": "Amendment explicitly adds XBRL only without revising the financial results.",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/clls-ex99_1.htm",
+            "source_sha256": "46122e286f2bfae3b6c178afb0c07359e5f6b77dff1a7358f6241e4b7528ead2",
+            "excerpt": "year ended December 31, 2025 of the parent company was",
+            "excerpt_sha256": "8a38010634c800b542c577e2749438097c8fd98e74060b825e12efebb53d17a6"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526389336/clls-20260630.htm",
+            "source_sha256": "4e63dac5a3e653e9f6b5baa2867773fe1d67fa7ddbca6a53717daf526acb3bb9",
+            "excerpt": "XBRL (Inline eXtensible Business Reporting Language) in accordance with Rule",
+            "excerpt_sha256": "b9911d100b4ce8db344b7f44d9c9d715030aa9afdcffdd02dbdd834907dbbf86"
+          }
+        ]
+      },
+      {
+        "relation_type": "RESULT_TO_SAME_RESULT_REPEAT",
+        "from_candidate_id": "0001193125-26-338220",
+        "to_candidate_id": "0001171843-26-005324",
+        "from_candidate_fingerprint": "6bb63cf72ae6dc1a53702f597d783db9ac96a458ecfa1272521dc6af93cdd811",
+        "to_candidate_fingerprint": "0a54c0e2b69a32306874f9b45917c161ce849d83e691acfa8a0c24fc58b47f2d",
+        "same_economic_chain": true,
+        "review_reference": "Phase13G.3.81:bounded-economic-chain-review",
+        "relation_reason": "Same Cellectis consolidated IFRS Q2 2026: earlier filed IAS34 interim statements approved August 6 and later August 6 release explicitly report those interim statements. Full Q2 statutory table agrees: revenue 5229, other income 1675, R&D 24976, SG&A 5739, operating loss 23521, financial gain 1727, net loss 21819 USD thousands, EPS -0.22. Later release is a repeat of the already furnished result, not a new financial correction. The separate XBRL-only amendment remains linked to the original statement filing.",
+        "documents": [
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000119312526338220/clls-ex99_1.htm",
+            "source_sha256": "46122e286f2bfae3b6c178afb0c07359e5f6b77dff1a7358f6241e4b7528ead2",
+            "excerpt": "approved by our Board of Directors on August 6, 2026. The Interim Condensed Consolidated Financial Statements are presented in thousands of U.S. dollars. See",
+            "excerpt_sha256": "bcad2a6ba2540b3247b425ab1c01907d4c8755455a4871acac762839fc53fed6"
+          },
+          {
+            "source_reference": "https://www.sec.gov/Archives/edgar/data/1627281/000117184326005324/exh_991.htm",
+            "source_sha256": "4d91ec289bab6a74cbe7396378392ce6aa0e8ec9c5f610d025243c4fcc6e6e6f",
+            "excerpt": "interim condensed consolidated financial statements of Cellectis have been prepared in accordance with International Financial Reporting Standards, as issued by the International Accounting Standards",
+            "excerpt_sha256": "d5d2b6e66afae3b622b1211b66c54cdfdfb673e5174f0f9cea5636f24b6e2ce1"
+          }
+        ]
+      }
+    ],
+    "independent_issuer_evidence": null,
+    "expected_result": "MULTIPLE_COMPETING_EVENTS",
+    "expected_timestamp": null,
+    "authority_version": "FORM_6K_RESULT_PUBLICATION_AUTHORITY_V1"
+  }
+]

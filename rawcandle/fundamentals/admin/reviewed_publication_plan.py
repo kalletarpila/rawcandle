@@ -247,7 +247,11 @@ def prepare_reviewed_plan(*, project_root: Path, allowlist_path: Path, output_pl
                           publication_authority_mode: str | None = None,
                           policy_evidence_path: Path | None = None,
                           approved_handoff_path: Path | None = None,
-                          expected_approval_fingerprint: str | None = None) -> dict[str, Any]:
+                          expected_approval_fingerprint: str | None = None,
+                          plan_id: str | None = None,
+                          created_at_utc: str | None = None) -> dict[str, Any]:
+    if (plan_id is not None or created_at_utc is not None) and approved_handoff_path is None:
+        raise ValueError("PUBLICATION_POLICY_APPROVED_METADATA_MODE_REQUIRED")
     root = project_root.resolve()
     if not math.isfinite(network_budget_seconds) or network_budget_seconds <= 0:
         raise ValueError("PUBLICATION_NETWORK_BUDGET_INVALID")
@@ -269,7 +273,8 @@ def prepare_reviewed_plan(*, project_root: Path, allowlist_path: Path, output_pl
         return prepare_policy_plan(project_root=project_root,allowlist_path=allowlist_path,output_plan=output_plan,
                                    policy_evidence_path=policy_evidence_path,as_of_date=day,retry_days=retry_days,
                                    approved_handoff_path=approved_handoff_path,
-                                   expected_approval_fingerprint=expected_approval_fingerprint)
+                                   expected_approval_fingerprint=expected_approval_fingerprint,
+                                   plan_id=plan_id, created_at_utc=created_at_utc)
     if policy_evidence_path is not None:
         raise ValueError("PUBLICATION_POLICY_MODE_REQUIRED")
     destination = output_plan.resolve()

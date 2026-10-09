@@ -219,13 +219,35 @@ def test_future_candidate_execution_uses_frozen_evidence_on_copy_only(setup):
         assert db.execute('SELECT value FROM financial_sentinel').fetchone()[0]==1234.5
 
 
-def test_deterministic_plan_with_frozen_metadata(setup,monkeypatch):
-    class StableUUID:hex='synthetic_fixed_id'
-    monkeypatch.setattr(policy,'uuid4',lambda:StableUUID())
-    monkeypatch.setattr(legacy,'utc_now',lambda:'2026-10-09T00:00:00Z')
-    a=prepare(setup,'first.json');b=prepare(setup,'second.json')
+def test_deterministic_plan_with_frozen_metadata(setup):
+    metadata = dict(plan_id='explicit_synthetic_plan', created_at_utc='2026-10-09T00:00:00Z')
+    a=prepare(setup,'first.json', **metadata);b=prepare(setup,'second.json', **metadata)
     assert a==b
+    assert a['plan_id']==metadata['plan_id'] and a['created_at_utc']==metadata['created_at_utc']
     assert (setup['tmp']/'first.json').read_bytes()==(setup['tmp']/'second.json').read_bytes()
+    assert (setup['tmp']/'first.json').stat().st_mode & 0o222 == 0
+    with pytest.raises(FileExistsError):prepare(setup,'first.json', **metadata)
+    assert all(a[k] is False for k in ('publication_authorized','production_apply_authorized','executed'))
+
+
+@pytest.mark.parametrize('metadata', [dict(plan_id='only_id'),
+    dict(created_at_utc='2026-10-09T00:00:00Z'),dict(plan_id=' ',created_at_utc='2026-10-09T00:00:00Z'),
+    dict(plan_id='id',created_at_utc='invalid'),dict(plan_id='id',created_at_utc=123)])
+def test_invalid_explicit_metadata_rejects(setup, metadata):
+    with pytest.raises(ValueError):prepare(setup,**metadata)
+    assert not (setup['tmp']/'plan.json').exists()
+
+
+def test_explicit_metadata_requires_approved_mode(setup):
+    with pytest.raises(ValueError,match='APPROVED_METADATA_MODE_REQUIRED'):
+        legacy.prepare_reviewed_plan(project_root=setup['root'],allowlist_path=setup['allow'],
+            output_plan=setup['tmp']/'bad.json',plan_id='id',created_at_utc='2026-10-09T00:00:00Z')
+
+
+def test_default_metadata_remains_fresh(setup):
+    a=prepare(setup,'one.json');b=prepare(setup,'two.json')
+    assert a['plan_id'] != b['plan_id']
+    assert a['created_at_utc'] and b['created_at_utc']
 
 
 def test_new_competing_filing_rejects(setup):
@@ -249,8 +271,10 @@ def test_reviewed_plan_entry_point_forwards_explicit_mode(setup):
     s=setup;path=s['tmp']/'wrapper.json'
     result=legacy.prepare_reviewed_plan(project_root=s['root'],allowlist_path=s['allow'],output_plan=path,
         publication_event_policy=policy.V1,approved_handoff_path=s['input'],
-        expected_approval_fingerprint=s['handoff']['approval']['artifact_fingerprint'],as_of_date='2026-10-09')
+        expected_approval_fingerprint=s['handoff']['approval']['artifact_fingerprint'],as_of_date='2026-10-09',
+        plan_id='wrapper_fixed_id',created_at_utc='2026-10-09T00:00:00Z')
     assert result['prepared_key_count']==2
+    assert json.loads(path.read_text())['plan_id']=='wrapper_fixed_id'
     with pytest.raises(ValueError,match='APPROVED_MODE_REQUIRED'):
         legacy.prepare_reviewed_plan(project_root=s['root'],allowlist_path=s['allow'],output_plan=s['tmp']/'bad.json',
                                      approved_handoff_path=s['input'])
@@ -318,3 +342,37 @@ def test_context_only_quarter_preserved_without_entering_apply_membership(setup)
     assert policy.run_policy_candidate(candidate,plan,as_of_date='2026-10-09')['new_verified']==2
     with sqlite3.connect(candidate) as db:
         assert db.execute("SELECT status FROM v4_result_publication_authority WHERE fiscal_quarter='Q3'").fetchone()[0]=='NOT_FOUND'
+
+
+def test_durable_handoff_serialization_and_pinned_relocation(setup):
+    from hashlib import sha256
+    s=setup;h=deepcopy(s['handoff']);payload=b'exact reviewed semantic input\n'
+    semantic=s['tmp']/'durable_semantic.json';semantic.write_bytes(payload)
+    # Live path relocation preserves the original reviewed reference and digest.
+    h['semantic_input_references']={'logical/reviewed.json':sha256(payload).hexdigest()}
+    h['semantic_input_paths']={'logical/reviewed.json':str(semantic)}
+    approved.check_live_inputs(h)
+    semantic.write_bytes(payload+b'drift')
+    with pytest.raises(ValueError,match='POLICY_INPUT_CHANGED'):approved.check_live_inputs(h)
+    # Publish an unmodified, approved handoff through the existing atomic publisher.
+    path=s['tmp']/'durable_handoff.json';before=fingerprint(s['handoff']['approval'])
+    legacy.publish_plan(s['handoff'],path)
+    restored=legacy.read_unique_json(path)
+    approved.validate_handoff(restored,s['handoff']['approval']['artifact_fingerprint'])
+    assert restored==s['handoff'] and fingerprint(restored['approval'])==before
+    assert path.stat().st_mode & 0o222 == 0
+    with pytest.raises(FileExistsError):legacy.publish_plan(s['handoff'],path)
+
+
+def test_current_population_excludes_already_verified(setup):
+    s=setup;keys=[tuple(b['natural_key']) for b in s['fixture']['bindings']]
+    with sqlite3.connect(canonical(s)) as db:
+        db.row_factory=sqlite3.Row
+        case=s['fixture']['cases'][0]
+        from rawcandle.fundamentals.result_publication import apply_resolution
+        apply_resolution(db,case['quarter'],[case['events'][0]['evidence']])
+    scope=policy.policy_scope(canonical(s),keys,as_of_date='2026-10-09',retry_days=60)
+    terminal=tuple(s['fixture']['bindings'][0]['natural_key'])
+    assert terminal not in scope['quarter_keys']
+    assert len(scope['quarter_keys'])==len(keys)-1
+    assert next(r for r in scope['classifications'] if tuple(r['natural_key'])==terminal)['current_status']=='VERIFIED'

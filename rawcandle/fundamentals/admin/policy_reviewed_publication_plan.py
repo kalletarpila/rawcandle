@@ -363,7 +363,18 @@ def prepare_policy_plan(
     retry_days,
     approved_handoff_path=None,
     expected_approval_fingerprint=None,
+    plan_id=None,
+    created_at_utc=None,
 ):
+    # Explicit metadata is scoped to approved preparation; ordinary IDs/clocks stay unchanged.
+    if plan_id is not None or created_at_utc is not None:
+        if approved_handoff_path is None:
+            raise ValueError("PUBLICATION_POLICY_APPROVED_METADATA_MODE_REQUIRED")
+        if not isinstance(plan_id, str) or not plan_id.strip():
+            raise ValueError("PUBLICATION_PLAN_ID_INVALID")
+        if not isinstance(created_at_utc, str):
+            raise ValueError("PUBLICATION_PLAN_TIMESTAMP_INVALID")
+        created_at_utc = normalize_utc_timestamp(created_at_utc)
     root = project_root.resolve()
     destination = output_plan.resolve()
     if any(
@@ -555,8 +566,8 @@ def prepare_policy_plan(
         "policy_version": V1,
         "policy_evidence_version": POLICY_EVIDENCE_VERSION,
         "policy_evidence_fingerprint": legacy.fingerprint(supplied),
-        "plan_id": "publication_policy_plan_" + uuid4().hex,
-        "created_at_utc": legacy.utc_now(),
+        "plan_id": plan_id if plan_id is not None else "publication_policy_plan_" + uuid4().hex,
+        "created_at_utc": created_at_utc if created_at_utc is not None else legacy.utc_now(),
         "as_of_date": as_of_date,
         "retry_days": retry_days,
         "source_allowlist_path": str(allowlist_path.resolve()),
