@@ -327,6 +327,28 @@ def build_text_log_browser_url(path: str) -> str:
     return f"/{quote(Path(path).name)}"
 
 
+def scheduler_fundamentals_report_url(latest: dict[str, Any] | None) -> str | None:
+    """Use the existing admin download route for the exact supplied artifact."""
+    raw_path = (latest or {}).get("fundamentals_refresh_preview_report")
+    if not raw_path or raw_path == "NONE":
+        return None
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = REPOSITORY_ROOT / path
+    if path.name != WORKFLOW_REPORT_NAME:
+        return None
+    try:
+        report = resolve_operation_report_download(path.parent.name, path.name)
+        if report != path.resolve():
+            return None
+    except (ValueError, OSError):
+        return None
+    return (
+        f"{FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE}/"
+        f"{quote(path.parent.name, safe='')}/{quote(path.name, safe='')}"
+    )
+
+
 def _sha256_if_file(path: str | None) -> str | None:
     if not path or not Path(path).is_file():
         return None
@@ -1170,35 +1192,26 @@ def run_app(
                 f"{latest.get('technical_relevance_status', '')}",
                 "ec_source_layer_status="
                 f"{latest.get('ec_source_layer_status', '')}",
-                "fundamentals_refresh_preview_status="
-                f"{latest.get('fundamentals_refresh_preview_status', 'DISABLED')}",
+            ]
+            outcome = latest.get("fundamentals_refresh_final_outcome")
+            if not outcome or outcome == "DISABLED":
+                outcome = latest.get("fundamentals_refresh_preview_status", "DISABLED")
+            decision = (
+                latest.get("fundamentals_refresh_production_decision_reason")
+                or latest.get("fundamentals_refresh_preview_message")
+                or ""
+            )
+            failure = latest.get("fundamentals_refresh_technical_failure")
+            if not decision and failure and failure != "NONE":
+                decision = failure
+            lines.extend([
+                f"fundamentals_refresh_status={outcome}",
                 "fundamentals_refresh_mode="
                 f"{latest.get('fundamentals_refresh_mode', 'PREVIEW_ONLY')}",
-                "fundamentals_refresh_preview_timestamp_utc="
-                f"{latest.get('fundamentals_refresh_preview_timestamp_utc', 'NONE')}",
-                "fundamentals_refresh_pending_changes="
-                f"{latest.get('fundamentals_refresh_pending_changes', False)}",
-                "fundamentals_refresh_test_invoked="
-                f"{latest.get('fundamentals_refresh_test_invoked', False)}",
-                "fundamentals_refresh_production_invoked="
-                f"{latest.get('fundamentals_refresh_production_invoked', False)}",
-                "fundamentals_refresh_production_run_id="
-                f"{latest.get('fundamentals_refresh_production_run_id', 'NONE')}",
-                "fundamentals_refresh_final_outcome="
-                f"{latest.get('fundamentals_refresh_final_outcome', 'DISABLED')}",
-                "fundamentals_refresh_production_decision_reason="
-                f"{latest.get('fundamentals_refresh_production_decision_reason', '')}",
                 "fundamentals_refresh_review_required="
                 f"{latest.get('fundamentals_refresh_review_required', False)}",
-                "fundamentals_refresh_preview_report="
-                f"{latest.get('fundamentals_refresh_preview_report', 'NONE')}",
-            ]
-            refresh_failure = latest.get("fundamentals_refresh_technical_failure")
-            if refresh_failure and refresh_failure != "NONE":
-                lines.append(f"fundamentals_refresh_technical_failure={refresh_failure}")
-            refresh_message = latest.get("fundamentals_refresh_preview_message")
-            if refresh_message:
-                lines.append(f"fundamentals_refresh_preview_message={refresh_message}")
+                f"fundamentals_refresh_decision={decision}",
+            ])
             for market_result in latest.get("market_results", []):
                 lines.append(_market_row_text(market_result))
             summary_field.value = "\n".join(lines)
@@ -1225,6 +1238,15 @@ def run_app(
                         ]
                     )
                 )
+        report_url = scheduler_fundamentals_report_url(latest)
+        if report_url:
+            logs_column.controls.append(ft.Row([
+                ft.Text("Fundamentals full workflow report", expand=True),
+                ft.TextButton(
+                    "Open",
+                    on_click=lambda _e, url=report_url: launch_browser_url(page, url),
+                ),
+            ]))
         state = scheduler_running_state(payload["status"])
         running_status_text.value = (
             "Scheduler status: running" if state["is_running"]

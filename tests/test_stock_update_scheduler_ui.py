@@ -1336,10 +1336,10 @@ def test_run_app_formats_summary_lines_from_latest_summary(tmp_path, monkeypatch
 
     assert "overall_status=OK" in page.summary_field.value
     assert "enabled_markets=omxh,usa" in page.summary_field.value
-    assert "fundamentals_refresh_preview_status=REVIEW_REQUIRED" in page.summary_field.value
-    assert "fundamentals_refresh_pending_changes=True" in page.summary_field.value
+    assert "fundamentals_refresh_status=REVIEW_REQUIRED" in page.summary_field.value
+    assert "fundamentals_refresh_pending_changes=" not in page.summary_field.value
     assert "fundamentals_refresh_review_required=True" in page.summary_field.value
-    assert "fundamentals_refresh_preview_report=" in page.summary_field.value
+    assert "fundamentals_refresh_preview_report=" not in page.summary_field.value
     assert "market=omxh status=OK log=/tmp/omxh.txt" in page.summary_field.value
 
 
@@ -1742,3 +1742,94 @@ def test_taxonomy_refresh_enables_resume_and_validate_actions(tmp_path, monkeypa
     page.taxonomy_refresh_button.on_click(None)
     assert page.taxonomy_resume_button.disabled is True
     assert page.taxonomy_validate_button.disabled is False
+
+
+@pytest.mark.parametrize("outcome,mode,review,decision", [
+    ("COMPLETED", "FULL_WORKFLOW", False, "Production completed."),
+    ("STOPPED", "FULL_WORKFLOW", True, "Production requires review."),
+    (None, "PREVIEW_ONLY", True, "Preview requires review."),
+])
+@pytest.mark.parametrize("report_exists", [True, False])
+def test_scheduler_compact_fundamentals_and_report(
+    tmp_path, monkeypatch, outcome, mode, review, decision, report_exists
+):
+    from fastapi import FastAPI
+    from rawcandle.fundamentals.admin.operation_report import resolve_operation_report_download
+    from dev_tools import stock_update_scheduler_ui as ui
+
+    config_path = tmp_path / "scheduler.json"
+    _write_config(config_path)
+    report_root = tmp_path / "admin_runs"
+    report = report_root / "run-123" / "workflow_report.md"
+    report.parent.mkdir(parents=True)
+    if report_exists:
+        report.write_text("Exact workflow report", encoding="utf-8")
+    monkeypatch.setattr(ui, "resolve_operation_report_download", lambda run, name:
+        resolve_operation_report_download(run, name, root=report_root))
+    monkeypatch.setattr(ui, "read_systemd_user_timer_status", lambda: {})
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(exist_ok=True)
+    for name in ["stock_update_usa_20260617T080000Z.txt",
+                 "datacenter_pipeline_test_20260617T080000Z.txt",
+                 "ec_source_layer_test_20260617T080000Z.txt"]:
+        (log_dir / name).write_text("log", encoding="utf-8")
+    summary = {
+        "fundamentals_refresh_final_outcome": outcome,
+        "fundamentals_refresh_preview_status": "REVIEW_REQUIRED",
+        "fundamentals_refresh_mode": mode,
+        "fundamentals_refresh_review_required": review,
+        "fundamentals_refresh_production_decision_reason": decision if outcome else "",
+        "fundamentals_refresh_preview_message": "Duplicate preview" if outcome else decision,
+        "fundamentals_refresh_preview_report": str(report),
+        "fundamentals_refresh_preview_timestamp_utc": "2026-06-17T08:00:30Z",
+        "fundamentals_refresh_test_invoked": True,
+        "fundamentals_refresh_production_invoked": True,
+        "fundamentals_refresh_production_run_id": "production-123",
+        "fundamentals_refresh_pending_changes": True,
+    }
+    summary_path = log_dir / "stock_update_scheduler_summary_20260617T080000Z.json"
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    page = _FakePage()
+    run_app(page, str(config_path))
+    fundamentals = [line for line in page.summary_field.value.splitlines()
+                    if line.startswith("fundamentals_")]
+    assert fundamentals == [
+        f"fundamentals_refresh_status={outcome or 'REVIEW_REQUIRED'}",
+        f"fundamentals_refresh_mode={mode}",
+        f"fundamentals_refresh_review_required={review}",
+        f"fundamentals_refresh_decision={decision}",
+    ]
+    assert str(report) not in page.summary_field.value
+    rows = page.logs_column.controls
+    log_rows = rows[:3]
+    assert {row.controls[0].value.split()[1] for row in log_rows} == {
+        "[market_log]", "[datacenter_log]", "[ec_source_layer_log]"}
+    for row in log_rows:
+        row.controls[1].on_click(None)
+        assert page.launched_urls[-1] == "/" + row.controls[0].value.split()[0]
+    report_rows = [row for row in rows if row.controls[0].value == "Fundamentals full workflow report"]
+    assert len(report_rows) == int(report_exists)
+    if report_exists:
+        report_rows[0].controls[1].on_click(None)
+        app = FastAPI()
+        ui.add_fundamentals_admin_download_route(app)
+        route = next(route for route in app.routes
+                     if route.path.startswith(ui.FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE))
+        assert page.launched_urls[-1] == (
+            f"{ui.FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE}/run-123/workflow_report.md"
+        )
+        response = asyncio.run(route.endpoint("run-123", "workflow_report.md"))
+        assert Path(response.path) == report
+        assert Path(response.path).read_text() == "Exact workflow report"
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_scheduler_fundamentals_report_absent_or_wrong_path(tmp_path, monkeypatch):
+    from dev_tools import stock_update_scheduler_ui as ui
+    assert ui.scheduler_fundamentals_report_url(None) is None
+    assert ui.scheduler_fundamentals_report_url({}) is None
+    monkeypatch.setattr(ui, "resolve_operation_report_download", lambda *args: tmp_path / "other" / "workflow_report.md")
+    assert ui.scheduler_fundamentals_report_url({
+        "fundamentals_refresh_preview_report": str(tmp_path / "run" / "workflow_report.md")
+    }) is None
