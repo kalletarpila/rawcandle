@@ -179,3 +179,122 @@ def test_execution_failures_create_no_successful_receipt(tmp_path,monkeypatch,st
     with pytest.raises(RuntimeError,match='injected'):apply(root,path)
     assert not list((root/'fundamental_reports/publication_drains').glob('*/publication_drain_terminal_receipt*'))
     if stage!='candidate':assert load_journal(root/'data/.fundamentals_admin_publication_journal.json')['state']=='RECOVERED'
+
+
+def test_historical_inspector_and_persisted_cleanup_bind_exact_receipt(drain):
+    path=create(drain);advance(drain)
+    receipt=receipts.load(drain['run_dir']);eligible=inspect(drain)
+    expected=dict(schema_version=1,run_kind='PUBLICATION_DRAIN',run_id=RUN,path=str(path.resolve()),
+        receipt_fingerprint=receipt['receipt_fingerprint'],file_sha256=receipts.sha256_file(path),
+        operation_sha256=receipt['operation_sha256'],published_generation_id=RUN,source_generation_id='old')
+    assert eligible['terminal_receipt']==expected
+    assert 'terminal_receipt_file_identity' in eligible
+    before={p:p.read_bytes() for base in (drain['old'],drain['new'],drain['run_dir']) for p in base.iterdir() if p.is_file()}
+    result=cleanup.accept_run_and_cleanup_backups(RUN,**drain['kwargs'],lock_factory=nullcontext)
+    persisted=json.loads((drain['run_dir']/cleanup.CLEANUP_EVIDENCE_NAME).read_text())
+    assert result==persisted
+    assert persisted['terminal_receipt']==expected
+    assert persisted['run_id']==RUN and persisted['run_kind']=='PUBLICATION_DRAIN'
+    assert 'terminal_receipt_file_identity' not in persisted
+    assert receipts.load(Path(persisted['terminal_receipt']['path']).parent)['receipt_fingerprint']==expected['receipt_fingerprint']
+    assert set(persisted['files_deleted'])=={v['backup'] for v in drain['result']['backups'].values()}
+    assert len(persisted['files_deleted'])==3
+    assert all(p.read_bytes()==raw for p,raw in before.items())
+    assert cleanup.accept_run_and_cleanup_backups(RUN,**drain['kwargs'],lock_factory=nullcontext)==persisted|{'status':'ALREADY_CLEANED'}
+
+
+@pytest.mark.parametrize('when',['inspection','pre_delete'])
+@pytest.mark.parametrize('change',[
+ 'fingerprint','bytes','removed','replacement','symlink','duplicate','run','operation','generation','backup','resealed','writable','path','ancestor'])
+def test_receipt_change_after_eligibility_rejects_before_any_deletion(drain,monkeypatch,when,change):
+    path=create(drain);advance(drain)
+    def mutate():
+        value=receipts.load(drain['run_dir'])
+        if change=='ancestor':
+            parent=drain['run_dir'].parent;saved=parent.with_name('saved_reports');parent.rename(saved);parent.symlink_to(saved,target_is_directory=True)
+        elif change=='removed':path.unlink()
+        elif change=='path':path.rename(path.with_name('moved_receipt.json'))
+        elif change=='replacement':
+            replacement=path.with_name('replacement.json');replacement.write_bytes(path.read_bytes());replacement.chmod(0o444)
+            replacement.replace(path)  # Identical bytes, different inode: still reject replacement.
+        elif change=='symlink':
+            target=path.with_name('redirect.json');path.rename(target);path.symlink_to(target)
+        elif change=='duplicate':write(path.with_name('publication_drain_terminal_receipt_v2.json'),value)
+        elif change=='writable':path.chmod(0o644)
+        elif change=='bytes':
+            path.chmod(0o644);path.write_bytes(path.read_bytes()+b'\n');path.chmod(0o444)
+        else:
+            if change=='fingerprint':value['receipt_fingerprint']='f'*64
+            elif change=='run':value['run_id']='other'
+            elif change=='operation':value['operation_sha256']='f'*64
+            elif change=='generation':value['old_generation']['generation_id']='other'
+            elif change=='backup':value['roles']['canonical']['backup_size']+=1
+            elif change=='resealed':value['created_at_utc']='2026-10-10T08:00:00Z'
+            if change=='fingerprint':path.chmod(0o644);write(path,value)
+            else:reseal(drain,value)
+            path.chmod(0o444)
+    if when=='inspection':
+        original=cleanup.inspect_cleanup_eligibility
+        def inspect_then_change(*args,**kwargs):
+            result=original(*args,**kwargs);assert result['status']=='ELIGIBLE';mutate();return result
+        monkeypatch.setattr(cleanup,'inspect_cleanup_eligibility',inspect_then_change)
+    else:
+        original=cleanup._acceptance_result;calls=0
+        def validate_then_change(*args,**kwargs):
+            nonlocal calls
+            result=original(*args,**kwargs);calls+=1
+            if calls==2:mutate()
+            return result
+        monkeypatch.setattr(cleanup,'_acceptance_result',validate_then_change)
+    with pytest.raises((cleanup.RunAcceptanceCleanupError,ValueError,OSError)):
+        cleanup.accept_run_and_cleanup_backups(RUN,**drain['kwargs'],lock_factory=nullcontext)
+    assert all(Path(b['backup']).exists() for b in drain['result']['backups'].values())
+    assert not (drain['run_dir']/cleanup.CLEANUP_EVIDENCE_NAME).exists()
+
+
+def test_partial_unlink_failure_cannot_write_completed_receipt_bound_audit(drain,monkeypatch):
+    path=create(drain);advance(drain);receipt_before=path.read_bytes()
+    failing=Path(drain['result']['backups']['canonical']['backup']);original=Path.unlink
+    def unlink(p,*args,**kwargs):
+        if p==failing:raise OSError('injected second deletion failure')
+        return original(p,*args,**kwargs)
+    monkeypatch.setattr(Path,'unlink',unlink)
+    with pytest.raises(OSError,match='second deletion'):
+        cleanup.accept_run_and_cleanup_backups(RUN,**drain['kwargs'],lock_factory=nullcontext)
+    assert not Path(drain['result']['backups']['analysis']['backup']).exists()
+    assert failing.exists() and Path(drain['result']['backups']['provider']['backup']).exists()
+    assert not (drain['run_dir']/cleanup.CLEANUP_EVIDENCE_NAME).exists()
+    assert path.read_bytes()==receipt_before
+    assert inspect(drain)['status']=='NOT_ELIGIBLE'
+
+
+def test_current_run_cleanup_retains_legacy_audit_even_with_receipt_available(drain):
+    create(drain)
+    assert 'terminal_receipt' not in inspect(drain)
+    result=cleanup.accept_run_and_cleanup_backups(RUN,**drain['kwargs'],lock_factory=nullcontext)
+    assert not {'run_id','run_kind','terminal_receipt','terminal_receipt_file_identity'} & result.keys()
+
+
+def test_admin_cleanup_remains_compatible_without_publication_identity(tmp_path):
+    from tests.test_fundamentals_admin_run_acceptance_cleanup import _fixture,_inspect,_cleanup
+    fixture=_fixture(tmp_path)
+    assert 'terminal_receipt' not in _inspect(fixture)
+    result=_cleanup(fixture)
+    assert not {'run_id','run_kind','terminal_receipt','terminal_receipt_file_identity'} & result.keys()
+    assert _cleanup(fixture)==result|{'status':'ALREADY_CLEANED'}
+
+
+def test_last_pre_delete_receipt_reread_rejects_change_after_full_validation(drain,monkeypatch):
+    path=create(drain);advance(drain);original=cleanup._journal_state;calls=0
+    def change_after_final_journal_check(*args,**kwargs):
+        nonlocal calls
+        result=original(*args,**kwargs);calls+=1
+        if calls==3:
+            path.chmod(0o644);path.write_bytes(path.read_bytes()+b'\n');path.chmod(0o444)
+        return result
+    monkeypatch.setattr(cleanup,'_journal_state',change_after_final_journal_check)
+    with pytest.raises(cleanup.RunAcceptanceCleanupError,match='RECEIPT_CHANGED'):
+        cleanup.accept_run_and_cleanup_backups(RUN,**drain['kwargs'],lock_factory=nullcontext)
+    assert calls==3
+    assert all(Path(b['backup']).exists() for b in drain['result']['backups'].values())
+    assert not (drain['run_dir']/cleanup.CLEANUP_EVIDENCE_NAME).exists()

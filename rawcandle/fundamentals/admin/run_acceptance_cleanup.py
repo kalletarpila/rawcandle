@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import stat
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -279,6 +280,35 @@ def _drain_verification(record: Mapping[str, Any]) -> None:
                  "VERIFICATION_INVALID")
 
 
+def _historical_receipt_identity(directory: Path, run_id: str):
+    """Read the canonical immutable file and bind both its bytes and file identity."""
+    from rawcandle.fundamentals.admin import publication_terminal_receipt as terminal
+    from rawcandle.fundamentals.admin.reviewed_publication_plan import fingerprint
+
+    _drain_check(directory == directory.resolve() and directory.name == run_id, "RECEIPT_DIRECTORY")
+    path = directory / terminal.NAME
+    before = path.lstat()
+    _drain_check(stat.S_ISREG(before.st_mode) and not before.st_mode & 0o222, "RECEIPT_NOT_IMMUTABLE")
+    digest = sha256_file(path)
+    receipt = terminal.load(directory)
+    _drain_check(receipt["run_id"] == run_id, "RECEIPT_RUN_MISMATCH")
+    after = path.lstat()
+    def file_identity(record):
+        return {"device": record.st_dev, "inode": record.st_ino, "size": record.st_size,
+                "mtime_ns": record.st_mtime_ns, "ctime_ns": record.st_ctime_ns, "mode": record.st_mode}
+    snapshot = file_identity(before)
+    _drain_check(snapshot == file_identity(after) and sha256_file(path) == digest, "RECEIPT_CHANGED")
+    identity = {
+        "schema_version": receipt["schema_version"], "run_kind": receipt["run_kind"],
+        "run_id": receipt["run_id"], "path": str(path),
+        "receipt_fingerprint": fingerprint({k: v for k, v in receipt.items() if k != "receipt_fingerprint"}),
+        "file_sha256": digest, "operation_sha256": receipt["operation_sha256"],
+        "published_generation_id": receipt["published_generation"]["generation_id"],
+        "source_generation_id": receipt["old_generation"]["generation_id"],
+    }
+    return receipt, identity, snapshot
+
+
 def _publication_drain_result(result, *, run_id, journal_path, backup_root, live_paths, directory=None, terminal_receipt=None):
     """Read-only adapter; the existing acceptance function owns all deletion."""
     _drain_check(("mode" not in result or result["mode"] == "PRODUCTION_APPLY")
@@ -289,11 +319,17 @@ def _publication_drain_result(result, *, run_id, journal_path, backup_root, live
     journal = load_journal(journal_path)
     canonical = journal
     historical = bool(journal and journal.get("production_run_id") != run_id)
+    receipt_identity = receipt_file_identity = None
     if historical:
         from rawcandle.fundamentals.admin import publication_terminal_receipt as terminal
         if directory is None:
             directory = Path(result['report_path']).parent
-        receipt = terminal_receipt if terminal_receipt is not None else terminal.load(directory)
+        if terminal_receipt is None:
+            receipt, receipt_identity, receipt_file_identity = _historical_receipt_identity(directory, run_id)
+        else:
+            # Bounded reconstruction validates a candidate before its exclusive publication.
+            # Public inspection/cleanup never supplies an in-memory candidate.
+            receipt = terminal_receipt
         _drain_check(Path(receipt['operation_reference']) == directory / 'result.json', 'RECEIPT_OPERATION_PATH')
         journal = terminal.historical_journal(receipt, result, canonical, live_paths=live_paths)
     _drain_check(isinstance(journal, dict), "JOURNAL_MISSING")
@@ -390,8 +426,16 @@ def _publication_drain_result(result, *, run_id, journal_path, backup_root, live
     _drain_check(load_journal(journal_path) == canonical and _load_json(active_path) == active,
                  "JOURNAL_OR_ACTIVE_MANIFEST_CHANGED")
     # In-memory view only. Neither the historical result nor its journal is rewritten.
-    return dict(result, mode="PRODUCTION_APPLY", outcome="COMPLETED", journal=journal,
-                acceptance_run_kind="PUBLICATION_DRAIN")
+    normalized = dict(result, mode="PRODUCTION_APPLY", outcome="COMPLETED", journal=journal,
+                      acceptance_run_kind="PUBLICATION_DRAIN")
+    # Receipt identity is derived only from our validated canonical file, never report fields.
+    for key in ("terminal_receipt", "terminal_receipt_file_identity"):
+        normalized.pop(key, None)
+    if receipt_identity is not None:
+        _, final_identity, final_file_identity = _historical_receipt_identity(directory, run_id)
+        _drain_check((final_identity, final_file_identity) == (receipt_identity, receipt_file_identity), "RECEIPT_CHANGED")
+        normalized.update(terminal_receipt=final_identity, terminal_receipt_file_identity=final_file_identity)
+    return normalized
 
 
 def _acceptance_result(result, *, directory, run_id, journal_path, backup_root, live_paths):
@@ -464,6 +508,8 @@ def inspect_cleanup_eligibility(
             "bytes_freed": sum(sizes),
             "backup_files": [str(record["path"]) for record in manifest.values()],
             "journal_state": state,
+            **({key: result[key] for key in ("terminal_receipt", "terminal_receipt_file_identity")}
+               if result["acceptance_run_kind"] == "PUBLICATION_DRAIN" and "terminal_receipt" in result else {}),
         }
     except (OSError, KeyError, TypeError, AttributeError, ValueError, PublicationRecoveryError, RunAcceptanceCleanupError) as exc:
         return {
@@ -524,6 +570,9 @@ def _accept_run_and_cleanup_backups_locked(
     result = _acceptance_result(_load_json(directory / "result.json"), directory=directory,
                                 run_id=run_id, journal_path=journal_path,
                                 backup_root=backup_root, live_paths=live_paths)
+    if eligibility.get("run_kind") == "PUBLICATION_DRAIN":
+        _drain_check(all(eligibility.get(key) == result.get(key)
+                         for key in ("terminal_receipt", "terminal_receipt_file_identity")), "RECEIPT_CHANGED")
     source_paths = _generation_publication_sources(result, run_id=run_id)
     manifest = _validated_manifest(
         result,
@@ -567,6 +616,11 @@ def _accept_run_and_cleanup_backups_locked(
     if journal_error:
         raise RunAcceptanceCleanupError(journal_error)
 
+    if current.get("acceptance_run_kind") == "PUBLICATION_DRAIN" and "terminal_receipt" in current:
+        _, identity, file_identity = _historical_receipt_identity(directory, run_id)
+        _drain_check(identity == current["terminal_receipt"]
+                     and file_identity == current["terminal_receipt_file_identity"], "RECEIPT_CHANGED")
+
     deleted: list[str] = []
     bytes_freed = 0
     for role in sorted(manifest):
@@ -597,6 +651,8 @@ def _accept_run_and_cleanup_backups_locked(
         "publication_journal_state": state,
         "backup_directory_removed": not backup_directory.exists(),
     }
+    if current.get("acceptance_run_kind") == "PUBLICATION_DRAIN" and "terminal_receipt" in current:
+        evidence.update(run_id=run_id, run_kind="PUBLICATION_DRAIN", terminal_receipt=identity)
     write_text_atomic(
         directory / CLEANUP_EVIDENCE_NAME,
         json.dumps(evidence, indent=2, sort_keys=True, allow_nan=False) + "\n",
