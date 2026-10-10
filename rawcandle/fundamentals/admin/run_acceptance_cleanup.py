@@ -279,7 +279,7 @@ def _drain_verification(record: Mapping[str, Any]) -> None:
                  "VERIFICATION_INVALID")
 
 
-def _publication_drain_result(result, *, run_id, journal_path, backup_root, live_paths):
+def _publication_drain_result(result, *, run_id, journal_path, backup_root, live_paths, directory=None, terminal_receipt=None):
     """Read-only adapter; the existing acceptance function owns all deletion."""
     _drain_check(("mode" not in result or result["mode"] == "PRODUCTION_APPLY")
                  and ("outcome" not in result or result["outcome"] == "COMPLETED"), "RESULT_DISAGREEMENT")
@@ -287,6 +287,15 @@ def _publication_drain_result(result, *, run_id, journal_path, backup_root, live
                  and result.get("status") == "SUCCESS" and result.get("journal_state") == "COMPLETED"
                  and result.get("rollback") == {"status": "NOT_REQUIRED"}, "TERMINAL_EVIDENCE_INVALID")
     journal = load_journal(journal_path)
+    canonical = journal
+    historical = bool(journal and journal.get("production_run_id") != run_id)
+    if historical:
+        from rawcandle.fundamentals.admin import publication_terminal_receipt as terminal
+        if directory is None:
+            directory = Path(result['report_path']).parent
+        receipt = terminal_receipt if terminal_receipt is not None else terminal.load(directory)
+        _drain_check(Path(receipt['operation_reference']) == directory / 'result.json', 'RECEIPT_OPERATION_PATH')
+        journal = terminal.historical_journal(receipt, result, canonical, live_paths=live_paths)
     _drain_check(isinstance(journal, dict), "JOURNAL_MISSING")
     _drain_check(journal.get("operation_type") == "RESULT_PUBLICATION_BACKLOG_DRAIN"
                  and journal.get("production_run_id") == run_id
@@ -332,7 +341,7 @@ def _publication_drain_result(result, *, run_id, journal_path, backup_root, live
                  and not old_dir.is_symlink() and new_dir != old_dir, "GENERATION_PATH_INVALID")
     published = _load_json(new_dir / "generation_manifest.json")
     original = _load_json(old_dir / "generation_manifest.json")
-    _drain_check(active == published == journal.get("new_generation_manifest")
+    _drain_check((historical or active == published) and published == journal.get("new_generation_manifest")
                  and published.get("generation_id") == run_id
                  and original == old.get("manifest") and original.get("generation_id") == old["generation_id"],
                  "GENERATION_MANIFEST_MISMATCH")
@@ -357,7 +366,7 @@ def _publication_drain_result(result, *, run_id, journal_path, backup_root, live
         old_path, new_path = old_dir / old_name, new_dir / new_name
         expected_backup = expected_dir / (role+".db")
         _drain_check(sources[role] == old_path.resolve() and backup.get("source") == str(old_path)
-                     and Path(live_paths[role]).resolve() == new_path.resolve()
+                     and (historical or Path(live_paths[role]).resolve() == new_path.resolve())
                      and backup.get("backup") == jr.get("backup_path") == str(expected_backup)
                      and jr.get("production_path") == str(new_path), "ROLE_LINEAGE_MISMATCH")
         _drain_check(verification["sha256"] == source["sha256"] == backup.get("source_sha256")
@@ -378,7 +387,7 @@ def _publication_drain_result(result, *, run_id, journal_path, backup_root, live
         _integrity(new_path)
         _drain_check(sha256_file(new_path) == post["sha256"] and new_path.stat().st_size == post["size"],
                      "PUBLISHED_ROLE_CHANGED")
-    _drain_check(load_journal(journal_path) == journal and _load_json(active_path) == active,
+    _drain_check(load_journal(journal_path) == canonical and _load_json(active_path) == active,
                  "JOURNAL_OR_ACTIVE_MANIFEST_CHANGED")
     # In-memory view only. Neither the historical result nor its journal is rewritten.
     return dict(result, mode="PRODUCTION_APPLY", outcome="COMPLETED", journal=journal,
@@ -388,7 +397,7 @@ def _publication_drain_result(result, *, run_id, journal_path, backup_root, live
 def _acceptance_result(result, *, directory, run_id, journal_path, backup_root, live_paths):
     if result.get("operation") == "RESULT_PUBLICATION_BACKLOG_DRAIN":
         return _publication_drain_result(result, run_id=run_id, journal_path=journal_path,
-                                         backup_root=backup_root, live_paths=live_paths)
+                                         backup_root=backup_root, live_paths=live_paths, directory=directory)
     if directory.parent.name == "publication_drains":
         raise RunAcceptanceCleanupError("CLEANUP_RUN_KIND_UNKNOWN")
     return dict(result, acceptance_run_kind="ADMIN_PRODUCTION_APPLY")

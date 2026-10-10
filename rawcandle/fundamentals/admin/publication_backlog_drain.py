@@ -251,4 +251,17 @@ def run_backlog_drain(*, project_root: Path = ROOT, apply: bool = False,
             persist()
             if journal is None or result["status"] in {"SUCCESS", "PARTIAL"}:
                 shutil.rmtree(lane, ignore_errors=True)
+        if result['status'] == 'SUCCESS' and plan is not None:
+            # Auxiliary acceptance evidence must never roll back a completed publication.
+            try:
+                from rawcandle.fundamentals.admin.publication_terminal_receipt import create_for_completed_run
+                receipt_path = create_for_completed_run(result, journal_path, plan)
+                result['terminal_acceptance_evidence'] = {'status':'CREATED','path':str(receipt_path)}
+            except Exception as exc:
+                warning = {'status':'UNAVAILABLE','error':f'{type(exc).__name__}: {exc}'}
+                result['terminal_acceptance_evidence'] = warning
+                try:
+                    (run_dir / 'terminal_acceptance_error.json').write_text(json.dumps(warning,sort_keys=True)+'\n')
+                except OSError:
+                    pass  # The returned warning still reports auxiliary evidence unavailability.
     return result
