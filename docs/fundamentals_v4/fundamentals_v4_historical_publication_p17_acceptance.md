@@ -1,3 +1,45 @@
+# P1.8D — Stopped before authorization: cleanup audit lacks terminal receipt binding
+
+Selected run: `publication_drain_20261009T175136Z_e99387cf`.
+Required terminal receipt fingerprint: `8edadb2a770d55db80b5a76dcebed5093a0985c5d0aeb3b25628033bf6438769`.
+
+**STOPPED before the cleanup authorization gate. No authorization was requested, no acceptance action was invoked, and no backup was deleted.**
+
+## Contract review finding — 2026-10-10
+
+Inspected HEAD: `052af16df9e179c5bc1174af0cd1dbaf15e0f0f1` (P1.8C). Source matches that implementation; the pre-existing mutable journal, untracked generation/pointer files and unrelated research files remain outside this documentation change.
+
+P1.8D section I.4 requires the cleanup audit artifact to bind the exact terminal receipt fingerprint. The current `_accept_run_and_cleanup_backups_locked` evidence dictionary in `rawcandle/fundamentals/admin/run_acceptance_cleanup.py` records the selected run ID, deleted files, verified backup hashes/sizes, integrity, byte total and journal state. It does **not** record the terminal receipt fingerprint, receipt file hash or receipt reference. The P1.8C adapter validates the historical receipt, but its normalized return value also does not carry receipt identity to the cleanup evidence writer.
+
+Thus even a successful existing cleanup action cannot produce the receipt-bound audit required by this task. A prior ELIGIBLE inspection cannot establish that missing output contract. No extra runtime audit file, manual cleanup, or post-hoc alteration of the existing cleanup record was used to work around it.
+
+P1.8D explicitly requires: “If a source defect is discovered, STOP and make it a separate implementation phase.” This finding triggers that instruction before Stage 1 completion. Fresh full runtime eligibility and collateral inventories were not performed after the finding; the earlier P1.8C ELIGIBLE result is historical evidence only and is not treated as fresh authorization readiness.
+
+## Retained state
+
+The exact selected receipt was loaded and its fingerprint validated against the required value. The selected backup directory still contains exactly the three regular, non-symlink role files:
+
+| Role | Bytes |
+| --- | ---: |
+| provider | 968331264 |
+| canonical | 749371392 |
+| analysis | 909815808 |
+| **Total** | **2627518464** |
+
+Deleted: **0 files / 0 bytes**. Remaining: **3 files / 2,627,518,464 bytes**. No selected `backup_cleanup.json` exists. These presence/size checks do not replace the full hash/integrity/lineage revalidation required before any future authorization request.
+
+Production/runtime mutations by this attempt: **none**. Source changes: **none**. No pytest or full suite was run. Only this acceptance documentation was updated; all earlier blocked attempts below are preserved.
+
+## Required separate implementation phase
+
+Add receipt identity propagation and receipt-fingerprint binding to the existing publication-drain cleanup audit, preserving normal Admin behavior and the existing deletion boundary. Test the persisted exact binding and rejection of receipt identity changes before deletion. Do not delete real backups during that implementation phase.
+
+Then restart P1.8D Stage 1 with fresh current-state, lineage, exact backup and collateral inventories; ask the specified explicit YES/NO authorization question only after all gates pass. Previous YES responses and the earlier ELIGIBLE result must not be reused.
+
+---
+
+## Earlier P1.8B and P1.8 blocked attempts — preserved history
+
 # P1.8B — Acceptance blocked after normal Production advancement
 
 Selected run: `publication_drain_20261009T175136Z_e99387cf`. Fresh eligibility: **NOT_ELIGIBLE**. Acceptance result: **FAIL / STOPPED before cleanup**. The exact failed gate is **`PUBLICATION_DRAIN_JOURNAL_RUN_MISMATCH`**. No acceptance action was invoked, no audit state was recorded and **all three selected backups remain intact**. P1.7 publication remains a successful completed run; this rejection concerns cleanup eligibility under the current journal-binding contract.
