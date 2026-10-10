@@ -1,4 +1,59 @@
-# P1.8 — P1.7 run acceptance blocked; backups retained
+# P1.8B — Acceptance blocked after normal Production advancement
+
+Selected run: `publication_drain_20261009T175136Z_e99387cf`. Fresh eligibility: **NOT_ELIGIBLE**. Acceptance result: **FAIL / STOPPED before cleanup**. The exact failed gate is **`PUBLICATION_DRAIN_JOURNAL_RUN_MISMATCH`**. No acceptance action was invoked, no audit state was recorded and **all three selected backups remain intact**. P1.7 publication remains a successful completed run; this rejection concerns cleanup eligibility under the current journal-binding contract.
+
+## Fresh current baseline and failed gate
+
+Checked at `2026-10-10T09:14:05.791245+03:00` (Europe/Helsinki). HEAD: `7416beb5e86a8f23d97a0efca4436ed88bf8e71f`. The worktree’s modified runtime journal, untracked active-generation files and unrelated PE research script/PNG were preserved and excluded from this documentation commit.
+
+Current active generation before and after this task: `refresh_20261010T043039Z_refresh_fundamentals_f430ff5db759_production_e44c51cc`. Active manifest fingerprint: `5758df86d14ce0c4bfe9db1aa649534e2e3fc72f0650bdcda9e4f7e1ba05a366`.
+
+The canonical journal now belongs to normal refresh `20261010T043039Z_refresh_fundamentals_f430ff5db759_production_e44c51cc`, rather than the selected P1.7 publication drain. It is `COMPLETED`, activation `ACTIVATED_AND_VERIFIED`, postflight `PASSED`, rollback/recovery `NOT_REQUIRED`. The updated default `inspect_cleanup_eligibility(selected_run)` returned `NOT_ELIGIBLE / PUBLICATION_DRAIN_JOURNAL_RUN_MISMATCH`. Its zero `backup_count`/`bytes_freed` fields are rejection defaults; the verified actual inventory below remains three files.
+
+P1.8A explicitly requires the canonical journal to identify the selected run and the active manifest to agree with that publication generation. Its previous read-only ELIGIBLE result was not reused. This task did not modify the adapter, substitute a historical journal, rewrite a result, roll back Production or invoke `accept_run_and_cleanup_backups`. The stop is required by P1.8B and the current acceptance contract.
+
+Current provider watermark: `2026-10-09`; latest successful normal refresh `20261010T043039Z_refresh_fundamentals_f430ff5db759_production_e44c51cc`, completed `2026-10-10T04:31:12Z`. Current authority census: VERIFIED 12,979; UNRESOLVED 770; NOT_FOUND 1,870; AMBIGUOUS 628. These are the fresh baseline after normal Production advancement, not changes caused by this task.
+
+Selected P1.7 operation report remains `status=SUCCESS`, `journal_state=COMPLETED`, rollback NOT_REQUIRED, with its successful role postflight and published generation recorded. The preserved P1.7 execution report records postflight PASSED, activation ACTIVATED_AND_VERIFIED and recovery NOT_REQUIRED. These historical facts do not replace the required current canonical-journal match. Operation report SHA-256: `afd87308c73ed29262f6debdde90ddc092d889ab1382fe04997495b8326125d1`.
+
+## Exact selected backup inventory
+
+| Role | Exact path | Bytes | Verified SHA-256 |
+|---|---|---:|---|
+| analysis | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/publication_drain_20261009T175136Z_e99387cf/analysis.db` | 909815808 | `9da7016ef65571d47b8ae9d2db79f4f42589dc866c1967042fbde8e770db9e8c` |
+| canonical | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/publication_drain_20261009T175136Z_e99387cf/canonical.db` | 749371392 | `996deb198513b94e22888dbbb11b8139698b68cf98201a5df4d9bb8cd30a1845` |
+| provider | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/publication_drain_20261009T175136Z_e99387cf/provider.db` | 968331264 | `fda234de30f448fe342fd5fc842ff430575fd6b361146409cf1f8131e17f2981` |
+
+All three files are regular, nonsymlink files and the selected directory has no unexpected contents. Recorded source paths bind them to the OLD P1.7 generation; SHA-256 and size match the selected operation’s role records. All three SQLite quick checks return `ok`, with zero foreign-key errors.
+
+Before: **3 files / 2,627,518,464 bytes**. Deleted: **0 files / 0 bytes**. Remaining: **3 files / 2,627,518,464 bytes**. Selected directory remains intact. Cleanup audit `backup_cleanup.json`: **NOT_CREATED**.
+
+## Post-attempt invariants
+
+Fresh before/after hashes and sizes match for active provider/canonical/analysis DBs, pointer, terminal journal, Review Queue and its existing WAL/SHM, scheduler configurations, operation report, proposal, approval, handoff and semantic support, immutable plan, execution authorization and P1.7/P1.8A evidence. Canonical byte identity proves unchanged financial contents, publication authority and authority census; provider byte identity proves unchanged watermark. Queue state was recorded read-only and its files remain byte-identical.
+
+Compact path/size/mtime/inode inventories restricted to backup and generation roots match exactly before and after. Other backup directories changed: **0**. Immutable generations deleted: **0**. The OLD P1.7 and published P1.7 generations, current active generation and all audit artifacts remain present. No unrelated runtime artifact was deleted.
+
+| Active/protected artifact | SHA-256 before and after |
+|---|---|
+| `/home/kalle/projects/rawcandle/data/fundamentals_generations/refresh_20261010T043039Z_refresh_fundamentals_f430ff5db759_production_e44c51cc/fundamentals_provider.db` | `aed20dab5493fae71db086e163710bb3cd8c694d84b1713f32338cb7e2ef79d9` |
+| `/home/kalle/projects/rawcandle/data/fundamentals_generations/refresh_20261010T043039Z_refresh_fundamentals_f430ff5db759_production_e44c51cc/fundamentals_v4.db` | `ca339cfd927c645116614610ed65f4d24edd2b5d0d0458ffb64ca728b22210b4` |
+| `/home/kalle/projects/rawcandle/data/fundamentals_generations/refresh_20261010T043039Z_refresh_fundamentals_f430ff5db759_production_e44c51cc/fundamentals_analysis.db` | `0acdbc93f46c070e49a32b15db7a0506db966a27e9740708d6089ca9b9d715c6` |
+| `/home/kalle/projects/rawcandle/data/fundamentals_active_generation.json` | `a70eed876a80bd48ba0702a4654e3ec4596a34ba542db2b562d2b2ce06340138` |
+| `/home/kalle/projects/rawcandle/data/.fundamentals_admin_publication_journal.json` | `fc960171c2d30b2c358903b811a9c596d81c5c84c30efa1f554c151cbc37f5ce` |
+| `/home/kalle/projects/rawcandle/fundamental_reports/fundamentals_refresh_review_queue.db` | `84c18a698ef541a355950c91805ba0e949c9dd4d1a1d4d7d991a7bebc5d3e15b` |
+| `/home/kalle/projects/rawcandle/scheduler_config.json` | `3a0b74412a0fb9cf5e7a9b370e97a6d48af031d5094d53b5689669e630c9e894` |
+| `/home/kalle/projects/rawcandle/forecast_scheduler_config.json` | `67e55b992b6144306b8b96a23157d4879490256c3af1d267f3852da5f1587e79` |
+
+Acceptance mechanism inspected: the updated default `run_acceptance_cleanup.inspect_cleanup_eligibility`; its existing locked `accept_run_and_cleanup_backups` action was **NOT CALLED** because eligibility failed. Journal changed: NO. Source changed: NO. Pytest/full suite: NOT RUN. Nothing was pushed.
+
+Historical publication-run acceptance after a newer canonical journal requires separately designed durable terminal/recovery lineage evidence. That implementation is outside this runtime task. All selected backups must remain retained until an established contract can safely prove eligibility.
+
+---
+
+## Earlier P1.8 blocked attempt — preserved history
+
+The following is the earlier P1.8 record, before P1.8A added publication-drain support. Its dated baseline and schema rejection are historical; the current P1.8B result is the journal-binding rejection above.
 
 Selected run: `publication_drain_20261009T175136Z_e99387cf`. Acceptance result: **FAIL / NOT_ELIGIBLE**. **No backup was deleted and no acceptance state was recorded.** The existing contract does not support this publication-drain report shape; P1.8 requires stopping rather than manually deleting backups or changing source.
 
