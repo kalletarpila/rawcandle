@@ -1,0 +1,762 @@
+{
+  "audit_date": "2026-10-13",
+  "code_commit": "358857e5d0a19db5381716dc6bcd33cbee00c268",
+  "generation_id": "refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5",
+  "connection_policy": "SQLite mode=ro; query_only=ON; one read transaction per database; databases not mutually atomic",
+  "checks": [
+    {
+      "database": "data/osakedata.db",
+      "check": "market_coverage",
+      "sql": "select market,count(*) rows,count(distinct osake) tickers,min(pvm) first_date,max(pvm) last_date from osakedata group by market",
+      "columns": [
+        "market",
+        "rows",
+        "tickers",
+        "first_date",
+        "last_date"
+      ],
+      "rows": [
+        [
+          "omxh",
+          201561,
+          98,
+          "2018-01-02",
+          "2026-10-12"
+        ],
+        [
+          "omxs",
+          574124,
+          292,
+          "2018-01-02",
+          "2026-06-16"
+        ],
+        [
+          "usa",
+          8084150,
+          4524,
+          "2018-01-02",
+          "2026-10-13"
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "usa_year_coverage",
+      "sql": "select substr(pvm,1,4) year,count(*) rows,count(distinct osake) tickers from osakedata where market='usa' group by 1",
+      "columns": [
+        "year",
+        "rows",
+        "tickers"
+      ],
+      "rows": [
+        [
+          "2018",
+          720677,
+          2943
+        ],
+        [
+          "2019",
+          760183,
+          3090
+        ],
+        [
+          "2020",
+          804366,
+          3331
+        ],
+        [
+          "2021",
+          893323,
+          3733
+        ],
+        [
+          "2022",
+          954800,
+          3869
+        ],
+        [
+          "2023",
+          980198,
+          3998
+        ],
+        [
+          "2024",
+          1030020,
+          4186
+        ],
+        [
+          "2025",
+          1093608,
+          4503
+        ],
+        [
+          "2026",
+          846975,
+          4519
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "usa_quality",
+      "sql": "select count(*) rows,sum(open is null or high is null or low is null or close is null) null_ohlc,sum(open<=0 or high<=0 or low<=0 or close<=0) nonpositive_ohlc,sum(high<low or high<open or high<close or low>open or low>close) invalid_range,sum(volume is null) null_volume,sum(volume=0) zero_volume,sum(volume<0) negative_volume from osakedata where market='usa'",
+      "columns": [
+        "rows",
+        "null_ohlc",
+        "nonpositive_ohlc",
+        "invalid_range",
+        "null_volume",
+        "zero_volume",
+        "negative_volume"
+      ],
+      "rows": [
+        [
+          8084150,
+          2,
+          2320,
+          12583,
+          0,
+          103534,
+          0
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "usa_duplicate_keys",
+      "sql": "select count(*) duplicate_keys from (select osake,pvm from osakedata where market='usa' group by osake,pvm having count(*)>1)",
+      "columns": [
+        "duplicate_keys"
+      ],
+      "rows": [
+        [
+          0
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "usa_ticker_span",
+      "sql": "select count(*) tickers,min(n) min_rows,max(n) max_rows,sum(a<='2018-01-02') starts_at_beginning,sum(b<'2026-10-01') stale_before_october,sum(b='2026-10-12') ends_oct12 from (select osake,count(*) n,min(pvm) a,max(pvm) b from osakedata where market='usa' group by osake)",
+      "columns": [
+        "tickers",
+        "min_rows",
+        "max_rows",
+        "starts_at_beginning",
+        "stale_before_october",
+        "ends_oct12"
+      ],
+      "rows": [
+        [
+          4524,
+          8,
+          3203,
+          2787,
+          278,
+          4224
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "benchmarks",
+      "sql": "select osake,market,count(*) rows,min(pvm) first_date,max(pvm) last_date from osakedata where osake in ('SPY','QQQ','^GSPC','^NDX','^VIX','BTC-USD') group by osake,market",
+      "columns": [
+        "osake",
+        "market",
+        "rows",
+        "first_date",
+        "last_date"
+      ],
+      "rows": [
+        [
+          "BTC-USD",
+          "usa",
+          3203,
+          "2018-01-02",
+          "2026-10-13"
+        ],
+        [
+          "QQQ",
+          "usa",
+          2206,
+          "2018-01-02",
+          "2026-10-12"
+        ],
+        [
+          "SPY",
+          "usa",
+          2206,
+          "2018-01-02",
+          "2026-10-12"
+        ],
+        [
+          "^GSPC",
+          "usa",
+          2204,
+          "2018-01-02",
+          "2026-10-12"
+        ],
+        [
+          "^NDX",
+          "usa",
+          2204,
+          "2018-01-02",
+          "2026-10-12"
+        ],
+        [
+          "^VIX",
+          "usa",
+          2206,
+          "2018-01-02",
+          "2026-10-12"
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "splits",
+      "sql": "select is_price_data_corrected,count(*) rows,count(distinct osake) tickers,min(split_date) first_date,max(split_date) last_date from splits_data group by 1",
+      "columns": [
+        "is_price_data_corrected",
+        "rows",
+        "tickers",
+        "first_date",
+        "last_date"
+      ],
+      "rows": [
+        [
+          1,
+          6426,
+          2269,
+          "1962-10-31",
+          "2026-10-12"
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "missing_spy_sessions_inside_ticker_span",
+      "sql": "select count(*) missing_pairs from osakedata s join (select osake,min(pvm) a,max(pvm) b from osakedata where market='usa' group by osake) t on s.pvm between t.a and t.b where s.osake='SPY' and not exists(select 1 from osakedata x where x.osake=t.osake and x.market='usa' and x.pvm=s.pvm)",
+      "columns": [
+        "missing_pairs"
+      ],
+      "rows": [
+        [
+          8838
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "large_adjacent_close_ratios",
+      "sql": "select count(*) rows from (select close/lag(close) over(partition by osake order by pvm) r from osakedata where market='usa') where r>2 or r<0.5",
+      "columns": [
+        "rows"
+      ],
+      "rows": [
+        [
+          2403
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "usa_latest_dates",
+      "sql": "select pvm,count(*) rows from osakedata where market='usa' and pvm>='2026-10-09' group by pvm",
+      "columns": [
+        "pvm",
+        "rows"
+      ],
+      "rows": [
+        [
+          "2026-10-09",
+          4234
+        ],
+        [
+          "2026-10-10",
+          1
+        ],
+        [
+          "2026-10-11",
+          1
+        ],
+        [
+          "2026-10-12",
+          4225
+        ],
+        [
+          "2026-10-13",
+          1
+        ]
+      ]
+    },
+    {
+      "database": "data/osakedata.db",
+      "check": "invalid_ranges_by_year",
+      "sql": "select substr(pvm,1,4) year,count(*) rows from osakedata where market='usa' and (high<low or high<open or high<close or low>open or low>close) group by 1",
+      "columns": [
+        "year",
+        "rows"
+      ],
+      "rows": [
+        [
+          "2018",
+          1212
+        ],
+        [
+          "2019",
+          1410
+        ],
+        [
+          "2020",
+          1044
+        ],
+        [
+          "2021",
+          796
+        ],
+        [
+          "2022",
+          671
+        ],
+        [
+          "2023",
+          259
+        ],
+        [
+          "2024",
+          116
+        ],
+        [
+          "2025",
+          35
+        ],
+        [
+          "2026",
+          7040
+        ]
+      ]
+    },
+    {
+      "database": "data/analysis.db",
+      "check": "results_data",
+      "sql": "select count(*) rows,count(distinct ticker) tickers,min(date) first_date,max(date) last_date from results_data",
+      "columns": [
+        "rows",
+        "tickers",
+        "first_date",
+        "last_date"
+      ],
+      "rows": [
+        [
+          37363,
+          3122,
+          "2018-01-30",
+          "2026-02-11"
+        ]
+      ]
+    },
+    {
+      "database": "data/analysis.db",
+      "check": "divergence_data",
+      "sql": "select count(*) rows,count(distinct ticker) tickers,min(date) first_date,max(date) last_date from divergence_data",
+      "columns": [
+        "rows",
+        "tickers",
+        "first_date",
+        "last_date"
+      ],
+      "rows": [
+        [
+          8860146,
+          4915,
+          "2018-01-02",
+          "2026-10-13"
+        ]
+      ]
+    },
+    {
+      "database": "data/analysis.db",
+      "check": "stock_dow_structure_events",
+      "sql": "select count(*) rows,count(distinct ticker) tickers,min(confirmed_as_of_date) first_date,max(confirmed_as_of_date) last_date from stock_dow_structure_events",
+      "columns": [
+        "rows",
+        "tickers",
+        "first_date",
+        "last_date"
+      ],
+      "rows": [
+        [
+          948397,
+          4908,
+          "2018-01-10",
+          "2026-10-12"
+        ]
+      ]
+    },
+    {
+      "database": "data/analysis.db",
+      "check": "blackouts",
+      "sql": "select event,source,count(*) rows,count(distinct ticker) tickers,min(date) first_date,max(date) last_date from blackout_dates group by event,source",
+      "columns": [
+        "event",
+        "source",
+        "rows",
+        "tickers",
+        "first_date",
+        "last_date"
+      ],
+      "rows": [
+        [
+          "dividend",
+          "yfinance",
+          72508,
+          2583,
+          "2018-01-02",
+          "2026-03-06"
+        ],
+        [
+          "earnings",
+          "yfinance",
+          108628,
+          4135,
+          "2018-01-02",
+          "2026-09-02"
+        ]
+      ]
+    },
+    {
+      "database": "data/forecasts.db",
+      "check": "snapshot_coverage",
+      "sql": "select forecast_family,count(*) rows,count(distinct provider_symbol) symbols,min(first_seen_at_utc) first_seen,max(first_seen_at_utc) last_seen from forecast_snapshot group by 1",
+      "columns": [
+        "forecast_family",
+        "rows",
+        "symbols",
+        "first_seen",
+        "last_seen"
+      ],
+      "rows": [
+        [
+          "EARNINGS_HISTORY_REFERENCE",
+          2498,
+          2379,
+          "2026-09-27T16:27:27.390266Z",
+          "2026-10-13T12:01:33.759283Z"
+        ],
+        [
+          "FISCAL_ESTIMATE",
+          9254,
+          2302,
+          "2026-09-27T16:27:26.679445Z",
+          "2026-10-13T12:01:52.276856Z"
+        ],
+        [
+          "PRICE_TARGET",
+          28248,
+          2441,
+          "2026-09-27T16:27:26.884221Z",
+          "2026-10-13T12:01:55.784826Z"
+        ]
+      ]
+    },
+    {
+      "database": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_v4.db",
+      "check": "securities",
+      "sql": "select active,count(*) rows from security group by active",
+      "columns": [
+        "active",
+        "rows"
+      ],
+      "rows": [
+        [
+          0,
+          18
+        ],
+        [
+          1,
+          2542
+        ]
+      ]
+    },
+    {
+      "database": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_v4.db",
+      "check": "aliases",
+      "sql": "select count(*) rows,min(valid_from) first_from,max(valid_to) last_to from ticker_alias",
+      "columns": [
+        "rows",
+        "first_from",
+        "last_to"
+      ],
+      "rows": [
+        [
+          2575,
+          "",
+          "2026-08-26"
+        ]
+      ]
+    },
+    {
+      "database": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_v4.db",
+      "check": "quarters",
+      "sql": "select count(*) rows,count(distinct company_id) companies,min(period_end) first_period,max(period_end) last_period,sum(first_public_result_date is not null) with_public_date from v4_quarter",
+      "columns": [
+        "rows",
+        "companies",
+        "first_period",
+        "last_period",
+        "with_public_date"
+      ],
+      "rows": [
+        [
+          89938,
+          2540,
+          "2015-05-28",
+          "2026-09-30",
+          89938
+        ]
+      ]
+    },
+    {
+      "database": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_v4.db",
+      "check": "publication_authority",
+      "sql": "select status,count(*) rows,min(result_publication_timestamp_utc) first_timestamp,max(result_publication_timestamp_utc) last_timestamp from v4_result_publication_authority group by status",
+      "columns": [
+        "status",
+        "rows",
+        "first_timestamp",
+        "last_timestamp"
+      ],
+      "rows": [
+        [
+          "AMBIGUOUS",
+          629,
+          null,
+          null
+        ],
+        [
+          "NOT_FOUND",
+          1871,
+          null,
+          null
+        ],
+        [
+          "UNRESOLVED",
+          771,
+          null,
+          null
+        ],
+        [
+          "VERIFIED",
+          12983,
+          "2024-05-14T10:23:30Z",
+          "2026-10-10T01:05:28Z"
+        ]
+      ]
+    },
+    {
+      "database": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_provider.db",
+      "check": "delisting_metadata",
+      "sql": "select table_name,isdelisted,count(*) rows from sharadar_ticker_metadata group by 1,2",
+      "columns": [
+        "table_name",
+        "isdelisted",
+        "rows"
+      ],
+      "rows": [
+        [
+          "fundamentals",
+          "N",
+          5523
+        ],
+        [
+          "fundamentals",
+          "Y",
+          12305
+        ],
+        [
+          "funds",
+          "N",
+          6250
+        ],
+        [
+          "funds",
+          "Y",
+          3583
+        ],
+        [
+          "holdings_investor",
+          null,
+          13244
+        ],
+        [
+          "insiders",
+          "N",
+          5591
+        ],
+        [
+          "insiders",
+          "Y",
+          6630
+        ],
+        [
+          "stocks",
+          "N",
+          6317
+        ],
+        [
+          "stocks",
+          "Y",
+          14632
+        ]
+      ]
+    },
+    {
+      "database": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_provider.db",
+      "check": "actions",
+      "sql": "select action,count(*) rows,min(date) first_date,max(date) last_date from sharadar_action_metadata group by 1",
+      "columns": [
+        "action",
+        "rows",
+        "first_date",
+        "last_date"
+      ],
+      "rows": [
+        [
+          "acquisitionby",
+          1,
+          "2026-06-30",
+          "2026-06-30"
+        ],
+        [
+          "acquisitionof",
+          1,
+          "2026-06-30",
+          "2026-06-30"
+        ],
+        [
+          "bankruptcyliquidation",
+          1,
+          "2026-05-12",
+          "2026-05-12"
+        ],
+        [
+          "delisted",
+          4,
+          "2025-12-19",
+          "2026-05-12"
+        ],
+        [
+          "dividend",
+          11,
+          "2025-09-30",
+          "2026-07-16"
+        ],
+        [
+          "namechangefrom",
+          9,
+          "2025-09-03",
+          "2026-05-14"
+        ],
+        [
+          "namechangeto",
+          9,
+          "2025-09-03",
+          "2026-05-14"
+        ],
+        [
+          "regulatorydelisting",
+          3,
+          "2025-12-19",
+          "2026-03-25"
+        ],
+        [
+          "relation",
+          10,
+          "2026-03-20",
+          "2026-08-28"
+        ],
+        [
+          "sicchangefrom",
+          6,
+          "2026-01-07",
+          "2026-08-18"
+        ],
+        [
+          "sicchangeto",
+          6,
+          "2026-01-07",
+          "2026-08-18"
+        ],
+        [
+          "split",
+          85,
+          "2025-09-02",
+          "2026-08-31"
+        ],
+        [
+          "tickerchangefrom",
+          5,
+          "2025-09-02",
+          "2025-09-25"
+        ],
+        [
+          "tickerchangeto",
+          5,
+          "2025-09-02",
+          "2025-09-25"
+        ]
+      ]
+    },
+    {
+      "database": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_provider.db",
+      "check": "fundamentals_dimensions",
+      "sql": "select dimension,count(*) rows,min(reportperiod) first_period,max(reportperiod) last_period from sharadar_fundamental_observation group by 1",
+      "columns": [
+        "dimension",
+        "rows",
+        "first_period",
+        "last_period"
+      ],
+      "rows": [
+        [
+          "ARQ",
+          92437,
+          "2015-05-28",
+          "2026-09-30"
+        ],
+        [
+          "ART",
+          2814,
+          "2015-12-31",
+          "2026-08-02"
+        ],
+        [
+          "ARY",
+          967,
+          "2015-12-31",
+          "2026-07-03"
+        ],
+        [
+          "MRQ",
+          93141,
+          "2016-06-30",
+          "2026-09-30"
+        ],
+        [
+          "MRT",
+          2540,
+          "2016-06-30",
+          "2026-08-02"
+        ],
+        [
+          "MRY",
+          725,
+          "2016-06-30",
+          "2026-07-03"
+        ]
+      ]
+    }
+  ]
+}
