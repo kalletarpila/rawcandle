@@ -1,0 +1,303 @@
+{
+  "canonical_all": {
+    "companies": 2547,
+    "security_routes": 2560,
+    "coverage_classes": {
+      "PARTIAL_WINDOW": 2499,
+      "COMPLETE_WINDOW": 61
+    },
+    "full_calendar_without_quality_filter": 110,
+    "stored_span_complete": 89,
+    "routes_with_internal_missing_sessions": 2388,
+    "routes_with_basic_quality_issues": 1310,
+    "routes_with_any_prices": 2560,
+    "unknown_alias_start_routes": 2470,
+    "routes_ending_cutoff": 2535,
+    "routes_starting_boundary": 1767,
+    "price_rows": 5022847,
+    "null_ohlc": 0,
+    "nonpositive_ohlc": 2275,
+    "invalid_range": 6304,
+    "null_volume": 0,
+    "zero_volume": 48640,
+    "negative_volume": 0,
+    "unusable_rows": 55536,
+    "missing_internal_sessions": 3781,
+    "off_spy_calendar_rows": 6,
+    "weekend_rows": 0,
+    "split_count": 3968,
+    "uncorrected_splits": 0,
+    "earnings_blackout_rows": 70187,
+    "dividend_blackout_rows": 29715,
+    "earnings_blackout_rows_routes": 2476,
+    "dividend_blackout_rows_routes": 1107,
+    "forecast_fiscal_estimate_routes": 2302,
+    "forecast_price_target_routes": 2441,
+    "forecast_earnings_history_reference_routes": 2379,
+    "quarter_rows": 89938,
+    "companies_with_quarters": 2540,
+    "verified_publication_rows": 12983,
+    "companies_with_verified_publication": 2289,
+    "publication_ambiguous": 629,
+    "publication_not_found": 1871,
+    "publication_unresolved": 771
+  },
+  "locally_corroborated_instruments": {
+    "companies": 2541,
+    "security_routes": 2554,
+    "coverage_classes": {
+      "PARTIAL_WINDOW": 2493,
+      "COMPLETE_WINDOW": 61
+    },
+    "full_calendar_without_quality_filter": 109,
+    "stored_span_complete": 89,
+    "routes_with_internal_missing_sessions": 2383,
+    "routes_with_basic_quality_issues": 1306,
+    "routes_with_any_prices": 2554,
+    "unknown_alias_start_routes": 2464,
+    "routes_ending_cutoff": 2529,
+    "routes_starting_boundary": 1762,
+    "price_rows": 5009668,
+    "null_ohlc": 0,
+    "nonpositive_ohlc": 2275,
+    "invalid_range": 6303,
+    "null_volume": 0,
+    "zero_volume": 48361,
+    "negative_volume": 0,
+    "unusable_rows": 55256,
+    "missing_internal_sessions": 3776,
+    "off_spy_calendar_rows": 6,
+    "weekend_rows": 0,
+    "split_count": 3961,
+    "uncorrected_splits": 0,
+    "earnings_blackout_rows": 70187,
+    "dividend_blackout_rows": 29715,
+    "earnings_blackout_rows_routes": 2476,
+    "dividend_blackout_rows_routes": 1107,
+    "forecast_fiscal_estimate_routes": 2299,
+    "forecast_price_target_routes": 2436,
+    "forecast_earnings_history_reference_routes": 2376,
+    "quarter_rows": 89741,
+    "companies_with_quarters": 2535,
+    "verified_publication_rows": 12964,
+    "companies_with_verified_publication": 2286,
+    "publication_ambiguous": 629,
+    "publication_not_found": 1856,
+    "publication_unresolved": 771,
+    "year_coverage": {
+      "2018": {
+        "rows": 456121,
+        "security_routes": 1861
+      },
+      "2019": {
+        "rows": 480656,
+        "security_routes": 1956
+      },
+      "2020": {
+        "rows": 509303,
+        "security_routes": 2118
+      },
+      "2021": {
+        "rows": 569106,
+        "security_routes": 2382
+      },
+      "2022": {
+        "rows": 607556,
+        "security_routes": 2446
+      },
+      "2023": {
+        "rows": 618454,
+        "security_routes": 2509
+      },
+      "2024": {
+        "rows": 637919,
+        "security_routes": 2539
+      },
+      "2025": {
+        "rows": 636065,
+        "security_routes": 2547
+      },
+      "2026": {
+        "rows": 494488,
+        "security_routes": 2554
+      }
+    },
+    "large_adjacent_close_ratios": 1266
+  },
+  "unresolved_instruments": {
+    "companies": 6,
+    "security_routes": 6,
+    "coverage_classes": {
+      "PARTIAL_WINDOW": 6
+    },
+    "full_calendar_without_quality_filter": 1,
+    "stored_span_complete": 0,
+    "routes_with_internal_missing_sessions": 5,
+    "routes_with_basic_quality_issues": 4,
+    "routes_with_any_prices": 6,
+    "unknown_alias_start_routes": 6,
+    "routes_ending_cutoff": 6,
+    "routes_starting_boundary": 5,
+    "price_rows": 13179,
+    "null_ohlc": 0,
+    "nonpositive_ohlc": 0,
+    "invalid_range": 1,
+    "null_volume": 0,
+    "zero_volume": 279,
+    "negative_volume": 0,
+    "unusable_rows": 280,
+    "missing_internal_sessions": 5,
+    "off_spy_calendar_rows": 0,
+    "weekend_rows": 0,
+    "split_count": 7,
+    "uncorrected_splits": 0,
+    "earnings_blackout_rows": 0,
+    "dividend_blackout_rows": 0,
+    "earnings_blackout_rows_routes": 0,
+    "dividend_blackout_rows_routes": 0,
+    "forecast_fiscal_estimate_routes": 3,
+    "forecast_price_target_routes": 5,
+    "forecast_earnings_history_reference_routes": 3,
+    "quarter_rows": 197,
+    "companies_with_quarters": 5,
+    "verified_publication_rows": 19,
+    "companies_with_verified_publication": 3,
+    "publication_ambiguous": 0,
+    "publication_not_found": 15,
+    "publication_unresolved": 0
+  },
+  "excluded_instruments": {
+    "companies": 0,
+    "security_routes": 0,
+    "coverage_classes": {},
+    "full_calendar_without_quality_filter": 0,
+    "stored_span_complete": 0,
+    "routes_with_internal_missing_sessions": 0,
+    "routes_with_basic_quality_issues": 0,
+    "routes_with_any_prices": 0,
+    "unknown_alias_start_routes": 0,
+    "routes_ending_cutoff": 0,
+    "routes_starting_boundary": 0,
+    "price_rows": 0,
+    "null_ohlc": 0,
+    "nonpositive_ohlc": 0,
+    "invalid_range": 0,
+    "null_volume": 0,
+    "zero_volume": 0,
+    "negative_volume": 0,
+    "unusable_rows": 0,
+    "missing_internal_sessions": 0,
+    "off_spy_calendar_rows": 0,
+    "weekend_rows": 0,
+    "split_count": 0,
+    "uncorrected_splits": 0,
+    "earnings_blackout_rows": 0,
+    "dividend_blackout_rows": 0,
+    "earnings_blackout_rows_routes": 0,
+    "dividend_blackout_rows_routes": 0,
+    "forecast_fiscal_estimate_routes": 0,
+    "forecast_price_target_routes": 0,
+    "forecast_earnings_history_reference_routes": 0,
+    "quarter_rows": 0,
+    "companies_with_quarters": 0,
+    "verified_publication_rows": 0,
+    "companies_with_verified_publication": 0,
+    "publication_ambiguous": 0,
+    "publication_not_found": 0,
+    "publication_unresolved": 0
+  },
+  "reconciliation79": {
+    "companies": 79,
+    "reasons": {
+      "EXPLICIT_BNC_RETIREMENT_AND_FINANCIAL_HISTORY_REMOVAL": 1,
+      "BATCH_CANONICAL_ADDITION_NOT_PRESENT_IN_PUBLISHED_ROSTER": 76,
+      "REVIEWED_NEW_ISSUER_ADDED_AFTER_PUBLISHED_VERSION": 2
+    },
+    "active_additions_with_timestamp_matched_plan": 78,
+    "active_additions_with_no_old_membership": 78
+  },
+  "six_held_routes_checks": [
+    {
+      "check": "held_routes_years",
+      "sql": "select substr(pvm,1,4) year,count(*) rows,count(distinct osake) tickers from osakedata where osake in ('BNC','VAI','NXH','VMRK','IA','NMAD') and market='usa' and pvm<='2026-10-12' group by 1",
+      "columns": [
+        "year",
+        "rows",
+        "tickers"
+      ],
+      "rows": [
+        [
+          "2018",
+          1454,
+          6
+        ],
+        [
+          "2019",
+          1512,
+          6
+        ],
+        [
+          "2020",
+          1518,
+          6
+        ],
+        [
+          "2021",
+          1512,
+          6
+        ],
+        [
+          "2022",
+          1506,
+          6
+        ],
+        [
+          "2023",
+          1500,
+          6
+        ],
+        [
+          "2024",
+          1512,
+          6
+        ],
+        [
+          "2025",
+          1500,
+          6
+        ],
+        [
+          "2026",
+          1165,
+          6
+        ]
+      ]
+    },
+    {
+      "check": "held_routes_jumps",
+      "sql": "select count(*) jumps from(select close/lag(close) over(partition by osake order by pvm) r from osakedata where osake in ('BNC','VAI','NXH','VMRK','IA','NMAD') and market='usa' and pvm<='2026-10-12') where r>2 or r<0.5",
+      "columns": [
+        "jumps"
+      ],
+      "rows": [
+        [
+          5
+        ]
+      ]
+    },
+    {
+      "check": "held_routes_invalid_by_year",
+      "sql": "select substr(pvm,1,4) year,count(*) rows from osakedata where osake in ('BNC','VAI','NXH','VMRK','IA','NMAD') and market='usa' and (high<low or high<open or high<close or low>open or low>close) group by 1",
+      "columns": [
+        "year",
+        "rows"
+      ],
+      "rows": [
+        [
+          "2019",
+          1
+        ]
+      ]
+    }
+  ]
+}

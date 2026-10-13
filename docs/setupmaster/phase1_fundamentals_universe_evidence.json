@@ -1,0 +1,851 @@
+{
+  "audit_date": "2026-10-13",
+  "cutoff_session": "2026-10-12",
+  "generation_id": "refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5",
+  "source_paths": {
+    "f": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_v4.db",
+    "p": "data/fundamentals_generations/refresh_20261013T042603Z_refresh_fundamentals_3d9f10e1f3f2_production_25d220d5/fundamentals_provider.db",
+    "a": "data/analysis.db",
+    "o": "data/osakedata.db",
+    "fc": "data/forecasts.db"
+  },
+  "active_operational_universe": {
+    "universe_version_id": "3b8121b74c852f08575fa1e2b70004e6",
+    "contract_version": "PHASE13B_OPERATIONAL_UNIVERSE_CONTRACT_V1",
+    "semantic_mode": "CURRENT_OPERATIONAL_UNIVERSE",
+    "as_of_date": "2026-09-20",
+    "source_fingerprint": "a699c0d93a4e2a06dbfea6890dd168e829944dc10580d5354afa99174e3c542d",
+    "economic_result_fingerprint": "4d5fbd5539cfb830d4d11a630c8c0a81a09e6839cf79c9602bd30937e9afd28d",
+    "physical_content_fingerprint": "43256efd36b7776ec3b08b42b191033e312e06ba6be2d2fbbeb0d073e29ad1b0",
+    "status": "COMPLETE",
+    "member_count": 2468,
+    "company_count": 2468,
+    "active_security_count": 2463,
+    "zero_active_company_count": 16,
+    "multi_active_company_count": 11,
+    "created_at_utc": "2026-09-20T14:58:55Z",
+    "completed_at_utc": "2026-09-20T14:58:55Z"
+  },
+  "definitions": {
+    "price_mapping": "exact canonical current_ticker, market=usa; historical alias availability separately inspected; not PIT-certified identity",
+    "primary_roster": "Canonical company/company_id with security/security_id; published roster scopes are reconciliation only, not the research boundary.",
+    "complete_window": "all 2206 stored SPY sessions from 2018-01-02 to 2026-10-12, no basic unusable or off-calendar rows; not proof of full listing life",
+    "partial_window": "some prices but fails complete_window, includes later IPOs and ended listings",
+    "stored_span_complete": "no absent SPY sessions between own first/last stored dates and no basic unusable/off-calendar rows",
+    "unusable": "null/nonpositive OHLC, invalid range, null/nonpositive volume; does not certify adjustment basis",
+    "canonical_starting_universe": "User-selected provisional boundary: all 2547 canonical company rows and their 2560 distinct security routes, including retired/inactive rows; instrument and data eligibility assessed separately."
+  },
+  "summary": {
+    "published_all_security_routes": {
+      "companies": 2468,
+      "security_routes": 2479,
+      "coverage_classes": {
+        "PARTIAL_WINDOW": 2421,
+        "COMPLETE_WINDOW": 58
+      },
+      "stored_span_complete": 78,
+      "price_first": "2018-01-02",
+      "price_last": "2026-10-12",
+      "companies_with_quarters": 2466,
+      "companies_with_verified_publications": 2255,
+      "quarter_rows": 87947,
+      "verified_publication_rows": 12831,
+      "publication_status_counts": {
+        "VERIFIED": 12831,
+        "AMBIGUOUS": 620,
+        "NOT_FOUND": 1616,
+        "UNRESOLVED": 769
+      },
+      "missing_price_tickers": [],
+      "active_counts": {
+        "1": 2463,
+        "0": 16
+      },
+      "delisted_flag_routes": 16,
+      "unknown_alias_start_routes": 2468,
+      "company_ids_without_quarters": [
+        274,
+        303
+      ],
+      "price_rows": 4892740,
+      "null_ohlc": 0,
+      "nonpositive_ohlc": 2275,
+      "invalid_range": 6249,
+      "null_volume": 0,
+      "zero_volume": 47877,
+      "negative_volume": 0,
+      "unusable_rows": 54718,
+      "weekend_rows": 0,
+      "missing_internal_sessions": 3701,
+      "off_spy_calendar_rows": 6,
+      "split_count": 3872,
+      "uncorrected_splits": 0,
+      "earnings_blackout_rows": 69086,
+      "dividend_blackout_rows": 29339,
+      "earnings_blackout_rows_routes": 2430,
+      "dividend_blackout_rows_routes": 1087,
+      "forecast_fiscal_estimate_routes": 2302,
+      "forecast_fiscal_estimate_rows": 9254,
+      "forecast_price_target_routes": 2441,
+      "forecast_price_target_rows": 28248,
+      "forecast_earnings_history_reference_routes": 2379,
+      "forecast_earnings_history_reference_rows": 2498,
+      "first_date_counts": {
+        "2018-01-02": 1722,
+        "2021-06-30": 9,
+        "2020-12-11": 6,
+        "2021-07-01": 6,
+        "2021-01-08": 6
+      },
+      "last_date_counts": {
+        "2026-10-12": 2455,
+        "2026-10-09": 5,
+        "2026-08-24": 2,
+        "2026-10-07": 2,
+        "2026-09-02": 2
+      },
+      "year_coverage": {
+        "2018": {
+          "rows": 445881,
+          "tickers": 1820
+        },
+        "2019": {
+          "rows": 470043,
+          "tickers": 1912
+        },
+        "2020": {
+          "rows": 497969,
+          "tickers": 2072
+        },
+        "2021": {
+          "rows": 556660,
+          "tickers": 2330
+        },
+        "2022": {
+          "rows": 594167,
+          "tickers": 2392
+        },
+        "2023": {
+          "rows": 604664,
+          "tickers": 2453
+        },
+        "2024": {
+          "rows": 623094,
+          "tickers": 2477
+        },
+        "2025": {
+          "rows": 619693,
+          "tickers": 2479
+        },
+        "2026": {
+          "rows": 480569,
+          "tickers": 2479
+        }
+      }
+    },
+    "published_active_single": {
+      "companies": 2441,
+      "security_routes": 2441,
+      "coverage_classes": {
+        "PARTIAL_WINDOW": 2385,
+        "COMPLETE_WINDOW": 56
+      },
+      "stored_span_complete": 76,
+      "price_first": "2018-01-02",
+      "price_last": "2026-10-12",
+      "companies_with_quarters": 2439,
+      "companies_with_verified_publications": 2237,
+      "quarter_rows": 87074,
+      "verified_publication_rows": 12735,
+      "publication_status_counts": {
+        "VERIFIED": 12735,
+        "AMBIGUOUS": 616,
+        "NOT_FOUND": 1593,
+        "UNRESOLVED": 768
+      },
+      "missing_price_tickers": [],
+      "active_counts": {
+        "1": 2441
+      },
+      "delisted_flag_routes": 0,
+      "unknown_alias_start_routes": 2430,
+      "company_ids_without_quarters": [
+        274,
+        303
+      ],
+      "price_rows": 4823312,
+      "null_ohlc": 0,
+      "nonpositive_ohlc": 2275,
+      "invalid_range": 6211,
+      "null_volume": 0,
+      "zero_volume": 46196,
+      "negative_volume": 0,
+      "unusable_rows": 52999,
+      "weekend_rows": 0,
+      "missing_internal_sessions": 3648,
+      "off_spy_calendar_rows": 0,
+      "split_count": 3801,
+      "uncorrected_splits": 0,
+      "earnings_blackout_rows": 68247,
+      "dividend_blackout_rows": 29158,
+      "earnings_blackout_rows_routes": 2395,
+      "dividend_blackout_rows_routes": 1076,
+      "forecast_fiscal_estimate_routes": 2302,
+      "forecast_fiscal_estimate_rows": 9254,
+      "forecast_price_target_routes": 2441,
+      "forecast_price_target_rows": 28248,
+      "forecast_earnings_history_reference_routes": 2379,
+      "forecast_earnings_history_reference_rows": 2498,
+      "first_date_counts": {
+        "2018-01-02": 1700,
+        "2021-06-30": 9,
+        "2020-12-11": 6,
+        "2021-07-01": 6,
+        "2021-01-08": 6
+      },
+      "last_date_counts": {
+        "2026-10-12": 2427,
+        "2026-10-07": 2,
+        "2026-09-02": 2,
+        "2026-09-03": 1,
+        "2026-10-08": 1
+      },
+      "year_coverage": {
+        "2018": {
+          "rows": 440359,
+          "tickers": 1798
+        },
+        "2019": {
+          "rows": 464026,
+          "tickers": 1887
+        },
+        "2020": {
+          "rows": 491298,
+          "tickers": 2043
+        },
+        "2021": {
+          "rows": 548989,
+          "tickers": 2298
+        },
+        "2022": {
+          "rows": 585829,
+          "tickers": 2358
+        },
+        "2023": {
+          "rows": 595725,
+          "tickers": 2415
+        },
+        "2024": {
+          "rows": 613518,
+          "tickers": 2439
+        },
+        "2025": {
+          "rows": 610193,
+          "tickers": 2441
+        },
+        "2026": {
+          "rows": 473375,
+          "tickers": 2441
+        }
+      }
+    },
+    "published_multi_security_candidates": {
+      "companies": 11,
+      "security_routes": 22,
+      "coverage_classes": {
+        "PARTIAL_WINDOW": 20,
+        "COMPLETE_WINDOW": 2
+      },
+      "stored_span_complete": 2,
+      "price_first": "2018-01-02",
+      "price_last": "2026-10-12",
+      "companies_with_quarters": 11,
+      "companies_with_verified_publications": 10,
+      "quarter_rows": 403,
+      "verified_publication_rows": 65,
+      "publication_status_counts": {
+        "VERIFIED": 65,
+        "AMBIGUOUS": 2,
+        "NOT_FOUND": 6,
+        "UNRESOLVED": 1
+      },
+      "missing_price_tickers": [],
+      "active_counts": {
+        "1": 22
+      },
+      "delisted_flag_routes": 0,
+      "unknown_alias_start_routes": 22,
+      "company_ids_without_quarters": [],
+      "price_rows": 43726,
+      "null_ohlc": 0,
+      "nonpositive_ohlc": 0,
+      "invalid_range": 2,
+      "null_volume": 0,
+      "zero_volume": 0,
+      "negative_volume": 0,
+      "unusable_rows": 2,
+      "weekend_rows": 0,
+      "missing_internal_sessions": 24,
+      "off_spy_calendar_rows": 0,
+      "split_count": 39,
+      "uncorrected_splits": 0,
+      "earnings_blackout_rows": 590,
+      "dividend_blackout_rows": 94,
+      "earnings_blackout_rows_routes": 21,
+      "dividend_blackout_rows_routes": 8,
+      "forecast_fiscal_estimate_routes": 0,
+      "forecast_fiscal_estimate_rows": 0,
+      "forecast_price_target_routes": 0,
+      "forecast_price_target_rows": 0,
+      "forecast_earnings_history_reference_routes": 0,
+      "forecast_earnings_history_reference_rows": 0,
+      "first_date_counts": {
+        "2018-01-02": 17,
+        "2023-08-04": 2,
+        "2019-03-13": 1,
+        "2019-03-12": 1,
+        "2023-06-16": 1
+      },
+      "last_date_counts": {
+        "2026-10-12": 22
+      },
+      "year_coverage": {
+        "2018": {
+          "rows": 4267,
+          "tickers": 17
+        },
+        "2019": {
+          "rows": 4693,
+          "tickers": 19
+        },
+        "2020": {
+          "rows": 4807,
+          "tickers": 19
+        },
+        "2021": {
+          "rows": 4788,
+          "tickers": 19
+        },
+        "2022": {
+          "rows": 4769,
+          "tickers": 19
+        },
+        "2023": {
+          "rows": 5087,
+          "tickers": 22
+        },
+        "2024": {
+          "rows": 5544,
+          "tickers": 22
+        },
+        "2025": {
+          "rows": 5500,
+          "tickers": 22
+        },
+        "2026": {
+          "rows": 4271,
+          "tickers": 22
+        }
+      }
+    },
+    "published_historical_retained": {
+      "companies": 16,
+      "security_routes": 16,
+      "coverage_classes": {
+        "PARTIAL_WINDOW": 16
+      },
+      "stored_span_complete": 0,
+      "price_first": "2018-01-02",
+      "price_last": "2026-10-12",
+      "companies_with_quarters": 16,
+      "companies_with_verified_publications": 8,
+      "quarter_rows": 470,
+      "verified_publication_rows": 31,
+      "publication_status_counts": {
+        "VERIFIED": 31,
+        "AMBIGUOUS": 2,
+        "NOT_FOUND": 17,
+        "UNRESOLVED": 0
+      },
+      "missing_price_tickers": [],
+      "active_counts": {
+        "0": 16
+      },
+      "delisted_flag_routes": 16,
+      "unknown_alias_start_routes": 16,
+      "company_ids_without_quarters": [],
+      "price_rows": 25702,
+      "null_ohlc": 0,
+      "nonpositive_ohlc": 0,
+      "invalid_range": 36,
+      "null_volume": 0,
+      "zero_volume": 1681,
+      "negative_volume": 0,
+      "unusable_rows": 1717,
+      "weekend_rows": 0,
+      "missing_internal_sessions": 29,
+      "off_spy_calendar_rows": 6,
+      "split_count": 32,
+      "uncorrected_splits": 0,
+      "earnings_blackout_rows": 249,
+      "dividend_blackout_rows": 87,
+      "earnings_blackout_rows_routes": 14,
+      "dividend_blackout_rows_routes": 3,
+      "forecast_fiscal_estimate_routes": 0,
+      "forecast_fiscal_estimate_rows": 0,
+      "forecast_price_target_routes": 0,
+      "forecast_price_target_rows": 0,
+      "forecast_earnings_history_reference_routes": 0,
+      "forecast_earnings_history_reference_rows": 0,
+      "first_date_counts": {
+        "2018-01-02": 5,
+        "2023-08-02": 1,
+        "2022-02-07": 1,
+        "2021-05-07": 1,
+        "2021-11-30": 1
+      },
+      "last_date_counts": {
+        "2026-10-12": 6,
+        "2026-10-09": 5,
+        "2026-08-24": 2,
+        "2026-08-21": 1,
+        "2026-08-27": 1
+      },
+      "year_coverage": {
+        "2018": {
+          "rows": 1255,
+          "tickers": 5
+        },
+        "2019": {
+          "rows": 1324,
+          "tickers": 6
+        },
+        "2020": {
+          "rows": 1864,
+          "tickers": 10
+        },
+        "2021": {
+          "rows": 2883,
+          "tickers": 13
+        },
+        "2022": {
+          "rows": 3569,
+          "tickers": 15
+        },
+        "2023": {
+          "rows": 3852,
+          "tickers": 16
+        },
+        "2024": {
+          "rows": 4032,
+          "tickers": 16
+        },
+        "2025": {
+          "rows": 4000,
+          "tickers": 16
+        },
+        "2026": {
+          "rows": 2923,
+          "tickers": 16
+        }
+      }
+    },
+    "canonical_starting_universe": {
+      "companies": 2547,
+      "security_routes": 2560,
+      "coverage_classes": {
+        "PARTIAL_WINDOW": 2499,
+        "COMPLETE_WINDOW": 61
+      },
+      "stored_span_complete": 89,
+      "price_first": "2018-01-02",
+      "price_last": "2026-10-12",
+      "companies_with_quarters": 2540,
+      "companies_with_verified_publications": 2289,
+      "quarter_rows": 89938,
+      "verified_publication_rows": 12983,
+      "publication_status_counts": {
+        "VERIFIED": 12983,
+        "AMBIGUOUS": 629,
+        "NOT_FOUND": 1871,
+        "UNRESOLVED": 771
+      },
+      "missing_price_tickers": [],
+      "active_counts": {
+        "1": 2542,
+        "0": 18
+      },
+      "delisted_flag_routes": 17,
+      "unknown_alias_start_routes": 2470,
+      "company_ids_without_quarters": [
+        274,
+        303,
+        346,
+        2484,
+        2485,
+        2499,
+        2501
+      ],
+      "price_rows": 5022847,
+      "null_ohlc": 0,
+      "nonpositive_ohlc": 2275,
+      "invalid_range": 6304,
+      "null_volume": 0,
+      "zero_volume": 48640,
+      "negative_volume": 0,
+      "unusable_rows": 55536,
+      "weekend_rows": 0,
+      "missing_internal_sessions": 3781,
+      "off_spy_calendar_rows": 6,
+      "split_count": 3968,
+      "uncorrected_splits": 0,
+      "earnings_blackout_rows": 70187,
+      "dividend_blackout_rows": 29715,
+      "earnings_blackout_rows_routes": 2476,
+      "dividend_blackout_rows_routes": 1107,
+      "forecast_fiscal_estimate_routes": 2302,
+      "forecast_fiscal_estimate_rows": 9254,
+      "forecast_price_target_routes": 2441,
+      "forecast_price_target_rows": 28248,
+      "forecast_earnings_history_reference_routes": 2379,
+      "forecast_earnings_history_reference_rows": 2498,
+      "first_date_counts": {
+        "2018-01-02": 1767,
+        "2021-06-30": 9,
+        "2020-12-11": 6,
+        "2021-07-01": 6,
+        "2021-01-08": 6
+      },
+      "last_date_counts": {
+        "2026-10-12": 2535,
+        "2026-10-09": 5,
+        "2026-08-24": 2,
+        "2026-10-07": 2,
+        "2026-09-02": 2
+      },
+      "year_coverage": {
+        "2018": {
+          "rows": 457575,
+          "tickers": 1867
+        },
+        "2019": {
+          "rows": 482168,
+          "tickers": 1962
+        },
+        "2020": {
+          "rows": 510821,
+          "tickers": 2124
+        },
+        "2021": {
+          "rows": 570618,
+          "tickers": 2388
+        },
+        "2022": {
+          "rows": 609062,
+          "tickers": 2452
+        },
+        "2023": {
+          "rows": 619954,
+          "tickers": 2515
+        },
+        "2024": {
+          "rows": 639431,
+          "tickers": 2545
+        },
+        "2025": {
+          "rows": 637565,
+          "tickers": 2553
+        },
+        "2026": {
+          "rows": 495653,
+          "tickers": 2560
+        }
+      }
+    }
+  },
+  "checks": [
+    {
+      "check": "active_universe",
+      "sql": "select v.* from f.fundamentals_operational_universe_version v join f.fundamentals_operational_universe_active_version a using(universe_version_id)",
+      "parameters": [],
+      "rows": [
+        {
+          "universe_version_id": "3b8121b74c852f08575fa1e2b70004e6",
+          "contract_version": "PHASE13B_OPERATIONAL_UNIVERSE_CONTRACT_V1",
+          "semantic_mode": "CURRENT_OPERATIONAL_UNIVERSE",
+          "as_of_date": "2026-09-20",
+          "source_fingerprint": "a699c0d93a4e2a06dbfea6890dd168e829944dc10580d5354afa99174e3c542d",
+          "economic_result_fingerprint": "4d5fbd5539cfb830d4d11a630c8c0a81a09e6839cf79c9602bd30937e9afd28d",
+          "physical_content_fingerprint": "43256efd36b7776ec3b08b42b191033e312e06ba6be2d2fbbeb0d073e29ad1b0",
+          "status": "COMPLETE",
+          "member_count": 2468,
+          "company_count": 2468,
+          "active_security_count": 2463,
+          "zero_active_company_count": 16,
+          "multi_active_company_count": 11,
+          "created_at_utc": "2026-09-20T14:58:55Z",
+          "completed_at_utc": "2026-09-20T14:58:55Z"
+        }
+      ]
+    },
+    {
+      "check": "canonical_security_roster",
+      "sql": "select co.company_id,co.company_key,co.company_name,co.status company_status,s.security_id,s.current_ticker ticker,s.active,s.exchange,s.valid_from,s.valid_to,m.membership_status,m.security_id published_security_id,m.current_ticker published_ticker from f.company co left join f.security s using(company_id) left join f.fundamentals_operational_universe_member m on m.company_id=co.company_id and m.universe_version_id=? order by co.company_id,s.security_id",
+      "parameters": [
+        "3b8121b74c852f08575fa1e2b70004e6"
+      ],
+      "row_count": 2560,
+      "result_sha256": "9ba0571845cf88b4421151e36b5e55b71203c5ca9bfdebb9c139ed5bc3f228d1"
+    },
+    {
+      "check": "canonical_ticker_prices",
+      "sql": "select s.security_id,count(o.pvm) price_rows,min(o.pvm) first_date,max(o.pvm) last_date,sum(o.pvm is not null and (o.open is null or o.high is null or o.low is null or o.close is null)) null_ohlc,sum(o.open<=0 or o.high<=0 or o.low<=0 or o.close<=0) nonpositive_ohlc,sum(o.high<o.low or o.high<o.open or o.high<o.close or o.low>o.open or o.low>o.close) invalid_range,sum(o.pvm is not null and o.volume is null) null_volume,sum(o.volume=0) zero_volume,sum(o.volume<0) negative_volume,sum(o.pvm is not null and (o.open is null or o.high is null or o.low is null or o.close is null or o.open<=0 or o.high<=0 or o.low<=0 or o.close<=0 or o.high<o.low or o.high<o.open or o.high<o.close or o.low>o.open or o.low>o.close or o.volume is null or o.volume<=0)) unusable_rows,sum(o.pvm is not null and strftime('%w',o.pvm) in ('0','6')) weekend_rows from f.security s left join o.osakedata o on o.osake=s.current_ticker and o.market='usa' and o.pvm<='2026-10-12' group by s.security_id",
+      "parameters": [],
+      "row_count": 2560,
+      "result_sha256": "042bfaf396c3850fa96290abd45e803e33646060b2762d21c9231106f444d1b2"
+    },
+    {
+      "check": "benchmark_calendar",
+      "sql": "select pvm from o.osakedata where osake='SPY' and market='usa' and pvm<='2026-10-12' order by pvm",
+      "parameters": [],
+      "row_count": 2206,
+      "result_sha256": "e5264c0c922cc3bed65a9d6e093a8e069e35564cabee6296694e05add958b581"
+    },
+    {
+      "check": "canonical_ticker_dates",
+      "sql": "select s.security_id,o.pvm from f.security s join o.osakedata o on o.osake=s.current_ticker and o.market='usa' and o.pvm<='2026-10-12'",
+      "row_count": 5022847,
+      "result_sha256": "7591da7e3373079ef42d6f1c556ffd1d0356f668e0f59418e7b801a88d14333e"
+    },
+    {
+      "check": "aliases",
+      "sql": "select security_id,count(*) alias_count,sum(valid_from is null or valid_from='') unknown_alias_start,sum(valid_to is not null and valid_to<>'') closed_alias_count from f.ticker_alias group by security_id",
+      "parameters": [],
+      "row_count": 2560,
+      "result_sha256": "8fce81a891921ca074dcd804077061470944cad4366b6cbe250af7b647a30ee6"
+    },
+    {
+      "check": "company_quarters",
+      "sql": "select company_id,count(*) quarters,min(period_end) first_period,max(period_end) last_period,sum(first_public_result_date is not null) public_date_quarters from f.v4_quarter group by company_id",
+      "parameters": [],
+      "row_count": 2540,
+      "result_sha256": "ceaa8df397653a2791d7678f609f07d3c6e2b19b3eb05d3b623b550765c15382"
+    },
+    {
+      "check": "company_publications",
+      "sql": "select company_id,status,count(*) n,min(result_publication_timestamp_utc) first_timestamp,max(result_publication_timestamp_utc) last_timestamp from f.v4_result_publication_authority group by company_id,status",
+      "parameters": [],
+      "row_count": 3471,
+      "result_sha256": "efddf813cabac619e5698075edf1920acc13d480037c5ac7577a6fc139d23d86"
+    },
+    {
+      "check": "canonical_ticker_blackouts",
+      "sql": "select s.security_id,b.event,count(*) n,min(b.date) first_date,max(b.date) last_date from f.security s join a.blackout_dates b on b.ticker=s.current_ticker group by s.security_id,b.event",
+      "parameters": [],
+      "row_count": 3583,
+      "result_sha256": "901521009293680546094837c65aa3fe2725222d56ec3dace671207928c4cf18"
+    },
+    {
+      "check": "canonical_identity_forecasts",
+      "sql": "select s.security_id,x.forecast_family,count(*) n,min(x.first_seen_at_utc) first_seen,max(x.first_seen_at_utc) last_seen from f.security s join fc.forecast_snapshot x on x.security_id=s.security_id and x.company_id=s.company_id group by s.security_id,x.forecast_family",
+      "parameters": [],
+      "row_count": 7122,
+      "result_sha256": "18e75173d77775b981252d3c3f25ff5a42335125647fc9d488238044ffa40e51"
+    },
+    {
+      "check": "canonical_ticker_splits",
+      "sql": "select s.security_id,count(*) split_count,sum(x.is_price_data_corrected=0) uncorrected_splits,min(split_date) first_split,max(split_date) last_split from f.security s join o.splits_data x on x.osake=s.current_ticker group by s.security_id",
+      "parameters": [],
+      "row_count": 1289,
+      "result_sha256": "25033f359c8a93286e8bbf409311aba46de1abdff5f530df9efaecf195945c09"
+    },
+    {
+      "check": "provider_security_routes",
+      "sql": "select s.security_id,i.provider_security_id,t.isdelisted,t.category,t.firstpricedate,t.lastpricedate from f.security s join f.provider_security_identity i using(security_id) left join p.sharadar_ticker_metadata t on t.permaticker=i.provider_security_id and lower(t.table_name)='stocks' where upper(i.provider)='SHARADAR'",
+      "parameters": [],
+      "row_count": 2557,
+      "result_sha256": "7f0aa714909fd7ed8e8ec528b54f69afe1513bca1594b09fc889fb4c1b488d96"
+    },
+    {
+      "check": "membership_drift",
+      "sql": "select m.company_id,m.membership_status,m.security_id,m.current_ticker,s.active,s.current_ticker canonical_ticker,(select count(*) from f.security z where z.company_id=m.company_id and z.active=1) current_active_securities from f.fundamentals_operational_universe_member m join f.security s on s.security_id=m.security_id where m.universe_version_id=? and (m.current_ticker<>s.current_ticker or (m.membership_status='ACTIVE_SINGLE_SECURITY' and (s.active<>1 or (select count(*) from f.security z where z.company_id=m.company_id and z.active=1)<>1)))",
+      "parameters": [
+        "3b8121b74c852f08575fa1e2b70004e6"
+      ],
+      "rows": [
+        {
+          "company_id": 627,
+          "membership_status": "ACTIVE_SINGLE_SECURITY",
+          "security_id": 628,
+          "current_ticker": "CYCN",
+          "active": 1,
+          "canonical_ticker": "CYCN",
+          "current_active_securities": 2
+        }
+      ]
+    },
+    {
+      "check": "dated_alias_routes",
+      "sql": "select s.security_id,s.current_ticker,a.ticker alias_ticker,a.provider,a.valid_from,a.valid_to,(select count(*) from o.osakedata x where x.osake=a.ticker and x.market='usa') stored_alias_rows from f.security s join f.ticker_alias a using(security_id) where a.ticker<>s.current_ticker",
+      "parameters": [],
+      "rows": [
+        {
+          "security_id": 82,
+          "current_ticker": "VAI",
+          "alias_ticker": "AIHS",
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "valid_from": "",
+          "valid_to": null,
+          "stored_alias_rows": 2127
+        },
+        {
+          "security_id": 278,
+          "current_ticker": "NXH",
+          "alias_ticker": "BBBY",
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "valid_from": "",
+          "valid_to": null,
+          "stored_alias_rows": 2204
+        },
+        {
+          "security_id": 788,
+          "current_ticker": "VMRK",
+          "alias_ticker": "EQR",
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "valid_from": "",
+          "valid_to": null,
+          "stored_alias_rows": 2171
+        },
+        {
+          "security_id": 1170,
+          "current_ticker": "IA",
+          "alias_ticker": "ISSC",
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "valid_from": "",
+          "valid_to": null,
+          "stored_alias_rows": 2172
+        },
+        {
+          "security_id": 1311,
+          "current_ticker": "NMAD",
+          "alias_ticker": "LIXT",
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "valid_from": "",
+          "valid_to": null,
+          "stored_alias_rows": 2175
+        },
+        {
+          "security_id": 309,
+          "current_ticker": "BGMS",
+          "alias_ticker": "CYCC",
+          "provider": "SHARADAR",
+          "valid_from": "2025-09-12",
+          "valid_to": null,
+          "stored_alias_rows": 0
+        },
+        {
+          "security_id": 1309,
+          "current_ticker": "LITS",
+          "alias_ticker": "MEIP",
+          "provider": "SHARADAR",
+          "valid_from": "2025-09-11",
+          "valid_to": null,
+          "stored_alias_rows": 0
+        },
+        {
+          "security_id": 1667,
+          "current_ticker": "ORBS",
+          "alias_ticker": "OCTO",
+          "provider": "SHARADAR",
+          "valid_from": "2025-09-11",
+          "valid_to": null,
+          "stored_alias_rows": 0
+        },
+        {
+          "security_id": 1835,
+          "current_ticker": "QCLS",
+          "alias_ticker": "TNFA",
+          "provider": "SHARADAR",
+          "valid_from": "2025-09-25",
+          "valid_to": null,
+          "stored_alias_rows": 0
+        },
+        {
+          "security_id": 2199,
+          "current_ticker": "TONX",
+          "alias_ticker": "VERB",
+          "provider": "SHARADAR",
+          "valid_from": "2025-09-02",
+          "valid_to": null,
+          "stored_alias_rows": 0
+        },
+        {
+          "security_id": 2471,
+          "current_ticker": "SNDK",
+          "alias_ticker": "SNDKV",
+          "provider": "SHARADAR",
+          "valid_from": "2025-02-24",
+          "valid_to": null,
+          "stored_alias_rows": 0
+        },
+        {
+          "security_id": 788,
+          "current_ticker": "VMRK",
+          "alias_ticker": "EQR",
+          "provider": "PHASE13F3_TRANSITION",
+          "valid_from": null,
+          "valid_to": "2026-08-18",
+          "stored_alias_rows": 2171
+        },
+        {
+          "security_id": 1170,
+          "current_ticker": "IA",
+          "alias_ticker": "ISSC",
+          "provider": "PHASE13F3_TRANSITION",
+          "valid_from": null,
+          "valid_to": "2026-08-18",
+          "stored_alias_rows": 2172
+        },
+        {
+          "security_id": 82,
+          "current_ticker": "VAI",
+          "alias_ticker": "AIHS",
+          "provider": "PHASE13F3_TRANSITION",
+          "valid_from": null,
+          "valid_to": "2026-08-26",
+          "stored_alias_rows": 2127
+        },
+        {
+          "security_id": 278,
+          "current_ticker": "NXH",
+          "alias_ticker": "BBBY",
+          "provider": "PHASE13F3_TRANSITION",
+          "valid_from": null,
+          "valid_to": "2026-08-17",
+          "stored_alias_rows": 2204
+        },
+        {
+          "security_id": 1311,
+          "current_ticker": "NMAD",
+          "alias_ticker": "LIXT",
+          "provider": "PHASE13F3_TRANSITION",
+          "valid_from": null,
+          "valid_to": "2026-07-06",
+          "stored_alias_rows": 2175
+        }
+      ]
+    },
+    {
+      "check": "alias_date_constraints",
+      "sql": "select count(*) rows,sum(valid_from is null or valid_from='') unknown_start from f.ticker_alias",
+      "parameters": [],
+      "rows": [
+        {
+          "rows": 2575,
+          "unknown_start": 2475
+        }
+      ]
+    }
+  ],
+  "decision": "Use 2547 canonical Fundamentals companies per explicit user instruction; published universe is not authoritative for SetupMaster."
+}

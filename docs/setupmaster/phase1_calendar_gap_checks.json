@@ -1,0 +1,53 @@
+{
+  "sql": "with spans as (select s.security_id,s.current_ticker,min(o.pvm) first_date,max(o.pvm) last_date from f.security s join o.osakedata o on o.osake=s.current_ticker and o.market='usa' group by 1,2) select spy.pvm,count(*) missing_routes from o.osakedata spy join spans s on spy.pvm between s.first_date and s.last_date where spy.osake='SPY' and spy.market='usa' and not exists(select 1 from o.osakedata x where x.osake=s.current_ticker and x.market='usa' and x.pvm=spy.pvm) group by spy.pvm order by count(*) desc limit 12",
+  "rows": [
+    {
+      "pvm": "2026-09-22",
+      "missing_routes": 2271
+    },
+    {
+      "pvm": "2023-06-30",
+      "missing_routes": 1197
+    },
+    {
+      "pvm": "2026-07-23",
+      "missing_routes": 13
+    },
+    {
+      "pvm": "2026-07-24",
+      "missing_routes": 13
+    },
+    {
+      "pvm": "2026-07-22",
+      "missing_routes": 12
+    },
+    {
+      "pvm": "2026-07-20",
+      "missing_routes": 11
+    },
+    {
+      "pvm": "2026-07-21",
+      "missing_routes": 10
+    },
+    {
+      "pvm": "2026-07-27",
+      "missing_routes": 10
+    },
+    {
+      "pvm": "2026-07-28",
+      "missing_routes": 10
+    },
+    {
+      "pvm": "2026-07-29",
+      "missing_routes": 10
+    },
+    {
+      "pvm": "2026-07-30",
+      "missing_routes": 10
+    },
+    {
+      "pvm": "2026-08-11",
+      "missing_routes": 10
+    }
+  ]
+}

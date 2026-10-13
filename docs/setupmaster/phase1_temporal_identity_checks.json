@@ -1,0 +1,138 @@
+[
+  {
+    "check": "known_validity_violations",
+    "sql": "select s.security_id,s.company_id,s.current_ticker,s.valid_from,s.valid_to,sum(s.valid_from is not null and s.valid_from<>'' and o.pvm<s.valid_from) rows_before_valid_from,sum(s.valid_to is not null and s.valid_to<>'' and o.pvm>s.valid_to) rows_after_valid_to from f.security s join o.osakedata o on o.osake=s.current_ticker and o.market='usa' where (s.valid_from is not null and s.valid_from<>'') or (s.valid_to is not null and s.valid_to<>'') group by s.security_id having rows_before_valid_from>0 or rows_after_valid_to>0",
+    "rows": [
+      {
+        "security_id": 346,
+        "company_id": 346,
+        "current_ticker": "BNC",
+        "valid_from": null,
+        "valid_to": "2026-09-20",
+        "rows_before_valid_from": 0,
+        "rows_after_valid_to": 16
+      },
+      {
+        "security_id": 2471,
+        "company_id": 2459,
+        "current_ticker": "SNDK",
+        "valid_from": "2025-02-24",
+        "valid_to": null,
+        "rows_before_valid_from": 6,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2473,
+        "company_id": 2461,
+        "current_ticker": "ALOY",
+        "valid_from": "2021-11-09",
+        "valid_to": null,
+        "rows_before_valid_from": 971,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2502,
+        "company_id": 2490,
+        "current_ticker": "ECG",
+        "valid_from": "2024-11-01",
+        "valid_to": null,
+        "rows_before_valid_from": 4,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2503,
+        "company_id": 2491,
+        "current_ticker": "ERO",
+        "valid_from": "2021-06-15",
+        "valid_to": null,
+        "rows_before_valid_from": 868,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2507,
+        "company_id": 2495,
+        "current_ticker": "HUT",
+        "valid_from": "2023-12-04",
+        "valid_to": null,
+        "rows_before_valid_from": 1445,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2530,
+        "company_id": 2518,
+        "current_ticker": "HYFT",
+        "valid_from": "2020-12-31",
+        "valid_to": null,
+        "rows_before_valid_from": 755,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2534,
+        "company_id": 2522,
+        "current_ticker": "IPHA",
+        "valid_from": "2019-10-18",
+        "valid_to": null,
+        "rows_before_valid_from": 1,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2550,
+        "company_id": 2538,
+        "current_ticker": "VNTG",
+        "valid_from": "2025-06-12",
+        "valid_to": null,
+        "rows_before_valid_from": 1,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2556,
+        "company_id": 2544,
+        "current_ticker": "CAN",
+        "valid_from": "2019-11-21",
+        "valid_to": null,
+        "rows_before_valid_from": 1,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2558,
+        "company_id": 627,
+        "current_ticker": "KRSA",
+        "valid_from": "2026-09-09",
+        "valid_to": null,
+        "rows_before_valid_from": 1880,
+        "rows_after_valid_to": 0
+      },
+      {
+        "security_id": 2559,
+        "company_id": 2546,
+        "current_ticker": "PSQL",
+        "valid_from": "2026-08-28",
+        "valid_to": null,
+        "rows_before_valid_from": 147,
+        "rows_after_valid_to": 0
+      }
+    ]
+  },
+  {
+    "check": "cycn_krsa_overlap",
+    "sql": "select count(*) overlapping_dates,sum(a.open=b.open and a.high=b.high and a.low=b.low and a.close=b.close and a.volume=b.volume) identical_ohlcv_rows,min(a.pvm) first_overlap,max(a.pvm) last_overlap from o.osakedata a join o.osakedata b on a.pvm=b.pvm where a.osake='CYCN' and b.osake='KRSA' and a.market='usa' and b.market='usa'",
+    "rows": [
+      {
+        "overlapping_dates": 1880,
+        "identical_ohlcv_rows": 297,
+        "first_overlap": "2019-03-18",
+        "last_overlap": "2026-09-08"
+      }
+    ]
+  },
+  {
+    "check": "canonical_unknown_security_dates",
+    "sql": "select sum(valid_from is null or valid_from='') unknown_valid_from,sum(valid_to is null or valid_to='') open_ended_valid_to from f.security",
+    "rows": [
+      {
+        "unknown_valid_from": 2470,
+        "open_ended_valid_to": 2559
+      }
+    ]
+  }
+]

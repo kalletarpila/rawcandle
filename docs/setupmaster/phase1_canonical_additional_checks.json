@@ -1,0 +1,115 @@
+[
+  {
+    "check": "primary_quality",
+    "sql": "select count(*),count(distinct s.security_id),min(o.pvm),max(o.pvm),sum(o.open is null or o.high is null or o.low is null or o.close is null),sum(o.open<=0 or o.high<=0 or o.low<=0 or o.close<=0),sum(o.high<o.low or o.high<o.open or o.high<o.close or o.low>o.open or o.low>o.close),sum(o.volume is null),sum(o.volume=0),sum(o.volume<0) from f.security s join o.osakedata o on o.osake=s.current_ticker where o.market='usa' and o.pvm<='2026-10-12'",
+    "rows": [
+      [
+        5022847,
+        2560,
+        "2018-01-02",
+        "2026-10-12",
+        0,
+        2275,
+        6304,
+        0,
+        48640,
+        0
+      ]
+    ]
+  },
+  {
+    "check": "primary_missing",
+    "sql": "select s.current_ticker,s.active from f.security s where not exists(select 1 from o.osakedata o where o.osake=s.current_ticker and o.market='usa' and o.pvm<='2026-10-12')",
+    "rows": []
+  },
+  {
+    "check": "primary_years",
+    "sql": "select substr(o.pvm,1,4),count(*),count(distinct s.security_id) from f.security s join o.osakedata o on o.osake=s.current_ticker where o.market='usa' and o.pvm<='2026-10-12' group by 1",
+    "rows": [
+      [
+        "2018",
+        457575,
+        1867
+      ],
+      [
+        "2019",
+        482168,
+        1962
+      ],
+      [
+        "2020",
+        510821,
+        2124
+      ],
+      [
+        "2021",
+        570618,
+        2388
+      ],
+      [
+        "2022",
+        609062,
+        2452
+      ],
+      [
+        "2023",
+        619954,
+        2515
+      ],
+      [
+        "2024",
+        639431,
+        2545
+      ],
+      [
+        "2025",
+        637565,
+        2553
+      ],
+      [
+        "2026",
+        495653,
+        2560
+      ]
+    ]
+  },
+  {
+    "check": "primary_jumps",
+    "sql": "select count(*) from (select close/lag(close) over(partition by o.osake order by o.pvm) r from f.security s join o.osakedata o on o.osake=s.current_ticker where o.market='usa' and o.pvm<='2026-10-12') where r>2 or r<0.5",
+    "rows": [
+      [
+        1271
+      ]
+    ]
+  },
+  {
+    "check": "primary_duplicate_keys",
+    "sql": "select count(*) from(select s.security_id,o.pvm from f.security s join o.osakedata o on o.osake=s.current_ticker where o.market='usa' group by 1,2 having count(*)>1)",
+    "rows": [
+      [
+        0
+      ]
+    ]
+  },
+  {
+    "check": "primary_null_exchanges",
+    "sql": "select current_ticker from f.security where exchange is null",
+    "rows": [
+      [
+        "VAI"
+      ],
+      [
+        "NXH"
+      ],
+      [
+        "VMRK"
+      ],
+      [
+        "IA"
+      ],
+      [
+        "NMAD"
+      ]
+    ]
+  }
+]
