@@ -494,7 +494,11 @@ def build_fundamentals_admin_page(
                 ft.Text(item.stage, width=155, weight=weight),
                 ft.Text(title, width=135, weight=weight),
                 ft.Text(count_text, width=125, weight=weight),
-                ft.Text(category, width=170, tooltip=f"run_id={item.run_id}; mode={item.mode}"),
+                ft.Text(category, width=170, tooltip=f"run_id={item.run_id}; mode={item.mode}" + (
+                    f"; workflow_parent={item.workflow_parent_run_id}; scheduler_provenance="
+                    + ("inherited" if item.provenance_inherited else "stored")
+                    if getattr(item, "workflow_parent_run_id", None) else ""
+                )),
                 ft.IconButton(
                     icon=ft.Icons.DELETE_OUTLINE,
                     tooltip="Remove from run history",

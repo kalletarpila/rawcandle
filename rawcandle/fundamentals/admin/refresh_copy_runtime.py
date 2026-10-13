@@ -1094,9 +1094,12 @@ def run_apply(
     temp_root: Path = ADMIN_TEMP_ROOT, client: SharadarClient | None = None,
     confirm_apply: bool = False, progress_callback: ProgressCallback | None = None,
     as_of_date: str | None = None,
+    trigger_source: str = "MANUAL",
 ) -> dict[str, Any]:
     if not confirm_apply:
         raise PermissionError("REFRESH_TEST_CONFIRMATION_REQUIRED")
+    if trigger_source not in {"MANUAL", "SCHEDULER"}:
+        raise ValueError("INVALID_TRIGGER_SOURCE")
     source_paths = source_paths or BatchAddTickerPaths()
     request = _request()
     run_id = stable_run_id(AdminOperationType.REFRESH_FUNDAMENTALS, preview_fingerprint, suffix="test")
@@ -1106,7 +1109,7 @@ def run_apply(
         run_dir=writer.run_dir, stages=REFRESH_FUNDAMENTALS_TEST_STAGES,
         callback=progress_callback,
     )
-    writer.write_json("request.json", request.as_dict() | {"options": {"contract_version": TEST_CONTRACT_VERSION, "mode": "COPY_ONLY_APPLY"}})
+    writer.write_json("request.json", request.as_dict() | {"trigger_source": trigger_source, "options": {"contract_version": TEST_CONTRACT_VERSION, "mode": "COPY_ONLY_APPLY"}})
     writer.checkpoint(RunStage.REQUEST_CREATED, message="Refresh copy Test request recorded.", preview_fingerprint=preview_fingerprint)
     writer.checkpoint(RunStage.APPLY_STARTED, message="Refresh copy Test started.", preview_fingerprint=preview_fingerprint)
     writer.checkpoint(RunStage.WRITE_BOUNDARY_NOT_CROSSED, message="Production write boundary will not be crossed.", preview_fingerprint=preview_fingerprint)
@@ -1298,7 +1301,7 @@ def run_apply(
         )
         result = result_obj.as_dict() | {
             "artifact_dir": str(writer.run_dir), "bound_preview_run_id": preview_run_id,
-            "trigger_source": "MANUAL",
+            "trigger_source": trigger_source,
             "production_writes": 0, "database_safety": "COPY_ONLY",
             "review_partition": revalidated["review_partition"],
             "completed_with_review_holds": bool(revalidated["review_partition"]["held"]),
@@ -1359,7 +1362,7 @@ def run_apply(
             errors=({"type": type(exc).__name__, "message": str(exc)},),
         ).as_dict() | {
             "artifact_dir": str(writer.run_dir), "failed_stage": failed_stage.value,
-            "trigger_source": "MANUAL",
+            "trigger_source": trigger_source,
             "production_writes": 0, "database_safety": "COPY_ONLY",
             "production_file_state_unchanged": before_files == _production_file_state(source_paths),
         }

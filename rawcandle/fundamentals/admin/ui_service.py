@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import fcntl
 from importlib import import_module
 import json
@@ -90,6 +90,8 @@ class AdminUIHistoryEntry:
     count_label: str | None = None
     report_filename: str = OPERATION_REPORT_NAME
     trigger_source: str = "MANUAL"
+    workflow_parent_run_id: str | None = None
+    provenance_inherited: bool = False
 
     @property
     def stage(self) -> str:
@@ -135,6 +137,47 @@ class AdminHistoryCursor:
         self.entries: list[AdminUIHistoryEntry] = []
         self.projections: dict[Path, _RunHistoryProjection] = {}
         self.exhausted = False
+        self.workflow_children: dict[str, set[tuple[str, str, str]]] | None = None
+
+    def scheduler_workflow_parent(self, entry: AdminUIHistoryEntry) -> str | None:
+        if self.workflow_children is None:
+            self.workflow_children = {}
+            # Legacy children have no back-reference. Index only explicit parent
+            # stage references, once per cursor; ordinary run projections stay lazy.
+            modes = {"Preview": "PREVIEW", "Test on copies": "COPY_ONLY_APPLY", "Production update": "PRODUCTION_APPLY"}
+            for path in self.candidates:
+                if "_full_workflow" not in path.name:
+                    continue
+                try:
+                    projection = self.projection(path)
+                    payload = projection.result or {}
+                    parent = self.service._history_entry_from_projection(projection)
+                except (OSError, ValueError, TypeError):
+                    continue
+                if (parent is None or parent.category != "Administration run"
+                        or payload.get("run_id") != path.name or payload.get("mode") != "FULL_WORKFLOW"
+                        or payload.get("trigger_source") != "SCHEDULER"):
+                    continue
+                stages = payload.get("stages")
+                if not isinstance(stages, list):
+                    continue
+                for stage in stages:
+                    if not isinstance(stage, dict):
+                        continue
+                    child = stage.get("run_id")
+                    label = stage.get("stage")
+                    mode = modes.get(label) if isinstance(label, str) else None
+                    if isinstance(child, str) and child != path.name and Path(child).name == child and mode:
+                        self.workflow_children.setdefault(child, set()).add((path.name, parent.operation_type, mode))
+        links = self.workflow_children.get(entry.run_id, set())
+        if len(links) != 1:
+            return None
+        parent, operation, mode = next(iter(links))
+        payload = (self.projection(self.service.run_root / entry.run_id).result or {})
+        if (entry.category == "Administration run" and entry.operation_type == operation
+                and entry.mode == mode and payload.get("run_id") == entry.run_id):
+            return parent
+        return None
 
     @staticmethod
     def _candidate_order_key(path: Path) -> tuple[int, str, str]:
@@ -161,6 +204,12 @@ class AdminHistoryCursor:
                 continue
             if entry is None or (not self.include_technical and entry.category != "Administration run"):
                 continue
+            parent = self.scheduler_workflow_parent(entry)
+            if parent:
+                if not self.include_technical:
+                    continue
+                entry = replace(entry, workflow_parent_run_id=parent, trigger_source="SCHEDULER",
+                                provenance_inherited=entry.trigger_source != "SCHEDULER")
             self.entries.append(entry)
         self.exhausted = self.position >= len(self.candidates)
         return list(self.entries[:wanted])
@@ -418,6 +467,7 @@ class FundamentalsAdminUIService:
         preview_payload_path: str,
         preview_fingerprint: str,
         taxonomy_domain: str = "dc_ecosystem",
+        trigger_source: str = "MANUAL",
         progress_callback: AdminProgressCallback | None = None,
     ) -> AdminUIRunResult:
         operation = operation_type.strip().upper()
@@ -443,6 +493,7 @@ class FundamentalsAdminUIService:
                 preview_fingerprint=preview_fingerprint,
                 run_root=self.run_root,
                 confirm_apply=True,
+                trigger_source=trigger_source,
                 progress_callback=progress_callback,
             )
         elif operation == "CHECK_UPDATE_SECTOR_INDUSTRY":
@@ -588,6 +639,7 @@ class FundamentalsAdminUIService:
                         operation,
                         preview_payload_path=preview.preview_payload_path or "",
                         preview_fingerprint=preview.preview_fingerprint or "",
+                        trigger_source=trigger_source,
                         progress_callback=callback,
                     ),
                     production_stage=lambda preview, test, callback: self._production_apply_unlocked(
