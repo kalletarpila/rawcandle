@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -456,7 +457,8 @@ def build_fundamentals_admin_page(
             }
         else:
             try:
-                state = dict(reader(run_id))
+                state = dict(reader(run_id, projection_cache=getattr(history_cursor, "projections", None))
+                             if not force and "projection_cache" in inspect.signature(reader).parameters else reader(run_id))
             except Exception as exc:
                 LOGGER.exception("Administration backup cleanup eligibility failed")
                 state = {
@@ -520,7 +522,8 @@ def build_fundamentals_admin_page(
                     ),
                 ),
             ]
-            if item.stage == "Production update" and item.outcome == "COMPLETED":
+            if ((item.stage == "Production update" and item.outcome == "COMPLETED")
+                    or (item.mode == "FULL_WORKFLOW" and item.operation_type == "REFRESH_FUNDAMENTALS")):
                 cleanup_state = cleanup_eligibility_state(run_id)
                 if cleanup_state.get("eligible"):
                     row_controls.append(
@@ -1233,6 +1236,7 @@ def build_fundamentals_admin_page(
         if force:
             history_cursor = None
             history_limit = 8
+            cleanup_eligibility_cache.clear()
             history_loader.invalidate()
         if defer_initial_load:
             history_loader.start(force=force)
@@ -1280,6 +1284,17 @@ def build_fundamentals_admin_page(
             else str(state.get("reason") or "Backup cleanup is not available for this run.")
         )
         cleanup_status_field.visible = True
+        if state.get("workflow_parent_run_id"):
+            child = state.get("cleanup_target_run_id")
+            cleanup_status_field.value = (
+                f"Cleanup target: Production child\nProduction child run: {child or 'unavailable'}\n"
+                f"Cleanup status: {state.get('status', 'NOT_ELIGIBLE')}\n"
+                f"Rollback backups {'deleted' if state.get('status') == 'ALREADY_CLEANED' else 'retained'}: "
+                f"{state.get('backup_count', 0) if eligible or state.get('status') == 'ALREADY_CLEANED' else 'not verified'}\n"
+                f"Acceptance required: {'YES' if eligible else 'NO' if state.get('status') == 'ALREADY_CLEANED' else 'unavailable'}\n"
+                + str(state.get("reason") or "")
+                + (f"\nChild cleanup evidence: {child}/backup_cleanup.json" if state.get("status") == "ALREADY_CLEANED" else "")
+            )
         return state
 
     def select_history_run(run_id: str) -> None:
@@ -1382,7 +1397,8 @@ def build_fundamentals_admin_page(
         if hasattr(page, "update"):
             page.update()
 
-    def confirm_backup_cleanup(run_id: str) -> None:
+    def confirm_backup_cleanup(run_id: str, *, workflow_parent_run_id: str | None = None,
+                               expected_eligibility: dict[str, Any] | None = None) -> None:
         close_dialog()
         cleanup_button.disabled = True
         cleanup_status_field.value = "Verifying this run's rollback backups..."
@@ -1390,13 +1406,17 @@ def build_fundamentals_admin_page(
         if hasattr(page, "update"):
             page.update()
         try:
-            result = admin_service.accept_run_and_cleanup_backups(run_id)
+            result = (admin_service.accept_run_and_cleanup_backups(
+                run_id, workflow_parent_run_id=workflow_parent_run_id, expected_eligibility=expected_eligibility,
+            ) if workflow_parent_run_id else admin_service.accept_run_and_cleanup_backups(run_id))
             status = str(result.get("status") or result.get("cleanup_outcome") or "COMPLETED")
             if status == "ALREADY_CLEANED":
                 cleanup_status_field.value = "Accepted / backups cleaned"
             else:
                 freed = int(result.get("bytes_freed") or 0)
                 cleanup_status_field.value = f"Accepted / backups cleaned ({freed / (1024 ** 3):.3f} GiB freed)"
+            # Parent and technical child are views of the same child-owned state.
+            cleanup_eligibility_cache.clear()
             cleanup_eligibility_cache[run_id] = {
                 "run_id": run_id,
                 "status": "ALREADY_CLEANED",
@@ -1410,6 +1430,11 @@ def build_fundamentals_admin_page(
                 cleanup_status_field.visible = True
             if history_cursor is not None:
                 render_history(history_cursor.entries[:history_limit])
+            if selected_history_run_id and (
+                selected_history_run_id == workflow_parent_run_id
+                or cleanup_eligibility_cache.get(selected_history_run_id, {}).get("cleanup_target_run_id") == run_id
+            ):
+                apply_cleanup_eligibility(selected_history_run_id, force=True)
         except Exception as exc:
             LOGGER.exception("Administration backup cleanup failed")
             cleanup_status_field.value = f"Backup cleanup stopped: {exc}"
@@ -1430,11 +1455,20 @@ def build_fundamentals_admin_page(
             return
         count = int(state.get("backup_count") or 0)
         gib = int(state.get("bytes_freed") or 0) / (1024 ** 3)
+        parent_id = state.get("workflow_parent_run_id")
+        child_id = state.get("cleanup_target_run_id") if parent_id else run_id
+        identity = (f"Full workflow: {parent_id}\nCleanup target: Production child {child_id}\n" if parent_id else f"Run: {run_id}\n")
+        evidence = ""
+        if parent_id:
+            evidence = (f"Eligibility: {state.get('status')}\nExact bytes: {state.get('bytes_freed', 0)}\n"
+                        + "\n".join(str(path) for path in state.get("backup_files", [])) + "\n")
+            if state.get("terminal_receipt"):
+                evidence += "Terminal receipt: " + json.dumps(state["terminal_receipt"], sort_keys=True) + "\n"
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("Accept Production run and cleanup backups?"),
             content=ft.Text(
-                f"Run: {run_id}\n\n"
+                identity + evidence + "\n"
                 f"This removes {count} verified rollback backup file(s), approximately {gib:.3f} GiB.\n"
                 "Live Production databases will not be modified."
             ),
@@ -1443,7 +1477,9 @@ def build_fundamentals_admin_page(
                 ft.ElevatedButton(
                     "Accept and cleanup",
                     icon=ft.Icons.DELETE_SWEEP,
-                    on_click=lambda _event: confirm_backup_cleanup(run_id),
+                    on_click=lambda _event: confirm_backup_cleanup(
+                        child_id, workflow_parent_run_id=parent_id, expected_eligibility=state,
+                    ) if parent_id else confirm_backup_cleanup(run_id),
                 ),
             ],
         )

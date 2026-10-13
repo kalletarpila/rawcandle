@@ -737,18 +737,83 @@ class FundamentalsAdminUIService:
             "retained_path": str(retained_path),
         }
 
-    def cleanup_eligibility(self, run_id: str) -> Mapping[str, Any]:
-        if self._cleanup_inspect is not None:
-            return self._cleanup_inspect(run_id)
-        module = import_module("rawcandle.fundamentals.admin.run_acceptance_cleanup")
-        return module.inspect_cleanup_eligibility(run_id, run_root=self.run_root)
+    def resolve_cleanup_target(
+        self, run_id: str, *, projection_cache: Mapping[Path, _RunHistoryProjection] | None = None,
+    ) -> Mapping[str, Any]:
+        """A workflow selects its exact child; backup ownership stays with that child."""
+        def result_for(selected: str) -> Mapping[str, Any] | None:
+            if (self.run_root / selected / "result.json").is_symlink():
+                return None
+            path = self.history.artifact_path(selected, "result.json")
+            if any(p.is_symlink() for p in (self.run_root / selected, path)):
+                return None
+            cached = self._cached_projection(selected, projection_cache)
+            return cached.result if cached is not None else self._load_json_file(path)
 
-    def accept_run_and_cleanup_backups(self, run_id: str) -> Mapping[str, Any]:
-        with self._operation_lock():
-            if self._cleanup_apply is not None:
-                return self._cleanup_apply(run_id)
+        try:
+            parent = result_for(run_id) or {}
+        except (OSError, ValueError):
+            parent = {}
+        if parent.get("mode") != "FULL_WORKFLOW":
+            return {"cleanup_target_run_id": run_id}
+        invalid = {"cleanup_target_run_id": None, "workflow_parent_run_id": run_id,
+                   "reason": "Full workflow has no exact completed Production child for cleanup."}
+        if parent.get("run_id") != run_id or parent.get("operation_type") != "REFRESH_FUNDAMENTALS":
+            return invalid
+        stages = parent.get("stages")
+        if not isinstance(stages, list):
+            return invalid
+        references = [stage for stage in stages if isinstance(stage, Mapping) and stage.get("stage") == "Production update"]
+        if len(references) != 1:
+            return invalid
+        if any(references[0].get(key) not in {None, "COMPLETED"} for key in ("status", "result")):
+            return invalid
+        child_id = references[0].get("run_id")
+        if not isinstance(child_id, str) or child_id == run_id:
+            return invalid
+        try:
+            child = result_for(child_id) or {}
+        except (ValueError, OSError):
+            return invalid
+        if (child.get("run_id") != child_id or child.get("operation_type") != parent["operation_type"]
+                or child.get("mode") != "PRODUCTION_APPLY" or child.get("outcome") != "COMPLETED"):
+            return invalid
+        return {"cleanup_target_run_id": child_id, "workflow_parent_run_id": run_id}
+
+    def cleanup_eligibility(
+        self, run_id: str, *, projection_cache: Mapping[Path, _RunHistoryProjection] | None = None,
+    ) -> Mapping[str, Any]:
+        target = self.resolve_cleanup_target(run_id, projection_cache=projection_cache)
+        child_id = target["cleanup_target_run_id"]
+        if child_id is None:
+            return {**target, "eligible": False, "status": "NOT_ELIGIBLE", "backup_count": 0, "bytes_freed": 0}
+        if self._cleanup_inspect is not None:
+            state = self._cleanup_inspect(child_id)
+        else:
             module = import_module("rawcandle.fundamentals.admin.run_acceptance_cleanup")
-            return module.accept_run_and_cleanup_backups(run_id, run_root=self.run_root)
+            state = module.inspect_cleanup_eligibility(child_id, run_root=self.run_root)
+        return dict(state, **target) if "workflow_parent_run_id" in target else state
+
+    def accept_run_and_cleanup_backups(
+        self, run_id: str, *, workflow_parent_run_id: str | None = None,
+        expected_eligibility: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any]:
+        with self._operation_lock():
+            target = self.resolve_cleanup_target(workflow_parent_run_id or run_id)
+            child_id = target["cleanup_target_run_id"]
+            if child_id is None or (workflow_parent_run_id is not None and child_id != run_id):
+                raise ValueError("WORKFLOW_CLEANUP_TARGET_CHANGED_OR_INVALID")
+            if "workflow_parent_run_id" in target:
+                fresh = self.cleanup_eligibility(target["workflow_parent_run_id"])
+                if fresh.get("cleanup_target_run_id") != child_id:
+                    raise ValueError("WORKFLOW_CLEANUP_TARGET_CHANGED_OR_INVALID")
+                if fresh.get("status") != "ALREADY_CLEANED":
+                    if not fresh.get("eligible") or (expected_eligibility is not None and dict(fresh) != dict(expected_eligibility)):
+                        raise ValueError("WORKFLOW_CHILD_CLEANUP_ELIGIBILITY_CHANGED")
+            if self._cleanup_apply is not None:
+                return self._cleanup_apply(child_id)
+            module = import_module("rawcandle.fundamentals.admin.run_acceptance_cleanup")
+            return module.accept_run_and_cleanup_backups(child_id, run_root=self.run_root)
 
     def refresh_review_queue(self, *, include_resolved: bool = False) -> list[Mapping[str, Any]]:
         module = import_module("rawcandle.fundamentals.admin.refresh_review_queue")
