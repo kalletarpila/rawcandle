@@ -12,7 +12,7 @@ import sys
 import threading
 import webbrowser
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -85,6 +85,7 @@ DEFAULT_DATACENTER_WATCHLIST_FILE = "/home/kalle/projects/rawcandle/watchlists/d
 DEFAULT_DATACENTER_SIGNAL_DATE = (date.today() - timedelta(days=1)).isoformat()
 DEFAULT_DATACENTER_START_DATE = "2025-08-01"
 _SUMMARY_FILENAME_RE = r"stock_update_scheduler_summary_"
+SCHEDULER_FUNDAMENTALS_VIEW_ROUTE = "/scheduler/reports/fundamentals"
 _MARKET_LOG_FILENAME_RE = re.compile(
     r"^stock_update_(omxh|omxs|usa)_(\d{8}T\d{4,6}Z)(?:_(\d+))?\.(txt|log)$"
 )
@@ -328,9 +329,9 @@ def build_text_log_browser_url(path: str) -> str:
 
 
 def scheduler_fundamentals_report_url(latest: dict[str, Any] | None) -> str | None:
-    """Use the existing admin download route for the exact supplied artifact."""
+    """Open only the exact approved workflow artifact through the inline route."""
     raw_path = (latest or {}).get("fundamentals_refresh_preview_report")
-    if not raw_path or raw_path == "NONE":
+    if not isinstance(raw_path, str) or not raw_path or raw_path == "NONE":
         return None
     path = Path(raw_path)
     if not path.is_absolute():
@@ -338,15 +339,71 @@ def scheduler_fundamentals_report_url(latest: dict[str, Any] | None) -> str | No
     if path.name != WORKFLOW_REPORT_NAME:
         return None
     try:
+        if any(p.is_symlink() for p in (path, *path.parents)):
+            return None
         report = resolve_operation_report_download(path.parent.name, path.name)
         if report != path.resolve():
             return None
     except (ValueError, OSError):
         return None
     return (
-        f"{FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE}/"
-        f"{quote(path.parent.name, safe='')}/{quote(path.name, safe='')}"
+        f"{SCHEDULER_FUNDAMENTALS_VIEW_ROUTE}/{quote(path.parent.name, safe='')}"
     )
+
+
+def _workflow_report_metadata(path: Path) -> tuple[str | None, str]:
+    """Use the parent result's exact completion/start time, never filesystem time."""
+    timestamp = None
+    try:
+        result_path = path.parent / "result.json"
+        if result_path.is_symlink():
+            raise ValueError("symlink metadata")
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        if (result.get("run_id") != path.parent.name or result.get("mode") != "FULL_WORKFLOW"
+                or result.get("operation_type") != "REFRESH_FUNDAMENTALS"):
+            raise ValueError("unbound workflow metadata")
+        for key in ("completed_at_utc", "started_at_utc"):
+            try:
+                parsed = datetime.fromisoformat(result[key].replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    timestamp = parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                    break
+            except (KeyError, TypeError, AttributeError, ValueError):
+                continue
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return timestamp, f"fundamentals_full_workflow_{timestamp or 'unknown_timestamp'}.md"
+
+
+def scheduler_log_artifacts(log_entries: list[dict[str, Any]], latest: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Merge the referenced report before visible paging, using common time precision."""
+    entries = [dict(entry) for entry in log_entries]
+    url = scheduler_fundamentals_report_url(latest)
+    if url:
+        path = Path(latest["fundamentals_refresh_preview_report"])
+        if not path.is_absolute():
+            path = REPOSITORY_ROOT / path
+        timestamp, name = _workflow_report_metadata(path)
+        try:
+            file_stat = path.stat()
+        except OSError:
+            return scheduler_log_artifacts(entries, None)
+        entries.append(dict(filename=name, path=str(path), size_bytes=file_stat.st_size,
+            modified_at=str(int(file_stat.st_mtime)), sort_key=f"{timestamp or ''}_0",
+            timestamp=timestamp, type="fundamentals_workflow_report", media_type="text/plain",
+            open_url=url, download_url=f"{FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE}/{quote(path.parent.name, safe='')}/{WORKFLOW_REPORT_NAME}",
+            metadata_status="KNOWN" if timestamp else "UNKNOWN"))
+    def order(entry):
+        stamp, _, suffix = entry.get("sort_key", "").rpartition("_")
+        try:
+            if len(stamp) not in {14, 16}:
+                raise ValueError("unknown timestamp")
+            parsed = datetime.strptime(stamp, "%Y%m%dT%H%MZ" if len(stamp) == 14 else "%Y%m%dT%H%M%SZ")
+            stamp = parsed.strftime("%Y%m%dT%H%M%SZ")
+        except ValueError:
+            stamp = ""
+        return stamp, suffix
+    return sorted(entries, key=order, reverse=True)
 
 
 def _sha256_if_file(path: str | None) -> str | None:
@@ -725,8 +782,8 @@ def start_taxonomy_background_operation(page: Any, target: Any, *args: Any, **kw
     return thread
 
 
-def launch_browser_url(page: Any, url: str) -> None:
-    result = page.launch_url(url)
+def launch_browser_url(page: Any, url: str, *, new_tab: bool = False) -> None:
+    result = page.launch_url(url, web_window_name="_blank") if new_tab else page.launch_url(url)
     if inspect.isawaitable(result):
         async def _await_launch() -> None:
             await result
@@ -1166,11 +1223,12 @@ def run_app(
 
     def load_scheduler_view(log_dir: str) -> dict[str, Any]:
         nonlocal scheduler_log_cache
+        latest = load_latest_scheduler_summary(log_dir)
         if scheduler_log_cache is None:
-            scheduler_log_cache = list_scheduler_log_files(log_dir, limit=1_000_000)
+            scheduler_log_cache = scheduler_log_artifacts(list_scheduler_log_files(log_dir, limit=1_000_000), latest)
         return {
             "log_entries": scheduler_log_cache[:scheduler_log_limit],
-            "latest": load_latest_scheduler_summary(log_dir),
+            "latest": latest,
             "status": read_scheduler_status(log_dir),
             "config": _load_config_or_raise(config_path),
             "timer": read_systemd_user_timer_status(),
@@ -1233,20 +1291,13 @@ def run_app(
                             ),
                             ft.TextButton(
                                 "Open",
-                                on_click=lambda _e, path=path: open_log_in_browser(path),
+                                on_click=(lambda _e, url=log_entry["open_url"]: launch_browser_url(page, url, new_tab=True))
+                                if log_entry.get("type") == "fundamentals_workflow_report"
+                                else (lambda _e, path=path: open_log_in_browser(path)),
                             ),
                         ]
                     )
                 )
-        report_url = scheduler_fundamentals_report_url(latest)
-        if report_url:
-            logs_column.controls.append(ft.Row([
-                ft.Text("Fundamentals full workflow report", expand=True),
-                ft.TextButton(
-                    "Open",
-                    on_click=lambda _e, url=report_url: launch_browser_url(page, url),
-                ),
-            ]))
         state = scheduler_running_state(payload["status"])
         running_status_text.value = (
             "Scheduler status: running" if state["is_running"]
@@ -2289,6 +2340,7 @@ def create_scheduler_web_app(
     add_forecast_log_route(application)
     add_fundamentals_download_route(application, report_dir=report_dir)
     add_fundamentals_admin_download_route(application)
+    add_scheduler_fundamentals_view_route(application)
 
     flet_application = flet_fastapi.app(
         session_handler=_app,
@@ -2296,6 +2348,20 @@ def create_scheduler_web_app(
     )
     application.mount("/", flet_application)
     return application
+
+
+def add_scheduler_fundamentals_view_route(application: FastAPI) -> None:
+    @application.get(SCHEDULER_FUNDAMENTALS_VIEW_ROUTE + "/{run_id}")
+    async def view_workflow_report(run_id: str) -> FileResponse:
+        try:
+            path = resolve_operation_report_download(run_id, WORKFLOW_REPORT_NAME)
+            if path.name != WORKFLOW_REPORT_NAME or any(p.is_symlink() for p in (path, *path.parents)):
+                raise ValueError("invalid workflow report")
+        except (ValueError, OSError, RuntimeError):
+            raise HTTPException(status_code=404, detail="Workflow report not found.")
+        _, name = _workflow_report_metadata(path)
+        return FileResponse(path, media_type="text/plain", filename=name,
+                            content_disposition_type="inline", headers={"X-Content-Type-Options": "nosniff"})
 
 
 def add_forecast_log_route(

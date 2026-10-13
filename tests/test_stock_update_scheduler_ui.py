@@ -107,8 +107,9 @@ class _FakePage:
     def update(self):
         self.update_count += 1
 
-    def launch_url(self, url):
+    def launch_url(self, url, **kwargs):
         self.launched_urls.append(url)
+        self.last_launch_kwargs = kwargs
 
     def run_task(self, coro):
         self.tasks.append(coro)
@@ -1808,18 +1809,21 @@ def test_scheduler_compact_fundamentals_and_report(
     for row in log_rows:
         row.controls[1].on_click(None)
         assert page.launched_urls[-1] == "/" + row.controls[0].value.split()[0]
-    report_rows = [row for row in rows if row.controls[0].value == "Fundamentals full workflow report"]
+    report_rows = [row for row in rows if "[fundamentals_workflow_report]" in row.controls[0].value]
     assert len(report_rows) == int(report_exists)
     if report_exists:
         report_rows[0].controls[1].on_click(None)
         app = FastAPI()
-        ui.add_fundamentals_admin_download_route(app)
+        ui.add_scheduler_fundamentals_view_route(app)
         route = next(route for route in app.routes
-                     if route.path.startswith(ui.FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE))
+                     if route.path.startswith(ui.SCHEDULER_FUNDAMENTALS_VIEW_ROUTE))
         assert page.launched_urls[-1] == (
-            f"{ui.FUNDAMENTALS_ADMIN_DOWNLOAD_ROUTE}/run-123/workflow_report.md"
+            f"{ui.SCHEDULER_FUNDAMENTALS_VIEW_ROUTE}/run-123"
         )
-        response = asyncio.run(route.endpoint("run-123", "workflow_report.md"))
+        assert page.last_launch_kwargs == {"web_window_name": "_blank"}
+        response = asyncio.run(route.endpoint("run-123"))
+        assert response.headers["content-disposition"].startswith("inline;")
+        assert response.headers["content-type"].startswith("text/plain")
         assert Path(response.path) == report
         assert Path(response.path).read_text() == "Exact workflow report"
     assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
