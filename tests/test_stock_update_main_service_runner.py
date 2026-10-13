@@ -360,8 +360,9 @@ def test_update_stock_data_via_service_ui_flow_does_not_call_old_update_stock_da
     assert app.loading_text.value == "FORMATTED RESULT"
 
 
-def test_update_stock_data_opt_in_true_delegates_to_service_ui_flow():
+def test_update_stock_data_opt_in_true_delegates_to_service_ui_flow(tmp_path):
     app = main.RawCandleApp.__new__(main.RawCandleApp)
+    app.osakedata_db_path = str(tmp_path / "synthetic_osakedata.db")
     app._use_stock_update_service = True
     called = []
 

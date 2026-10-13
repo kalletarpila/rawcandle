@@ -33,6 +33,27 @@ from market_repository import (
 )
 from sector_update import refresh_single_ticker_metadata, update_sector_metadata
 from services.stock_update_service import run_stock_data_update, StockUpdateResult
+from services.stock_update_service import sleep_after_legacy_stock_ticker, sleep_legacy_stock_batch
+
+
+def _coordinate_stock_update_ui(method):
+    """Coordinate UI updates with the existing scheduler; collection is unchanged."""
+    from functools import wraps
+
+    @wraps(method)
+    def guarded(self, e):
+        from services.missing_day_recovery import stock_update_operation_lock
+        from rawcandle.scheduler.runner import SchedulerAlreadyRunningError
+        if getattr(self, "_stock_update_in_progress", False):
+            return method(self, e)
+        try:
+            with stock_update_operation_lock(self.osakedata_db_path):
+                return method(self, e)
+        except SchedulerAlreadyRunningError:
+            self.loading_text.value = "⏳ Toinen osaketietojen päivitys on käynnissä"
+            self.loading_text.color = ft.Colors.ORANGE_600
+            self.page.update()
+    return guarded
 
 
 def _exclusive_end_date(date_str: str) -> str:
@@ -3204,6 +3225,7 @@ class RawCandleApp:
             tooltip="Hae puuttuvat päivät kaikille kannassa oleville osakkeille",
         )
         self._update_update_market_dropdown()
+        self.missing_day_controls = self._build_missing_day_controls()
         try:
             self.active_market = self.update_market_dropdown.value or ""
         except Exception:
@@ -3347,6 +3369,110 @@ class RawCandleApp:
             ],
         )
 
+    def _build_missing_day_controls(self):
+        import threading
+        self._missing_day_submit_lock = threading.Lock()
+        self.missing_day_date = ft.TextField(label="Päivämäärä (YYYY-MM-DD)", width=200)
+        self.missing_day_button = ft.ElevatedButton(
+            "Hae puuttuvan päivän tiedot", on_click=self.recover_missing_day)
+        self.missing_day_progress = ft.ProgressBar(visible=False, value=0)
+        self.missing_day_status = ft.Text("")
+        self.missing_day_report = ft.Text("", selectable=True)
+        return ft.Column([
+            ft.Text("Hae puuttuva päivä", weight=ft.FontWeight.BOLD),
+            ft.Text("Hakee valitulta päivältä vain puuttuvat osakkeiden OHLCV-tiedot. Olemassa olevia tietoja ei muuteta."),
+            ft.Row([self.missing_day_date, self.missing_day_button]),
+            self.missing_day_progress, self.missing_day_status, self.missing_day_report,
+        ])
+
+    def _start_missing_day_worker(self, worker):
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
+
+    def recover_missing_day(self, e=None):
+        from pathlib import Path
+        from services.missing_day_recovery import run_missing_day_recovery, validate_date
+        if getattr(self, "_stock_update_in_progress", False):
+            return
+        selected_date = (self.missing_day_date.value or "").strip()
+        try:
+            validate_date(selected_date)
+        except ValueError as exc:
+            self.missing_day_status.value = str(exc)
+            self.page.update()
+            return
+        selected_market = self.update_market_dropdown.value
+        if not selected_market:
+            self.missing_day_status.value = "Valitse yksi markkina puuttuvan päivän hakua varten"
+            self.page.update()
+            return
+        if not self._missing_day_submit_lock.acquire(blocking=False):
+            return
+        self._stock_update_in_progress = True
+        self.missing_day_button.disabled = True
+        self.update_stock_button.disabled = True
+        self.update_market_dropdown.disabled = True
+        self.missing_day_date.disabled = True
+        self.missing_day_progress.visible = True
+        self.missing_day_progress.value = 0
+        self.missing_day_status.value = "Haetaan puuttuvan päivän tiedot..."
+        self.missing_day_report.value = ""
+        self.page.update()
+
+        def progress(event):
+            self.missing_day_status.value = event.message or ""
+            self.missing_day_progress.value = event.index / event.total if event.total else None
+            try:
+                self.page.update()
+            except Exception:
+                pass  # Disconnected browser must not affect database/report integrity.
+
+        def worker():
+            try:
+                root = Path(__file__).resolve().parent
+                result = run_missing_day_recovery(
+                    db_path=self.osakedata_db_path, market=selected_market,
+                    requested_date=selected_date,
+                    stock_factory=self._build_stock_update_service_adapters()["stock_factory"],
+                    report_dir=root / "reports/missing_day_recovery",
+                    backup_dir=root / "backups/missing_day_recovery",
+                    progress_callback=progress)
+                self.missing_day_status.value = (
+                    f"{result.date} | {result.market.upper()} | {result.status}\n"
+                    f"Tarkistettu: {result.tickers_examined} | Puuttui: {result.missing_candidates} | Lisätty: {result.inserted_rows}\n"
+                    f"Ohitettu (olemassa): {result.skipped_existing} | Todennettu poissaolo: {result.legitimately_unavailable} | Yahoo ei palauttanut: {result.unavailable_records}\n"
+                    f"Identiteetti/hintaperuste estetty: {result.identity_adjustment_holds} | Yahoo-virheet: {result.provider_failures} | Kantavirheet: {result.database_failures}\n"
+                    f"Puuttuu edelleen: {result.remaining_missing_rows}"
+                    + ("\n" + "; ".join(result.errors) if result.errors else ""))
+                self.missing_day_report.value = f"Raportti: {result.report_path}"
+                if result.backup:
+                    self.missing_day_report.value += (
+                        f"\nVäliaikainen varmuuskopio: {result.backup.get('state')} — {result.backup.get('destination')}")
+            except Exception as exc:
+                self.missing_day_status.value = f"Haku epäonnistui: {type(exc).__name__}"
+            finally:
+                self._stock_update_in_progress = False
+                self._missing_day_submit_lock.release()
+                self.missing_day_button.disabled = False
+                self.update_stock_button.disabled = False
+                self.update_market_dropdown.disabled = False
+                self.missing_day_date.disabled = False
+                self.missing_day_progress.visible = False
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+        try:
+            self._start_missing_day_worker(worker)
+        except Exception:
+            self._stock_update_in_progress = False
+            self._missing_day_submit_lock.release()
+            for control in (self.missing_day_button, self.update_stock_button, self.update_market_dropdown, self.missing_day_date):
+                control.disabled = False
+            self.missing_day_progress.visible = False
+            raise
+
+    @_coordinate_stock_update_ui
     def update_stock_data(self, e):
         """Päivitä olemassa olevien osakkeiden tiedot Yahoosta"""
         if getattr(self, "_use_stock_update_service", False):
@@ -3658,8 +3784,7 @@ class RawCandleApp:
                     self.page.update()
 
                 # Tauot - lyhyempi jos paljon päiviä (divergenssit vievät aikaa)
-                pause_time = 1.0 if rows_added >= 50 else 1.5
-                time.sleep(pause_time)
+                sleep_after_legacy_stock_ticker(rows_added)
 
                 # 30s tauko per 500 osaketta
                 if idx % 500 == 0:
@@ -3668,7 +3793,7 @@ class RawCandleApp:
                     )
                     self.loading_text.color = ft.Colors.ORANGE_600
                     self.page.update()
-                    time.sleep(30)
+                    sleep_legacy_stock_batch(idx)
 
             # Yhteenveto
             stock_summary = f"""✅ Päivitys valmis!
@@ -4425,6 +4550,7 @@ Virheet: {error_count}"""
                                                 alignment=ft.MainAxisAlignment.CENTER,
                                                 spacing=15,
                                             ),
+                                            self.missing_day_controls,
                                             ft.Row(
                                                 [
                                                     self._build_update_sectors_button(),

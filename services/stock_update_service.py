@@ -304,6 +304,16 @@ def _sleep_yahoo_large_batch_if_needed(processed_count: int) -> None:
         time.sleep(YAHOO_LARGE_BATCH_SLEEP_SECONDS)
 
 
+def sleep_after_legacy_stock_ticker(rows_added: int) -> None:
+    """The normal UI updater's existing pacing, shared without changing delays."""
+    time.sleep(1.0 if rows_added >= 50 else 1.5)
+
+
+def sleep_legacy_stock_batch(processed_count: int) -> None:
+    if processed_count % 500 == 0:
+        time.sleep(30)
+
+
 def resolve_stock_update_market(market: Optional[str]) -> str:
     if market is None or not market.strip():
         return DEFAULT_STOCK_UPDATE_MARKET
