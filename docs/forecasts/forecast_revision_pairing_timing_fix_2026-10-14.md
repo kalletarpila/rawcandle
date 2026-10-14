@@ -1,6 +1,43 @@
 # Forecast revision pairing and timing fix — 2026-10-14
 
-Decision: **FORECAST_REVISION_PAIRING_FIX_NEEDS_REVISION** — the code correction and frozen-input 27-event QA succeed, but live production OHLC changes during validation. All 34 focused test assertions pass; the repository production-file safety guard makes pytest exit 1. The live research rerun also fails closed with SOURCE_DATABASE_CHANGED_DURING_RESEARCH. The required unchanged-production-OHLC acceptance gate is therefore outstanding. Do not describe this as a clean live validation.
+Decision: **FORECAST_REVISION_PAIRING_FIX_READY**. Clean live acceptance completed on October 14: 34 focused tests passed with exit 0, the original 27-event bounded research rerun succeeded against live production inputs, and all three production DB hashes and protected configuration/source hashes remained unchanged. No source changes were needed. The earlier concurrent-OHLC failure is retained below as historical evidence.
+
+## Final clean live acceptance — 2026-10-14
+
+Validated implementation: `01d143bd`. The OHLC file was quiet before validation: size, mtime and SHA-256 remained equal across a 10-second quiet-window check; its last write preceded validation by approximately 35 minutes. Process inspection in the sandbox did not expose host writer processes, so acceptance relies on measured file quiescence and unchanged whole-file hashes across the complete test/research window. No writer or scheduler was stopped, and no guard was disabled.
+
+Baseline recorded `2026-10-14T15:03:20.846897+00:00`; post-validation hashes recorded `2026-10-14T15:04:35.458658+00:00`. Active generation: `refresh_20261014T095401Z_refresh_fundamentals_43db1c8371f6_production_6917d617`.
+
+- `python3 -m pytest -q tests/test_forecast_revision_research.py`: **34 passed in 5.67s, exit 0**, with the production-file guard enabled.
+- Existing publication exporter ran with Yahoo mode none and current exact authority; the existing research engine ran against live `data/forecasts.db`, the pinned active canonical DB, and live `data/osakedata.db`. No frozen copy supplied acceptance evidence.
+- Original inclusive forecast-history boundaries remain September 27 16:27:26.679445Z through October 13 12:01:55.287946Z. The same 27 stable event identities were verified.
+- PRE / POST: **26 / 25**; nominal pairs **25**; validated pairs **23**; mismatches **2**; provisional **0**; no-pair events **2**. MU and NKE remain rejected with null revision metrics.
+- AIR first provider rollover remains **2026-09-29T11:02:26.051928Z**, **14.067792202 hours** after publication. Its separate linker transition remains **2026-10-02T11:03:13.828041Z**.
+- Event-associated forward provider rollovers / prior +1q matches: **25 / 25**. Cohort-company history episodes: **32 forward / 27 matched / 7 backward**. Link identity changes **25**; linker-only events **0**.
+- D5 / D20 availability remains **12 / 0** across 27 events; quality-approved D5 availability **10**.
+
+| Live production input | Baseline = post-validation SHA-256 |
+| --- | --- |
+| data/forecasts.db | `167a7a8d4ff1ad7b318e708e422ef00fca02bec118f3ab8587a9060129967638` |
+| /home/kalle/projects/rawcandle/data/fundamentals_generations/refresh_20261014T095401Z_refresh_fundamentals_43db1c8371f6_production_6917d617/fundamentals_v4.db | `aec33d93fdcb060c8986a4b5fa6fbb8d70bf8aa94cc3da909c993f66239c64fa` |
+| data/osakedata.db | `a814df5d9e9a5959a5cb2c1d38c19d698d0be5c5e521232cad1c53b03b853e5e` |
+
+Generation pointer, both scheduler configurations, forecast scheduler source and production linker source hashes also remained equal to their baseline. Their captured hashes are:
+
+- `data/fundamentals_active_generation.json`: `feb2f41367120b331573e92380f35ca1ed3e773c812c519cdd22cf0df35918d0`.
+- `forecast_scheduler_config.json`: `67e55b992b6144306b8b96a23157d4879490256c3af1d267f3852da5f1587e79`.
+- `scheduler_config.json`: `3a0b74412a0fb9cf5e7a9b370e97a6d48af031d5094d53b5689669e630c9e894`.
+- `rawcandle/forecasts/scheduler.py`: `c018012cb82949020e9b7ff2f51eff9a54f13e65d9e7a50fd71b2283279de4a6`.
+- `rawcandle/forecasts/linking.py`: `0f984b2f4716ed7c5551dc8b710f4e4b213e839145533e59c2bf4f4c21aaffa9`.
+- `rawcandle/forecasts/fiscal_linker.py`: `cef0d151b400f35cdeab3e1660cbc69ca520650df38cf0861a39d66c0f11419f`.
+
+The corrected compact CSV is byte-identical to the committed artifact: SHA-256 `ba61ef124335b98f62774b796a0fa2ea9c58d86972f322d9e2f50b6740c2a35c`. Its 27 rows and every displayed field were regenerated from the live run and checked; no CSV rewrite was necessary. The engine's independent before/after input hashes and quick_check guards all passed.
+
+This closes the implementation acceptance gate. Broader revision-versus-return interpretation remains premature: only 23 quality-approved pairs, below the earlier roughly 30–50-event guideline, and no D20 outcomes. Exact next step: continue existing passive collection unchanged and rerun the same bounded research as the quality-approved publication cohort and follow-up outcomes accumulate.
+
+## Initial implementation record
+
+The remaining implementation details and interrupted-run evidence describe the earlier attempt; the clean live acceptance above supersedes its outstanding safety gate.
 
 ## Narrow change
 
@@ -113,7 +150,7 @@ Episode counts include repeated forward/backward moves within one company’s hi
 | WS 2027/Q1 | NO_PAIR | — | — | False / False |
 
 
-## Validation and live OHLC limitation
+## Initial validation and live OHLC limitation (historical)
 
 Command: `python3 -m pytest -q tests/test_forecast_revision_research.py`. Final result: **34 assertions/tests passed in 5.52s; command exit 1 because the repository safety guard observed concurrent production market-data drift**. The guard remained enabled. An earlier MU fixture erroneously used AIR’s old Q1 identity for MU’s Q4 report; the local fixture was corrected before the final run. No broad Fundamentals, valuation or DC suites ran.
 
@@ -146,9 +183,9 @@ Generation pointer, forecast scheduler configuration, Fundamentals scheduler con
 | Provider rollover evidence | EARLY_BUT_USABLE | 25 observed event-associated forward rollovers; daily timing intervals |
 | Outcomes | NOT_YET_READY | 12 D5 across the full cohort; 10 quality-approved D5; no D20 |
 | Broader revision-versus-return interpretation | NOT_YET_READY | Quality-approved cohort too small and follow-up incomplete |
-| Fix live acceptance | NEEDS_REVISION | Concurrent OHLC drift prevents clean command exit and unchanged-production-hash gate |
+| Fix live acceptance | READY | Final live rerun: 34 tests pass, exit 0; all three production input hashes unchanged |
 
-Exact next step: once the unrelated OHLC writer finishes normally, rerun this same focused test module and the same 27-event live read-only QA with the recorded inclusive history bounds and pinned generation, and require stable before/after production hashes. No further feature or production-data change is justified by the current results. Continue daily collection unchanged; defer broader interpretation until roughly 30–50 quality-approved publication-linked events and required outcomes accumulate.
+The final clean live acceptance above completes that rerun. Exact next step: continue passive collection unchanged and repeat the same bounded research as quality-approved publication events and outcomes accumulate. No further feature or production-data change is justified by the current results. Continue daily collection unchanged; defer broader interpretation until roughly 30–50 quality-approved publication-linked events and required outcomes accumulate.
 
 ## Artifacts and reproduction
 
@@ -173,4 +210,4 @@ build_forecast_revision_research(
 
 CSV row count, exact identity-set equality, MU/NKE rejected states with null revision metrics, AIR provider/linker timestamps, frozen input hash equality, production forecasts/canonical hash equality and protected-source/config hashes were checked directly. `git diff --check` was also run.
 
-**FORECAST_REVISION_PAIRING_FIX_NEEDS_REVISION**
+**FORECAST_REVISION_PAIRING_FIX_READY**
