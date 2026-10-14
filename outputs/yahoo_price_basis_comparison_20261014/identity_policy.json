@@ -1,0 +1,19 @@
+{
+  "sources": {
+    "META": "https://investor.atmeta.com/investor-news/press-release-details/2022/Meta-Platforms-Inc.-to-Change-Ticker-Symbol-to-META-on-June-9/default.aspx",
+    "VATE_completed": "https://www.sec.gov/Archives/edgar/data/1006837/000114036121031765/brhc10029101_ex99-2.htm",
+    "VATE_same_capitalization": "https://www.sec.gov/Archives/edgar/data/1006837/000100683721000123/a202108198-kxexh991.htm",
+    "VATE_new_CUSIP": "https://www.sec.gov/Archives/edgar/data/1006837/000100683721000128/hchc-20210818.htm",
+    "VRT": "https://www.sec.gov/Archives/edgar/data/1674101/000119312520028315/d880241d8k.htm",
+    "DEC_listing": "https://ir.div.energy/financial-information/sec-filings/content/0001104659-23-126545/tm2333102d1_ex99-1.htm",
+    "DEC_domestication": "https://ir.div.energy/financial-information/sec-filings/content/0001922446-26-000020/dec-20251231.htm"
+  },
+  "policy": {
+    "META": "FB before 2022-06-09, META thereafter, issuer confirms unchanged Class A CUSIP",
+    "VATE": "HCHC before 2021-09-20, VATE thereafter; continuing common stock/no capitalization change, administrative CUSIP change explicitly retained",
+    "VRT": "exclude pre-2020-02-10 GSAH period and warm-up",
+    "DEC": "exclude pre-2023-12-18 from primary US pool; separate warm-up at new US common-stock listing 2025-11-24",
+    "NFE": "do not compute across observed split-unit break 2026-09-14"
+  },
+  "production_identity_changes": 0
+}

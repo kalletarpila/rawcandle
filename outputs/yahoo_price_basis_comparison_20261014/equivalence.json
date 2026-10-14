@@ -1,0 +1,618 @@
+{
+  "same_vintage_checks": [
+    {
+      "ticker": "NVDA",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "AMD",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "AAPL",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "MSFT",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "AMZN",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "AVGO",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "ANET",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "MU",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "VRT",
+      "rows": 1678,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "JPM",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "KO",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "XOM",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "O",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "MO",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "GOOGL",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "META",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "TSLA",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "PLTR",
+      "rows": 1516,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "CRM",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "COST",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "WMT",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "PG",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "JNJ",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "PEP",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "ABBV",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "AGNC",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "F",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "DEC",
+      "rows": 1451,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "NFE",
+      "rows": 1935,
+      "exact_ohlc_equal": true
+    },
+    {
+      "ticker": "VATE",
+      "rows": 2207,
+      "exact_ohlc_equal": true
+    }
+  ],
+  "independent_samples": [
+    {
+      "ticker": "NVDA",
+      "start": "2024-06-03",
+      "end_exclusive": "2024-06-19",
+      "common": 12,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 9,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 1.583749727274153e-05,
+      "max_rel": 1.330634540969363e-07,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "same_window_followup": {
+        "common": 12,
+        "expected_only": [],
+        "actual_only": [],
+        "strict_mismatch_rows": 0,
+        "numerical_mismatch_rows_1ppm": 0,
+        "max_abs": 0.0,
+        "max_rel": 0.0,
+        "auxiliary_mismatches": {
+          "Volume": 0,
+          "Dividends": 0,
+          "Stock Splits": 0
+        }
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 9,
+        "max_abs": 1.52587890625e-05
+      },
+      "raw_false_rows": 12,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0,
+      "false_ohlc_input_revisions": {
+        "common": 12,
+        "expected_only": [],
+        "actual_only": [],
+        "strict_mismatch_rows": 0,
+        "numerical_mismatch_rows_1ppm": 0,
+        "max_abs": 0.0,
+        "max_rel": 0.0,
+        "auxiliary_mismatches": {
+          "Volume": 0,
+          "Dividends": 0,
+          "Stock Splits": 0
+        }
+      }
+    },
+    {
+      "ticker": "AMD",
+      "start": "2023-09-01",
+      "end_exclusive": "2023-10-03",
+      "common": 21,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 0,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 0,
+        "max_abs": 0.0
+      },
+      "raw_false_rows": 21,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0
+    },
+    {
+      "ticker": "AAPL",
+      "start": "2024-08-01",
+      "end_exclusive": "2024-08-21",
+      "common": 14,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 10,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 1.568644850635792e-05,
+      "max_rel": 7.360940787722754e-08,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "same_window_followup": {
+        "common": 14,
+        "expected_only": [],
+        "actual_only": [],
+        "strict_mismatch_rows": 0,
+        "numerical_mismatch_rows_1ppm": 0,
+        "max_abs": 0.0,
+        "max_rel": 0.0,
+        "auxiliary_mismatches": {
+          "Volume": 0,
+          "Dividends": 0,
+          "Stock Splits": 0
+        }
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 10,
+        "max_abs": 1.52587890625e-05
+      },
+      "raw_false_rows": 14,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0,
+      "false_ohlc_input_revisions": {
+        "common": 14,
+        "expected_only": [],
+        "actual_only": [],
+        "strict_mismatch_rows": 0,
+        "numerical_mismatch_rows_1ppm": 0,
+        "max_abs": 0.0,
+        "max_rel": 0.0,
+        "auxiliary_mismatches": {
+          "Volume": 0,
+          "Dividends": 0,
+          "Stock Splits": 0
+        }
+      }
+    },
+    {
+      "ticker": "KO",
+      "start": "2024-09-03",
+      "end_exclusive": "2024-10-03",
+      "common": 22,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 10,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 1.544432466005219e-05,
+      "max_rel": 2.2836913276655293e-07,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "same_window_followup": {
+        "common": 22,
+        "expected_only": [],
+        "actual_only": [],
+        "strict_mismatch_rows": 0,
+        "numerical_mismatch_rows_1ppm": 0,
+        "max_abs": 0.0,
+        "max_rel": 0.0,
+        "auxiliary_mismatches": {
+          "Volume": 0,
+          "Dividends": 0,
+          "Stock Splits": 0
+        }
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 10,
+        "max_abs": 1.52587890625e-05
+      },
+      "raw_false_rows": 22,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0,
+      "false_ohlc_input_revisions": {
+        "common": 22,
+        "expected_only": [],
+        "actual_only": [],
+        "strict_mismatch_rows": 0,
+        "numerical_mismatch_rows_1ppm": 0,
+        "max_abs": 0.0,
+        "max_rel": 0.0,
+        "auxiliary_mismatches": {
+          "Volume": 0,
+          "Dividends": 0,
+          "Stock Splits": 0
+        }
+      }
+    },
+    {
+      "ticker": "O",
+      "start": "2024-09-03",
+      "end_exclusive": "2024-10-03",
+      "common": 22,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 20,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 1.1544510456928947e-05,
+      "max_rel": 2.0501024540939648e-07,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 20,
+        "max_abs": 1.1444091796875e-05
+      },
+      "raw_false_rows": 22,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0
+    },
+    {
+      "ticker": "COST",
+      "start": "2023-12-01",
+      "end_exclusive": "2024-01-11",
+      "common": 27,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 17,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 0.0002490714440455122,
+      "max_rel": 3.836240852464632e-07,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 17,
+        "max_abs": 0.000244140625
+      },
+      "raw_false_rows": 27,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0
+    },
+    {
+      "ticker": "F",
+      "start": "2023-02-01",
+      "end_exclusive": "2023-03-02",
+      "common": 20,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 16,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 2.8844548403128556e-06,
+      "max_rel": 2.8962630969374924e-07,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 16,
+        "max_abs": 2.86102294921875e-06
+      },
+      "raw_false_rows": 20,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0
+    },
+    {
+      "ticker": "WMT",
+      "start": "2024-02-20",
+      "end_exclusive": "2024-03-06",
+      "common": 11,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 5,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 1.5264008538906637e-05,
+      "max_rel": 2.683217107625566e-07,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 5,
+        "max_abs": 1.52587890625e-05
+      },
+      "raw_false_rows": 11,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0
+    },
+    {
+      "ticker": "NFE",
+      "start": "2022-12-20",
+      "end_exclusive": "2023-01-11",
+      "common": 14,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 9,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 3.874764264111263e-06,
+      "max_rel": 1.984407716434005e-07,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 9,
+        "max_abs": 3.814697265625e-06
+      },
+      "raw_false_rows": 14,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0
+    },
+    {
+      "ticker": "VATE",
+      "start": "2020-05-01",
+      "end_exclusive": "2020-05-22",
+      "common": 15,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 0,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 0.0,
+      "max_rel": 0.0,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 0,
+        "max_abs": 0.0
+      },
+      "raw_false_rows": 15,
+      "raw_false_only_dates": [],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0
+    },
+    {
+      "ticker": "DEC",
+      "start": "2023-06-28",
+      "end_exclusive": "2023-07-07",
+      "common": 5,
+      "expected_only": [],
+      "actual_only": [],
+      "strict_mismatch_rows": 0,
+      "numerical_mismatch_rows_1ppm": 0,
+      "max_abs": 0.0,
+      "max_rel": null,
+      "auxiliary_mismatches": {
+        "Volume": 0,
+        "Dividends": 0,
+        "Stock Splits": 0
+      },
+      "source_adj_close_response_difference": {
+        "different_exact": 0,
+        "max_abs": 0.0
+      },
+      "raw_false_rows": 6,
+      "raw_false_only_dates": [
+        "2023-07-03"
+      ],
+      "true_only_dates": [],
+      "using_observed_true_close_as_adj_close_mismatch_rows": 0
+    }
+  ],
+  "requests": [
+    {
+      "ticker": "NVDA",
+      "start": "2024-06-03",
+      "end_exclusive": "2024-06-19",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:06:45.154140+00:00"
+    },
+    {
+      "ticker": "NVDA",
+      "start": "2024-06-03",
+      "end_exclusive": "2024-06-19",
+      "auto_adjust": false,
+      "at_utc": "2026-10-14T16:06:47.153172+00:00"
+    },
+    {
+      "ticker": "AMD",
+      "start": "2023-09-01",
+      "end_exclusive": "2023-10-03",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:06:48.776981+00:00"
+    },
+    {
+      "ticker": "AAPL",
+      "start": "2024-08-01",
+      "end_exclusive": "2024-08-21",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:06:50.464624+00:00"
+    },
+    {
+      "ticker": "AAPL",
+      "start": "2024-08-01",
+      "end_exclusive": "2024-08-21",
+      "auto_adjust": false,
+      "at_utc": "2026-10-14T16:06:52.198039+00:00"
+    },
+    {
+      "ticker": "KO",
+      "start": "2024-09-03",
+      "end_exclusive": "2024-10-03",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:06:53.820298+00:00"
+    },
+    {
+      "ticker": "KO",
+      "start": "2024-09-03",
+      "end_exclusive": "2024-10-03",
+      "auto_adjust": false,
+      "at_utc": "2026-10-14T16:06:55.562291+00:00"
+    },
+    {
+      "ticker": "O",
+      "start": "2024-09-03",
+      "end_exclusive": "2024-10-03",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:06:57.180443+00:00"
+    },
+    {
+      "ticker": "COST",
+      "start": "2023-12-01",
+      "end_exclusive": "2024-01-11",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:06:58.892971+00:00"
+    },
+    {
+      "ticker": "F",
+      "start": "2023-02-01",
+      "end_exclusive": "2023-03-02",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:07:00.614980+00:00"
+    },
+    {
+      "ticker": "WMT",
+      "start": "2024-02-20",
+      "end_exclusive": "2024-03-06",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:07:02.350277+00:00"
+    },
+    {
+      "ticker": "NFE",
+      "start": "2022-12-20",
+      "end_exclusive": "2023-01-11",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:07:04.090696+00:00"
+    },
+    {
+      "ticker": "VATE",
+      "start": "2020-05-01",
+      "end_exclusive": "2020-05-22",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:07:05.815348+00:00"
+    },
+    {
+      "ticker": "DEC",
+      "start": "2023-06-28",
+      "end_exclusive": "2023-07-07",
+      "auto_adjust": true,
+      "at_utc": "2026-10-14T16:07:07.523850+00:00"
+    }
+  ],
+  "status": "complete"
+}

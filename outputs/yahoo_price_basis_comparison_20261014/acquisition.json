@@ -1,0 +1,2822 @@
+{
+  "started_at_utc": "2026-10-14T15:58:28.591114+00:00",
+  "end_exclusive": "2026-10-14",
+  "completed_session_cutoff": "2026-10-13",
+  "yfinance_version": "0.2.66",
+  "sample": [
+    "NVDA",
+    "AMD",
+    "AAPL",
+    "MSFT",
+    "AMZN",
+    "AVGO",
+    "ANET",
+    "MU",
+    "VRT",
+    "JPM",
+    "KO",
+    "XOM",
+    "O",
+    "MO",
+    "GOOGL",
+    "META",
+    "TSLA",
+    "PLTR",
+    "CRM",
+    "COST",
+    "WMT",
+    "PG",
+    "JNJ",
+    "PEP",
+    "ABBV",
+    "AGNC",
+    "F",
+    "DEC",
+    "NFE",
+    "VATE"
+  ],
+  "requests": [
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T15:58:28.746225+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T15:58:30.796595+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T15:58:32.517844+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T15:58:34.238010+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T15:58:35.954798+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T15:58:37.678267+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T15:58:39.397134+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T15:58:41.120371+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "NVDA",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T15:58:42.853677+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T15:58:44.675544+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T15:58:46.367537+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T15:58:48.089869+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T15:58:49.792883+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T15:58:51.507808+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T15:58:53.229242+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T15:58:54.955818+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T15:58:56.660360+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AMD",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T15:58:58.392282+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T15:59:00.210774+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T15:59:01.998240+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T15:59:03.724304+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T15:59:05.460401+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T15:59:07.208676+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T15:59:08.943287+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T15:59:10.688214+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T15:59:12.434519+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AAPL",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T15:59:14.197775+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T15:59:16.039700+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T15:59:17.758756+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T15:59:19.471871+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T15:59:21.182024+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T15:59:22.907808+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T15:59:24.635005+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T15:59:26.375791+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T15:59:28.116749+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MSFT",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T15:59:29.866491+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T15:59:31.681443+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T15:59:33.397614+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T15:59:35.102058+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T15:59:36.844368+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T15:59:38.568266+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T15:59:40.266762+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T15:59:41.981384+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T15:59:43.688099+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AMZN",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T15:59:45.391706+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T15:59:47.190969+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T15:59:48.947827+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T15:59:50.663108+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T15:59:52.383024+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T15:59:54.120362+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T15:59:55.851959+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T15:59:57.580715+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T15:59:59.305107+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AVGO",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:00:01.029173+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:00:02.886790+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:00:04.582502+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:00:06.356594+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:00:08.126393+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:00:10.477548+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:00:12.436023+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:00:14.238407+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:00:15.969840+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "ANET",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:00:17.734032+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:00:19.623370+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:00:21.357362+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:00:23.137989+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:00:24.925845+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:00:26.672296+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:00:28.472288+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:00:30.228128+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:00:31.996245+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MU",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:00:33.747856+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "VRT",
+      "auto_adjust": false,
+      "start": "2020-02-10",
+      "end_exclusive": "2021-02-09",
+      "started_at_utc": "2026-10-14T16:00:35.637931+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "VRT",
+      "auto_adjust": false,
+      "start": "2021-02-09",
+      "end_exclusive": "2022-02-09",
+      "started_at_utc": "2026-10-14T16:00:37.335126+00:00",
+      "status": "returned",
+      "rows": 253
+    },
+    {
+      "ticker": "VRT",
+      "auto_adjust": false,
+      "start": "2022-02-09",
+      "end_exclusive": "2023-02-09",
+      "started_at_utc": "2026-10-14T16:00:39.066993+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "VRT",
+      "auto_adjust": false,
+      "start": "2023-02-09",
+      "end_exclusive": "2024-02-09",
+      "started_at_utc": "2026-10-14T16:00:40.772623+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "VRT",
+      "auto_adjust": false,
+      "start": "2024-02-09",
+      "end_exclusive": "2025-02-08",
+      "started_at_utc": "2026-10-14T16:00:42.509713+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "VRT",
+      "auto_adjust": false,
+      "start": "2025-02-08",
+      "end_exclusive": "2026-02-08",
+      "started_at_utc": "2026-10-14T16:00:44.241766+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "VRT",
+      "auto_adjust": false,
+      "start": "2026-02-08",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:00:45.968852+00:00",
+      "status": "returned",
+      "rows": 171
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:00:47.802437+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:00:49.525669+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:00:51.272613+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:00:53.029661+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:00:54.769695+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:00:56.511737+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:00:58.302091+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:01:00.060443+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "JPM",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:01:01.814197+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:01:03.693301+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:01:05.516211+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:01:07.292255+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:01:09.035360+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:01:10.796278+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:01:12.564318+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:01:14.343189+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:01:16.158160+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "KO",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:01:17.926286+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:01:19.873761+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:01:21.630137+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:01:23.385359+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:01:25.134280+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:01:26.900223+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:01:28.665110+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:01:30.436101+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:01:32.204243+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "XOM",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:01:33.983027+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:01:35.855969+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:01:37.669893+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:01:39.396413+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:01:41.130863+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:01:42.855317+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:01:44.595451+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:01:46.349899+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:01:48.097114+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "O",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:01:49.861937+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:01:51.677975+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:01:53.426877+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:01:55.176897+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:01:56.923670+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:01:58.691775+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:02:00.458201+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:02:02.247672+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:02:04.023001+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "MO",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:02:05.827794+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:02:07.729162+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:02:09.421216+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:02:11.120166+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:02:12.849275+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:02:14.567990+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:02:16.302428+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:02:18.100483+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:02:19.834042+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "GOOGL",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:02:21.558680+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:02:23.404312+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:02:25.110773+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:02:26.813601+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:02:28.512360+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:02:30.275647+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:02:31.983456+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:02:33.698678+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:02:35.453686+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "META",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:02:37.168671+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:02:39.003925+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:02:40.713692+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:02:42.441034+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:02:44.146713+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:02:45.851572+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:02:47.711596+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:02:49.415458+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:02:51.121120+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "TSLA",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:02:52.826647+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "PLTR",
+      "auto_adjust": false,
+      "start": "2020-09-30",
+      "end_exclusive": "2021-09-30",
+      "started_at_utc": "2026-10-14T16:02:54.644516+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PLTR",
+      "auto_adjust": false,
+      "start": "2021-09-30",
+      "end_exclusive": "2022-09-30",
+      "started_at_utc": "2026-10-14T16:02:56.375870+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PLTR",
+      "auto_adjust": false,
+      "start": "2022-09-30",
+      "end_exclusive": "2023-09-30",
+      "started_at_utc": "2026-10-14T16:02:58.074432+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "PLTR",
+      "auto_adjust": false,
+      "start": "2023-09-30",
+      "end_exclusive": "2024-09-29",
+      "started_at_utc": "2026-10-14T16:02:59.786893+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "PLTR",
+      "auto_adjust": false,
+      "start": "2024-09-29",
+      "end_exclusive": "2025-09-29",
+      "started_at_utc": "2026-10-14T16:03:01.482369+00:00",
+      "status": "returned",
+      "rows": 249
+    },
+    {
+      "ticker": "PLTR",
+      "auto_adjust": false,
+      "start": "2025-09-29",
+      "end_exclusive": "2026-09-29",
+      "started_at_utc": "2026-10-14T16:03:03.223113+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "PLTR",
+      "auto_adjust": false,
+      "start": "2026-09-29",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:03:04.961184+00:00",
+      "status": "returned",
+      "rows": 11
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:03:06.798929+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:03:08.494314+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:03:10.205514+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:03:11.926565+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:03:13.630108+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:03:15.368996+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:03:17.080865+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:03:18.792170+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "CRM",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:03:20.511934+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:03:22.385207+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:03:24.099544+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:03:25.842852+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:03:27.582650+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:03:29.310934+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:03:31.094663+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:03:32.815331+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:03:34.606978+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "COST",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:03:36.360419+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:03:38.202608+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:03:39.939991+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:03:41.670107+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:03:43.517261+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:03:45.248933+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:03:47.045046+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:03:48.811736+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:03:50.555894+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "WMT",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:03:52.315345+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:03:54.151677+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:03:55.897714+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:03:57.674778+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:03:59.431972+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:04:01.230174+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:04:03.003647+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:04:04.849656+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:04:06.625152+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "PG",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:04:08.386073+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:04:10.292509+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:04:12.058328+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:04:13.839567+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:04:15.602278+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:04:17.364049+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:04:19.133998+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:04:20.903832+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:04:22.657338+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "JNJ",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:04:24.421517+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:04:26.287752+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:04:28.048347+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:04:29.796500+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:04:31.536174+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:04:33.301158+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:04:35.057093+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:04:36.807195+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:04:38.576054+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "PEP",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:04:40.362964+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:04:42.206293+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:04:43.932983+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:04:45.644724+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:04:47.391269+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:04:49.102778+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:04:50.826708+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:04:52.548713+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:04:54.274945+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "ABBV",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:04:56.000827+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:04:57.808774+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:04:59.520756+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:05:01.255728+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:05:02.988790+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:05:04.724102+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:05:06.456078+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:05:08.224364+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:05:09.949921+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "AGNC",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:05:11.730193+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:05:13.558957+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:05:15.301628+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:05:17.038895+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:05:18.796130+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:05:20.566558+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:05:22.333190+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:05:24.094062+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:05:25.892054+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "F",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:05:27.685540+00:00",
+      "status": "returned",
+      "rows": 198
+    },
+    {
+      "ticker": "DEC",
+      "auto_adjust": false,
+      "start": "2021-01-04",
+      "end_exclusive": "2022-01-04",
+      "started_at_utc": "2026-10-14T16:05:29.536959+00:00",
+      "status": "returned",
+      "rows": 253
+    },
+    {
+      "ticker": "DEC",
+      "auto_adjust": false,
+      "start": "2022-01-04",
+      "end_exclusive": "2023-01-04",
+      "started_at_utc": "2026-10-14T16:05:31.243710+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "DEC",
+      "auto_adjust": false,
+      "start": "2023-01-04",
+      "end_exclusive": "2024-01-04",
+      "started_at_utc": "2026-10-14T16:05:32.953208+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "DEC",
+      "auto_adjust": false,
+      "start": "2024-01-04",
+      "end_exclusive": "2025-01-03",
+      "started_at_utc": "2026-10-14T16:05:34.668238+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "DEC",
+      "auto_adjust": false,
+      "start": "2025-01-03",
+      "end_exclusive": "2026-01-03",
+      "started_at_utc": "2026-10-14T16:05:36.390841+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "DEC",
+      "auto_adjust": false,
+      "start": "2026-01-03",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:05:38.142526+00:00",
+      "status": "returned",
+      "rows": 195
+    },
+    {
+      "ticker": "NFE",
+      "auto_adjust": false,
+      "start": "2019-01-31",
+      "end_exclusive": "2020-01-31",
+      "started_at_utc": "2026-10-14T16:05:39.951904+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "NFE",
+      "auto_adjust": false,
+      "start": "2020-01-31",
+      "end_exclusive": "2021-01-30",
+      "started_at_utc": "2026-10-14T16:05:41.649474+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "NFE",
+      "auto_adjust": false,
+      "start": "2021-01-30",
+      "end_exclusive": "2022-01-30",
+      "started_at_utc": "2026-10-14T16:05:43.363156+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "NFE",
+      "auto_adjust": false,
+      "start": "2022-01-30",
+      "end_exclusive": "2023-01-30",
+      "started_at_utc": "2026-10-14T16:05:45.084840+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "NFE",
+      "auto_adjust": false,
+      "start": "2023-01-30",
+      "end_exclusive": "2024-01-30",
+      "started_at_utc": "2026-10-14T16:05:46.807787+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "NFE",
+      "auto_adjust": false,
+      "start": "2024-01-30",
+      "end_exclusive": "2025-01-29",
+      "started_at_utc": "2026-10-14T16:05:48.531059+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "NFE",
+      "auto_adjust": false,
+      "start": "2025-01-29",
+      "end_exclusive": "2026-01-29",
+      "started_at_utc": "2026-10-14T16:05:50.244813+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "NFE",
+      "auto_adjust": false,
+      "start": "2026-01-29",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:05:51.957473+00:00",
+      "status": "returned",
+      "rows": 177
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2018-01-01",
+      "end_exclusive": "2019-01-01",
+      "started_at_utc": "2026-10-14T16:05:53.784224+00:00",
+      "status": "returned",
+      "rows": 251
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2019-01-01",
+      "end_exclusive": "2020-01-01",
+      "started_at_utc": "2026-10-14T16:05:55.489689+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2020-01-01",
+      "end_exclusive": "2020-12-31",
+      "started_at_utc": "2026-10-14T16:05:57.216793+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2020-12-31",
+      "end_exclusive": "2021-12-31",
+      "started_at_utc": "2026-10-14T16:05:58.927970+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2021-12-31",
+      "end_exclusive": "2022-12-31",
+      "started_at_utc": "2026-10-14T16:06:00.637757+00:00",
+      "status": "returned",
+      "rows": 252
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2022-12-31",
+      "end_exclusive": "2023-12-31",
+      "started_at_utc": "2026-10-14T16:06:02.349702+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2023-12-31",
+      "end_exclusive": "2024-12-30",
+      "started_at_utc": "2026-10-14T16:06:04.081719+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2024-12-30",
+      "end_exclusive": "2025-12-30",
+      "started_at_utc": "2026-10-14T16:06:05.805888+00:00",
+      "status": "returned",
+      "rows": 250
+    },
+    {
+      "ticker": "VATE",
+      "auto_adjust": false,
+      "start": "2025-12-30",
+      "end_exclusive": "2026-10-14",
+      "started_at_utc": "2026-10-14T16:06:07.537842+00:00",
+      "status": "returned",
+      "rows": 198
+    }
+  ],
+  "tickers": {
+    "NVDA": {
+      "fetch_start": "2018-01-01",
+      "file": "NVDA_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "NVDA",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 917015400,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "NVIDIA Corporation"
+      }
+    },
+    "AMD": {
+      "fetch_start": "2018-01-01",
+      "file": "AMD_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "AMD",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 322151400,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Advanced Micro Devices, Inc."
+      }
+    },
+    "AAPL": {
+      "fetch_start": "2018-01-01",
+      "file": "AAPL_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "AAPL",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 345479400,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Apple Inc."
+      }
+    },
+    "MSFT": {
+      "fetch_start": "2018-01-01",
+      "file": "MSFT_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "MSFT",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 511108200,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Microsoft Corporation"
+      }
+    },
+    "AMZN": {
+      "fetch_start": "2018-01-01",
+      "file": "AMZN_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "AMZN",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 863703000,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Amazon.com, Inc."
+      }
+    },
+    "AVGO": {
+      "fetch_start": "2018-01-01",
+      "file": "AVGO_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "AVGO",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1249565400,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Broadcom Inc."
+      }
+    },
+    "ANET": {
+      "fetch_start": "2018-01-01",
+      "file": "ANET_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "ANET",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1402061400,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "Arista Networks, Inc."
+      }
+    },
+    "MU": {
+      "fetch_start": "2018-01-01",
+      "file": "MU_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "MU",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 454944600,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Micron Technology, Inc."
+      }
+    },
+    "VRT": {
+      "fetch_start": "2020-02-10",
+      "file": "VRT_false.csv.gz",
+      "rows": 1678,
+      "provider_identity": {
+        "symbol": "VRT",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1533216600,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "Vertiv Holdings Co"
+      }
+    },
+    "JPM": {
+      "fetch_start": "2018-01-01",
+      "file": "JPM_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "JPM",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 322151400,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "JPMorgan Chase & Co."
+      }
+    },
+    "KO": {
+      "fetch_start": "2018-01-01",
+      "file": "KO_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "KO",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": -252322200,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "The Coca-Cola Company"
+      }
+    },
+    "XOM": {
+      "fetch_start": "2018-01-01",
+      "file": "XOM_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "XOM",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": -252322200,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "ExxonMobil Holdings Corporation"
+      }
+    },
+    "O": {
+      "fetch_start": "2018-01-01",
+      "file": "O_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "O",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 782487000,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "Realty Income Corporation"
+      }
+    },
+    "MO": {
+      "fetch_start": "2018-01-01",
+      "file": "MO_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "MO",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": -252322200,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "Altria Group, Inc."
+      }
+    },
+    "GOOGL": {
+      "fetch_start": "2018-01-01",
+      "file": "GOOGL_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "GOOGL",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1092922200,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Alphabet Inc."
+      }
+    },
+    "META": {
+      "fetch_start": "2018-01-01",
+      "file": "META_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "META",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1337347800,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Meta Platforms, Inc."
+      }
+    },
+    "TSLA": {
+      "fetch_start": "2018-01-01",
+      "file": "TSLA_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "TSLA",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1277818200,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Tesla, Inc."
+      }
+    },
+    "PLTR": {
+      "fetch_start": "2020-09-30",
+      "file": "PLTR_false.csv.gz",
+      "rows": 1516,
+      "provider_identity": {
+        "symbol": "PLTR",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1601472600,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Palantir Technologies Inc."
+      }
+    },
+    "CRM": {
+      "fetch_start": "2018-01-01",
+      "file": "CRM_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "CRM",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1087997400,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "Salesforce, Inc."
+      }
+    },
+    "COST": {
+      "fetch_start": "2018-01-01",
+      "file": "COST_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "COST",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 521299800,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Costco Wholesale Corporation"
+      }
+    },
+    "WMT": {
+      "fetch_start": "2018-01-01",
+      "file": "WMT_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "WMT",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 83597400,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "Walmart Inc."
+      }
+    },
+    "PG": {
+      "fetch_start": "2018-01-01",
+      "file": "PG_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "PG",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": -252322200,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "The Procter & Gamble Company"
+      }
+    },
+    "JNJ": {
+      "fetch_start": "2018-01-01",
+      "file": "JNJ_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "JNJ",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": -252322200,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "Johnson & Johnson"
+      }
+    },
+    "PEP": {
+      "fetch_start": "2018-01-01",
+      "file": "PEP_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "PEP",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 76253400,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "PepsiCo, Inc."
+      }
+    },
+    "ABBV": {
+      "fetch_start": "2018-01-01",
+      "file": "ABBV_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "ABBV",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1357137000,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "AbbVie Inc."
+      }
+    },
+    "AGNC": {
+      "fetch_start": "2018-01-01",
+      "file": "AGNC_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "AGNC",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1210858200,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "AGNC Investment Corp."
+      }
+    },
+    "F": {
+      "fetch_start": "2018-01-01",
+      "file": "F_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "F",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 76253400,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "Ford Motor Company"
+      }
+    },
+    "DEC": {
+      "fetch_start": "2021-01-04",
+      "file": "DEC_false.csv.gz",
+      "rows": 1451,
+      "provider_identity": {
+        "symbol": "DEC",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1609770600,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "Diversified Energy Company"
+      }
+    },
+    "NFE": {
+      "fetch_start": "2019-01-31",
+      "file": "NFE_false.csv.gz",
+      "rows": 1935,
+      "provider_identity": {
+        "symbol": "NFE",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1548945000,
+        "currency": "USD",
+        "exchangeName": "NMS",
+        "longName": "New Fortress Energy Inc."
+      }
+    },
+    "VATE": {
+      "fetch_start": "2018-01-01",
+      "file": "VATE_false.csv.gz",
+      "rows": 2207,
+      "provider_identity": {
+        "symbol": "VATE",
+        "instrumentType": "EQUITY",
+        "exchangeTimezoneName": "America/New_York",
+        "firstTradeDate": 1247491800,
+        "currency": "USD",
+        "exchangeName": "NYQ",
+        "longName": "INNOVATE Corp."
+      }
+    }
+  },
+  "status": "false_history_complete",
+  "production_writes": 0
+}

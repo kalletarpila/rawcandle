@@ -1,0 +1,9 @@
+{
+  "sample_size": 30,
+  "false_rows": 63962,
+  "qualified_rows": 61635,
+  "invalid_false": 0,
+  "invalid_true": 2315,
+  "true_keepna_dropped": 39,
+  "identity_excluded": 744
+}

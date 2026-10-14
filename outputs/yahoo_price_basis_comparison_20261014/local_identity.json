@@ -1,0 +1,1037 @@
+{
+  "generation": "refresh_20261014T095401Z_refresh_fundamentals_43db1c8371f6_production_6917d617",
+  "tickers": {
+    "NVDA": {
+      "securities": [
+        {
+          "security_id": 1601,
+          "company_id": 1592,
+          "current_ticker": "NVDA",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "NVDA",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "NVDA",
+          "permaticker": "196754",
+          "name": "NVIDIA CORP",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1999-01-22",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "AMD": {
+      "securities": [
+        {
+          "security_id": 131,
+          "company_id": 131,
+          "current_ticker": "AMD",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "AMD",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "AMD",
+          "permaticker": "199991",
+          "name": "ADVANCED MICRO DEVICES INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "AAPL": {
+      "securities": [
+        {
+          "security_id": 7,
+          "company_id": 7,
+          "current_ticker": "AAPL",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "AAPL",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "AAPL",
+          "permaticker": "199059",
+          "name": "APPLE INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "MSFT": {
+      "securities": [
+        {
+          "security_id": 1482,
+          "company_id": 1473,
+          "current_ticker": "MSFT",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "MSFT",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "MSFT",
+          "permaticker": "198508",
+          "name": "MICROSOFT CORP",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-03-13",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "AMZN": {
+      "securities": [
+        {
+          "security_id": 152,
+          "company_id": 152,
+          "current_ticker": "AMZN",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "AMZN",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "AMZN",
+          "permaticker": "197029",
+          "name": "AMAZON COM INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1997-05-16",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "AVGO": {
+      "securities": [
+        {
+          "security_id": 245,
+          "company_id": 245,
+          "current_ticker": "AVGO",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "AVGO",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "AVGO",
+          "permaticker": "193427",
+          "name": "BROADCOM INC",
+          "category": "Domestic Common Stock Primary Class",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": "AVGOP",
+          "firstpricedate": "2009-08-06",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "ANET": {
+      "securities": [
+        {
+          "security_id": 156,
+          "company_id": 156,
+          "current_ticker": "ANET",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "ANET",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "ANET",
+          "permaticker": "187524",
+          "name": "ARISTA NETWORKS INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "2014-06-06",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "MU": {
+      "securities": [
+        {
+          "security_id": 1503,
+          "company_id": 1494,
+          "current_ticker": "MU",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "MU",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "MU",
+          "permaticker": "198808",
+          "name": "MICRON TECHNOLOGY INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1989-05-16",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "VRT": {
+      "securities": [
+        {
+          "security_id": 2340,
+          "company_id": 2329,
+          "current_ticker": "VRT",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "VRT",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "VRT",
+          "permaticker": "115966",
+          "name": "VERTIV HOLDINGS CO",
+          "category": "Domestic Common Stock Primary Class",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": "GSAH.U VERT.U GSAH",
+          "firstpricedate": "2018-07-30",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "JPM": {
+      "securities": [],
+      "aliases": [],
+      "provider_stocks": [
+        {
+          "ticker": "JPM",
+          "permaticker": "199853",
+          "name": "JPMORGAN CHASE & CO",
+          "category": "Domestic Common Stock Primary Class",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": "JPM-PE JPM-PJ JPM-PD CMB JPM-PB-CL JPM-PA JPM-PM JPM-PG JPM-PK JPM-PL JPM-PF JPM-PH JPM-PC JPM-PB",
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "KO": {
+      "securities": [
+        {
+          "security_id": 1235,
+          "company_id": 1231,
+          "current_ticker": "KO",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "KO",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "KO",
+          "permaticker": "199839",
+          "name": "COCA COLA CO",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "XOM": {
+      "securities": [
+        {
+          "security_id": 2431,
+          "company_id": 2420,
+          "current_ticker": "XOM",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "XOM",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "XOM",
+          "permaticker": "199739",
+          "name": "EXXON MOBIL CORP",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": "XON",
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "O": {
+      "securities": [
+        {
+          "security_id": 1621,
+          "company_id": 1611,
+          "current_ticker": "O",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "O",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "O",
+          "permaticker": "198782",
+          "name": "REALTY INCOME CORP",
+          "category": "Domestic Common Stock Primary Class",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": "O-PF O-P",
+          "firstpricedate": "1994-10-18",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "MO": {
+      "securities": [
+        {
+          "security_id": 1458,
+          "company_id": 1449,
+          "current_ticker": "MO",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "MO",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "MO",
+          "permaticker": "198615",
+          "name": "ALTRIA GROUP INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "GOOGL": {
+      "securities": [
+        {
+          "security_id": 973,
+          "company_id": 969,
+          "current_ticker": "GOOGL",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "GOOGL",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "GOOGL",
+          "permaticker": "195146",
+          "name": "ALPHABET INC",
+          "category": "Domestic Common Stock Primary Class",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": "GOOG GOOGM GOOGN",
+          "firstpricedate": "2004-08-19",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "META": {
+      "securities": [
+        {
+          "security_id": 1414,
+          "company_id": 1406,
+          "current_ticker": "META",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "META",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "META",
+          "permaticker": "194817",
+          "name": "META PLATFORMS INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": "FB",
+          "firstpricedate": "2012-05-18",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "TSLA": {
+      "securities": [
+        {
+          "security_id": 2226,
+          "company_id": 2216,
+          "current_ticker": "TSLA",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "TSLA",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "TSLA",
+          "permaticker": "194897",
+          "name": "TESLA INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "2010-06-29",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "PLTR": {
+      "securities": [
+        {
+          "security_id": 1764,
+          "company_id": 1754,
+          "current_ticker": "PLTR",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "PLTR",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "PLTR",
+          "permaticker": "632043",
+          "name": "PALANTIR TECHNOLOGIES INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "2020-09-30",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "CRM": {
+      "securities": [
+        {
+          "security_id": 566,
+          "company_id": 565,
+          "current_ticker": "CRM",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "CRM",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "CRM",
+          "permaticker": "196078",
+          "name": "SALESFORCE INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "2004-06-23",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "COST": {
+      "securities": [
+        {
+          "security_id": 540,
+          "company_id": 539,
+          "current_ticker": "COST",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "COST",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "COST",
+          "permaticker": "197593",
+          "name": "COSTCO WHOLESALE CORP",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-07-09",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "WMT": {
+      "securities": [
+        {
+          "security_id": 2400,
+          "company_id": 2389,
+          "current_ticker": "WMT",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "WMT",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "WMT",
+          "permaticker": "199233",
+          "name": "WALMART INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "PG": {
+      "securities": [
+        {
+          "security_id": 1737,
+          "company_id": 1727,
+          "current_ticker": "PG",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "PG",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "PG",
+          "permaticker": "199411",
+          "name": "PROCTER & GAMBLE CO",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "JNJ": {
+      "securities": [
+        {
+          "security_id": 1198,
+          "company_id": 1194,
+          "current_ticker": "JNJ",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "JNJ",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "JNJ",
+          "permaticker": "199185",
+          "name": "JOHNSON & JOHNSON",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "PEP": {
+      "securities": [
+        {
+          "security_id": 1730,
+          "company_id": 1720,
+          "current_ticker": "PEP",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "PEP",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "PEP",
+          "permaticker": "199433",
+          "name": "PEPSICO INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "ABBV": {
+      "securities": [
+        {
+          "security_id": 10,
+          "company_id": 10,
+          "current_ticker": "ABBV",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "ABBV",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "ABBV",
+          "permaticker": "191883",
+          "name": "ABBVIE INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "2013-01-02",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "AGNC": {
+      "securities": [
+        {
+          "security_id": 75,
+          "company_id": 75,
+          "current_ticker": "AGNC",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "AGNC",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "AGNC",
+          "permaticker": "193651",
+          "name": "AGNC INVESTMENT CORP",
+          "category": "Domestic Common Stock Primary Class",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": "AGNCM AGNCL AGNCB AGNCP1 AGNCP AGNCZ AGNCN AGNCO",
+          "firstpricedate": "2008-05-15",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "F": {
+      "securities": [
+        {
+          "security_id": 833,
+          "company_id": 832,
+          "current_ticker": "F",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "F",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "F",
+          "permaticker": "199713",
+          "name": "FORD MOTOR CO",
+          "category": "Domestic Common Stock Primary Class",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": "F-PB F-PD F-PC",
+          "firstpricedate": "1986-01-01",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "DEC": {
+      "securities": [
+        {
+          "security_id": 657,
+          "company_id": 656,
+          "current_ticker": "DEC",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "DEC",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "DEC",
+          "permaticker": "640849",
+          "name": "DIVERSIFIED ENERGY CO",
+          "category": "Domestic Common Stock",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "2023-12-18",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "NFE": {
+      "securities": [
+        {
+          "security_id": 1543,
+          "company_id": 1534,
+          "current_ticker": "NFE",
+          "exchange": "NASDAQ",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "NFE",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "NFE",
+          "permaticker": "111638",
+          "name": "NEW FORTRESS ENERGY INC",
+          "category": "Domestic Common Stock",
+          "exchange": "NASDAQ",
+          "isdelisted": "N",
+          "relatedtickers": null,
+          "firstpricedate": "2019-01-31",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    },
+    "VATE": {
+      "securities": [
+        {
+          "security_id": 2300,
+          "company_id": 2289,
+          "current_ticker": "VATE",
+          "exchange": "NYSE",
+          "valid_from": null,
+          "valid_to": null,
+          "active": 1
+        }
+      ],
+      "aliases": [
+        {
+          "ticker": "VATE",
+          "valid_from": "",
+          "valid_to": null,
+          "provider": "LOCAL_VERIFIED_BOOTSTRAP",
+          "source": "v3_active_tickers_99_27"
+        }
+      ],
+      "provider_stocks": [
+        {
+          "ticker": "VATE",
+          "permaticker": "197117",
+          "name": "INNOVATE CORP",
+          "category": "Domestic Common Stock Primary Class",
+          "exchange": "NYSE",
+          "isdelisted": "N",
+          "relatedtickers": "PTGI HCHC PMUG",
+          "firstpricedate": "2011-06-23",
+          "lastpricedate": "2026-08-28"
+        }
+      ]
+    }
+  }
+}
