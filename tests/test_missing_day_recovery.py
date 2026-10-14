@@ -352,3 +352,48 @@ def test_duplicate_provider_dates_rejected(environment):
                                              index=pd.to_datetime([TARGET,TARGET]))
     result=run(environment,factory=lambda t:stock)
     assert result.inserted_rows==0 and aaa(result)['reason']=='DUPLICATE_PROVIDER_DATES'
+
+
+@pytest.mark.parametrize('ticker,instrument,timezone,market,provider_symbol,expected', [
+    ('^VIX','INDEX','America/Chicago','usa','^VIX',None),
+    ('^GSPC','INDEX','America/New_York','usa','^GSPC',None),
+    ('^NDX','INDEX','America/New_York','usa','^NDX',None),
+    ('^SYNTH','INDEX','America/Chicago','usa','^SYNTH',None),
+    ('AAA','EQUITY','America/New_York','usa','AAA',None),
+    ('ETF','ETF','America/New_York','usa','ETF',None),
+    ('^VIX','INDEX','America/Chicago','usa','^OTHER','PROVIDER_SYMBOL_MISMATCH'),
+    ('^VIX','INDEX','Europe/London','usa','^VIX','PROVIDER_MARKET_MISMATCH'),
+    ('^VIX','INDEX','America/Chicago','omxh','^VIX','PROVIDER_MARKET_MISMATCH'),
+    ('AAA','EQUITY','America/Chicago','usa','AAA','PROVIDER_MARKET_MISMATCH'),
+    ('ETF','ETF','America/Chicago','usa','ETF','PROVIDER_MARKET_MISMATCH'),
+    ('^VIX',None,'America/Chicago','usa','^VIX','PROVIDER_MARKET_MISMATCH'),
+    ('^VIX','INDEX','America/Los_Angeles','usa','^VIX','PROVIDER_MARKET_MISMATCH'),
+    ('^VIX','INDEX',None,'usa','^VIX','PROVIDER_MARKET_UNVERIFIED'),
+])
+def test_index_timezone_allowance_is_instrument_and_market_specific(
+        ticker,instrument,timezone,market,provider_symbol,expected):
+    stock=Stock(ticker,metadata=dict(symbol=provider_symbol,instrumentType=instrument,
+                                   exchangeTimezoneName=timezone))
+    _,reason=recovery.provider_identity(stock,ticker,market)
+    assert reason==expected
+
+
+@pytest.mark.parametrize('ticker,timezone', [('^VIX','America/Chicago'),
+    ('^NDX','America/New_York'),('^SYNTH','America/Chicago')])
+def test_index_missing_day_insertion_existing_skip_and_restart(environment,ticker,timezone):
+    db,_,_=environment
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE osakedata SET osake=? WHERE osake='AAA'",(ticker,))
+    before=all_rows(db);calls=[]
+    def factory(symbol):
+        calls.append(symbol)
+        return Stock(symbol,metadata=dict(symbol=symbol,instrumentType='INDEX',
+                                         exchangeTimezoneName=timezone))
+    result=run(environment,factory=factory)
+    assert calls==[ticker]  # Existing ^GSPC and EXIST never request Yahoo.
+    assert result.inserted_rows==1 and result.writes_verified and result.status=='completed'
+    after=all_rows(db)
+    assert after[:len(before)]==before and after[-1][1:3]==(ticker,TARGET)
+    assert after[-1][8]=='usa'
+    repeat=run(environment,factory=lambda t:pytest.fail('existing index must not fetch'))
+    assert repeat.inserted_rows==0 and repeat.status=='completed' and all_rows(db)==after

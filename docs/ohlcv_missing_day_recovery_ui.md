@@ -16,7 +16,7 @@ A valid target is committed immediately. The operation does not wait to collect 
 
 ## Target validation and identity
 
-Only the selected date and market can be inserted. The converted row must retain the requested ticker and market; duplicate provider dates are rejected. The Yahoo metadata symbol must exactly match the ticker, and its exchange timezone must match the established market mapping. Missing provider identity on a returned bar is reported as unverified, separately from a demonstrated mismatch. There is no `instrumentType=EQUITY` restriction. Metadata cannot independently distinguish every exchange or reused ticker; this is operational validation, not a point-in-time security master.
+Only the selected date and market can be inserted. The converted row must retain the requested ticker and market; duplicate provider dates are rejected. The Yahoo metadata symbol must exactly match the ticker, and its exchange timezone must match the established market mapping (USA indices additionally allow Chicago, as documented below). Missing provider identity on a returned bar is reported as unverified, separately from a demonstrated mismatch. There is no `instrumentType=EQUITY` restriction. Metadata cannot independently distinguish every exchange or reused ticker; this is operational validation, not a point-in-time security master.
 
 OHLC must be finite and positive, `low <= open <= high` and `low <= close <= high`; volume must be finite and nonnegative. The normal converter's numeric conventions are preserved, including integer volume conversion. A requested raw bar skipped by that converter for incomplete OHLC is reported as invalid, rather than as absent. Zero volume is accepted. No price interpolation, scaling or existing-history correction takes place.
 
@@ -63,3 +63,13 @@ venv/bin/python -m pytest -q tests/test_missing_day_recovery.py tests/test_missi
 Final focused result: **104 passed**, zero failed. The existing test database guard rejected writable production connections and its protected-database inventory check passed. No live provider calls or production database copies were made.
 
 Changed files: `services/missing_day_recovery.py`, `main.py` (missing-day invocation/summary only), `tests/test_missing_day_recovery.py`, `tests/test_missing_day_recovery_ui.py`, and this document. `services/stock_update_service.py` is reused without changes. No full-suite or live recovery runs, provider requests, production database writes/copies/backups, application restarts or push.
+
+## USA index timezone correction — 2026-10-14
+
+The completed local report `reports/missing_day_recovery/missing_day_20261014T090019076691Z_345a4561.json` shows `^VIX` rejected as `PROVIDER_MARKET_MISMATCH` despite exact symbol, type `INDEX` and timezone `America/Chicago`. Targeted read-only inspection found three stored USA index symbols: `^GSPC`, `^NDX` and `^VIX`; the same report records New York for the first two. Normal collection assigns the selected/stored market through its usual conversion and has no Yahoo instrument/timezone acceptance gate. No live Yahoo requests were needed for this finding.
+
+Recovery now accepts **America/New_York or America/Chicago only for USA Yahoo INDEX responses**. This is an instrument-specific allowance, not a VIX-only exception. Other US index timezones require additional established evidence before being added. Equities, ETFs and other instruments retain their existing per-market timezone requirement. Exact Yahoo symbol matching, missing-provider-identity holds, requested ticker/date/market validation, reviewed historical identity protection, acquisition/options/pacing/retries/conversion and incremental insert-only persistence are unchanged. Missing `instrumentType` does not qualify for the Chicago allowance.
+
+Changed files for this correction: `services/missing_day_recovery.py`, `tests/test_missing_day_recovery.py` and this document. Mocked/synthetic tests cover the observed indices, a synthetic second Chicago index, New York equities/ETFs, wrong symbols/markets, unsupported/missing timezones, insertion exactly once, existing-key request skipping and restart. Normal updater regression tests remain included in the focused command above. Production database changes/copies/backups and live provider requests: **0**; no recovery job, scheduler restart or push.
+
+Correction validation: **121 targeted tests passed**, zero failed, using the command above. The production database isolation guard and protected-file inventory checks passed.

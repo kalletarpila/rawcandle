@@ -25,6 +25,9 @@ MARKET_TIMEZONES = {
     "omxs": "Europe/Stockholm",
     "xetra": "Europe/Berlin",
 }
+# Retained Yahoo evidence: ^GSPC/^NDX use New York; ^VIX uses Chicago.
+# This allowance applies only to USA INDEX responses, never equities or ETFs.
+USA_INDEX_TIMEZONES = frozenset({"America/New_York", "America/Chicago"})
 BAR_FIELDS = ("open", "high", "low", "close", "volume")
 
 
@@ -163,7 +166,10 @@ def provider_identity(stock, ticker: str, market: str, *, allow_missing: bool = 
     if not evidence["symbol"] and not allow_missing:
         return evidence, "PROVIDER_SYMBOL_UNVERIFIED"
     timezone = evidence["exchangeTimezoneName"]
-    if timezone and timezone != MARKET_TIMEZONES[market]:
+    allowed_timezones = (USA_INDEX_TIMEZONES
+                         if market == "usa" and evidence["instrumentType"] == "INDEX"
+                         else {MARKET_TIMEZONES[market]})
+    if timezone and timezone not in allowed_timezones:
         return evidence, "PROVIDER_MARKET_MISMATCH"
     if not timezone and not allow_missing:
         return evidence, "PROVIDER_MARKET_UNVERIFIED"
