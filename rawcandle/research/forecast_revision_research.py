@@ -42,6 +42,11 @@ COLUMNS += ("transition_status", "hours_publication_to_new_0q_first_seen",
             "pre_eps_low", "pre_eps_high", "post_eps_low", "post_eps_high",
             "pre_revenue_low", "pre_revenue_high", "post_revenue_low", "post_revenue_high",
             "eps_range_width_change", "revenue_range_width_change")
+COLUMNS += ("pair_validation_status", "pre_target", "post_target", "pre_provider_end_date", "post_provider_end_date",
+            "provider_date_match", "provider_rollover_status", "provider_old_0q_end_date",
+            "provider_new_0q_end_date", "provider_rollover_last_old_fetch_at",
+            "provider_rollover_first_new_fetch_at", "provider_plus1q_matches_new0q",
+            "linker_transition_at", "linker_transition_status", "timing_basis")
 
 
 def instant(value: str) -> datetime:
@@ -87,6 +92,8 @@ def reconstruct_fetch(connection: sqlite3.Connection, fetch: dict[str, Any]) -> 
         states = {f'{row["metric"]}:{row["statistic"]}': {"state": row["value_state"],
                   "numeric": row["value_numeric"], "text": row["value_text"]} for row in estimates}
         result.append({**fetch, "company_id": link["company_id"], "horizon": link["provider_horizon"],
+                       "provider_end_date": estimates[0]["provider_end_date"] if estimates and
+                       len({row["provider_end_date"] for row in estimates}) == 1 else None,
                        "target": (link["company_id"], link["expected_fiscal_year"], link["expected_fiscal_quarter"]),
                        "canonical_quarter_id": link["canonical_quarter_id"], "link_id": link["link_id"],
                        "resolution_id": identity["resolution_id"], "states": states})
@@ -122,6 +129,52 @@ def revision(pre: float | None, post: float | None) -> tuple[float | None, float
     return absolute, absolute / pre * 100, None
 
 
+def validate_pair(baseline: dict | None, after: dict | None) -> str:
+    """Fiscal identity selects the pair; provider dates only approve or contradict it."""
+    if not baseline or not after or baseline["target"] != after["target"]:
+        return "NO_PAIR"
+    a, b = baseline.get("provider_end_date"), after.get("provider_end_date")
+    if not a or not b:
+        return "PROVISIONAL_PROVIDER_DATE_MISSING"
+    return "VALIDATED_PROVIDER_DATE_MATCH" if a == b else "REJECT_PROVIDER_DATE_MISMATCH"
+
+
+def provider_rollovers(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Consecutive usable 0q fetches, independent of their derived target labels.
+
+    Missing dates and duplicate 0q occurrences break continuity. The +1q check
+    uses only the immediately preceding usable 0q fetch, never an older row.
+    Unchanged dates create no episode; failures/no-data have no usable 0q.
+    Callers supply one company's fetch-specific AS_KNOWN observations.
+    """
+    fetches = {}
+    for row in sorted(observations, key=lambda r: (instant(r["fetched_at_utc"]), r["fetch_order"])):
+        fetches.setdefault(row["fetch_id"], []).append(row)
+    previous = None
+    result = []
+    for rows in fetches.values():
+        zero = [row for row in rows if row["horizon"] == "0q" and any(
+            numeric(row, metric, "AVG") is not None for metric in ("EPS_ESTIMATE", "REVENUE_ESTIMATE"))]
+        if not zero:
+            continue
+        if len(zero) != 1 or not zero[0].get("provider_end_date"):
+            previous = None
+            continue
+        current = zero[0]
+        if previous:
+            old, old_rows = previous
+            a, b = old["provider_end_date"], current["provider_end_date"]
+            if a != b:
+                plus = [r for r in old_rows if r["horizon"] == "+1q" and any(
+                    numeric(r, metric, "AVG") is not None for metric in ("EPS_ESTIMATE", "REVENUE_ESTIMATE"))]
+                matched = len(plus) == 1 and plus[0].get("provider_end_date") == b
+                result.append({"old": old, "new": current, "plus1q_matches": matched,
+                               "status": "BACKWARD_DATE_REGRESSION" if b < a else
+                               "FORWARD_MATCHED_PLUS1Q" if matched else "FORWARD_NO_PLUS1Q_MATCH"})
+        previous = current, rows
+    return result
+
+
 def analyze_event(event: dict[str, Any], observations: list[dict[str, Any]],
                   next_target: tuple | None, trading_dates: list[str]) -> dict[str, Any]:
     company = int(event["company_id"])
@@ -147,25 +200,71 @@ def analyze_event(event: dict[str, Any], observations: list[dict[str, Any]],
         status = "NOT_YET_OBSERVED"
     baseline = next((row for row in reversed(pre) if row["horizon"] == "+1q" and next_target and row["target"] == next_target), None)
     after = next((row for row in post if row["horizon"] == "0q" and next_target and row["target"] == next_target), None)
+    pair_status = validate_pair(baseline, after)
+    approved = pair_status == "VALIDATED_PROVIDER_DATE_MATCH"
+    # Keep the original candidate and link timing for diagnostics. Never search
+    # past a rejected candidate to make the quality-approved cohort look larger.
+    linker_first_new = first_new
+    episodes = provider_rollovers(observations)
+    pre_old_dates = {r.get("provider_end_date") for r in pre
+                     if r["horizon"] == "0q" and r["target"] == old_target}
+    relevant = [ep for ep in episodes
+                if classify_fetch(event, ep["new"]["fetched_at_utc"]) == "POST_RESULT"
+                and ep["old"].get("provider_end_date") in pre_old_dates
+                and (not baseline or not baseline.get("provider_end_date")
+                     or ep["new"]["provider_end_date"] == baseline["provider_end_date"])]
+    rollover = next((ep for ep in relevant if ep["status"].startswith("FORWARD_")), None)
+    backward = next((ep for ep in episodes if ep["status"] == "BACKWARD_DATE_REGRESSION"
+                     and classify_fetch(event, ep["new"]["fetched_at_utc"]) == "POST_RESULT"
+                     and (ep["old"].get("provider_end_date") in pre_old_dates or
+                          baseline and ep["old"].get("provider_end_date") == baseline.get("provider_end_date"))), None)
+    provider_episode = rollover or backward
+    zero_count = sum(r["horizon"] == "0q" and any(numeric(r, m, "AVG") is not None
+                     for m in ("EPS_ESTIMATE", "REVENUE_ESTIMATE")) for r in observations)
+    provider_status = rollover["status"] if rollover else (
+        "BACKWARD_DATE_REGRESSION" if backward else
+        "INSUFFICIENT_HISTORY" if zero_count < 2 else "NO_OBSERVED_ROLLOVER")
+    timing_basis = "PROVIDER_0Q_ROLLOVER" if rollover else (
+        "LINK_IDENTITY_CHANGE_ONLY" if status == "OBSERVED" else "NONE")
+    if rollover:
+        last_old, first_new = rollover["old"], rollover["new"]
     flags = []
     if not next_target:
         flags.append("NEXT_CANONICAL_QUARTER_UNAVAILABLE")
     if not baseline or not after:
         flags.append("NO_SAME_TARGET_PAIR")
+    elif not approved:
+        flags.append(pair_status)
     result = {"company_id": company, "ticker": event["ticker"], "result_fiscal_year": event["fiscal_year"],
               "result_fiscal_quarter": event["fiscal_quarter"], "publication_boundary_quality": event["research_status"],
               "result_publication_timestamp_utc": event.get("canonical_timestamp_utc") if event["research_status"] == "EXACT" else None,
               "first_full_post_result_trading_date": event.get("first_full_post_result_trading_date"),
-              "transition_status": status, "research_status": event["research_status"],
+              "transition_status": "OBSERVED" if rollover else status, "research_status": event["research_status"],
+              "linker_transition_status": status,
+              "linker_transition_at": linker_first_new["fetched_at_utc"] if status == "OBSERVED" else None,
+              "pair_validation_status": pair_status,
+              "nominal_candidate_pair": bool(baseline and after),
+              "provider_date_match": True if approved else False if pair_status == "REJECT_PROVIDER_DATE_MISMATCH" else None,
+              "provider_rollover_status": provider_status, "timing_basis": timing_basis,
+              "provider_old_0q_end_date": provider_episode["old"]["provider_end_date"] if provider_episode else None,
+              "provider_new_0q_end_date": provider_episode["new"]["provider_end_date"] if provider_episode else None,
+              "provider_rollover_last_old_fetch_at": provider_episode["old"]["fetched_at_utc"] if provider_episode else None,
+              "provider_rollover_first_new_fetch_at": provider_episode["new"]["fetched_at_utc"] if provider_episode else None,
+              "provider_plus1q_matches_new0q": provider_episode["plus1q_matches"] if provider_episode else None,
+              "provider_forward_episode_count": sum(ep["status"].startswith("FORWARD_") for ep in episodes),
+              "provider_matched_forward_episode_count": sum(ep["status"] == "FORWARD_MATCHED_PLUS1Q" for ep in episodes),
+              "provider_backward_episode_count": sum(ep["status"] == "BACKWARD_DATE_REGRESSION" for ep in episodes),
               "target_fiscal_year": next_target[1] if next_target else None,
               "target_fiscal_quarter": next_target[2] if next_target else None,
               "pre_horizon": "+1q", "post_horizon": "0q",
               "old_0q_last_seen_at_utc": last_old["fetched_at_utc"] if last_old else None,
               "new_0q_first_seen_at_utc": first_new["fetched_at_utc"] if first_new else None,
-              "transition_interval_hours": (instant(first_new["fetched_at_utc"]) - instant(last_old["fetched_at_utc"])).total_seconds()/3600 if status == "OBSERVED" else None,
-              "has_pre": bool(pre), "has_post": bool(post), "comparable": bool(baseline and after)}
+              "transition_interval_hours": (instant(first_new["fetched_at_utc"]) - instant(last_old["fetched_at_utc"])).total_seconds()/3600 if rollover or status == "OBSERVED" else None,
+              "has_pre": bool(pre), "has_post": bool(post), "comparable": approved}
     for prefix, obs in (("pre", baseline), ("post", after)):
         result[f"{prefix}_fetch_at_utc"] = obs["fetched_at_utc"] if obs else None
+        result[f"{prefix}_target"] = "/".join(map(str, obs["target"])) if obs else None
+        result[f"{prefix}_provider_end_date"] = obs.get("provider_end_date") if obs else None
         for field in ("fetch_id", "snapshot_id", "resolution_id", "link_id"):
             result[f"{prefix}_{field}"] = obs.get(field) if obs else None
         result[f"{prefix}_value_states_json"] = json.dumps(obs["states"] if obs else {}, sort_keys=True)
@@ -182,8 +281,13 @@ def analyze_event(event: dict[str, Any], observations: list[dict[str, Any]],
         result[f"{name}_analyst_count_change"] = b-a if a is not None and b is not None else None
         ranges = [result[f"{prefix}_{name}_{stat}"] for prefix in ("pre", "post") for stat in ("low", "high")]
         result[f"{name}_range_width_change"] = (ranges[3]-ranges[2])-(ranges[1]-ranges[0]) if all(x is not None for x in ranges) else None
+        if not approved:
+            # Raw PRE/POST values remain evidence; invalid/provisional pairs do
+            # not produce research revision metrics or enter aggregate summaries.
+            for suffix in ("revision_abs", "revision_pct", "analyst_count_change", "range_width_change"):
+                result[f"{name}_{suffix}"] = None
     delay = None
-    if first_new:
+    if timing_basis != "NONE" and first_new:
         new_time = instant(first_new["fetched_at_utc"])
         new_day = new_time.astimezone(ZoneInfo("America/New_York")).date().isoformat()
         origin = event.get("research_publication_date") or event.get("first_full_post_result_trading_date")
@@ -201,11 +305,12 @@ def analyze_event(event: dict[str, Any], observations: list[dict[str, Any]],
         result["transition_trading_day_class"] = "NOT_YET_OBSERVED"
     result["trading_days_publication_to_new_0q"] = delay
     checkpoints = {}
-    if after:
+    if after and approved:
         anchor = instant(after["fetched_at_utc"]).astimezone(ZoneInfo("America/New_York")).date().isoformat()
         days = [day for day in trading_dates if day >= anchor]
         for offset in (1,2,5):
-            candidate = next((obs for obs in post if obs["horizon"] == "0q" and obs["target"] == next_target and len(days)>offset
+            candidate = next((obs for obs in post if obs["horizon"] == "0q" and obs["target"] == next_target
+                              and validate_pair(baseline, obs) == "VALIDATED_PROVIDER_DATE_MATCH" and len(days)>offset
                               and instant(obs["fetched_at_utc"]).astimezone(ZoneInfo("America/New_York")).date().isoformat() >= days[offset]), None)
             checkpoints[str(offset)] = {"fetch_id": candidate["fetch_id"], "fetched_at_utc": candidate["fetched_at_utc"], "states": candidate["states"]} if candidate else None
     result["checkpoints_json"] = json.dumps(checkpoints, sort_keys=True)
@@ -288,7 +393,8 @@ def transition_class_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
 def build_forecast_revision_research(
     publication_csv: Path, publication_metadata: Path, forecasts_db: Path,
     canonical_db: Path, ohlc_db: Path, output_csv: Path, output_metadata: Path,
-    *, generated_at_utc: str | None = None,
+    *, generated_at_utc: str | None = None, history_start_utc: str | None = None,
+    history_end_utc: str | None = None,
 ) -> dict[str, Any]:
     validate_publication_input(publication_csv, publication_metadata)
     with publication_csv.open(newline="", encoding="utf-8") as handle:
@@ -300,6 +406,12 @@ def build_forecast_revision_research(
         fetches = [dict(row) for row in connection.execute(
             "SELECT rowid AS fetch_order,* FROM forecast_fetch WHERE forecast_family='FISCAL_ESTIMATE' ORDER BY fetched_at_utc,rowid"
         )]
+        if history_start_utc:
+            fetches = [row for row in fetches if instant(row["fetched_at_utc"]) >= instant(history_start_utc)]
+        if history_end_utc:
+            fetches = [row for row in fetches if instant(row["fetched_at_utc"]) <= instant(history_end_utc)]
+        if history_start_utc and history_end_utc and instant(history_start_utc) > instant(history_end_utc):
+            raise ValueError("HISTORY_BOUNDARY_ORDER_INVALID")
         summary = summarize_forecast_revision_research(publications, fetches)
         identities = {tuple(key) for key in summary.get("cohort_identities", [])}
         cohort = [row for row in publications if (int(row["company_id"]), int(row["fiscal_year"]), row["fiscal_quarter"]) in identities]
@@ -349,6 +461,14 @@ def build_forecast_revision_research(
         "events_only_post": sum(row["has_post"] and not row["has_pre"] for row in rows),
         "events_without_usable_observations": sum(not row["has_pre"] and not row["has_post"] for row in rows),
         "comparable_next_quarter_events": sum(row["comparable"] for row in rows),
+        "nominal_candidate_pairs": sum(row["nominal_candidate_pair"] for row in rows),
+        "pair_validation_counts": dict(Counter(row["pair_validation_status"] for row in rows)),
+        "provider_rollover_status_counts": dict(Counter(row["provider_rollover_status"] for row in rows)),
+        "timing_basis_counts": dict(Counter(row["timing_basis"] for row in rows)),
+        "linker_identity_changes": sum(row["linker_transition_status"] == "OBSERVED" for row in rows),
+        "provider_forward_episodes": sum(row["provider_forward_episode_count"] for row in rows),
+        "provider_matched_forward_episodes": sum(row["provider_matched_forward_episode_count"] for row in rows),
+        "provider_backward_episodes": sum(row["provider_backward_episode_count"] for row in rows),
         "transition_status_counts": dict(Counter(row["transition_status"] for row in rows)),
         "transition_class_counts": transition_class_counts(rows),
     }
@@ -373,18 +493,19 @@ def build_forecast_revision_research(
         raise ValueError("SOURCE_DATABASE_CHANGED_DURING_RESEARCH")
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COLUMNS, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=COLUMNS, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     metadata = {
         "artifact_version": VERSION,
         "generated_at_utc": generated_at_utc or datetime.now(timezone.utc).isoformat(),
-        "decision": "FORECAST_REVISION_RESEARCH_V1_READY" if rows and (observations["comparable_next_quarter_events"] or observations["transition_status_counts"].get("OBSERVED")) else "FORECAST_REVISION_RESEARCH_V1_INSUFFICIENT_HISTORY",
+        "decision": "FORECAST_REVISION_RESEARCH_V1_READY" if observations["comparable_next_quarter_events"] else "FORECAST_REVISION_RESEARCH_V1_INSUFFICIENT_HISTORY",
         "publication_csv": str(publication_csv.resolve()),
         "publication_sha256": sha256(publication_csv),
         "publication_rows": len(publications),
         "latest_frozen_boundary": max((row["first_full_post_result_trading_date"] for row in publications), default=None),
         "availability": summary,
+        "history_bounds": {"start_utc": history_start_utc, "end_utc": history_end_utc},
         "health": health,
         "observations": observations,
         "representative_qa": rows if len(rows) <= 20 else rows[::max(1,len(rows)//20)][:20],
