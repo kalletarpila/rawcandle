@@ -40,7 +40,7 @@ def test_reuses_selected_market_progress_duplicate_guard_terminal_report(app,mon
         assert app.missing_day_progress.value==0.5
         return recovery.MissingDayResult(date='2026-01-05',market='omxh',status='partial',tickers_examined=2,
              missing_candidates=2,inserted_rows=1,identity_adjustment_holds=1,remaining_missing_rows=1,
-             report_path='/tmp/synthetic_report.json',backup={'state':'deleted','destination':'/tmp/synthetic_backup.db'})
+             report_path='/tmp/synthetic_report.json',backup={'state':'not_created'})
     monkeypatch.setattr(recovery,'run_missing_day_recovery',run)
     app.recover_missing_day()
     assert app.missing_day_button.disabled and app.update_stock_button.disabled
@@ -53,7 +53,7 @@ def test_reuses_selected_market_progress_duplicate_guard_terminal_report(app,mon
     assert not app._stock_update_in_progress and not app.missing_day_progress.visible
     assert 'partial' in app.missing_day_status.value and 'Lisätty: 1' in app.missing_day_status.value
     assert 'Puuttuu edelleen: 1' in app.missing_day_status.value
-    assert '/tmp/synthetic_report.json' in app.missing_day_report.value and 'deleted' in app.missing_day_report.value
+    assert '/tmp/synthetic_report.json' in app.missing_day_report.value and 'not_created' in app.missing_day_report.value
 
 
 def test_invalid_date_never_starts_worker(app):
@@ -117,5 +117,5 @@ def test_ui_to_real_backend_on_small_synthetic_database(tmp_path,monkeypatch,app
     monkeypatch.setattr(recovery,'run_missing_day_recovery',lambda **kwargs:real_run(**kwargs,identity_evidence=recovery.ExistingIdentityEvidence()))
     app.recover_missing_day()
     assert 'completed' in app.missing_day_status.value and 'Lisätty: 1' in app.missing_day_status.value
-    assert 'deleted' in app.missing_day_report.value and not list((tmp_path/'backups').rglob('*.db'))
+    assert 'not_created' in app.missing_day_report.value and not list((tmp_path/'backups').rglob('*.db'))
     with sqlite3.connect(db) as c:assert c.execute('SELECT count(*) FROM osakedata').fetchone()[0]==4

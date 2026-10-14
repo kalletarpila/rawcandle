@@ -22,10 +22,9 @@ def environment(tmp_path, monkeypatch):
           osake TEXT,pvm TEXT,open REAL,high REAL,low REAL,close REAL,volume INTEGER,
           market TEXT,sector TEXT,UNIQUE(osake,pvm));
           CREATE TABLE markets(abbreviation TEXT,yahoo_suffix TEXT);
-          INSERT INTO markets VALUES('usa',''),('omxh','.HE');
-          CREATE TABLE splits_data(osake TEXT,is_price_data_corrected INTEGER);''')
-        for ticker,days,market in [('AAA',[DAYS[0],DAYS[2]],'usa'),('EXIST',DAYS,'usa'),
-                                   ('^GSPC',[TARGET],'usa'),('OTHER.HE',[DAYS[0],DAYS[2]],'omxh')]:
+          INSERT INTO markets VALUES('usa',''),('omxh','.HE');''')
+        for ticker, days, market in [('AAA', [DAYS[0], DAYS[2]], 'usa'), ('EXIST', DAYS, 'usa'),
+                                     ('^GSPC', [TARGET], 'usa'), ('OTHER.HE', [DAYS[0]], 'omxh')]:
             c.executemany('INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market,sector) VALUES(?,?,?,?,?,?,?,?,?)',
                           [(ticker,d,*BAR.values(),market,'preserve') for d in days])
     pauses = []
@@ -35,12 +34,12 @@ def environment(tmp_path, monkeypatch):
 
 class Stock:
     def __init__(self, ticker, *, rows=None, error=None, metadata=None):
-        self.ticker = ticker
-        self.rows = rows or {d:BAR.copy() for d in DAYS}
+        self.rows = {TARGET: BAR.copy()} if rows is None else rows
         self.error = error
         self.calls = []
-        self.history_metadata = metadata or dict(symbol=ticker,instrumentType='EQUITY',
-                 exchangeTimezoneName='America/New_York',firstTradeDate=946684800)
+        self.history_metadata = (dict(symbol=ticker, instrumentType='EQUITY',
+            exchangeTimezoneName='America/New_York', firstTradeDate=946684800)
+            if metadata is None else metadata)
 
     def history(self, **kwargs):
         self.calls.append(kwargs)
@@ -53,10 +52,10 @@ class Stock:
 def run(environment, factory=None, **kwargs):
     db, tmp, _ = environment
     return recovery.run_missing_day_recovery(db_path=db, market=kwargs.pop('market','usa'),
-        requested_date=kwargs.pop('requested_date',TARGET), stock_factory=factory or (lambda t:Stock(t)),
-        report_dir=tmp/'reports',backup_dir=tmp/'backups',
+        requested_date=kwargs.pop('requested_date',TARGET), stock_factory=factory or Stock,
+        report_dir=tmp/'reports',
         identity_evidence=kwargs.pop('identity_evidence',recovery.ExistingIdentityEvidence()),
-        today=date(2026,10,13), **kwargs)
+        today=date(2026,10,14), **kwargs)
 
 
 def all_rows(db):
@@ -64,262 +63,292 @@ def all_rows(db):
         return c.execute('SELECT * FROM osakedata ORDER BY id').fetchall()
 
 
-@pytest.mark.parametrize('value',['bad','2026-1-05','2026-02-30','2027-01-05','2026-10-13','2026-01-04'])
-def test_invalid_future_today_weekend_never_fetch_or_write(environment,value):
-    before = all_rows(environment[0])
-    result = run(environment, factory=lambda t:pytest.fail('provider must not run'),requested_date=value)
-    assert result.status == 'failed' and result.inserted_rows == 0
-    assert all_rows(environment[0]) == before
-    assert not (environment[1]/'backups').exists()
+def aaa(result):
+    return next(r for r in result.records if r['ticker']=='AAA')
 
 
-def test_success_exact_market_date_existing_preserved_backup_restore_and_idempotence(environment,monkeypatch):
-    db,tmp,pauses = environment
-    before = all_rows(db)
-    verified_backups=[]
-    cleanup=recovery.delete_verified_temporary_backup
-    def verify_restore_then_cleanup(backup):
-        path=Path(backup['destination'])
-        assert all_rows(path)==before
-        # Restore only this small synthetic fixture into memory.
-        with sqlite3.connect(path) as source,sqlite3.connect(':memory:') as restored:
-            source.backup(restored)
-            assert restored.execute('pragma integrity_check').fetchone()[0]=='ok'
-            assert restored.execute('select count(*) from osakedata').fetchone()[0]==len(before)
-        verified_backups.append(path)
-        cleanup(backup)
-    monkeypatch.setattr(recovery,'delete_verified_temporary_backup',verify_restore_then_cleanup)
-    stock = Stock('AAA'); calls=[]; events=[]
-    result = run(environment, factory=lambda t:calls.append(t) or stock,progress_callback=events.append)
-    assert result.status == 'completed'
-    assert result.inserted_rows == 1 and result.missing_candidates == 1
-    assert result.remaining_missing_rows == 0 and result.skipped_existing == 2
-    assert calls == ['AAA']  # Neither another market nor already-present rows are fetched.
-    assert stock.calls == [{'start':'2026-01-02','end':'2026-01-07'}]
-    assert 0.1 in pauses and 1.5 in pauses
+@pytest.mark.parametrize('value',['bad','2026-1-05','2026-02-30','2027-01-05','2026-10-14','2026-01-04'])
+def test_invalid_date_never_fetches_or_writes(environment,value):
+    before=all_rows(environment[0])
+    result=run(environment, factory=lambda t:pytest.fail('must not fetch'), requested_date=value)
+    assert result.status=='failed' and all_rows(environment[0])==before
+
+
+def test_success_existing_skips_preservation_scope_pacing_and_restart(environment):
+    db,tmp,pauses=environment;before=all_rows(db);calls=[];events=[];stock=Stock('AAA')
+    result=run(environment,factory=lambda t:calls.append(t) or stock,progress_callback=events.append)
+    assert result.status=='completed' and result.inserted_rows==1 and result.writes_verified
+    assert result.tickers_examined==3 and result.missing_candidates==1 and result.skipped_existing==2
+    assert result.remaining_missing_rows==0 and calls==['AAA']
+    assert stock.calls==[{'start':TARGET,'end':'2026-01-06'}]
+    assert pauses==[0.1,1.5] and events[-1].event_type==update.EVENT_COMPLETED
     after=all_rows(db)
-    assert after[:len(before)] == before
-    assert after[-1][1:3] == ('AAA',TARGET) and after[-1][8] == 'usa'
-    assert events[0].event_type == update.EVENT_STARTED and events[-1].event_type == update.EVENT_COMPLETED
-    report=json.loads(Path(result.report_path).read_text())
-    assert report['inserted_rows'] == 1 and report['existing_rows_modified'] == 0
-    backup=Path(result.backup['destination'])
-    assert result.backup['quick_check']=='ok' and result.backup['state']=='deleted'
-    assert verified_backups==[backup] and not backup.exists()
-    repeat=run(environment,factory=lambda t:pytest.fail('idempotent run must not fetch'))
-    assert repeat.status=='completed' and repeat.inserted_rows==0
-    assert len(list((tmp/'backups').glob('*.db')))==0
-    assert all_rows(db)==after
+    assert after[:len(before)]==before and after[-1][1:3]==('AAA',TARGET) and after[-1][8]=='usa'
+    assert json.loads(Path(result.report_path).read_text())['inserted_rows']==1
+    repeat=run(environment,factory=lambda t:pytest.fail('restart must skip'))
+    assert repeat.inserted_rows==0 and repeat.status=='completed' and all_rows(db)==after
+    assert result.backup['state']=='not_created' and not (tmp/'backups').exists()
 
 
-@pytest.mark.parametrize('case,expected',[('unavailable','unavailable'),('error','provider_failure'),
- ('invalid','held'),('mismatch','held'),('identity','held'),('zero_volume','inserted')])
-def test_provider_and_validation_outcomes(environment,case,expected):
-    rows={d:BAR.copy() for d in DAYS};meta=None;error=None
-    if case=='unavailable': rows.pop(TARGET)
-    if case=='error': error=RuntimeError('provider failed')
-    if case=='invalid': rows[TARGET]['high']=18
-    if case=='mismatch': rows[DAYS[0]]['open']=20.1
-    if case=='identity': meta=dict(symbol='DIFFERENT',instrumentType='EQUITY')
-    if case=='zero_volume': rows[TARGET]['volume']=0
-    result=run(environment,factory=lambda t:Stock(t,rows=rows,error=error,metadata=meta))
-    record=next(r for r in result.records if r['ticker']=='AAA')
-    assert record['status']==expected
-    assert result.inserted_rows==int(expected=='inserted')
+@pytest.mark.parametrize('instrument',['EQUITY','ETF','INDEX','MUTUALFUND'])
+def test_instrument_type_and_absent_fundamentals_or_start_do_not_gate(environment,instrument):
+    stock=Stock('AAA',metadata=dict(symbol='AAA',instrumentType=instrument,
+                                  exchangeTimezoneName='America/New_York'))
+    result=run(environment,factory=lambda t:stock)
+    assert aaa(result)['status']=='inserted'
 
 
-@pytest.mark.parametrize('field,value',[('open',float('inf')),('close',float('nan')),('volume',-1),('low',0)])
-def test_invalid_numeric_bar(field,value):
-    bar=BAR.copy();bar[field]=value
-    assert not recovery.valid_bar(bar)
-
-
-def test_partial_success_does_not_depend_on_held_peer(environment):
+@pytest.mark.parametrize('variant',['no_following','no_previous','invalid_neighbor','changed_neighbor'])
+def test_anchors_not_required_or_compared(environment,variant):
     db,_,_=environment
     with sqlite3.connect(db) as c:
-        c.execute("INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) SELECT 'BAD',pvm,open,high,low,close,volume,market FROM osakedata WHERE osake='AAA'")
-    result=run(environment,factory=lambda t:Stock(t,metadata={'symbol':'WRONG'} if t=='BAD' else None))
-    assert result.status=='partial' and result.inserted_rows==1
-    assert result.identity_adjustment_holds==1 and result.remaining_missing_rows==1
+        if variant=='no_following':c.execute("DELETE FROM osakedata WHERE osake='AAA' AND pvm>?",(TARGET,))
+        if variant=='no_previous':c.execute("DELETE FROM osakedata WHERE osake='AAA' AND pvm<?",(TARGET,))
+        if variant=='invalid_neighbor':c.execute("UPDATE osakedata SET high=1 WHERE osake='AAA'")
+    stock=Stock('AAA',rows={DAYS[0]:dict(BAR,open=20.1,volume=107),TARGET:BAR,DAYS[2]:dict(BAR,volume=1000)})
+    assert run(environment,factory=lambda t:stock).inserted_rows==1
 
 
-def test_database_failure_rolls_back_all_pending_records(environment):
-    db,_,_=environment;before=all_rows(db)
-    with sqlite3.connect(db) as c:
-        # Deliberately unsupported table trigger: writer must refuse before any insert.
-        c.execute("CREATE TRIGGER refuse_recovery BEFORE INSERT ON osakedata BEGIN SELECT RAISE(ABORT,'fixture refusal'); END")
-    result=run(environment)
-    assert result.status=='failed' and result.database_failures and result.inserted_rows==0
-    assert all_rows(db)==before
-    assert result.backup['state']=='retained' and Path(result.backup['destination']).exists()
+@pytest.mark.parametrize('field,value',[('open',float('inf')),('close',float('nan')),('volume',-1),
+                                        ('low',0),('high',18),('volume',float('inf'))])
+def test_invalid_target_rejected(environment,field,value):
+    result=run(environment,factory=lambda t:Stock(t,rows={TARGET:dict(BAR,**{field:value})}))
+    assert result.inserted_rows==0 and aaa(result)['status']=='invalid_data'
+    assert result.invalid_records==1
 
 
-def test_real_second_insert_failure_rolls_back_first(environment):
+def test_zero_volume_accepted(environment):
+    assert run(environment,factory=lambda t:Stock(t,rows={TARGET:dict(BAR,volume=0)})).inserted_rows==1
+
+
+@pytest.mark.parametrize('metadata',[
+    dict(symbol='WRONG',exchangeTimezoneName='America/New_York'),
+    dict(symbol='AAA',exchangeTimezoneName='Europe/Helsinki'),
+    dict(symbol='AAA'),
+    dict(symbol='AAA',exchangeTimezoneName='America/New_York',firstTradeDate=1893456000)])
+def test_provider_symbol_market_or_demonstrated_start_conflict_held(environment,metadata):
+    result=run(environment,factory=lambda t:Stock(t,metadata=metadata))
+    assert result.inserted_rows==0 and aaa(result)['status']=='held'
+
+
+def test_wrong_session_not_inserted(environment):
+    result=run(environment,factory=lambda t:Stock(t,rows={DAYS[2]:BAR}))
+    assert result.inserted_rows==0 and aaa(result)['status']=='unavailable'
+
+
+@pytest.mark.parametrize('side,expected',[('before','POST_DELISTING_POSSIBLE'),
+    ('after','PRE_LISTING_POSSIBLE'),('both','NO_TRADING_DATA'),('neither','UNKNOWN')])
+def test_no_data_diagnostic_context_at_most_14_days(environment,side,expected):
     db,_,_=environment
+    with sqlite3.connect(db) as c:
+        if side in ('before','neither'):c.execute("DELETE FROM osakedata WHERE osake='AAA' AND pvm>?",(TARGET,))
+        if side in ('after','neither'):c.execute("DELETE FROM osakedata WHERE osake='AAA' AND pvm<?",(TARGET,))
+    if side=='neither':
+        with sqlite3.connect(db) as c:
+            c.execute("INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) VALUES('AAA','2025-01-02',20,22,19,21,100,'usa')")
+    stock=Stock('AAA',rows={})
+    result=run(environment,factory=lambda t:stock)
+    assert result.inserted_rows==0 and aaa(result)['reason']==expected
+    for call in stock.calls:
+        assert (date.fromisoformat(call['end'])-date.fromisoformat(call['start'])).days<=14
+    assert len(stock.calls)==(1 if side=='both' else 2)
+
+
+def test_dated_reviewed_conflicts_hold_with_exact_evidence(environment):
+    _,tmp,_=environment;registry=tmp/'identity.json'
+    entry=dict(subject_ticker='AAA',predecessor_ticker='OLD',effective_date='2026-01-06',
+               review_status='APPROVED',resolution_class='REORGANIZATION_SUCCESSOR',
+               evidence=[{'fact':'dated successor starts January 6'}])
+    registry.write_text(json.dumps({'records':[entry]}))
+    identity=recovery.ExistingIdentityEvidence(registry)
+    result=run(environment,identity_evidence=identity,factory=lambda t:pytest.fail('known conflict'))
+    assert aaa(result)['status']=='held' and aaa(result)['identity_evidence']['evidence']==entry['evidence']
+    assert identity.conflict('OLD','2026-01-06')['reason']=='TARGET_AFTER_REVIEWED_SUCCESSOR'
+    assert identity.conflict('AAA','2026-01-06') is None
+
+
+@pytest.mark.parametrize('review,effective',[('PROPOSED',None),('APPROVED',None),('PROPOSED','2026-01-06')])
+def test_undated_or_unapproved_metadata_not_proven_conflict(environment,review,effective):
+    _,tmp,_=environment;registry=tmp/'identity.json'
+    registry.write_text(json.dumps({'records':[dict(subject_ticker='AAA',review_status=review,effective_date=effective)]}))
+    assert run(environment,identity_evidence=recovery.ExistingIdentityEvidence(registry)).inserted_rows==1
+
+
+def add_zzz(db):
     with sqlite3.connect(db) as c:
         c.execute("INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) SELECT 'ZZZ',pvm,open,high,low,close,volume,market FROM osakedata WHERE osake='AAA'")
-        c.execute('ALTER TABLE osakedata ADD COLUMN constraint_test INTEGER CHECK(osake<>\'ZZZ\' OR pvm<>\'2026-01-05\')')
-    before=all_rows(db)
-    result=run(environment)
-    assert result.inserted_rows==0 and result.status=='failed'
-    assert all_rows(db)==before
 
 
-def test_unverified_session_stops_without_stock_fetch(environment):
-    db,_,_=environment
-    with sqlite3.connect(db) as c:c.execute("DELETE FROM osakedata WHERE osake='^GSPC'")
+def test_incremental_commit_survives_interruption_and_restart(environment):
+    db,tmp,_=environment;add_zzz(db);before=all_rows(db)
+    def factory(ticker):
+        if ticker=='ZZZ':raise KeyboardInterrupt()
+        return Stock(ticker)
+    with pytest.raises(KeyboardInterrupt):run(environment,factory=factory)
+    after=all_rows(db)
+    assert after[:len(before)]==before and after[-1][1:3]==('AAA',TARGET)
+    report=json.loads(next((tmp/'reports').glob('*.json')).read_text())
+    assert report['status']=='interrupted' and report['inserted_rows']==1
     calls=[]
-    result=run(environment,factory=lambda t:calls.append(t) or Stock(t,rows={DAYS[0]:BAR}))
-    assert calls==['^GSPC'] and result.status=='failed' and result.inserted_rows==0
+    result=run(environment,factory=lambda t:calls.append(t) or Stock(t))
+    assert calls==['ZZZ'] and result.inserted_rows==1 and result.status=='completed'
+
+
+def test_later_database_failure_does_not_rollback_committed_peer(environment):
+    db,_,_=environment;add_zzz(db)
+    with sqlite3.connect(db) as c:
+        c.execute("ALTER TABLE osakedata ADD COLUMN constraint_test INTEGER CHECK(osake<>'ZZZ' OR pvm<>'2026-01-05')")
+    result=run(environment)
+    assert result.inserted_rows==1 and result.database_failures==1 and result.status=='failed'
+    assert aaa(result)['status']=='inserted'
+    assert not any(r[1]=='ZZZ' and r[2]==TARGET for r in all_rows(db))
+
+
+def test_peer_provider_failure_independent(environment):
+    db,_,_=environment;add_zzz(db)
+    result=run(environment,factory=lambda t:Stock(t,error=RuntimeError() if t=='ZZZ' else None))
+    assert result.inserted_rows==1 and result.provider_failures==1 and result.status=='partial'
+
+
+def test_raised_rate_limit_stops_later_requests_no_retries(environment):
+    from yfinance.exceptions import YFRateLimitError
+    db,_,_=environment;add_zzz(db);calls=[]
+    result=run(environment,factory=lambda t:calls.append(t) or Stock(t,error=YFRateLimitError()))
+    assert calls==['AAA'] and result.provider_failures==1 and result.inserted_rows==0
 
 
 def test_existing_scheduler_lock_rejects_duplicate(environment):
     from rawcandle.scheduler.runner import acquire_scheduler_lock,release_scheduler_lock
-    db,tmp,_=environment;handle=acquire_scheduler_lock(str(tmp/'logs'))
+    _,tmp,_=environment;handle=acquire_scheduler_lock(str(tmp/'logs'))
     try:
-        result=run(environment,factory=lambda t:pytest.fail('duplicate must not fetch'))
+        result=run(environment,factory=lambda t:pytest.fail('locked operation'))
         assert result.status=='failed' and 'SchedulerAlreadyRunningError' in result.errors
     finally:release_scheduler_lock(handle)
 
 
-def test_known_identity_evidence_is_guard_not_universe(environment):
-    _,tmp,_=environment;canonical=tmp/'identities.db'
-    with sqlite3.connect(canonical) as c:
-        c.executescript("""CREATE TABLE company(company_id INTEGER,status TEXT);
-            CREATE TABLE security(security_id INTEGER,company_id INTEGER,current_ticker TEXT,exchange TEXT,valid_from TEXT,valid_to TEXT);
-            CREATE TABLE ticker_alias(security_id INTEGER,ticker TEXT,valid_from TEXT,valid_to TEXT);
-            INSERT INTO company VALUES(1,'ACTIVE');
-            INSERT INTO security VALUES(1,1,'AAA','NASDAQ','2026-01-06',NULL);""")
-    evidence=recovery.ExistingIdentityEvidence(canonical)
-    result=run(environment,factory=lambda t:pytest.fail('pre-start security must not fetch'),identity_evidence=evidence)
-    assert result.legitimately_unavailable==1 and result.inserted_rows==0
-    assert result.tickers_examined==3  # Remains the market's stored universe.
+def test_writer_concurrent_key_and_invalid_scope(environment):
+    db,_,_=environment;before=all_rows(db)
+    record=dict(ticker='EXIST',date=TARGET,market='usa',bar=BAR)
+    inserted,changed=recovery.insert_validated_rows(db,[record],TARGET,'usa')
+    assert inserted==0 and changed[0]['status']=='existing' and all_rows(db)==before
+    for day,market in [('2026-01-06','usa'),(TARGET,'omxh')]:
+        with pytest.raises(ValueError,match='OUTSIDE_VALIDATED'):
+            recovery.insert_validated_rows(db,[dict(record,ticker='AAA',date=day,market=market)],TARGET,'usa')
+    assert all_rows(db)==before
 
 
-def test_stale_anchors_skip_one_peer_inside_transaction(environment):
-    db,_,_=environment
-    accepted=[dict(ticker='AAA',date=TARGET,market='usa',bar=BAR,anchors={DAYS[0]:dict(BAR,close=20)})]
-    inserted,changed=recovery.insert_validated_rows(db,accepted,TARGET,'usa')
-    assert inserted==0 and changed[0]['reason']=='ANCHOR_CHANGED_BEFORE_WRITE'
+def test_trigger_table_refused_without_backup_or_writes(environment):
+    db,tmp,_=environment;before=all_rows(db)
+    with sqlite3.connect(db) as c:c.execute("CREATE TRIGGER refuse BEFORE INSERT ON osakedata BEGIN SELECT RAISE(ABORT,'no'); END")
+    result=run(environment)
+    assert result.inserted_rows==0 and result.database_failures==1 and all_rows(db)==before
+    assert not (tmp/'backups').exists()
 
 
-def test_post_commit_verification_failure_retains_temporary_backup(environment,monkeypatch):
-    before=all_rows(environment[0])
-    def fail(*args):raise RuntimeError('synthetic post-commit verification failure')
+def test_postcommit_verification_failure_reports_real_insert(environment,monkeypatch):
+    def fail(*args,**kwargs):raise RuntimeError('verification failure')
     monkeypatch.setattr(recovery,'verify_committed_rows',fail)
     result=run(environment)
-    assert result.status=='failed' and result.inserted_rows==1
-    assert not result.writes_verified and result.backup['state']=='retained'
-    assert all_rows(Path(result.backup['destination']))==before
-    assert all_rows(environment[0])[:len(before)]==before
-    report=json.loads(Path(result.report_path).read_text())
-    assert report['backup']['destination']==result.backup['destination']
+    assert result.inserted_rows==1 and not result.writes_verified and result.status=='failed'
+    assert aaa(result)['status']=='committed_unverified'
+    assert any(r[1:3]==('AAA',TARGET) for r in all_rows(environment[0]))
 
 
-def test_cleanup_leaves_unrelated_backup_and_wal_shm_names(environment):
-    _,tmp,_=environment
-    backup_dir=tmp/'backups';backup_dir.mkdir()
-    unrelated=backup_dir/'unrelated.db';unrelated.write_bytes(b'not this operation')
-    for suffix in ['-wal','-shm']:(backup_dir/('unrelated.db'+suffix)).write_bytes(b'untouched')
-    result=run(environment)
-    assert result.backup['state']=='deleted' and unrelated.read_bytes()==b'not this operation'
-    assert (backup_dir/'unrelated.db-wal').read_bytes()==b'untouched'
-    assert (backup_dir/'unrelated.db-shm').read_bytes()==b'untouched'
+def test_empty_market_does_not_use_default(environment):
+    assert run(environment,market='',factory=lambda t:pytest.fail('no selection')).status=='failed'
 
 
-def test_partial_holds_with_conclusive_safe_writes_clean_backup(environment):
-    db,_,_=environment
-    with sqlite3.connect(db) as c:
-        c.execute("INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) SELECT 'BAD',pvm,open,high,low,close,volume,market FROM osakedata WHERE osake='AAA'")
-    result=run(environment,factory=lambda t:Stock(t,metadata={'symbol':'WRONG'} if t=='BAD' else None))
-    assert result.status=='partial' and result.inserted_rows==1 and result.writes_verified
-    assert result.backup['state']=='deleted'
-
-
-def test_legacy_pacing_values_unchanged(environment):
-    pauses=environment[2]
+def test_legacy_pacing_unchanged(environment):
     update.sleep_after_legacy_stock_ticker(0)
     update.sleep_after_legacy_stock_ticker(50)
     update.sleep_legacy_stock_batch(499)
     update.sleep_legacy_stock_batch(500)
-    assert pauses==[1.5,1.0,30]
+    assert environment[2]==[1.5,1.0,30]
 
 
-def test_raised_rate_limit_stops_later_requests_without_retries(environment):
-    from yfinance.exceptions import YFRateLimitError
+def test_empty_history_without_provider_metadata_is_no_data_not_identity_hold(environment):
+    result=run(environment,factory=lambda t:Stock(t,rows={},metadata={}))
+    assert aaa(result)['status']=='unavailable' and aaa(result)['reason']=='NO_TRADING_DATA'
+
+
+def test_context_wrong_provider_identity_is_held(environment):
+    db,_,_=environment
+    with sqlite3.connect(db) as c:c.execute("DELETE FROM osakedata WHERE osake='AAA' AND pvm>?",(TARGET,))
+    stock=Stock('AAA',rows={})
+    original=stock.history
+    def history(**kwargs):
+        data=original(**kwargs)
+        if len(stock.calls)==2:stock.history_metadata['symbol']='WRONG'
+        return data
+    stock.history=history
+    result=run(environment,factory=lambda t:stock)
+    assert aaa(result)['status']=='held' and aaa(result)['reason']=='PROVIDER_SYMBOL_MISMATCH'
+
+
+@pytest.mark.parametrize('field,value',[('ticker','OTHER'),('market','omxh')])
+def test_converted_row_scope_checked_before_assignment(environment,monkeypatch,field,value):
+    row=dict(ticker='AAA',date=TARGET,market='usa',**BAR)
+    row[field]=value
+    monkeypatch.setattr(update,'convert_histories_to_ohlcv_rows',lambda **kwargs:[update.StockOhlcvRow(**row)])
+    result=run(environment)
+    assert result.inserted_rows==0 and aaa(result)['reason']=='PROVIDER_ROW_IDENTITY_MISMATCH'
+
+
+def test_transaction_failure_rolls_back_active_batch(environment):
     db,_,_=environment
     with sqlite3.connect(db) as c:
-        c.execute("INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) SELECT 'ZZZ',pvm,open,high,low,close,volume,market FROM osakedata WHERE osake='AAA'")
-    calls=[]
-    result=run(environment,factory=lambda t:calls.append(t) or Stock(t,error=YFRateLimitError()))
-    assert calls==['AAA'] and result.provider_failures==1 and result.inserted_rows==0
-    assert any('Yahoo-rajoitus' in e for e in result.errors)
-
-
-def test_empty_market_does_not_silently_use_default(environment):
-    result=run(environment,market='',factory=lambda t:pytest.fail('no market chosen'))
-    assert result.status=='failed' and result.inserted_rows==0
-
-
-def test_writer_rejects_outside_date_and_market(environment):
-    before=all_rows(environment[0])
-    for day,market in [('2026-01-06','usa'),(TARGET,'omxh')]:
-        record=dict(ticker='AAA',date=day,market=market,bar=BAR,anchors={})
-        with pytest.raises(ValueError,match='OUTSIDE_VALIDATED'):
-            recovery.insert_validated_rows(environment[0],[record],TARGET,'usa')
-        assert all_rows(environment[0])==before
-
-
-def test_bad_stored_anchor_is_local_hold_and_safe_peer_continues(environment):
-    db,_,_=environment
-    with sqlite3.connect(db) as c:
-        c.execute("INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) SELECT 'BAD',pvm,open,high,low,close,volume,market FROM osakedata WHERE osake='AAA'")
-        c.execute("UPDATE osakedata SET high=1 WHERE osake='BAD' AND pvm='2026-01-02'")
-    calls=[]
-    result=run(environment,factory=lambda t:calls.append(t) or Stock(t))
-    assert calls==['AAA'] and result.inserted_rows==1 and result.identity_adjustment_holds==1
-    assert next(r for r in result.records if r['ticker']=='BAD')['reason']=='INVALID_STORED_ANCHOR'
-
-
-def test_wrong_market_existing_key_is_held_without_fetch(environment):
-    db,_,_=environment
-    with sqlite3.connect(db) as c:
-        c.execute('INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) VALUES(?,?,?,?,?,?,?,?)',('AAA',TARGET,*BAR.values(),'omxh'))
+        c.execute("ALTER TABLE osakedata ADD COLUMN constraint_test INTEGER CHECK(osake<>'ZZZ' OR pvm<>'2026-01-05')")
     before=all_rows(db)
-    result=run(environment,factory=lambda t:pytest.fail('occupied key cannot be repaired'))
-    assert result.identity_adjustment_holds==1 and result.remaining_missing_rows==1
+    records=[dict(ticker=t,date=TARGET,market='usa',bar=BAR) for t in ['AAA','ZZZ']]
+    with pytest.raises(sqlite3.IntegrityError):recovery.insert_validated_rows(db,records,TARGET,'usa')
     assert all_rows(db)==before
 
 
-def test_interrupted_transaction_retains_backup_and_rolls_back(environment,monkeypatch):
-    db,tmp,_=environment;before=all_rows(db)
-    def interrupted(db,accepted,ds,market):
+def test_unique_key_required(environment):
+    db,_,_=environment
+    with sqlite3.connect(db) as c:
+        c.executescript('ALTER TABLE osakedata RENAME TO old; CREATE TABLE osakedata AS SELECT * FROM old; DROP TABLE old;')
+    result=run(environment)
+    assert result.inserted_rows==0 and result.database_failures==1
+
+
+def test_report_failure_does_not_relabel_committed_insert(environment,monkeypatch):
+    real=recovery.write_text_atomic
+    def write(path,*args,**kwargs):
+        content=json.loads(args[0])
+        if content['inserted_rows']:
+            raise OSError('synthetic report failure after commit')
+        return real(path,*args,**kwargs)
+    monkeypatch.setattr(recovery,'write_text_atomic',write)
+    result=run(environment)
+    assert result.inserted_rows==1 and aaa(result)['status']=='inserted' and result.status=='failed'
+    assert any(r[1:3]==('AAA',TARGET) for r in all_rows(environment[0]))
+
+
+def test_network_oserror_is_independent_provider_failure(environment):
+    db,_,_=environment;add_zzz(db)
+    result=run(environment,factory=lambda t:Stock(t,error=OSError('network') if t=='AAA' else None))
+    assert aaa(result)['status']=='provider_failure' and result.provider_failures==1
+    assert result.inserted_rows==1 and result.status=='partial'
+
+
+def test_concurrent_insert_after_fetch_is_skipped_without_overwrite(environment):
+    db,_,_=environment
+    stock=Stock('AAA');history=stock.history
+    def fetch(**kwargs):
         with sqlite3.connect(db) as c:
-            c.execute('BEGIN IMMEDIATE')
-            c.execute('INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) VALUES(?,?,?,?,?,?,?,?)',('AAA',TARGET,*BAR.values(),'usa'))
-            raise KeyboardInterrupt()
-    monkeypatch.setattr(recovery,'insert_validated_rows',interrupted)
-    with pytest.raises(KeyboardInterrupt):run(environment)
-    assert all_rows(db)==before
-    backups=list((tmp/'backups').glob('*.db'))
-    assert len(backups)==1 and all_rows(backups[0])==before
+            c.execute("INSERT INTO osakedata(osake,pvm,open,high,low,close,volume,market) VALUES('AAA',?,30,32,29,31,150,'usa')",(TARGET,))
+        return history(**kwargs)
+    stock.history=fetch
+    result=run(environment,factory=lambda t:stock)
+    assert result.inserted_rows==0 and aaa(result)['status']=='existing'
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT open,volume FROM osakedata WHERE osake='AAA' AND pvm=?",(TARGET,)).fetchone()==(30,150)
 
 
-def test_undated_alias_and_approved_successor_guards_use_small_fixtures(tmp_path):
-    canonical=tmp_path/'identity_fixture.db'
-    with sqlite3.connect(canonical) as c:
-        c.executescript("""CREATE TABLE company(company_id INTEGER,status TEXT);
-          CREATE TABLE security(security_id INTEGER,company_id INTEGER,current_ticker TEXT,exchange TEXT,valid_from TEXT,valid_to TEXT);
-          CREATE TABLE ticker_alias(security_id INTEGER,ticker TEXT,valid_from TEXT,valid_to TEXT);
-          INSERT INTO company VALUES(1,'ACTIVE');
-          INSERT INTO security VALUES(1,1,'NEW','NASDAQ',NULL,NULL);
-          INSERT INTO ticker_alias VALUES(1,'OLD',NULL,NULL);""")
-    evidence=recovery.ExistingIdentityEvidence(canonical)
-    assert evidence.hold_reason('NEW',TARGET,DAYS[0],DAYS[2])=='UNDATED_OR_CROSSING_ALIAS_BOUNDARY'
-    assert evidence.hold_reason('OLD',TARGET,DAYS[0],DAYS[2])=='FORMER_TICKER_REQUIRES_REVIEW'
-    registry=tmp_path/'review_fixture.json'
-    registry.write_text(json.dumps({'records':[{'subject_ticker':'NEW','predecessor_ticker':'OLD',
-                      'effective_date':'2026-01-05','review_status':'APPROVED'}]}))
-    evidence=recovery.ExistingIdentityEvidence(registry=registry)
-    assert evidence.hold_reason('NEW','2026-01-02','2026-01-01','2026-01-03')=='TARGET_BEFORE_REVIEWED_SUCCESSOR'
-    assert evidence.hold_reason('OLD',TARGET,DAYS[0],DAYS[2])=='TARGET_AFTER_REVIEWED_SUCCESSOR'
+def test_duplicate_provider_dates_rejected(environment):
+    stock=Stock('AAA')
+    stock.history=lambda **kwargs:pd.DataFrame([dict(Open=20,High=22,Low=19,Close=21,Volume=100)]*2,
+                                             index=pd.to_datetime([TARGET,TARGET]))
+    result=run(environment,factory=lambda t:stock)
+    assert result.inserted_rows==0 and aaa(result)['reason']=='DUPLICATE_PROVIDER_DATES'

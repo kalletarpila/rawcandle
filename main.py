@@ -3435,19 +3435,18 @@ class RawCandleApp:
                     requested_date=selected_date,
                     stock_factory=self._build_stock_update_service_adapters()["stock_factory"],
                     report_dir=root / "reports/missing_day_recovery",
-                    backup_dir=root / "backups/missing_day_recovery",
                     progress_callback=progress)
                 self.missing_day_status.value = (
                     f"{result.date} | {result.market.upper()} | {result.status}\n"
                     f"Tarkistettu: {result.tickers_examined} | Puuttui: {result.missing_candidates} | Lisätty: {result.inserted_rows}\n"
-                    f"Ohitettu (olemassa): {result.skipped_existing} | Todennettu poissaolo: {result.legitimately_unavailable} | Yahoo ei palauttanut: {result.unavailable_records}\n"
-                    f"Identiteetti/hintaperuste estetty: {result.identity_adjustment_holds} | Yahoo-virheet: {result.provider_failures} | Kantavirheet: {result.database_failures}\n"
+                    f"Ohitettu (olemassa): {result.skipped_existing} | Yahoo ei palauttanut: {result.unavailable_records}\n"
+                    f"Identiteetti estetty: {result.identity_adjustment_holds} | Virheellinen OHLCV: {result.invalid_records} | Yahoo-virheet: {result.provider_failures} | Kantavirheet: {result.database_failures}\n"
                     f"Puuttuu edelleen: {result.remaining_missing_rows}"
                     + ("\n" + "; ".join(result.errors) if result.errors else ""))
                 self.missing_day_report.value = f"Raportti: {result.report_path}"
                 if result.backup:
                     self.missing_day_report.value += (
-                        f"\nVäliaikainen varmuuskopio: {result.backup.get('state')} — {result.backup.get('destination')}")
+                        f"\nVäliaikainen varmuuskopio: {result.backup.get('state')}")
             except Exception as exc:
                 self.missing_day_status.value = f"Haku epäonnistui: {type(exc).__name__}"
             finally:

@@ -1,83 +1,65 @@
-# RawCandle missing day recovery UI
+# Yahoo-only missing-day recovery
 
-Task: RAWCANDLE-OHLCV-MISSING-DAY-01. Implementation date: 13 October 2026. Baseline: `09f5e959`.
+Updated 2026-10-14. This supersedes the original neighbor-anchor validation and collect-then-write design. The earlier HELD investigation remains historical evidence, not the current acceptance specification.
 
-## Outcome and production boundary
+## Operator flow
 
-The stock-data page now contains **Hae puuttuva päivä**, immediately below the existing update row. It uses that row's existing market selector, one `YYYY-MM-DD` date field and **Hae puuttuvan päivän tiedot**. Progress, terminal counters and the detailed report location appear in the same section. The operation is independent of SetupMaster.
+The existing **Hae puuttuva päivä** controls retain one date, the existing market selector, **Hae puuttuvan päivän tiedot**, progress and a final summary. Choose a completed weekday and one market: USA, OMX Helsinki, OMX Stockholm or Xetra. No page redesign or production recovery was performed during implementation.
 
-Implementation validation uses small synthetic SQLite fixtures and mocked Yahoo objects only. Neither historical example was recovered in production. No production database was copied, snapshotted, backed up, restored or modified. No live provider requests, app/server restart, scheduled job, rollout or push was performed. The prior standalone draft and its evidence were preserved and not executed or staged.
+The ticker universe is exactly normal RawCandle's existing market selection: `load_stock_update_candidates_for_market`, grouping stored tickers with their first/last dates and `MAX(market)`. Equities, ETFs, indices and other existing instrument types are included. Fundamentals membership, active status, missing security-start metadata and adjacent-history quality are not eligibility gates. The tool does not expand the universe or qualify instruments for SetupMaster research.
 
-## Existing path and minimal shared changes
+For each ticker, an existing `(ticker, date)` key is skipped before Yahoo acquisition, regardless of market; an occupied key in another market is reported as held. Missing keys are checked again immediately before acquisition and inside the insert transaction. The progress denominator is all examined market tickers, not the Yahoo request count.
 
-The normal main-app entry is `main.RawCandleApp.update_stock_data`, connected to the existing button. Unless `_use_stock_update_service` is enabled, it follows the legacy UI updater. The opt-in UI and scheduler use `_run_stock_update_via_service` and `services.stock_update_service.run_stock_data_update`.
+For a missing key, request just `[selected day, next day)` through the existing app `stock_factory`, `stock_update_service.fetch_history_for_date_ranges` and `convert_histories_to_ohlcv_rows`. There is no new downloader, batching implementation or provider fallback. History options remain the normal `stock.history(start=..., end=...)` defaults; no explicit adjustment transformation is introduced. Yahoo pacing/retries and normal daily collection are unchanged: the shared range pause and legacy ticker/batch sleeps are reused. A propagated `YFRateLimitError` stops subsequent requests without a new retry scheme.
 
-Both select existing tickers using `osakedata`, grouped by ticker with first/last stored dates and `MAX(market)`, then filter the selected market. Missing-day recovery reuses `load_stock_update_candidates_for_market`; Fundamentals is not its universe. The existing selector's **Kaikki** value is rejected for this one-market operation; normal selector behavior is unchanged.
+A valid target is committed immediately. The operation does not wait to collect all accepted tickers. It never requests neighbors to approve an otherwise valid target, compares no adjacent prices/volumes and requires no following stored row. Missing or invalid stored anchors and uncorrected-split flags are not insertion gates.
 
-Yahoo acquisition is reused through the existing app stock factory, `fetch_history_for_date_ranges` and `convert_histories_to_ohlcv_rows`. Requests retain the existing `stock.history(start=..., end=...)` signature and adjustment defaults. There is no second downloader, `yf.download` batching layer, rate limiter or replacement retry system. The fetch helper's existing 0.1-second range pause remains unchanged.
+## Target validation and identity
 
-The handover's service-delay description did not fully describe the default UI. Its legacy ticker delay is 1.0 seconds for at least 50 added rows and 1.5 seconds otherwise, with 30 seconds per 500 processed tickers. These exact expressions were extracted into shared helpers and reused by recovery. The normal updater's long-range pauses, service constants, retries, date planning, selection, writes and downstream analysis remain unchanged. The new operation stops if a rate-limit exception reaches it; it does not retry or change transport behavior. Yahoo may return an empty history instead of raising; that is reported as an unavailable response, not a proven legitimate absence.
+Only the selected date and market can be inserted. The converted row must retain the requested ticker and market; duplicate provider dates are rejected. The Yahoo metadata symbol must exactly match the ticker, and its exchange timezone must match the established market mapping. Missing provider identity on a returned bar is reported as unverified, separately from a demonstrated mismatch. There is no `instrumentType=EQUITY` restriction. Metadata cannot independently distinguish every exchange or reused ticker; this is operational validation, not a point-in-time security master.
 
-Normal UI updates and recovery now participate in the scheduler's existing nonblocking lock. No scheduler code, timer, configuration, status writer or execution path was changed. The scheduler already calls the service directly under its lock, so it does not acquire a nested UI lock. A local submission lock and disabled controls prevent duplicate submissions. Background work and `StockUpdateProgressEvent` reuse existing UI/service conventions.
+OHLC must be finite and positive, `low <= open <= high` and `low <= close <= high`; volume must be finite and nonnegative. The normal converter's numeric conventions are preserved, including integer volume conversion. A requested raw bar skipped by that converter for incomplete OHLC is reported as invalid, rather than as absent. Zero volume is accepted. No price interpolation, scaling or existing-history correction takes place.
 
-The normal UI has no configured OHLCV fallback. Recovery therefore does not newly enable Massive or Stooq or silently mix their price bases.
+Known identity protection uses only dated **APPROVED** records in the existing read-only `rawcandle/fundamentals/admin/identity_resolutions.json` registry. A successor ticker before its reviewed effective date, or a predecessor at/after that date, is held with the exact transition and supporting evidence in the report. No aliases are joined into continuity. Pending reviews and missing/undated metadata alone do not prove a conflict. Canonical Fundamentals databases are not opened by this recovery path. A returned bar contradicting a usable Yahoo `firstTradeDate` is held with that evidence; absence of the field is allowed. A malformed established registry fails the operation rather than silently ignoring known evidence.
 
-## Eligibility and validation
+The existing normal updater's split behavior is preserved: `main.RawCandleApp._maybe_backfill_splits_for_ticker` checks uncorrected splits, deletes/refetches history from 2018, recomputes analysis and marks successful corrections. Service adapters and legacy UI still invoke that path. Missing-day recovery neither calls it nor implements a second split-repair system. Consequently different adjustment vintages elsewhere in the database can remain; a successful missing-day insert is not certification of globally uniform historical adjustments.
 
-Only absent requested keys are fetched. An occupied key assigned to another market is held, never overwritten. Session evidence uses the market's stored index bar, or the same Yahoo acquisition path for a one-day index check if that bar is unavailable. Supported current market mappings are USA, OMX Helsinki, OMX Stockholm and Xetra. An unverified session stops before stock recovery; an empty calendar response is not asserted to prove a holiday. No index evidence is inserted or added to the stock universe.
+## No-data diagnostics
 
-For each missing stock, the nearest preceding/following stored rows form price-basis anchors. One short Yahoo request covers those anchors and the target, using an exclusive end date. Context beyond 14 calendar days, missing or invalid anchors, mixed-market history and uncorrected split history are held. Only the requested day can be inserted; context is validation-only.
+If Yahoo returns no converted target bar, do not invent a row. Missing metadata in an empty response is allowed; an explicitly wrong symbol or market is held. Local dates within a maximum 14-calendar-day window are inspected. If they already bracket the target, report `NO_TRADING_DATA` without a further context request. Otherwise at most one diagnostic history request covers `[target - 6 days, target + 8 days)` (14 calendar dates, exclusive end).
 
-Existing canonical securities, dated aliases and reviewed identity records are read-only guards. They do not filter the ticker universe to Fundamentals or create a new security master. Unknown tickers outside that database can proceed using provider evidence. Ambiguous aliases, retired/unknown identities, missing exchange evidence, dated security boundaries and successor/predecessor overlaps have explicit reasons. A malformed or unavailable established identity source fails explicitly instead of silently bypassing known evidence.
+Diagnostic reasons are `PRE_LISTING_POSSIBLE`, `POST_DELISTING_POSSIBLE`, `NO_TRADING_DATA` and `UNKNOWN`. One-sided nearby history or a provider first-trade hint can suggest a boundary, but does not establish an exchange-effective IPO/delisting date. No context bars are inserted. A target appearing only in the second, diagnostic response is reported `UNKNOWN`; restart can retrieve it through the normal one-day path. Invalid or absent context cannot justify synthetic continuity. A context retrieval failure is reported as a provider error, rather than inventing a classification.
 
-Yahoo must identify the exact ticker as an equity in the selected market's timezone and provide a usable first-trade date. A returned target contradicting its first-trade date is held. Dated local eligibility exclusions and unknown provider absences have separate counters.
+There is no separate global calendar-index Yahoo probe or index-presence gate. Completed weekdays are checked up front; actual returned date and provider market identity constrain insertion. Holidays with no target bars remain diagnostic absences. Index and exchange calendars can differ, and this function is not an authoritative exchange-calendar service.
 
-OHLC must be finite, positive and satisfy low/open/close/high relationships; volume must be finite and nonnegative. Duplicate provider dates are rejected. Both fetched neighboring OHLC bars must match the stored anchors within `1e-6` relative/absolute numerical tolerance, and volume must match exactly. No scaling factor, interpolation, forward fill, predecessor warm-up or price replacement is performed. The historical AAPL/NVDA mismatch identified in the handover would therefore remain held unless the existing convention matches. This establishes local compatibility, not global raw/split-only/PIT certification.
+## Persistence, interruption and backups
 
-## Insert and temporary backup lifecycle
+The normal stock service already uses a per-ticker plain `INSERT` writer and commits incrementally, not UPSERT. Missing-day recovery keeps that pattern in its existing small insert-only adapter, adding `BEGIN IMMEDIATE` around the final key check and insert. Direct reuse of the normal helper would leave a separate-connection check/write race and would not enforce the selected date/market boundary; normal service code is therefore unchanged.
 
-Accepted rows are collected before any write transaction. If none qualify, no backup is created. Otherwise the existing RawCandle `online_backup` helper creates exactly one coherent SQLite backup, checks it and hashes it. The operation-specific name is:
+A unique `(osake, pvm)` index is required, and tables with triggers are refused. Existing keys are skipped within the transaction. No UPDATE, DELETE, REPLACE, migration or downstream operation is executed. Failed active transactions roll back; previous committed ticker inserts survive later failure or interruption. Network work occurs outside write transactions. Each committed insert is read back, and final inserted-value verification and SQLite integrity verification run after writes. A post-commit verification failure is reported as `committed_unverified`; the committed count is preserved, not described as rolled back.
 
-`backups/missing_day_recovery/osakedata_missing_day_<run_id>.db`
+The database itself is the restart checkpoint: restarting enumerates current keys and fetches only missing ones. Atomic JSON progress is saved after each successful commit and periodically during other processing. Handled interruptions save an `interrupted` report and propagate. A hard process kill or report-file failure can leave the last report behind the database; restart reconciles database keys without overwriting them. Successful writes are never relabeled as provider failures merely because report persistence fails.
 
-Its manifest and the prepared report record the exact recovery path before insertion. No redundant persistent copy is created. Synthetic tests prove restoration through SQLite into memory.
+**No database backup is created.** SQLite transactions provide rollback for these strictly insert-only writes; a full recovery copy is unnecessary. Reports explicitly show `backup.state=not_created`. No production database was copied, backed up or written during implementation/tests. No unrelated backup or WAL/SHM file is deleted; Restic retention is unchanged. If a future operation actually requires a temporary backup, it must use the established facilities, delete only its operation-specific backup after conclusive verification, and retain/report its exact location on failure or uncertainty. This implementation introduces no backup creation or cleanup path.
 
-One `BEGIN IMMEDIATE` transaction rechecks keys and anchor values and inserts accepted rows. A unique ticker/date constraint is required; tables with triggers are refused. There is no UPDATE, DELETE, REPLACE, migration or downstream call. Existing keys are skipped. Changed anchors hold only their own row. Exceptions, commit failures or interruption roll back the active transaction; repeat execution skips already-present keys.
+The existing scheduler operation lock, UI duplicate-submission guard and disabled controls remain. No scheduler configuration, running process, normal update path or daily split logic was changed. Separate external tools must still respect the operation lock; atomic key rechecks protect against competing inserts.
 
-After commit, `PRAGMA integrity_check` and exact inserted-value/market/date verification must pass. A durable result is written before cleanup. The operation then promptly deletes only its own temporary backup and manifest. Known held peers do not prevent cleanup of conclusively verified safe writes. Provider/database failures, interruption, report-write failure before cleanup or an uncertain post-commit outcome retain the backup and report its exact location. A post-commit verification failure reports known inserted rows and a failed outcome, not a fictional rollback.
+## Status and reports
 
-Cleanup never deletes WAL/SHM files, unrelated backups or Restic retention. Reports and the UI distinguish `deleted`, `retained` and `not_created`. No production backup was created during this implementation.
+Reports: `reports/missing_day_recovery/missing_day_<run_id>.json`.
 
-## Reports and limitations
+Per-ticker statuses follow existing lower-case conventions: `existing`, `inserted`, `unavailable` (with the diagnostic reason above), `held` (specific identity/key conflict), `invalid_data`, `provider_failure`, `database_failure`, and exceptionally `committed_unverified`. `pending` denotes work not reached. Progress now reports actual `inserted`, rather than a pre-write `validated` promise. The summary includes examined tickers, initially missing keys, existing skips, inserts, unavailable responses, identity holds, invalid records, provider/database failures and remaining missing rows.
 
-Operator reports are atomic JSON files at:
+The JSON field `identity_adjustment_holds` is retained for report/UI compatibility but now counts identity/key holds only; there is no adjacent adjustment comparator. Terminal outcomes remain `completed`, `partial`, `failed`, with `interrupted` for a caught process interruption. No-data boundaries remain diagnostic, and known local identity evidence is not exhaustive. Yahoo adjustment vintage, silently swallowed provider throttling and incomplete identity metadata remain limitations of the reused acquisition path.
 
-`reports/missing_day_recovery/missing_day_<run_id>.json`
+## Focused validation and changed files
 
-The UI shows date/market, tickers examined, initial missing candidates, existing skips, insert count, documented eligibility exclusions, unavailable Yahoo responses, holds, provider/database failures, remaining missing rows and `completed`/`partial`/`failed`. Detailed per-ticker reasons, anchors, accepted values, provider identity, backup state/path and write verification remain in the report. Progress evidence is saved periodically; a disconnect does not invalidate a database transaction.
-
-Recovery is deliberately conservative: one explicitly selected market, completed dates only, two-sided context within 14 days, matching adjustment evidence and known identity boundaries. It does not certify undated historical identities or repair inconsistent existing prices. Latest dates without a following stored anchor are held. Session evidence is operational index OHLCV, not a newly introduced exchange-calendar service. Existing separate single-ticker/import tools are not redesigned; key/anchor rechecks still protect this insert path against concurrent changes.
-
-The live production browser was not launched because application startup can initialize production schemas. UI controls and the complete UI-to-backend flow were exercised with a synthetic database instead. Production activation and operator-triggered recovery remain separate work.
-
-## Validation
-
-Focused backend, UI integration and directly relevant stock-update regression tests cover invalid/future/non-session dates, exact market/date scope, occupied/missing keys, fetch success/absence/failure, numeric validation, identity/alias/successor holds, adjustment mismatches, independent peer success, duplicate requests, idempotence, stale anchors, rollback on a second insert, interruption, unchanged existing rows, backup restore/cleanup/retention, progress and terminal reporting.
-
-Command:
+All acquisition is mocked; all database fixtures are small synthetic SQLite files. Coverage includes existing-key request skipping, equities/ETFs/indices/other types, absent Fundamentals/start metadata, missing/invalid/different neighbors, malformed OHLCV, wrong symbol/date/market, reviewed transitions, no-data diagnostics and 14-day limits, independent peer failures, progressive commits, rollback, interruption/restart, concurrent keys, report failure after commit, rate-limit stopping, unchanged pacing, UI flow and normal stock-service regressions.
 
 ```text
 venv/bin/python -m pytest -q tests/test_missing_day_recovery.py tests/test_missing_day_recovery_ui.py tests/test_stock_update_main_service_runner.py tests/test_stock_update_service_history_fetch.py tests/test_stock_update_service_ohlcv_write.py tests/test_stock_update_main_adapters.py --override-ini addopts='' --tb=short
 ```
 
-Final focused result: 84 passed, zero failed. The full suite was not run. The existing production SQLite test guard rejected writable production connections and its protected-file inventory checks passed. All backup, restoration and insertion exercises used small synthetic fixtures.
+Final focused result: **104 passed**, zero failed. The existing test database guard rejected writable production connections and its protected-database inventory check passed. No live provider calls or production database copies were made.
 
-## Task owned files
-
-- `main.py`
-- `services/stock_update_service.py`
-- `services/missing_day_recovery.py`
-- `tests/test_missing_day_recovery.py`
-- `tests/test_missing_day_recovery_ui.py`
-- `tests/test_stock_update_main_service_runner.py`
-- `docs/ohlcv_missing_day_recovery_ui.md`
+Changed files: `services/missing_day_recovery.py`, `main.py` (missing-day invocation/summary only), `tests/test_missing_day_recovery.py`, `tests/test_missing_day_recovery_ui.py`, and this document. `services/stock_update_service.py` is reused without changes. No full-suite or live recovery runs, provider requests, production database writes/copies/backups, application restarts or push.
