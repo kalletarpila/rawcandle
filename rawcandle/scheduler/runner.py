@@ -2788,6 +2788,24 @@ def run_scheduler_config(
                 summary_json_path=result.summary_json_path,
                 error=None,
             )
+            # EC acceptance is independent of a later Fundamentals failure. Persist
+            # the terminal scheduler receipt before releasing any prior EC image.
+            from rawcandle.ec_backup_retention import terminal_retention
+
+            try:
+                retention = terminal_retention(result.summary_json_path)
+            except Exception as exc:
+                retention = {"deleted": [], "held": [{"reason": str(exc)}]}
+            try:
+                write_text_atomic(
+                    str(result.summary_json_path) + ".ec-retention.json",
+                    json.dumps(retention, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                # Failure to write auxiliary maintenance evidence must not turn
+                # an already committed scheduler outcome into a new failure.
+                print(f"EC backup retention report unavailable: {exc}", file=sys.stderr)
             return result
         except BaseException as exc:
             if status_initialized:

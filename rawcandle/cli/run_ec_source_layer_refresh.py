@@ -87,16 +87,12 @@ def _create_backup(
         taxonomy_version_code=taxonomy_version_code,
         selected_signal_date=selected_signal_date,
     )
-    source = sqlite3.connect(f"file:{Path(db_path).resolve()}?mode=ro", uri=True)
-    try:
-        target = sqlite3.connect(str(backup_path))
-        try:
-            source.backup(target)
-        finally:
-            target.close()
-    finally:
-        source.close()
-    return backup_path
+    from rawcandle.ec_backup_retention import create_prewrite_backup
+
+    return create_prewrite_backup(
+        backup_path, db_path=db_path, ecosystem=ecosystem_code,
+        taxonomy=taxonomy_version_code,
+    )
 
 
 def _selected_date_row_counts(db_path: str, selected_signal_date: str) -> dict[str, int]:

@@ -96,16 +96,12 @@ def _create_backup(
         date_from=date_from,
         date_to=date_to,
     )
-    source = sqlite3.connect(f"file:{Path(db_path).resolve()}?mode=ro", uri=True)
-    try:
-        target = sqlite3.connect(str(backup_path))
-        try:
-            source.backup(target)
-        finally:
-            target.close()
-    finally:
-        source.close()
-    return backup_path
+    from rawcandle.ec_backup_retention import create_prewrite_backup
+
+    return create_prewrite_backup(
+        backup_path, db_path=db_path, ecosystem=ecosystem_code,
+        taxonomy=taxonomy_version_code,
+    )
 
 
 def _selected_date_row_counts(db_path: str, selected_signal_date: str) -> dict[str, int]:
@@ -751,6 +747,10 @@ def run_ec_source_layer_backfill(
             }
     else:
         backup_path = Path(existing_backup_path) if existing_backup_path else None
+        if backup_path is not None:
+            from rawcandle.ec_backup_retention import protect_reused_backup
+
+            protect_reused_backup(backup_path)
 
     per_date_results: list[dict[str, object]] = []
     completed_dates: list[str] = []

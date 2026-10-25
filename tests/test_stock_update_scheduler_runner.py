@@ -868,11 +868,23 @@ def test_scheduler_runner_full_workflow_holds_admin_lock_before_dispatch(
         refresh,
     )
 
+    def retain_after_report(summary_path):
+        summary = json.loads(Path(summary_path).read_text())
+        assert summary["finished_at_utc"]
+        assert summary["fundamentals_refresh_production_run_id"] == "production-run"
+        assert "LOCK_EXIT" not in events
+        events.append("EC_RETENTION")
+        return {"deleted": [], "held": []}
+
+    monkeypatch.setattr(
+        "rawcandle.ec_backup_retention.terminal_retention", retain_after_report,
+    )
     result = run_scheduler_config(config_path=str(config_path))
 
     assert events == [
         ("LOCK_ENTER", str(tmp_path / "logs")),
         ("REFRESH", "FULL_WORKFLOW", str(tmp_path / "logs")),
+        "EC_RETENTION",
         "LOCK_EXIT",
     ]
     assert result.fundamentals_refresh_mode == "FULL_WORKFLOW"
