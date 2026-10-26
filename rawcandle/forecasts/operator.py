@@ -40,7 +40,6 @@ EXPECTED_TABLES = {
 EXPECTED_INDEXES = {
     "idx_forecast_fetch_asof", "idx_forecast_fetch_run",
     "idx_forecast_snapshot_identity", "idx_forecast_estimate_snapshot",
-    "idx_forecast_price_target_snapshot", "idx_forecast_history_snapshot",
     "idx_forecast_identity_fetch", "idx_forecast_fiscal_link_fetch",
     "idx_forecast_fiscal_link_target",
 }

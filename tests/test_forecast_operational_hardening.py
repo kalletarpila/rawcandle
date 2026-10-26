@@ -122,16 +122,16 @@ def test_cleanup_dry_run_and_apply_preserve_canonical_history(tmp_path: Path) ->
     dry = cleanup_raw_evidence(
         forecast_db=forecast, now_utc="2026-09-27T00:00:00Z"
     )
-    assert dry["eligible_rows"] == 3
+    assert dry["eligible_rows"] == 0
     assert dry["deleted_rows"] == 0
 
     applied = cleanup_raw_evidence(
         forecast_db=forecast, apply=True, now_utc="2026-09-27T00:00:00Z"
     )
-    assert applied["deleted_rows"] == 3
+    assert applied["deleted_rows"] == 0
     assert applied["quick_check"] == "ok"
     with connect_forecasts_db(forecast) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM forecast_raw_evidence").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM forecast_raw_evidence").fetchone()[0] == 3
         after = {
             table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             for table in before
@@ -139,7 +139,7 @@ def test_cleanup_dry_run_and_apply_preserve_canonical_history(tmp_path: Path) ->
         assert before == after
         assert connection.execute(
             "SELECT COUNT(*) FROM forecast_fetch WHERE raw_evidence_hash IS NOT NULL"
-        ).fetchone()[0] == 0
+        ).fetchone()[0] == 3
 
 
 def test_backup_manifest_fingerprint_and_restore_guards(tmp_path: Path) -> None:
@@ -168,6 +168,7 @@ def test_backup_manifest_fingerprint_and_restore_guards(tmp_path: Path) -> None:
         assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
         assert connection.execute("SELECT COUNT(*) FROM forecast_fetch").fetchone()[0] == 3
 
+    connection.close()  # SQLite context managers commit but do not close handles.
     safety = restore_backup(backup=backup, target=target, backup_dir=backups)
     assert safety["safety_backup"] is not None
 
@@ -181,27 +182,19 @@ def test_backup_manifest_fingerprint_and_restore_guards(tmp_path: Path) -> None:
 def test_backup_retention_dry_run_apply_protects_newest(tmp_path: Path) -> None:
     forecast, _ = _populated(tmp_path)
     backups = tmp_path / "backups"
-    now = datetime(2026, 9, 27, tzinfo=timezone.utc)
-    created: list[Path] = []
-    for days in (0, 1, 15, 16, 90, 91, 400):
-        timestamp = (now - timedelta(days=days)).isoformat().replace("+00:00", "Z")
-        created.append(Path(create_backup(
-            source=forecast, destination=backups, created_at_utc=timestamp
-        )["backup_path"]))
-
-    dry = backup_retention(
-        backup_dir=backups, now_utc="2026-09-27T00:00:00Z"
-    )
-    assert dry["mode"] == "DRY_RUN"
-    assert dry["selected_files"] > 0
-    assert all(path.exists() for path in created)
-
-    applied = backup_retention(
-        backup_dir=backups, apply=True, now_utc="2026-09-27T00:00:00Z"
-    )
-    assert applied["deleted_backups"] > 0
-    assert created[0].exists()
-    assert applied["remaining_newest_valid_backup"] == str(created[0])
+    first = create_backup(source=forecast, destination=backups, created_at_utc="2026-09-27T00:00:00Z")
+    second = create_backup(source=forecast, destination=backups, created_at_utc="2026-09-28T00:00:00Z")
+    assert not Path(first["backup_path"]).exists()
+    assert Path(second["backup_path"]).exists()
+    unknown = backups / "forecast_unknown.db"
+    unknown.write_bytes(b"unknown")
+    dry = backup_retention(backup_dir=backups)
+    assert dry["selected_files"] == 0
+    assert next(row for row in dry["inventory"] if row["path"] == str(unknown))["classification"] == "UNKNOWN_KEEP"
+    applied = backup_retention(backup_dir=backups, apply=True)
+    assert applied["deleted_backups"] == 0
+    assert unknown.exists()
+    assert applied["remaining_newest_valid_backup"] == second["backup_path"]
 
 
 def test_interrupted_run_resumes_only_missing_attempts(tmp_path: Path) -> None:

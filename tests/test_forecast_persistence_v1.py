@@ -361,7 +361,7 @@ def test_price_target_change_only_history(tmp_path: Path) -> None:
     )
     with connect_forecasts_db(path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM forecast_snapshot").fetchone()[0] == 2
-        assert connection.execute("SELECT COUNT(*) FROM forecast_price_target").fetchone()[0] == 10
+        assert connection.execute("SELECT COUNT(*) FROM forecast_price_target").fetchone()[0] == 8
 
 
 def test_earnings_history_is_persisted_as_provider_reference(tmp_path: Path) -> None:

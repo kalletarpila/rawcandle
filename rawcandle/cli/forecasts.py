@@ -270,12 +270,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "backup-retention":
             print(f"BACKUP_RETENTION {_compact(backup_retention(backup_dir=Path(args.backup_dir), apply=args.apply))}")
         elif args.command == "restore":
-            with forecast_daily_lock(Path(args.target)):
-                result = restore_backup(
-                    backup=Path(args.backup), target=Path(args.target),
-                    apply_production=args.apply_production,
-                    backup_dir=Path(args.backup_dir),
-                )
+            result = restore_backup(
+                backup=Path(args.backup), target=Path(args.target),
+                apply_production=args.apply_production,
+                backup_dir=Path(args.backup_dir),
+            )
             print(f"RESTORE {_compact(result)}")
         elif args.command == "restore-rehearsal":
             print(f"RESTORE_REHEARSAL {_compact(restore_rehearsal(backup_dir=Path(args.backup_dir), target=Path(args.target)))}")

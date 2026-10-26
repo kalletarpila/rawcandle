@@ -9,7 +9,7 @@ import sqlite3
 import tempfile
 import time
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -213,10 +213,12 @@ def cleanup_raw_evidence(
 ) -> dict[str, Any]:
     database = Path(forecast_db)
     cutoff = _utc(now_utc)
+    orphan = (" raw_hash NOT IN (SELECT raw_evidence_hash FROM forecast_fetch WHERE raw_evidence_hash IS NOT NULL)"
+              " AND raw_hash NOT IN (SELECT raw_evidence_hash FROM forecast_snapshot WHERE raw_evidence_hash IS NOT NULL)")
     with connect_forecasts_db(database) as connection:
         row = connection.execute(
             "SELECT COUNT(*),COALESCE(SUM(LENGTH(body_text)),0),MIN(retain_until_utc),"
-            "MAX(retain_until_utc) FROM forecast_raw_evidence WHERE retain_until_utc<=?",
+            "MAX(retain_until_utc) FROM forecast_raw_evidence WHERE retain_until_utc<=? AND" + orphan,
             (cutoff,),
         ).fetchone()
         summary = {
@@ -225,13 +227,9 @@ def cleanup_raw_evidence(
             "earliest_expiry": row[2], "latest_expiry": row[3], "deleted_rows": 0,
         }
         if apply and row[0]:
-            hashes = [item[0] for item in connection.execute(
-                "SELECT raw_hash FROM forecast_raw_evidence WHERE retain_until_utc<=?", (cutoff,)
-            )]
-            marks = ",".join("?" for _ in hashes)
-            connection.execute(f"UPDATE forecast_fetch SET raw_evidence_hash=NULL WHERE raw_evidence_hash IN ({marks})", hashes)
-            connection.execute(f"UPDATE forecast_snapshot SET raw_evidence_hash=NULL WHERE raw_evidence_hash IN ({marks})", hashes)
-            deleted = connection.execute(f"DELETE FROM forecast_raw_evidence WHERE raw_hash IN ({marks})", hashes).rowcount
+            deleted = connection.execute(
+                "DELETE FROM forecast_raw_evidence WHERE retain_until_utc<=? AND" + orphan, (cutoff,)
+            ).rowcount
             summary["deleted_rows"] = int(deleted)
     summary["quick_check"] = verify_database(database)["quick_check"]
     return summary
@@ -248,65 +246,26 @@ def _backup_name(timestamp_utc: str) -> str:
 
 def create_backup(
     *, source: str | Path = DEFAULT_FORECAST_DB, destination: str | Path = DEFAULT_BACKUP_DIR,
-    created_at_utc: str | None = None,
+    created_at_utc: str | None = None, promote: bool = True, _source_locked: bool = False,
 ) -> dict[str, Any]:
-    source_path = Path(source)
-    if not source_path.is_file():
-        raise FileNotFoundError(source_path)
-    source_check = verify_database(source_path)
+    from contextlib import nullcontext
+    from rawcandle.forecasts import backup_lifecycle as lifecycle
+    source_path = Path(source).absolute()
+    directory = Path(destination).absolute()
     created = _utc(created_at_utc)
-    destination_path = Path(destination)
-    destination_path.mkdir(parents=True, exist_ok=True)
-    backup_path = destination_path / _backup_name(created)
-    if backup_path.exists():
-        raise FileExistsError(backup_path)
-    temp_path = backup_path.with_suffix(".db.tmp")
-    with connect_forecasts_db(source_path) as source_connection:
-        source_counts = _core_counts(source_connection)
-        with sqlite3.connect(temp_path) as backup_connection:
-            source_connection.backup(backup_connection)
-            backup_connection.commit()
-    with connect_forecasts_db(temp_path) as backup_connection:
-        quick_check = str(backup_connection.execute("PRAGMA quick_check").fetchone()[0])
-        version_row = backup_connection.execute("SELECT version FROM forecast_schema_version").fetchone()
-        backup_counts = _core_counts(backup_connection)
-    if quick_check != "ok" or not version_row or version_row[0] != SCHEMA_VERSION or backup_counts != source_counts:
-        temp_path.unlink(missing_ok=True)
-        raise RuntimeError("forecast backup verification failed")
-    os.replace(temp_path, backup_path)
-    fingerprint = _sha256(backup_path)
-    manifest = {
-        "contract_version": "forecast_backup_v1", "created_at_utc": created,
-        "source_path": str(source_path.resolve()), "source_schema_version": source_check["schema_version"],
-        "source_size_bytes": source_path.stat().st_size, "source_fingerprint_sha256": _sha256(source_path),
-        "backup_path": str(backup_path.resolve()), "backup_size_bytes": backup_path.stat().st_size,
-        "backup_fingerprint_sha256": fingerprint, "quick_check": quick_check,
-        "core_counts": backup_counts,
-    }
-    manifest_path = backup_path.with_suffix(".manifest.json")
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    backup_path.chmod(0o444)
-    manifest_path.chmod(0o444)
-    return manifest | {"manifest_path": str(manifest_path.resolve())}
+    with (nullcontext() if _source_locked else forecast_daily_lock(source_path)):
+        with lifecycle.directory_lock(directory):
+            manifest = lifecycle.create_locked(source_path, directory, created, _backup_name(created), promote=promote)
+            if promote:
+                lifecycle.retention_locked(directory, apply=True)
+            return manifest
 
 
 def _valid_backup(path: Path) -> bool:
-    manifest_path = path.with_suffix(".manifest.json")
+    from rawcandle.forecasts.backup_lifecycle import validate
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
-            quick_check = str(connection.execute("PRAGMA quick_check").fetchone()[0])
-            version = connection.execute(
-                "SELECT version FROM forecast_schema_version WHERE db_name='forecasts'"
-            ).fetchone()
-            counts = _core_counts(connection)
-        return (
-            manifest.get("backup_fingerprint_sha256") == _sha256(path)
-            and quick_check == "ok"
-            and version is not None
-            and str(version[0]) == SCHEMA_VERSION
-            and counts == manifest.get("core_counts")
-        )
+        validate(path.absolute())
+        return True
     except Exception:
         return False
 
@@ -315,90 +274,87 @@ def backup_retention(
     *, backup_dir: str | Path = DEFAULT_BACKUP_DIR, apply: bool = False,
     now_utc: str | None = None,
 ) -> dict[str, Any]:
-    directory = Path(backup_dir)
-    now = datetime.fromisoformat(_utc(now_utc).replace("Z", "+00:00"))
-    valid = sorted((path for path in directory.glob("forecast_*.db") if _valid_backup(path)), reverse=True)
-    keep: set[Path] = set(valid[:1])
-    weekly: set[tuple[int, int]] = set()
-    monthly: set[tuple[int, int]] = set()
-    for path in valid:
-        stamp = datetime.strptime(path.stem.removeprefix("forecast_"), "%Y%m%dT%H%M%S%fZ").replace(tzinfo=timezone.utc)
-        age = now - stamp
-        if age <= timedelta(days=14):
-            keep.add(path)
-        elif age <= timedelta(weeks=8):
-            key = stamp.isocalendar()[:2]
-            if key not in weekly:
-                weekly.add(key); keep.add(path)
-        elif age <= timedelta(days=366):
-            key = (stamp.year, stamp.month)
-            if key not in monthly:
-                monthly.add(key); keep.add(path)
-    selected = [path for path in valid if path not in keep]
-    result = {
-        "mode": "APPLY" if apply else "DRY_RUN", "valid_backups": len(valid),
-        "protected_backups": len(keep), "selected_files": len(selected) * 2,
-        "selected_bytes": sum(path.stat().st_size + path.with_suffix(".manifest.json").stat().st_size for path in selected),
-        "newest_valid_backup": str(valid[0]) if valid else None,
-    }
-    if apply:
-        for path in selected:
-            path.chmod(0o644); path.unlink()
-            manifest = path.with_suffix(".manifest.json"); manifest.chmod(0o644); manifest.unlink()
-        result["deleted_backups"] = len(selected)
-        remaining = sorted((path for path in directory.glob("forecast_*.db") if _valid_backup(path)), reverse=True)
-        result["remaining_newest_valid_backup"] = str(remaining[0]) if remaining else None
-        if valid and not remaining:
-            raise RuntimeError("backup retention removed every valid backup")
-    return result
+    from contextlib import nullcontext
+    from rawcandle.forecasts import backup_lifecycle as lifecycle
+    directory = Path(backup_dir).absolute()
+    # Acquire source writer lock before directory lock, as backup creation does.
+    state = lifecycle.read_owner(directory)
+    with (forecast_daily_lock(state["source_path"]) if state["source_path"] else nullcontext()):
+        with lifecycle.directory_lock(directory):
+            return lifecycle.retention_locked(directory, apply=apply)
 
 
 def restore_backup(
     *, backup: str | Path, target: str | Path, apply_production: bool = False,
     backup_dir: str | Path = DEFAULT_BACKUP_DIR,
 ) -> dict[str, Any]:
-    backup_path = Path(backup)
-    target_path = Path(target)
+    from rawcandle.forecasts import backup_lifecycle as lifecycle
+    backup_path = Path(backup).absolute()
+    target_path = Path(target).absolute()
     if backup_path.resolve() == target_path.resolve():
         raise ValueError("backup and restore target must differ")
     if target_path.resolve() == DEFAULT_FORECAST_DB.resolve() and not apply_production:
         raise PermissionError("production restore requires --apply-production")
-    if not _valid_backup(backup_path):
-        raise ValueError("backup or manifest validation failed")
-    manifest = json.loads(backup_path.with_suffix(".manifest.json").read_text(encoding="utf-8"))
-    safety = None
-    if target_path.exists():
-        try:
-            verify_database(target_path)
-            safety = create_backup(source=target_path, destination=backup_dir)
-        except Exception as exc:
-            if target_path.resolve() != DEFAULT_FORECAST_DB.resolve():
+    if target_path.is_symlink() or target_path.parent.absolute() != target_path.parent.resolve():
+        raise ValueError("restore target must not contain symlink aliases")
+    # Crash/failed restore leaves a durable source pin. Only success releases it.
+    with forecast_daily_lock(target_path):
+        if target_path.exists():
+            try:
+                lifecycle.database_check(target_path)
+            except Exception as exc:
                 raise ValueError("existing restore target is not a valid forecast database") from exc
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix="forecast-restore-", suffix=".db", dir=target_path.parent)
-    os.close(fd)
-    temp_path = Path(temporary)
-    try:
-        with sqlite3.connect(f"file:{backup_path.resolve()}?mode=ro", uri=True) as source_connection:
-            with sqlite3.connect(temp_path) as target_connection:
-                source_connection.backup(target_connection)
-        verify_database(temp_path)
-        with sqlite3.connect(temp_path) as restored_connection:
-            if _core_counts(restored_connection) != manifest["core_counts"]:
-                raise RuntimeError("restored core counts differ from manifest")
-        os.replace(temp_path, target_path)
-        directory_fd = os.open(target_path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        temp_path.unlink(missing_ok=True)
-    return {"target": str(target_path), "quick_check": verify_database(target_path)["quick_check"], "safety_backup": safety and safety["backup_path"]}
+            lifecycle._closed([target_path])
+        if any(Path(str(target_path) + suffix).exists() for suffix in ("-wal", "-shm", "-journal")):
+            raise ValueError("restore target has active SQLite sidecars")
+        token = lifecycle.pin(backup_path, "RESTORE_IN_PROGRESS")
+        manifest = lifecycle.validate(backup_path)
+        safety = None
+        if target_path.exists():
+            try:
+                lifecycle.database_check(target_path)
+            except Exception as exc:
+                raise ValueError("existing restore target is not a valid forecast database") from exc
+            safety = create_backup(source=target_path, destination=backup_dir, promote=False, _source_locked=True)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with lifecycle.materialize(backup_path, target_path.parent) as materialized:
+            fd, name = tempfile.mkstemp(prefix="forecast-restore-", suffix=".db", dir=target_path.parent)
+            temp_path = Path(name)
+            try:
+                with os.fdopen(fd, "wb") as output, materialized.open("rb") as input_stream:
+                    import shutil
+                    shutil.copyfileobj(input_stream, output, 1024 * 1024)
+                    output.flush()
+                    os.fsync(output.fileno())
+                checked = lifecycle.database_check(temp_path)
+                if checked["core_counts"] != manifest["core_counts"]:
+                    raise RuntimeError("restored core counts differ from manifest")
+                lifecycle.checkpoint("restore_before_replace")
+                os.replace(temp_path, target_path)
+                lifecycle.sync_directory(target_path.parent)
+                lifecycle.checkpoint("restore_replaced")
+            finally:
+                temp_path.unlink(missing_ok=True)
+        checked = lifecycle.database_check(target_path)
+        lifecycle.unpin(backup_path, token)
+        if safety:
+            # Complete the safety pin and record retirement in one durable edit.
+            directory = Path(safety["backup_path"]).parent
+            with lifecycle.directory_lock(directory):
+                state = lifecycle.read_owner(directory)
+                safety_path = Path(safety["backup_path"])
+                if state["pins"].get(safety_path.name, {}).get("token") != safety["recovery_pin_token"]:
+                    raise ValueError("safety recovery pin ownership mismatch")
+                del state["pins"][safety_path.name]
+                state["retire"].append(lifecycle.describe(safety_path))
+                lifecycle.write_owner(directory, state)
+                lifecycle.retention_locked(directory, apply=True)
+        return {"target": str(target_path), "quick_check": checked["quick_check"],
+                "safety_backup": safety and safety["backup_path"]}
 
 
 def _rehearsal_signature(path: Path) -> dict[str, Any]:
-    with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         counts = _core_counts(connection)
         observations = connection.execute(
@@ -436,39 +392,30 @@ def restore_rehearsal(
     *, backup_dir: str | Path = DEFAULT_BACKUP_DIR,
     target: str | Path = "/tmp/rawcandle_forecasts_restore_rehearsal.db",
 ) -> dict[str, Any]:
-    directory = Path(backup_dir)
-    valid = sorted(
-        (path for path in directory.glob("forecast_*.db") if _valid_backup(path)),
-        reverse=True,
-    )
-    if not valid:
-        raise RuntimeError("no valid forecast backup available for restore rehearsal")
-    backup = valid[0]
-    target_path = Path(target)
+    from rawcandle.forecasts import backup_lifecycle as lifecycle
+    directory = Path(backup_dir).absolute()
+    with lifecycle.directory_lock(directory):
+        state = lifecycle.read_owner(directory)
+        if not state["last_good"]:
+            raise RuntimeError("no accepted latest-good forecast backup available")
+        lifecycle.check_description(state["last_good"])
+        backup = Path(state["last_good"]["path"])
+    target_path = Path(target).absolute()
     if target_path.exists():
         raise FileExistsError(f"restore rehearsal target already exists: {target_path}")
-    manifest = json.loads(backup.with_suffix(".manifest.json").read_text(encoding="utf-8"))
-    backup_signature = _rehearsal_signature(backup)
+    manifest = lifecycle.validate(backup)
+    # The restored byte image must match the qualified uncompressed SHA, which
+    # covers every historical row and index, beyond the representative PIT check.
     restored = restore_backup(backup=backup, target=target_path, backup_dir=directory)
-    restored_signature = _rehearsal_signature(target_path)
-    passed = (
-        restored["quick_check"] == "ok"
-        and manifest["backup_fingerprint_sha256"] == _sha256(backup)
-        and backup_signature == restored_signature
-        and restored_signature["core_counts"] == manifest["core_counts"]
-    )
-    if not passed:
+    signature = _rehearsal_signature(target_path)
+    expected = manifest.get("uncompressed_sha256", manifest["backup_fingerprint_sha256"])
+    if lifecycle.sha256(target_path) != expected or signature["core_counts"] != manifest["core_counts"]:
         raise RuntimeError("restore rehearsal parity validation failed")
-    return {
-        "status": "RESTORE_REHEARSAL_PASS",
-        "backup_path": str(backup.resolve()),
-        "manifest_path": str(backup.with_suffix(".manifest.json").resolve()),
-        "backup_fingerprint_sha256": manifest["backup_fingerprint_sha256"],
-        "schema_version": manifest["source_schema_version"],
-        "quick_check": restored["quick_check"],
-        "target": str(target_path.resolve()),
-        **restored_signature,
-    }
+    return {"status": "RESTORE_REHEARSAL_PASS", "backup_path": str(backup),
+            "manifest_path": str(lifecycle.manifest_path(backup)),
+            "backup_fingerprint_sha256": manifest["backup_fingerprint_sha256"],
+            "schema_version": manifest["source_schema_version"], "quick_check": restored["quick_check"],
+            "target": str(target_path), **signature}
 
 
 def universe_preview(
@@ -476,7 +423,7 @@ def universe_preview(
     minimum_interval_seconds: float = 0.5,
 ) -> dict[str, Any]:
     path = Path(fundamentals_db)
-    with sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only=ON")
         active = connection.execute(
@@ -541,7 +488,7 @@ def _daily_workflow_locked(
     except Exception as exc:
         raise DailyWorkflowError("DB_PREFLIGHT_FAILED", str(exc)) from exc
     try:
-        backup = create_backup(source=database, destination=backup_dir)
+        backup = create_backup(source=database, destination=backup_dir, promote=False, _source_locked=True)
     except Exception as exc:
         raise DailyWorkflowError("BACKUP_FAILED", str(exc)) from exc
     universe = None
@@ -610,6 +557,14 @@ def _daily_workflow_locked(
     reporting_finished = time.monotonic()
     run_status = report["run_status"] if report else "UNKNOWN"
     terminal_status = "SUCCESS" if run_status == "SUCCESS" and not errors else "PARTIAL"
+    if terminal_status == "SUCCESS":
+        from rawcandle.forecasts import backup_lifecycle as lifecycle
+        with lifecycle.directory_lock(Path(backup_dir).absolute()):
+            lifecycle.promote_locked(Path(backup_dir).absolute(), Path(backup["backup_path"]), {
+                "kind": "DAILY_WORKFLOW_SUCCESS", "run_id": outcome.run_id,
+                "terminal_status": terminal_status, "completed_at_utc": _utc(),
+            })
+            lifecycle.retention_locked(Path(backup_dir).absolute(), apply=True)
     finished_at = datetime.now(timezone.utc)
     provider_quality = (health or {}).get("provider_quality", {})
     identity = (report or {}).get("identity", {})

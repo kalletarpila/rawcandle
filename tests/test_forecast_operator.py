@@ -141,7 +141,7 @@ def test_operator_scope_partial_failure_link_reconcile_and_report(tmp_path: Path
     assert report["end_date"]["count"] == 2
 
     with connect_forecasts_db(forecast) as connection:
-        assert connection.execute("SELECT COUNT(*) FROM forecast_price_target").fetchone()[0] == 5
+        assert connection.execute("SELECT COUNT(*) FROM forecast_price_target").fetchone()[0] == 4
         assert connection.execute(
             "SELECT COUNT(*) FROM forecast_earnings_history_reference"
         ).fetchone()[0] == 2

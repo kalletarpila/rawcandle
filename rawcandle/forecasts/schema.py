@@ -205,10 +205,6 @@ CREATE INDEX IF NOT EXISTS idx_forecast_snapshot_identity
     ON forecast_snapshot(provider, forecast_family, identity_key, first_seen_at_utc);
 CREATE INDEX IF NOT EXISTS idx_forecast_estimate_snapshot
     ON forecast_estimate(snapshot_id, occurrence_index, metric, statistic);
-CREATE INDEX IF NOT EXISTS idx_forecast_price_target_snapshot
-    ON forecast_price_target(snapshot_id, statistic);
-CREATE INDEX IF NOT EXISTS idx_forecast_history_snapshot
-    ON forecast_earnings_history_reference(snapshot_id, occurrence_index);
 CREATE INDEX IF NOT EXISTS idx_forecast_identity_fetch
     ON forecast_identity_resolution(fetch_id, identity_rule_version, resolved_at_utc);
 CREATE INDEX IF NOT EXISTS idx_forecast_fiscal_link_fetch
@@ -234,6 +230,36 @@ def connect_forecasts_db(path: str | Path) -> sqlite3.Connection:
     return connection
 
 
+def remove_exact_duplicate_indexes(connection: sqlite3.Connection) -> list[str]:
+    """Drop only the two audited twins when an intact UNIQUE index covers them.
+
+    Do not infer redundancy from column prefixes or names alone. Custom index
+    definitions are preserved. Dropped pages become reusable; no VACUUM here.
+    """
+    removed = []
+    for table, name, columns in (
+        ("forecast_price_target", "idx_forecast_price_target_snapshot", ("snapshot_id", "statistic")),
+        ("forecast_earnings_history_reference", "idx_forecast_history_snapshot", ("snapshot_id", "occurrence_index")),
+    ):
+        indexes = {r[1]: r for r in connection.execute(f'PRAGMA index_list("{table}")')}
+        candidate = indexes.get(name)
+        if candidate is None or candidate[2] or candidate[3] != "c" or candidate[4]:
+            continue
+        details = list(connection.execute(f'PRAGMA index_xinfo("{name}")'))
+        keys = [(r[2], r[3], r[4]) for r in details if r[5]]
+        if keys != [(column, 0, "BINARY") for column in columns]:
+            continue
+        for twin, row in indexes.items():
+            if not row[2] or row[3] != "u" or row[4]:
+                continue
+            twin_details = list(connection.execute(f'PRAGMA index_xinfo("{twin}")'))
+            if [tuple(r) for r in details] == [tuple(r) for r in twin_details]:
+                connection.execute(f'DROP INDEX "{name}"')
+                removed.append(name)
+                break
+    return removed
+
+
 def migrate_forecasts_db(
     path: str | Path,
     *,
@@ -243,6 +269,7 @@ def migrate_forecasts_db(
     database_path.parent.mkdir(parents=True, exist_ok=True)
     with connect_forecasts_db(database_path) as connection:
         connection.executescript(SCHEMA_SQL)
+        remove_exact_duplicate_indexes(connection)
         connection.execute(
             """
             INSERT INTO forecast_schema_version(db_name, version, applied_at_utc)

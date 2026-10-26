@@ -40,7 +40,8 @@ EARNINGS_TREND_CONTRACT_VERSION = "yahoo_earnings_trend_v1"
 EARNINGS_TREND_MIXED_CONTRACT_VERSION = (
     "yahoo_earnings_trend_v2_mixed_empty_targets"
 )
-PRICE_TARGET_CONTRACT_VERSION = "yahoo_price_target_v1"
+PRICE_TARGET_CONTRACT_VERSION_V1 = "yahoo_price_target_v1"
+PRICE_TARGET_CONTRACT_VERSION = "yahoo_price_target_consensus_v2"
 EARNINGS_HISTORY_CONTRACT_VERSION = "yahoo_earnings_history_reference_v1"
 
 ROW_USABLE_TARGETED = "USABLE_TARGETED"
@@ -454,20 +455,30 @@ def canonicalize_mixed_earnings_trend(
     )
 
 
-def canonicalize_price_targets(payload: Mapping[str, Any]) -> CanonicalForecast:
+def canonicalize_price_targets(
+    payload: Mapping[str, Any], *, contract_version: str = PRICE_TARGET_CONTRACT_VERSION,
+) -> CanonicalForecast:
+    """V1 is retained for historical replay; new observations use consensus V2.
+
+    currentPrice remains in raw evidence. Historical market prices belong to
+    osakedata.db OHLC, with a trading-day boundary chosen by the researcher.
+    """
+    if contract_version not in {PRICE_TARGET_CONTRACT_VERSION_V1, PRICE_TARGET_CONTRACT_VERSION}:
+        raise ForecastContractError(f"unsupported price-target contract: {contract_version}")
     module = _quote_module(payload, "financialData")
     expected = {"maxAge", "financialCurrency", *PRICE_TARGET_SOURCE_FIELDS.values()}
     canonical = {
-        "contractVersion": PRICE_TARGET_CONTRACT_VERSION,
+        "contractVersion": contract_version,
         "currency": canonical_state(_field(module, "financialCurrency")),
         "values": {
             name: canonical_state(_field(module, source_name))
             for name, source_name in PRICE_TARGET_SOURCE_FIELDS.items()
+            if name != "current" or contract_version == PRICE_TARGET_CONTRACT_VERSION_V1
         },
     }
     return _canonical_result(
         FAMILY_PRICE_TARGET,
-        PRICE_TARGET_CONTRACT_VERSION,
+        contract_version,
         canonical,
         _drift("financialData", module, expected),
     )
