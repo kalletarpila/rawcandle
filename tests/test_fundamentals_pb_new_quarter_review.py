@@ -37,6 +37,8 @@ def digest_db(p):
 
 @pytest.fixture
 def factory(tmp_path,monkeypatch):
+    # These historical approval scenarios must not depend on the host date.
+    monkeypatch.setattr(workflow, 'utc_now', lambda: ASOF + 'T12:00:00Z')
     template=deepcopy(next(r for r in own.ownership_reviews_v2() if r['release_type']=='ORDINARY_COMMON'))
     def create(kind='ordinary'):
         folder=tmp_path/kind;folder.mkdir();pp,cp,ap=_databases(folder);mp=folder/'market.db';queue=folder/'queue.db'

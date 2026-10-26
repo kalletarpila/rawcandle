@@ -941,6 +941,32 @@ class FundamentalsAdminUIService:
                 ),
             )
 
+    def list_accounting_boundary_reviews(self) -> list[Mapping[str, Any]]:
+        from .accounting_boundary_review import read_items
+        from .refresh_review_queue import queue_path_for_run_root
+        return read_items(queue_path_for_run_root(self.run_root))
+
+    def register_accounting_boundary_proposal(self, proposal: Mapping[str, Any]) -> Mapping[str, Any]:
+        from .accounting_boundary_review import save_item
+        from .refresh_review_queue import queue_path_for_run_root
+        with self._operation_lock():
+            return save_item(queue_path_for_run_root(self.run_root), proposal)
+
+    def approve_accounting_boundary_review(self, resolution_id: str, *, operator: str,
+                                          rehearsal: Mapping[str, Any]) -> Mapping[str, Any]:
+        from .accounting_boundary_review import approve, read_items, save_item, BoundaryReviewError
+        from .refresh_review_queue import queue_path_for_run_root
+        from .publication_journal import safety_status
+        with self._operation_lock():
+            if safety_status().get('production_writes_blocked'):
+                raise BoundaryReviewError('BOUNDARY_PUBLICATION_RECOVERY_BLOCKED')
+            path = queue_path_for_run_root(self.run_root)
+            items = [i for i in read_items(path) if i['proposal']['resolution_id'] == resolution_id]
+            if len(items) != 1 or items[0]['status'] != 'OPEN':
+                raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
+            proposal = items[0]['proposal']
+            return save_item(path, proposal, decision=approve(proposal, operator=operator, rehearsal=rehearsal))
+
     def history_result_summary(
         self,
         run_id: str,

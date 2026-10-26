@@ -1115,17 +1115,46 @@ def build_fundamentals_admin_page(
             status = str(payload.get("status") or "ERROR")
             items = [dict(item) for item in payload.get("items") or []]
             render_review_queue(items)
+            boundary_reader = getattr(admin_service, "list_accounting_boundary_reviews", None)
+            boundary_items = boundary_reader() if callable(boundary_reader) else []
+            for boundary_item in boundary_items:
+                proposal = boundary_item["proposal"]
+                evidence = proposal["evidence"]
+                review_queue_column.controls.append(ft.Column([
+                    ft.Text("WFRD global accounting-boundary review — " + boundary_item["status"], weight=ft.FontWeight.BOLD),
+                    ft.Text(json.dumps({
+                        "classification": "GLOBAL_BLOCKING_REVIEW until exact approval and new Preview",
+                        "ARQ source": evidence["arq"]["source_key"],
+                        "provider label": evidence["arq"]["provider_label"],
+                        "accepted label": evidence["arq"]["accepted_label"],
+                        "financial payload changed": False,
+                        "MRQ removed source": evidence["mrq"]["removed_key"],
+                        "MRQ current source": evidence["mrq"]["current_key"],
+                        "historical role": evidence["mrq"]["historical_role"],
+                        "current role": evidence["mrq"]["current_role"],
+                        "historical membership": "HISTORICAL_ONLY; absent from current response",
+                        "current calculation eligible": False,
+                        "historical calculation eligible": False,
+                        "authority": evidence["authority"],
+                        "stale": boundary_item.get("stale_reason"),
+                        "actions": [evidence["arq"]["action"], evidence["mrq"]["action"]],
+                        "consequence": "Retain both canonical Q4 identities and their established dates; no Production authorization",
+                        "proposal fingerprint": proposal["proposal_fingerprint"],
+                    }, indent=2), selectable=True),
+                ]))
             empty_message = (
                 "No Refresh review items are currently quarantined."
                 if not review_queue_include_resolved_checkbox.value
                 else "No Refresh review items have been recorded."
             )
+            if boundary_items:
+                status = "READY"
             if status == "EMPTY":
                 review_queue_column.controls = [ft.Text(empty_message)]
             status_message = {
                 "NOT_INITIALIZED": "Review queue has not been initialized.",
                 "EMPTY": empty_message,
-                "READY": f"{len(items)} review item(s).",
+                "READY": f"{len(items) + len(boundary_items)} review item(s).",
             }.get(status, str(payload.get("error") or "Review queue could not be loaded."))
             review_queue_status_field.value = status_message
             if status in {"NOT_INITIALIZED", "ERROR"}:

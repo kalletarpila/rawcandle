@@ -364,6 +364,8 @@ def copy_database(source: Path, destination: Path) -> dict[str, Any]:
 
 
 def _provider_winners(provider_db: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    from rawcandle.fundamentals.admin.accounting_boundary_review import validate_store, BoundaryReviewError
+    validate_store(provider_db)
     with readonly(provider_db) as connection:
         rows = [dict(row) for row in connection.execute(
             "SELECT po.observation_id,po.company_id,po.security_id,s.* "
@@ -381,7 +383,14 @@ def _provider_winners(provider_db: Path) -> tuple[list[dict[str, Any]], dict[str
             unresolved += 1
             continue
         try:
-            fiscal_year, fiscal_quarter = parse_fiscalperiod(row["fiscalperiod"])
+            from rawcandle.fundamentals.admin.accounting_boundary_review import effective_fiscalperiod
+            effective_label = row["fiscalperiod"]
+            if row["ticker"] == "WFRD" and row["reportperiod"] == "2019-12-31":
+                with readonly(provider_db) as interpretation_source:
+                    effective_label = effective_fiscalperiod(interpretation_source, row)
+            fiscal_year, fiscal_quarter = parse_fiscalperiod(effective_label)
+        except BoundaryReviewError:
+            raise
         except ValueError:
             invalid += 1
             continue

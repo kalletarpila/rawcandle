@@ -328,7 +328,9 @@ def validate_complete_history(
         errors.append("EXACT_LIMIT_RESPONSE_NOT_PROVEN_COMPLETE")
     for index, row in enumerate(rows):
         try:
-            normalized.append(normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension))
+            item = normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension)
+            item["_acquisition_payload"] = dict(row.get("_acquisition_payload") or {k: v for k, v in row.items() if not str(k).startswith("_")})
+            normalized.append(item)
         except HistoryValidationError as exc:
             errors.append(f"ROW_{index}:{exc}")
     keys = [source_key(row) for row in normalized]
@@ -602,8 +604,9 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
             str(row["name"]) for row in connection.execute("PRAGMA table_info(provider_observation)")
         }
         provenance = "po.provenance_json" if "provenance_json" in provider_columns else "'{}' AS provenance_json"
+        payload = "po.payload_json" if "payload_json" in provider_columns else "'{}' AS payload_json"
         rows = [dict(row) for row in connection.execute(
-            f"SELECT po.observation_id,{provenance},{columns} FROM sharadar_fundamental_observation s "
+            f"SELECT po.observation_id,{payload},{provenance},{columns} FROM sharadar_fundamental_observation s "
             "JOIN provider_observation po USING(observation_id) "
             "WHERE UPPER(s.ticker)=? AND s.dimension=? "
             "ORDER BY s.lastupdated,po.observation_id",
@@ -617,6 +620,7 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
             parsed = json.loads(str(row.get("provenance_json") or "{}"))
             if not isinstance(parsed, dict):
                 raise ValueError("not an object")
+            item["_acquisition_payload"] = json.loads(row["payload_json"])
             item["_provider_provenance"] = parsed
             item["_history_retention_status"] = parsed.get("history_retention_status")
             item["_history_retention_evidence"] = parsed.get("history_retention_evidence")
@@ -1140,6 +1144,7 @@ def compare_ticker_histories(
     retained_history_approval: Mapping[str, Any] | None = None,
     fiscal_revision_approval: Mapping[str, Any] | None = None,
     true_removal_approval: Mapping[str, Any] | None = None,
+    accounting_boundary_application: Mapping[str, Any] | None = None,
     as_of_date: date | None = None,
     historical_source_window_review_years: int = HISTORICAL_SOURCE_WINDOW_REVIEW_YEARS,
 ) -> dict[str, Any]:
@@ -1177,8 +1182,12 @@ def compare_ticker_histories(
         as_of_date=as_of_date,
         historical_source_window_review_years=historical_source_window_review_years,
     )
+    boundary_reviewed = False
+    if accounting_boundary_application:
+        from .accounting_boundary_review import comparison_authorized
+        boundary_reviewed = comparison_authorized(accounting_boundary_application, current, source, fiscal_revisions, merge["events"])
     if fiscal_revisions and not (
-        fiscal_revision_approval and fiscal_revision_approval.get("applied")
+        boundary_reviewed or fiscal_revision_approval and fiscal_revision_approval.get("applied")
     ):
         return {
             "ticker": ticker,
@@ -1212,7 +1221,7 @@ def compare_ticker_histories(
             },
         }
     if action["true_source_removals"] and not (
-        true_removal_approval and true_removal_approval.get("applied")
+        boundary_reviewed or true_removal_approval and true_removal_approval.get("applied")
     ):
         return {
             "ticker": ticker,
@@ -1438,7 +1447,11 @@ def publish_date_impact(
     output: list[dict[str, Any]] = []
     source_winners: dict[tuple[int, str], Mapping[str, Any]] = {}
     for row in sorted(source_arq_rows, key=lambda item: (str(item.get("reportperiod")), str(item.get("lastupdated")), str(item.get("date"))), reverse=True):
-        source_winners.setdefault(fiscal_identity(row["fiscalperiod"]), row)
+        application = comparison.get("accounting_boundary_resolution") or {}
+        label = row["fiscalperiod"]
+        if application.get("applied") and source_key(row) == tuple(application["decision"]["proposal"]["evidence"]["arq"]["source_key"]):
+            label = application["decision"]["proposal"]["evidence"]["arq"]["accepted_label"]
+        source_winners.setdefault(fiscal_identity(label), row)
     for fiscal in sorted(affected):
         current = existing.get(fiscal)
         winner = source_winners.get(fiscal, {})
@@ -1646,7 +1659,10 @@ def _summary_counts(changes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
 
 
 def refresh_binding_change(item: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: item.get(key) for key in REFRESH_BINDING_FIELDS}
+    result = {key: item.get(key) for key in REFRESH_BINDING_FIELDS}
+    if item.get("accounting_boundary_resolution"):
+        result["accounting_boundary_resolution"] = item["accounting_boundary_resolution"]
+    return result
 
 
 def refresh_binding(
@@ -1849,6 +1865,15 @@ def _render_refresh_report(result: Mapping[str, Any]) -> str:
         "- No refresh state or watermark was advanced.",
         f"- Refresh-set fingerprint: `{result.get('preview_fingerprint')}`",
     ])
+    for item in (result.get("refresh_preview") or {}).get("ticker_changes", []):
+        application = item.get("accounting_boundary_resolution")
+        if application:
+            lines.extend(["", "## Exact-source accounting-boundary review", "",
+                          f"- Ticker: `{item['ticker']}`; applied: `{application.get('applied', False)}`; stale: `{application.get('stale', False)}`.",
+                          f"- Proposal fingerprint: `{application.get('proposal_fingerprint', '-')}`.",
+                          "- Provider ARQ label remains `2020-Q4`; reviewed canonical identity is `2019-Q4` only when the exact combined decision applies.",
+                          "- MRQ successor stocks are historical-only; current predecessor flows are partial-period, calculation-ineligible evidence.",
+                          "- Both reviewed actions and a new Preview are required; no Production authorization is implied."])
     return "\n".join(lines) + "\n"
 
 
@@ -1921,7 +1946,11 @@ def run_preview(
 
         failed_stage = ProgressStage.IDENTITY_RESOLUTION
         review_queue = RefreshReviewQueue(queue_path_for_run_root(run_root))
-        queued_tickers = review_queue.pending_tickers()
+        from . import accounting_boundary_review as boundary
+        boundary_items = boundary.read_items(review_queue.path)
+        boundary_tickers = {i["proposal"]["evidence"]["identity"]["ticker"] for i in boundary_items}
+        boundary_tickers.update(d["proposal"]["evidence"]["identity"]["ticker"] for d in boundary.installed_decisions(source_paths.provider_db))
+        queued_tickers = sorted(set(review_queue.pending_tickers()) | boundary_tickers)
         tickers = sorted(set(discovery["changed_tickers"]) | set(queued_tickers))
         discovery["queued_tickers_reevaluated"] = sorted(set(queued_tickers))
         discovery["evaluation_tickers"] = tickers
@@ -1995,6 +2024,14 @@ def run_preview(
                         **policy_args,
                     )
                     comparison["identity"] = identities[ticker]
+            boundary_application = boundary.evaluate_for_refresh(source_paths.provider_db, source_paths.canonical_db, histories[ticker], identities[ticker], review_queue.path)
+            if boundary_application.get("applied") or boundary_application.get("stale") or boundary_application.get("pending"):
+                comparison = boundary.comparison(ticker, current, histories[ticker], boundary_application, **policy_args)
+                comparison["identity"] = identities[ticker]
+                if boundary_application.get("stale"):
+                    for item in boundary_items:
+                        if item["proposal"]["evidence"]["identity"]["ticker"] == ticker:
+                            boundary.save_item(review_queue.path, item["proposal"], stale_reason=boundary_application["reason"])
             if comparison["classification"] != "REVIEW_REQUIRED":
                 comparison["publish_date_impact"] = publish_date_impact(
                     source_paths,

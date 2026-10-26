@@ -234,6 +234,7 @@ def revalidate_bound_source(
             (item.get("retained_history_approval") or {}).get("applied")
             or (item.get("fiscal_revision_approval") or {}).get("applied")
             or (item.get("true_removal_approval") or {}).get("applied")
+            or (item.get("accounting_boundary_resolution") or {}).get("applied")
         )
     }
     evaluation_tickers = sorted(
@@ -329,6 +330,13 @@ def revalidate_bound_source(
                 true_removal_approval=applied_true_removal_approval,
                 **policy_args,
             )
+        from . import accounting_boundary_review as boundary
+        expected_boundary = preview_change.get("accounting_boundary_resolution") or {}
+        boundary_application = (boundary.evaluate_for_refresh(paths.provider_db, paths.canonical_db, histories[ticker], identity, review_queue.path) if review_queue is not None else boundary.evaluate(paths.provider_db, paths.canonical_db, histories[ticker], identity, decision=expected_boundary.get("decision")))
+        if boundary_application.get("applied") or boundary_application.get("stale") or boundary_application.get("pending"):
+            item = boundary.comparison(ticker, current, histories[ticker], boundary_application, **policy_args)
+        if expected_boundary and boundary_application != expected_boundary:
+            raise StaleRefreshPreview("STALE_ACCOUNTING_BOUNDARY_RESOLUTION")
         if all("rows" in current.get(dimension, {}) for dimension in REFRESH_DIMENSIONS):
             merge_plans[ticker] = build_source_history_merge(
                 ticker,
@@ -393,7 +401,14 @@ def replace_provider_histories(
     provider_db: Path, histories: Mapping[str, Mapping[str, HistoryTrust]],
     identities: Mapping[str, Mapping[str, Any]], *, applied_at: str,
     merge_plans: Mapping[str, Mapping[str, Any]] | None = None,
+    boundary_applications: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    from . import accounting_boundary_review as boundary
+    for ticker, application in (boundary_applications or {}).items():
+        if not application.get("applied"):
+            raise boundary.BoundaryReviewError("BOUNDARY_UNVALIDATED_CANDIDATE_APPLICATION")
+        boundary.validate_candidate_input(application, histories[ticker])
+        boundary.install_on_copy(provider_db, application["decision"])
     tickers = sorted(histories)
     unrelated_before = _provider_unrelated_fingerprint(provider_db, tickers)
     run_id = "REFRESH_COPY_" + hashlib.sha256((applied_at + "|".join(tickers)).encode()).hexdigest()[:20]
@@ -435,7 +450,7 @@ def replace_provider_histories(
                     record_key = "|".join(key)
                     content_hash = fingerprint(_raw_row(item))
                     observation_id = _observation_id(record_key, content_hash)
-                    payload = dict(item)
+                    payload = dict(row.get("_acquisition_payload") or item)
                     retention_status = row.get("_history_retention_status")
                     provenance = {}
                     if retention_status == RETAINED_OUTSIDE_SOURCE_WINDOW:
@@ -466,6 +481,7 @@ def replace_provider_histories(
                 "source_history_action": (merge_plans or {}).get(ticker, {}).get("action", {}),
             })
         connection.commit()
+    boundary.validate_store(provider_db)
     verification = validate_provider_candidate(provider_db, histories, merge_plans=merge_plans)
     unrelated_after = _provider_unrelated_fingerprint(provider_db, tickers)
     if unrelated_before != unrelated_after:
@@ -479,6 +495,8 @@ def validate_provider_candidate(
     *,
     merge_plans: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    from . import accounting_boundary_review as boundary
+    boundary.validate_store(path)
     evidence = []
     retained_rows: list[dict[str, Any]] = []
     true_removal_rows: list[dict[str, Any]] = []
@@ -1164,6 +1182,7 @@ def run_apply(
             provider_result = replace_provider_histories(
                 provider_candidate, selected_histories, identities,
                 applied_at=applied_at, merge_plans=selected_merge_plans,
+                boundary_applications={item["ticker"]: item["accounting_boundary_resolution"] for item in changed if (item.get("accounting_boundary_resolution") or {}).get("applied")},
             )
         writer.write_json("provider_replacement_summary.json", provider_result)
         progress.completed(failed_stage, "Provider candidate replacement completed.", processed_items=len(changed_tickers), total_items=len(changed_tickers))

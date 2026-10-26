@@ -56,6 +56,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         category TEXT, pb REAL, marketcap REAL, price REAL, sharesbas REAL,
         shareswa REAL, shareswadil REAL, sharefactor REAL
     )""")
+    source_columns = {r[1] for r in conn.execute(f"PRAGMA table_info({SOURCE_TABLE})")}
+    for name in ("effective_fiscalperiod", "fiscal_identity_resolution_id"):
+        if name not in source_columns:
+            conn.execute(f"ALTER TABLE {SOURCE_TABLE} ADD COLUMN {name} TEXT")
     conn.execute(f"""CREATE TABLE IF NOT EXISTS {PROVENANCE_TABLE} (
         provenance_id INTEGER PRIMARY KEY,
         quarter_id INTEGER NOT NULL REFERENCES v4_quarter(quarter_id) ON DELETE CASCADE,
@@ -93,8 +97,16 @@ def accept_parent_equity(conn: sqlite3.Connection, provider: sqlite3.Connection,
         if observations is None:
             raise ValueError("PARENT_EQUITY_OBSERVATION_MISSING")
         raw = json.loads(observations['payload_json'])
+        from rawcandle.fundamentals.admin.accounting_boundary_review import ARQ_KEY, interpretation, _key
+        reviewed = {'effective_fiscalperiod': raw.get('fiscalperiod'), 'resolution_id': None}
+        if _key(raw) == ARQ_KEY:
+            native = provider.execute('SELECT * FROM sharadar_fundamental_observation WHERE observation_id=?', (observations['observation_id'],)).fetchone()
+            if native is None:
+                raise ValueError('PARENT_EQUITY_ACCEPTED_NATIVE_SOURCE_MISSING')
+            reviewed = interpretation(provider, dict(native))
+        effective_label = reviewed['effective_fiscalperiod']
         if (observations['provider'] != 'SHARADAR' or raw.get('dimension') != 'ARQ'
-            or raw.get('fiscalperiod') != f"{q['fiscal_year']}-{q['fiscal_quarter']}"
+            or effective_label != f"{q['fiscal_year']}-{q['fiscal_quarter']}"
             or raw.get('reportperiod') != q['source_reportperiod']
             or finite(raw.get('sharesbas')) != finite(q['shares_outstanding'])):
             raise ValueError("PARENT_EQUITY_ACCEPTED_OBSERVATION_MISMATCH")
@@ -112,6 +124,7 @@ def accept_parent_equity(conn: sqlite3.Connection, provider: sqlite3.Connection,
         columns = ('quarter_id','provider','observation_id','content_hash','dimension','fiscalperiod','reportperiod','provider_date','source_availability_date','fetched_at_utc','lastupdated','acceptance_rule','accepted_at_utc','category',*NUMERIC_SOURCE_FIELDS)
         values = (qid,'SHARADAR',observations['observation_id'],observations['content_hash'],'ARQ',raw['fiscalperiod'],raw['reportperiod'],raw.get('date'),observations['source_availability_date'],observations['fetched_at_utc'],raw.get('lastupdated'),RULE_VERSION,accepted_at,metadata.get(raw.get('ticker')), *(finite(raw.get(k)) for k in NUMERIC_SOURCE_FIELDS))
         conn.execute(f"INSERT INTO {SOURCE_TABLE} ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})", values)
+        conn.execute(f"UPDATE {SOURCE_TABLE} SET effective_fiscalperiod=?,fiscal_identity_resolution_id=? WHERE quarter_id=?", (effective_label, reviewed['resolution_id'], qid))
         metrics['bound_quarters'] += 1
     return metrics
 
