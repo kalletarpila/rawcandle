@@ -155,7 +155,17 @@ def terminal_retention(summary_path: str | Path) -> dict:
             if hold.get('scope') == owner['scope'] and hold.get('state') != 'RELEASED':
                 result['held'].append({'owner': str(hold_path), 'reason': hold.get('reason', 'RECOVERY_HOLD')})
                 return result
+            if hold.get('scope') == owner['scope'] and hold.get('state') == 'RELEASED' and hold.get('general_recovery'):
+                _qualified_general_point(hold)
+        if not _publication_clear(owner['scope'][0]):
+            result['held'].append({'owner': str(manifest), 'reason': 'UNRESOLVED_PUBLICATION_JOURNAL'})
+            return result
         owner.update(acceptance_path=str(summary_path), acceptance_sha256=_hash(summary_path))
+        try:
+            _not_open(path)
+        except ValueError as exc:
+            result['held'].append({'owner': str(manifest), 'reason': str(exc)})
+            return result
         _verify(path, owner)
         connection = sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True)
         try:
@@ -172,6 +182,12 @@ def terminal_retention(summary_path: str | Path) -> dict:
                 prior = _load(prior_manifest)
                 if prior['state'] != 'ACCEPTED' or prior['scope'] != owner['scope']:
                     continue
+                if prior.get('protection_reason'):
+                    continue
+                if (hold_path.exists() and hold.get('scope') == owner['scope']
+                        and hold.get('general_recovery', {}).get('path') == prior.get('path')):
+                    continue  # Explicit general recovery obligation outlives EC supersession.
+
                 old = Path(prior['path'])
                 if old.parent != path.parent or prior_manifest != Path(str(old) + SUFFIX):
                     raise ValueError('EC owner path mismatch')
@@ -264,5 +280,87 @@ def protect_reused_backup(path: Path) -> None:
             raise ValueError('Reused EC recovery image identity changed')
         owner.update(state='RECOVERY_REQUIRED', protection_reason='EXPLICIT_BACKUP_REUSE')
         _save(manifest, owner)
+    finally:
+        os.close(fd)
+
+
+def _publication_clear(db_path: str) -> bool:
+    """A completed EC branch cannot discharge an unresolved whole-DB publication."""
+    journal = Path(db_path).parent / '.fundamentals_admin_publication_journal.json'
+    if not journal.exists() and not journal.is_symlink():
+        return True  # Databases outside the Fundamentals publication owner.
+    file_identity(journal)
+    value = json.loads(journal.read_text())
+    return (value.get('state') == 'COMPLETED' and value.get('postflight_state') == 'PASSED'
+            and value.get('rollback_recovery_state') in {'NOT_REQUIRED', 'COMPLETED', 'ROLLED_BACK'})
+
+
+def _qualified_general_point(hold: dict) -> None:
+    point = hold['general_recovery']
+    if file_identity(Path(point['path'])) != point['identity']:
+        raise ValueError('Qualified general Analysis recovery point changed')
+    for suffix in ('-wal', '-journal'):
+        sidecar = Path(point['path'] + suffix)
+        if sidecar.is_symlink() or (sidecar.exists() and (suffix == '-journal' or sidecar.stat().st_size)):
+            raise ValueError('General Analysis recovery image has unresolved sidecars')
+    evidence = Path(hold['release_evidence_path'])
+    file_identity(evidence)
+    if _hash(evidence) != hold['release_evidence_sha256']:
+        raise ValueError('Historical hold release evidence changed')
+    for name, digest in hold['recovery_artifacts'].items():
+        path = Path(name)
+        file_identity(path)
+        if _hash(path) != digest:
+            raise ValueError('Required compact recovery evidence changed')
+
+
+def release_historical_hold(hold_path: Path, *, release_evidence: Path, owner_guard) -> dict:
+    """Supported BLOCKED -> RELEASED transition under qualified owner evidence.
+
+    Caller holds existing Production/scheduler and temporary-cleanup ownership.
+    Preserve the old hold and its reason; never unlink it to bypass recovery.
+    """
+    fd = os.open(hold_path.parent / '.ec-backup-retention.lock',
+                 os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        file_identity(hold_path.parent / '.ec-backup-retention.lock')
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        owner_guard()
+        hold = _load(hold_path)
+        evidence = _load(release_evidence)
+        if evidence['scope'] != hold['scope'] or evidence.get('result') != 'PASS':
+            raise ValueError('Historical recovery qualification not accepted')
+        for key in ('historical_obligations_discharged', 'decision_matrix_valid',
+                    'retained_recovery_qualified', 'no_active_recovery'):
+            if evidence.get(key) is not True:
+                raise ValueError(f'Hold release prerequisite missing: {key}')
+        ledger_path = Path(evidence['cleanup_execution_path'])
+        ledger = _load(ledger_path)
+        if (_hash(ledger_path) != evidence['cleanup_execution_sha256'] or ledger.get('state') != 'COMPLETE'
+                or ledger.get('deleted_images') != evidence['approved_image_count']
+                or ledger.get('deleted_allocated_bytes') != evidence['approved_allocated_bytes']
+                or len(ledger['images']) != evidence['approved_image_count']):
+            raise ValueError('Historical cleanup not reconciled')
+        for name, item in ledger['images'].items():
+            if item['state'] not in {'DELETED', 'RECONCILED_ABSENT'} or Path(name).exists() or Path(name).is_symlink():
+                raise ValueError('Historical cleanup incomplete')
+        qualification = Path(evidence['retained_qualification_path'])
+        value = _load(qualification)
+        if (_hash(qualification) != evidence['retained_qualification_sha256'] or value.get('result') != 'PASS'
+                or value.get('quick_check') != 'ok' or value.get('schema_exact') is not True
+                or value['path'] != evidence['general_recovery']['path']
+                or value['identity'] != evidence['general_recovery']['identity']
+                or value['sha256'] != evidence['general_recovery']['sha256']):
+            raise ValueError('Required general Analysis image is not qualified')
+        if not _publication_clear(hold['scope'][0]):
+            raise ValueError('Unresolved publication journal')
+        updated = dict(hold, state='RELEASED', previous_state=hold.get('previous_state', hold['state']),
+                       release_reason='G-OPS-05 obligations qualified; G-OPS-06 exact cleanup reconciled',
+                       release_evidence_path=str(release_evidence), release_evidence_sha256=_hash(release_evidence),
+                       general_recovery=evidence['general_recovery'], recovery_artifacts=evidence['recovery_artifacts'])
+        _qualified_general_point(updated)
+        owner_guard()
+        _save(hold_path, updated)
+        return updated
     finally:
         os.close(fd)

@@ -249,3 +249,50 @@ def test_unresolved_scope_hold_blocks_even_complete_ec_acceptance(points):
     assert not result['deleted'] and result['held']
     assert old.exists() and new.exists()
     assert json.loads(Path(str(new) + retention.SUFFIX).read_text())['state'] == 'RECOVERY_REQUIRED'
+
+
+def released_hold(point):
+    evidence = point.parent / 'qualified_release.json'
+    evidence.write_text('{"qualification":"fixture"}')
+    hold = point.parent / '.ec-backup-retention-hold.json'
+    owner = json.loads(Path(str(point)+retention.SUFFIX).read_text())
+    hold.write_text(json.dumps(dict(version=1, state='RELEASED', scope=owner['scope'],
+        general_recovery=dict(path=str(point), identity=retention.file_identity(point), sha256=retention._hash(point)),
+        release_evidence_path=str(evidence), release_evidence_sha256=retention._hash(evidence), recovery_artifacts={})))
+    return hold
+
+
+def test_released_hold_preserves_general_point_and_bounds_later_accepted_images(points):
+    general, first = points(1)
+    retention.terminal_retention(first)
+    released_hold(general)
+    previous, second = points(2, overall_status='PARTIAL')
+    assert retention.terminal_retention(second)['deleted'] == []
+    newest, third = points(3)
+    assert retention.terminal_retention(third)['deleted'] == [str(previous)]
+    assert general.exists() and newest.exists()
+
+
+@pytest.mark.parametrize('hazard', ['image', 'evidence', 'wal'])
+def test_released_hold_blocks_if_general_recovery_loses_qualification(points, hazard):
+    general, first = points(1); retention.terminal_retention(first)
+    released_hold(general)
+    if hazard == 'image': general.touch()
+    elif hazard == 'evidence': (general.parent/'qualified_release.json').write_text('changed')
+    else: Path(str(general)+'-wal').write_bytes(b'unresolved')
+    new, second = points(2)
+    with pytest.raises(ValueError): retention.terminal_retention(second)
+    assert general.exists() and new.exists()
+
+
+@pytest.mark.parametrize('state', ['PREPARED', 'PUBLISHING', 'RECOVERY_REQUIRED', 'FAILED'])
+def test_unresolved_publication_protects_ec_accepted_images(points, state):
+    old, first = points(1); retention.terminal_retention(first)
+    journal = old.parent/'.fundamentals_admin_publication_journal.json'
+    journal.write_text(json.dumps(dict(state=state, postflight_state='PASSED', rollback_recovery_state='NOT_REQUIRED')))
+    new, second = points(2, overall_status='PARTIAL')
+    result = retention.terminal_retention(second)
+    assert not result['deleted'] and result['held'][0]['reason'] == 'UNRESOLVED_PUBLICATION_JOURNAL'
+    assert old.exists() and new.exists()
+    journal.write_text(json.dumps(dict(state='COMPLETED', postflight_state='PASSED', rollback_recovery_state='NOT_REQUIRED')))
+    assert retention.terminal_retention(second)['deleted'] == [str(old)]
