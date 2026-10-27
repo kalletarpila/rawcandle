@@ -1,3 +1,5 @@
+**Current result — Stage 2: cleanup COMPLETED; exactly three accepted rollback backups deleted (2,628,214,784 bytes), zero selected files remaining, and no collateral or live Production changes. Stage 1 audit/consent history is preserved below.**
+
 # WFRD rollback backup acceptance — 2026-10-27
 
 Task: WFRD-ROLLBACK-BACKUP-ACCEPTANCE-1. Stage 1 audit HEAD: `a9bac025c21ac986d822d09a0a6a4e837a6941ed`. Governing [Production report](wfrd_production_update_2026-10-27.md), documentation commit `a9bac025c21ac986d822d09a0a6a4e837a6941ed`.
@@ -106,3 +108,53 @@ Do you approve deletion of the exact three rollback backups retained from succes
 YES authorizes only these exact three backup copies. It authorizes no other backup/temp deletion, OLD/NEW generation deletion, publication-authority cleanup/drain, review approval, or new Production run. If active generation, journal, recovery state, exact backup identity/provenance, or eligibility changes before deletion, consent is stale and cleanup must STOP. Post-YES revalidation, cleanup execution, deleted count/bytes and final invariance remain pending.
 
 Branch closeout recommendation: finish this exact acceptance gate first; preserve all unrelated worktree/runtime changes and keep the branch unpushed. No broader storage cleanup or branch merge is authorized by this audit.
+
+
+## Stage 2 — explicit YES, exact cleanup, and final verification
+
+The operator replied **YES** after the Stage 1 acceptance gate and documentation commit `409cfc22f77086a581e19bf948eab9d546792bf7`. Cleanup consent was recorded at `2026-10-27T20:43:17Z` for scope fingerprint `5c4e302235b7e369e39b5530265c71f6a18bbb790fd17a05a7ed6457b18acf2b`, restricted to the three audited rollback copies from Production run `20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3`. Prior Production consent was not reused.
+
+**Cleanup COMPLETED. Deleted backups: 3; deleted bytes: 2,628,214,784; selected backups remaining: 0.** Active generation remains `refresh_20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3`. Live financial state, manifests, journal, watermark, reviews, publication-authority data and scheduler config are unchanged. No source or repository/full-suite test run was required or performed.
+
+### Post-YES revalidation and existing mechanism
+
+Before deletion, the public cleanup API's supported lock factory acquired the actual normal Fundamentals operation lock and Production/scheduler kernel locks, then revalidated the exact accepted scope while holding those locks. The same guards remained held through the existing cleanup function and independent post-cleanup verification; no lock was bypassed and no private deletion function was called directly.
+
+Post-YES revalidation passed: exact successful Production result file hash, current active NEW generation, terminal selected-run journal, postflight PASSED, recovery NOT_REQUIRED, watermark 2026-10-26, all live authority hashes, queue decisions, scheduler config, and unchanged cleanup-mechanism source files. The three-role manifest, exact paths, device/inode/size/mtime/ctime/link identities, recorded backup hashes, OLD-source paths/hashes, eligibility, and freshly measured 2,628,214,784-byte total matched the accepted scope. All three selected backups were still regular nonsymlink files; their directory held only those exact three files. No scheduler/Fundamentals/Production operation was active and no recovery dependency appeared.
+
+The existing public `run_acceptance_cleanup.accept_run_and_cleanup_backups()` performed deletion using normal run/backup/journal roots and its unchanged verification/deletion implementation. It independently verified all selected backup hashes/integrity and live role integrity, reread terminal evidence before the first unlink, removed only the selected role files, and removed their owned run directory after it became empty. There was no manual `rm`, glob/age-based cleanup, retry, new Production, or broader selection.
+
+| Deleted role | Exact deleted path | Deleted bytes | Hash verified before deletion |
+| --- | --- | --- | --- |
+| analysis | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/analysis.db` | 910,512,128 | `492d437dcbd979039f8cdd863187ac36e1f1c0ddd543b3564b156e901e998708` |
+| canonical | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/canonical.db` | 749,371,392 | `e922eac780ec91fb2edc29e64879a17dd0cb5c81649b737f0dfcbe3235529c51` |
+| provider | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/provider.db` | 968,331,264 | `dbe53b90af540322babb3196c104b2e125c966aa9c4a28517d261293e1df88d5` |
+
+The normal surviving receipt is `/home/kalle/projects/rawcandle/fundamental_reports/admin_runs/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/backup_cleanup.json`. It records cleanup timestamp `2026-10-27T20:43:29Z`, operator action ACCEPT_RUN_AND_CLEANUP_BACKUPS, COMPLETED outcome, exact deleted files, verified hashes/integrity, 2,628,214,784 bytes freed, and unchanged live integrity. Explicit consent is additionally retained in the same Production run's `wfrd_backup_acceptance_authorization.json`. The original Production result/backup provenance and journal were not rewritten. The inspector now returns **ALREADY_CLEANED**, making this completed acceptance distinct from the historical Production report's retained-backup inventory.
+
+### Deletion and collateral verification
+
+Each of the three selected files is absent; none remains. Exactly 29 other backup files remain with the same paths, device/inode identities, sizes and timestamps as the fresh pre-deletion inventory. All 25 unrelated temp lanes and their recorded direct-file identities remain unchanged. No unrelated backup/temp or generation file was removed. The retained OLD generation files still exist and match their original source hashes; NEW remains the active healthy generation. Only the now-empty, owned backup-run directory was removed by the existing mechanism.
+
+### Final live-state invariance
+
+Before/after main-file SHA-256 values match for every authority below; semantic comparisons also match watermark, journal states, WFRD Q4/date/P/B/share provenance, all Review Queue tables/schemas and approval decisions, and scheduler config.
+
+| Authority | Before = after SHA-256 |
+| --- | --- |
+| analysis | `2bb68fb3029a6821c098c57b8f314e2af9693e566c030e75d2ee1e02b1d384e7` |
+| canonical | `5ec357a3a137b9cf3018c0603e17db191ec30033167fdf5c0f1c199805cc8a0e` |
+| provider | `5986536f13891e506c7a009269d731fdc7f97d7da87a6544b2390b4ae49e794f` |
+| active_manifest | `f9f1d0af37d81d68717de3e3f1fc84b63ee2f9113e41e872d34adf14d48360a0` |
+| generation_manifest | `f9f1d0af37d81d68717de3e3f1fc84b63ee2f9113e41e872d34adf14d48360a0` |
+| journal | `97e960f99b1dd51ce3c4db562eaa1a1c2d0afe827606fbec37e540505cd53276` |
+| queue | `d92e21f51d002fe6d9093f1db0da0b02d062fe466217b7285d19ddbbb680c17d` |
+| scheduler_config | `3a0b74412a0fb9cf5e7a9b370e97a6d48af031d5094d53b5689669e630c9e894` |
+
+Provider/canonical/analysis quick_check and FK checks pass after cleanup. WFRD's exact native/effective ARQ identities, separate genuine 2020 Q4, historical/current MRQ separation and calculation exclusions, both Q4 first-public dates, and ARQ parent-equity/share/P/B bindings all pass and equal the pre-deletion validation. Analysis bytes are identical to the Stage 1 fully validated package, and fresh active V2/RP/RV pointer checks match those same validated snapshots. No rebuild was performed.
+
+Journal state/step remain **COMPLETED / COMPLETED**; activation ACTIVATED_AND_VERIFIED; postflight PASSED; rollback/recovery NOT_REQUIRED. Active generation and manifest are unchanged; watermark remains **2026-10-26**. WFRD review remains APPROVED and exactly unchanged. DHR remains **OPEN**, unapproved. The entire live Review Queue is byte-identical. All 131 publication-authority rows remain identical: **81 VERIFIED, 16 UNRESOLVED, 4 AMBIGUOUS, 30 NOT_FOUND**; no retry, scope expansion, resolution or drain occurred. Scheduler config, Policy V1, resolver and taxonomy were not changed.
+
+Runtime evidence: `/tmp/wfrd_backup_acceptance_stage2` contains explicit consent, post-YES scope/identity verification, fresh before/after/collateral/temp inventories, normal cleanup result, live integrity/WFRD/model-pointer checks, publication-authority comparison and terminal verification. The normal cleanup receipt survives outside the deleted backup directory. Only acceptance documentation is committed; runtime files, DBs, manifests, journals, queues, backup artifacts, logs, caches, and unrelated worktree changes are excluded. Nothing is pushed.
+
+**Branch closeout recommendation:** the exact WFRD Production/rollback-backup acceptance workstream is complete. Review branch closeout separately; preserve unrelated worktree changes, retained OLD/NEW generations, 29 other backup files and 25 temp lanes. No broader cleanup, merge or push is authorized by this task.

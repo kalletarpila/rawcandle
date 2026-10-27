@@ -1,4 +1,4 @@
-**Current result — Stage 2: Production COMPLETED; atomic generation activation and postflight PASS. Explicit operator YES was received after Stage 1. OLD and three verified rollback backups are retained. Earlier STOP and Stage 1 consent records are preserved below; the completed Stage 2 record follows them.**
+**Production result — Stage 2: Production COMPLETED; atomic generation activation and postflight PASS. Explicit operator YES was received after Stage 1. OLD remains retained. The three rollback copies retained at publication were subsequently deleted after separate explicit acceptance; see the [completed backup acceptance report](wfrd_rollback_backup_acceptance_2026-10-27.md). Earlier STOP and Stage 1 consent records are preserved below; the Production completion record follows them.**
 
 # WFRD Production authorization — stopped before consent
 
@@ -279,4 +279,4 @@ DHR's P/B review remains **OPEN**, unapproved, with no operator approval. All ty
 
 Runtime evidence: `fundamental_reports/admin_runs/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/` (normal source/binding/candidate/postflight/result/journal-related reports and explicit consent) and `/tmp/wfrd_production_stage2` (post-YES source/baseline/terminal checks, independent published WFRD and role validation, retained backup verification, manifest/Test semantic comparison). Runtime DBs, manifests, journals, queue, backups, downloads, reports, logs, caches, and unrelated worktree changes are excluded from Git. This documentation is the only commit change; nothing is pushed.
 
-**Next phase:** review the published result and perform a separate explicit rollback-backup acceptance/cleanup decision. The three backups and OLD generation remain retained; this task does not authorize deletion.
+**Subsequent acceptance:** the separate explicit rollback-backup acceptance/cleanup completed as documented in the [backup acceptance report](wfrd_rollback_backup_acceptance_2026-10-27.md). The Production record above preserves the original retention state at publication completion. OLD remains retained; no other backup or generation cleanup is authorized. Review branch closeout separately.
