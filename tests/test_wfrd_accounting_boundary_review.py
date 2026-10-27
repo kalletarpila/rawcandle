@@ -594,7 +594,8 @@ def test_service_confirmation_and_exact_approval_use_fresh_evidence(case,monkeyp
     with pytest.raises(TypeError):svc.register_accounting_boundary_proposal(p)
     item=svc.register_accounting_boundary_proposal(p,rehearsal=proof)
     display=svc.accounting_boundary_approval_confirmation(p['resolution_id'])
-    assert display==dict(status='OPEN',proposal_fingerprint=p['proposal_fingerprint'],
+    assert display==dict(resolution_id=p['resolution_id'],linked_actions=[b.PRESERVE,b.RETAIN],
+                         status='OPEN',proposal_fingerprint=p['proposal_fingerprint'],
                          receipt_fingerprint=proof['receipt_fingerprint'],receipt_passed=True,
                          baseline_generation=p['evidence']['baseline']['generation'],candidate_sha256=proof['candidate_sha256'])
     display['candidate_sha256']['provider']='bad'  # Presentation cannot mutate stored identity.
@@ -680,3 +681,140 @@ def test_manifested_generation_binding_is_preserved_and_drift_rejected(case):
             proposal_fingerprint=p['proposal_fingerprint'],receipt_fingerprint=proof['receipt_fingerprint'],
             provider_db=case['p'],canonical_db=case['c'],histories=case['h'],identity=case['identity'])
     assert b.read_items(q)==[item]
+
+
+@pytest.fixture
+def confirmation_case(case):
+    from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+    from rawcandle.fundamentals.admin.refresh_review_queue import queue_path_for_run_root
+    svc=FundamentalsAdminUIService(run_root=case['tmp']/'confirmation'/'runs',recover_publication_on_startup=False)
+    queue=queue_path_for_run_root(svc.run_root)
+    item=b.save_item(queue,case['proposal'],rehearsal=case['receipt'])
+    return svc,queue,item
+
+
+def malformed_confirmation(case, item, *, stored_id=None, raw_json=None):
+    """An isolated corrupt/legacy fixture, never an edit of an immutable live item."""
+    from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+    from rawcandle.fundamentals.admin.refresh_review_queue import queue_path_for_run_root
+    svc=FundamentalsAdminUIService(run_root=case['tmp']/'malformed_confirmation'/'runs',recover_publication_on_startup=False)
+    queue=queue_path_for_run_root(svc.run_root);queue.parent.mkdir(parents=True)
+    with sqlite3.connect(queue) as c:
+        c.execute(f'CREATE TABLE {b.QUEUE}(resolution_id TEXT PRIMARY KEY,record_json TEXT NOT NULL)')
+        c.execute(f'INSERT INTO {b.QUEUE} VALUES(?,?)',
+                  (stored_id or case['proposal']['resolution_id'],
+                   raw_json if raw_json is not None else json.dumps(item,sort_keys=True)))
+    return svc,queue
+
+
+def test_confirmation_returns_authoritative_ordered_identity_and_is_read_only(case,confirmation_case,monkeypatch):
+    svc,q,item=confirmation_case;p=item['proposal'];binding=item['rehearsal_receipt_binding']
+    def forbidden_fetch():pytest.fail('Confirmation must not fetch provider evidence')
+    monkeypatch.setattr(svc,'_accounting_boundary_evidence',forbidden_fetch)
+    before={f:b.file_fingerprint(f) for f in (q,case['p'],case['c'])}
+    audit=queue_audit(q)
+    application=b.evaluate_for_refresh(case['p'],case['c'],case['h'],case['identity'],q)
+    confirmation=svc.accounting_boundary_approval_confirmation(p['resolution_id'])
+    assert confirmation=={
+        'resolution_id':p['resolution_id'], 'linked_actions':binding['linked_actions'],
+        'status':'OPEN', 'proposal_fingerprint':p['proposal_fingerprint'],
+        'receipt_fingerprint':binding['receipt_fingerprint'], 'receipt_passed':True,
+        'baseline_generation':binding['baseline_generation'], 'candidate_sha256':binding['candidate_sha256']}
+    assert confirmation['linked_actions']==[p['evidence']['arq']['action'],p['evidence']['mrq']['action']]
+    assert confirmation['linked_actions']==[b.PRESERVE,b.RETAIN]
+    confirmation['linked_actions'].reverse();confirmation['candidate_sha256']['provider']='changed presentation'
+    assert b.read_items(q)==[item] and queue_audit(q)==audit
+    assert before=={f:b.file_fingerprint(f) for f in before}
+    assert b.queued_decision(q,'WFRD') is None
+    assert application['pending'] and not application['applied']
+    assert application==b.evaluate_for_refresh(case['p'],case['c'],case['h'],case['identity'],q)
+    current={d:load_current_history(case['p'],'WFRD',d) for d in ('ARQ','MRQ')}
+    comparison=b.comparison('WFRD',current,case['h'],application);comparison['identity']=case['identity']
+    assert classify_review_scope(comparison)['scope']=='GLOBAL_BLOCKING_REVIEW'
+
+
+@pytest.mark.parametrize('path,value',[
+    ('schema_version','unsupported'), ('schema_version','__MISSING__'),
+    ('status','APPROVED'), ('status','STALE'), ('decision',{}), ('decision','__MISSING__'),
+    ('stale_reason','source drift'), ('rejected_reason','operator rejected'),
+    ('resolution_id','different item ID'),
+    ('proposal',None), ('proposal','__MISSING__'),
+    ('proposal.resolution_id','different proposal ID'),
+    ('proposal.proposal_fingerprint','__MISSING__'),
+    ('proposal.evidence.arq.action','__MISSING__'),
+    ('proposal.evidence.arq.action',b.RETAIN),
+    ('proposal.evidence.mrq.action','UNKNOWN_ACTION'),
+    ('rehearsal_receipt_binding',None), ('rehearsal_receipt_binding','__MISSING__'),
+    ('rehearsal_receipt_binding.resolution_id','different receipt ID'),
+    ('rehearsal_receipt_binding.proposal_fingerprint','0'*64),
+    ('rehearsal_receipt_binding.receipt_fingerprint','__MISSING__'),
+    ('rehearsal_receipt_binding.binding_fingerprint','0'*64),
+    ('rehearsal_receipt_binding.passed',False),
+    ('rehearsal_receipt_binding.linked_actions','__MISSING__'),
+    ('rehearsal_receipt_binding.linked_actions',[]),
+    ('rehearsal_receipt_binding.linked_actions',[b.PRESERVE,b.PRESERVE]),
+    ('rehearsal_receipt_binding.linked_actions',[b.PRESERVE,'UNKNOWN_ACTION']),
+    ('rehearsal_receipt_binding.linked_actions',[b.RETAIN,b.PRESERVE]),
+    ('rehearsal_receipt_binding.candidate_sha256','__MISSING__'),
+    ('rehearsal_receipt_binding.candidate_sha256.provider','__MISSING__'),
+    ('rehearsal_receipt_binding.candidate_sha256.canonical','bad hash'),
+    ('rehearsal_receipt_binding.baseline_generation','__MISSING__'),
+    ('rehearsal_receipt_binding.baseline_generation',''),
+])
+def test_confirmation_rejects_contradictory_or_missing_fields(case,confirmation_case,path,value):
+    item=deepcopy(confirmation_case[2]);target=item;names=path.split('.')
+    for name in names[:-1]:target=target[name]
+    if value=='__MISSING__':target.pop(names[-1])
+    else:target[names[-1]]=value
+    binding=item.get('rehearsal_receipt_binding')
+    if isinstance(binding,dict) and path!='rehearsal_receipt_binding.binding_fingerprint':
+        # Preserve valid binding checksums so scope/semantic checks must also reject.
+        binding['binding_fingerprint']=fingerprint({k:v for k,v in binding.items() if k!='binding_fingerprint'})
+    svc,q=malformed_confirmation(case,item);before=b.file_fingerprint(q)
+    with pytest.raises(b.BoundaryReviewError):
+        svc.accounting_boundary_approval_confirmation(case['proposal']['resolution_id'])
+    assert b.file_fingerprint(q)==before
+
+
+def test_confirmation_validates_actual_queue_key_not_only_embedded_proposal(case,confirmation_case):
+    item=confirmation_case[2];svc,q=malformed_confirmation(case,item,stored_id='different stored ID')
+    with pytest.raises(b.BoundaryReviewError,match='NOT_OPEN'):
+        svc.accounting_boundary_approval_confirmation(item['proposal']['resolution_id'])
+    with pytest.raises(b.BoundaryReviewError,match='CONFIRMATION_INVALID'):
+        svc.accounting_boundary_approval_confirmation('different stored ID')
+
+
+@pytest.mark.parametrize('raw_json',['null','[]','"invalid item"','{broken json'])
+def test_confirmation_rejects_malformed_record_with_domain_error(case,raw_json):
+    svc,q=malformed_confirmation(case,None,raw_json=raw_json);before=b.file_fingerprint(q)
+    with pytest.raises(b.BoundaryReviewError):
+        svc.accounting_boundary_approval_confirmation(case['proposal']['resolution_id'])
+    assert b.file_fingerprint(q)==before
+
+
+@pytest.mark.parametrize('requested_id',['not registered','',None])
+def test_confirmation_rejects_missing_or_invalid_requested_id(confirmation_case,requested_id):
+    svc,_,_=confirmation_case
+    with pytest.raises(b.BoundaryReviewError,match='NOT_OPEN'):
+        svc.accounting_boundary_approval_confirmation(requested_id)
+
+
+def test_confirmation_of_old_open_item_without_binding_remains_unavailable(case,confirmation_case):
+    item=deepcopy(confirmation_case[2]);item.pop('rehearsal_receipt_binding')
+    svc,_=malformed_confirmation(case,item)
+    with pytest.raises(b.BoundaryReviewError,match='REGISTERED_RECEIPT_REQUIRED'):
+        svc.accounting_boundary_approval_confirmation(case['proposal']['resolution_id'])
+
+
+def test_confirmation_rejects_empty_baseline_even_with_consistent_recomputed_hashes(case,confirmation_case):
+    item=deepcopy(confirmation_case[2]);p=item['proposal'];e=p['evidence'];binding=item['rehearsal_receipt_binding']
+    e['baseline']['generation']='';e['baseline_fingerprint']=fingerprint(e['baseline'])
+    p['evidence_fingerprint']=fingerprint(e);p['resolution_id']='boundary_'+p['evidence_fingerprint']
+    p['proposal_fingerprint']=fingerprint({k:v for k,v in p.items() if k!='proposal_fingerprint'})
+    binding.update(baseline_generation='',baseline_state_fingerprint=e['baseline_fingerprint'],
+                   resolution_id=p['resolution_id'],proposal_fingerprint=p['proposal_fingerprint'])
+    binding['binding_fingerprint']=fingerprint({k:v for k,v in binding.items() if k!='binding_fingerprint'})
+    b.validate_receipt_binding(p,binding)  # Presentation adds the required nonempty baseline check.
+    svc,_=malformed_confirmation(case,item,stored_id=p['resolution_id'])
+    with pytest.raises(b.BoundaryReviewError,match='CONFIRMATION_INVALID'):
+        svc.accounting_boundary_approval_confirmation(p['resolution_id'])

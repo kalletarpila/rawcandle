@@ -970,14 +970,42 @@ class FundamentalsAdminUIService:
 
     def accounting_boundary_approval_confirmation(self, resolution_id: str) -> Mapping[str, Any]:
         """Read-only confirmation fields; approval must echo these exact identities."""
-        from .accounting_boundary_review import validate_receipt_binding, BoundaryReviewError
-        items = [i for i in self.list_accounting_boundary_reviews()
-                 if i['proposal']['resolution_id'] == resolution_id]
-        if len(items) != 1 or items[0]['status'] != 'OPEN':
+        from .accounting_boundary_review import (
+            ITEM_VERSION, QUEUE, _ro, _has, verify, validate_receipt_binding, BoundaryReviewError,
+        )
+        from .refresh_review_queue import queue_path_for_run_root
+        path = queue_path_for_run_root(self.run_root)
+        if not isinstance(resolution_id, str) or not resolution_id or not path.exists():
             raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
-        item = items[0]
-        binding = validate_receipt_binding(item['proposal'], item.get('rehearsal_receipt_binding'))
-        return dict(status=item['status'], proposal_fingerprint=item['proposal']['proposal_fingerprint'],
+        with _ro(path) as connection:
+            if not _has(connection, QUEUE):
+                raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
+            row = connection.execute(
+                f'SELECT resolution_id,record_json FROM {QUEUE} WHERE resolution_id=?', (resolution_id,)
+            ).fetchone()
+        if row is None:
+            raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
+        try:
+            item = json.loads(row['record_json'])
+            if item['schema_version'] != ITEM_VERSION or item['decision'] is not None:
+                raise BoundaryReviewError('BOUNDARY_CONFIRMATION_INVALID')
+            if item['status'] != 'OPEN':
+                raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
+            proposal = item['proposal']
+            if (proposal['resolution_id'] != row['resolution_id']
+                    or item.get('resolution_id', row['resolution_id']) != row['resolution_id']
+                    or item.get('stale_reason') is not None or item.get('rejected_reason') is not None):
+                raise BoundaryReviewError('BOUNDARY_CONFIRMATION_INVALID')
+            verify(proposal)
+            binding = validate_receipt_binding(proposal, item.get('rehearsal_receipt_binding'))
+            if not isinstance(binding['baseline_generation'], str) or not binding['baseline_generation']:
+                raise BoundaryReviewError('BOUNDARY_CONFIRMATION_INVALID')
+        except BoundaryReviewError:
+            raise
+        except (KeyError, TypeError, AttributeError, ValueError) as exc:
+            raise BoundaryReviewError('BOUNDARY_CONFIRMATION_INVALID') from exc
+        return dict(resolution_id=proposal['resolution_id'], linked_actions=list(binding['linked_actions']),
+                    status=item['status'], proposal_fingerprint=proposal['proposal_fingerprint'],
                     receipt_fingerprint=binding['receipt_fingerprint'], receipt_passed=binding['passed'],
                     baseline_generation=binding['baseline_generation'], candidate_sha256=dict(binding['candidate_sha256']))
 
