@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_ROOT, ROOT, AdminRunWriter, stable_run_id
+from rawcandle.fundamentals.admin.accounting_boundary_review import applied_applications, validate_expected_store
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, _assert_clean_worktree
 from rawcandle.fundamentals.admin.contracts import AdminOperationType, RunStage, utc_now
 from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
@@ -526,14 +527,26 @@ def _publication_activity(journal: Mapping[str, Any] | None) -> dict[str, list[s
     return {"live_replacements": replaced, "rollback_restorations": restored}
 
 
+def build_provider_candidate(provider_db, histories, identities, *, changes, applied_at, merge_plans=None):
+    """Build only an inactive candidate from the revalidated authorized changes."""
+    from rawcandle.fundamentals.schema.parent_equity import assert_inactive_copy
+    assert_inactive_copy(Path(provider_db))
+    return replace_provider_histories(
+        provider_db, histories, identities, applied_at=applied_at, merge_plans=merge_plans,
+        boundary_applications=applied_applications(changes),
+    )
+
+
 def _postflight(
     *, paths: BatchAddTickerPaths, histories: Mapping[str, Any],
     merge_plans: Mapping[str, Any],
     canonical_result: Mapping[str, Any], analysis_result: Mapping[str, Any],
     expected_roles: Mapping[str, Mapping[str, Any]], refresh_state: Mapping[str, Any],
     as_of_date: str, read_only_sources: Mapping[str, Path] | None = None,
+    boundary_applications: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     provider = validate_provider_candidate(paths.provider_db, histories, merge_plans=merge_plans)
+    boundary_state = validate_expected_store(paths.provider_db, boundary_applications or {}, canonical_db=paths.canonical_db)
     with sqlite3.connect(f"file:{paths.provider_db.resolve()}?mode=ro", uri=True) as connection:
         connection.row_factory = sqlite3.Row
         state = connection.execute("SELECT * FROM sharadar_refresh_state WHERE singleton_id=1").fetchone()
@@ -576,7 +589,7 @@ def _postflight(
         if actual != expected:
             raise RuntimeError(f"REFRESH_POSTFLIGHT_ROLE_FINGERPRINT_MISMATCH:{role}")
         fingerprints[role] = actual
-    return {
+    result = {
         "provider": provider,
         "canonical": {
             **canonical,
@@ -595,6 +608,9 @@ def _postflight(
             "taxonomy_dependency": taxonomy,
         },
     }
+    if boundary_applications:
+        result["accounting_boundary"] = boundary_state
+    return result
 
 
 def _duration(started: str, completed: str) -> float:
@@ -933,6 +949,7 @@ def run_production_apply(
 
         changed = [item for item in revalidated["ticker_changes"] if item["classification"] in REPLACEMENT_CLASSES]
         changed_tickers = [item["ticker"] for item in changed]
+        boundary_applications = applied_applications(changed)
         identities = {item["ticker"]: item["identity"] for item in changed}
         histories = {ticker: revalidated["histories"][ticker] for ticker in changed_tickers}
         merge_plans = {ticker: revalidated["merge_plans"][ticker] for ticker in changed_tickers}
@@ -949,9 +966,9 @@ def run_production_apply(
         progress(stage, "RUNNING", "Preparing the isolated provider candidate.")
         with _durable_heartbeat(writer, stage, "Provider candidate construction is still running."):
             online_backup(source_paths.provider_db, provider_candidate)
-            provider_result = replace_provider_histories(
+            provider_result = build_provider_candidate(
                 provider_candidate, histories, identities,
-                applied_at=utc_now(), merge_plans=merge_plans,
+                changes=changed, applied_at=utc_now(), merge_plans=merge_plans,
             )
         source_watermark = str(revalidated["discovery"].get("observed_source_max_lastupdated") or "")
         if not source_watermark:
@@ -1046,6 +1063,10 @@ def run_production_apply(
         }
         candidate_checks = {role: sqlite_verification(path) for role, path in candidate_paths_by_role.items()}
         validate_provider_candidate(provider_candidate, histories, merge_plans=merge_plans)
+        if boundary_applications:
+            result["accounting_boundary_validation"] = validate_expected_store(
+                provider_candidate, boundary_applications, canonical_db=canonical_candidate,
+            )
         if _identity_mapping(canonical_candidate) != canonical_result["identity_contract"]["after"]:
             raise RuntimeError("REFRESH_CANONICAL_IDENTITY_VALIDATION_FAILED")
         candidate_sources = {
@@ -1075,6 +1096,10 @@ def run_production_apply(
         result["candidate_validation"] = {
             role: sqlite_verification(path) for role, path in candidate_paths_by_role.items()
         }
+        if boundary_applications:
+            result["accounting_boundary_validation"] = validate_expected_store(
+                provider_candidate, boundary_applications, canonical_db=canonical_candidate,
+            )
         result["candidate_analysis_lineage"] = _validate_analysis_generation(
             analysis_candidate, analysis_result=analysis_result,
             as_of_date=calculation_as_of_date, sources=candidate_sources,
@@ -1212,6 +1237,7 @@ def run_production_apply(
             analysis_result=analysis_result, expected_roles=roles, refresh_state=refresh_state,
             as_of_date=calculation_as_of_date,
             read_only_sources=read_only_copies,
+            boundary_applications=boundary_applications,
         )
         result["postflight"] = postflight
         journal = update_journal(journal_path, journal, postflight_state="PASSED", current_publication_step="POSTFLIGHT_PASSED")

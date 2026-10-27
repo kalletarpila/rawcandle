@@ -647,8 +647,79 @@ def current_provider_history(provider_db,ticker,dimension):
             if not r.get('_history_retention_status')]
 
 
-def validate_candidate_input(application, histories):
-    e=verify_decision(application['decision'])
+def applied_applications(changes):
+    """Select only applied objects from the already revalidated changed set."""
+    result = {}
+    for item in changes:
+        application = item.get('accounting_boundary_resolution') or {}
+        if not isinstance(application, Mapping):
+            raise BoundaryReviewError('BOUNDARY_CANDIDATE_APPLICATION_INVALID')
+        if application.get('applied'):
+            decision = application.get('decision')
+            if isinstance(decision, Mapping) and decision.get('copy_only') is True:
+                raise BoundaryReviewError('BOUNDARY_COPY_ONLY_NOT_RUNTIME_AUTHORITY')
+            ticker = item['ticker']
+            if ticker in result:
+                raise BoundaryReviewError('BOUNDARY_AMBIGUOUS_APPLICATION')
+            result[ticker] = application
+    return result
+
+
+def _application_evidence(ticker, application):
+    if (not isinstance(application, Mapping) or application.get('applied') is not True
+            or application.get('stale') is not False or application.get('phase') not in ('PENDING', 'PUBLISHED')):
+        raise BoundaryReviewError('BOUNDARY_UNVALIDATED_CANDIDATE_APPLICATION')
+    try:
+        evidence = verify_decision(application['decision'])
+        if application.get('proposal_fingerprint') != application['decision']['proposal']['proposal_fingerprint']:
+            raise BoundaryReviewError('BOUNDARY_APPLICATION_PROPOSAL_MISMATCH')
+        if ticker is not None and evidence['identity']['ticker'] != ticker:
+            raise BoundaryReviewError('BOUNDARY_APPLICATION_TICKER_MISMATCH')
+        return evidence
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise BoundaryReviewError('BOUNDARY_CANDIDATE_APPLICATION_INVALID') from exc
+
+
+def validate_expected_store(provider_db, applications, *, canonical_db=None):
+    """Read-only proof of required installed state, including absence detection."""
+    evidence = {ticker: _application_evidence(ticker, app) for ticker, app in applications.items()}
+    validate_store(provider_db)
+    checked = []
+    with _ro(provider_db) as p:
+        installed = {d['proposal']['resolution_id']: d for d in _records(p, DECISIONS)}
+        for ticker, e in evidence.items():
+            app = applications[ticker]; proposal = app['decision']['proposal']; rid = proposal['resolution_id']
+            if installed.get(rid) != app['decision']:
+                raise BoundaryReviewError('BOUNDARY_EXPECTED_DECISION_MISSING_OR_CHANGED')
+            for section, key in (('arq', e['arq']['source_key']), ('mrq', e['mrq']['current_key'])):
+                row = p.execute('SELECT po.payload_json FROM sharadar_fundamental_observation s JOIN provider_observation po USING(observation_id) WHERE s.ticker=? AND s.dimension=? AND s.date=? AND s.reportperiod=?', key).fetchone()
+                if row is None or json.loads(row[0]) != e[section]['incoming']['acquisition_payload']:
+                    raise BoundaryReviewError('BOUNDARY_CANDIDATE_ACQUISITION_CHANGED')
+            if canonical_db is not None:
+                with _ro(canonical_db) as c:
+                    for q in e['baseline']['quarters']:
+                        actual = _quarter(c, e['identity']['company_id'], q['fiscal_year'])
+                        if {k:v for k,v in actual.items() if k!='quarter_id'} != {k:v for k,v in q.items() if k!='quarter_id'}:
+                            raise BoundaryReviewError('BOUNDARY_EXPECTED_CANONICAL_CHANGED')
+                        source = c.execute('SELECT * FROM v4_parent_equity_source WHERE quarter_id=?', (actual['quarter_id'],)).fetchone()
+                        if source is None or source['dimension'] != 'ARQ' or source['effective_fiscalperiod'] != f"{q['fiscal_year']}-Q4":
+                            raise BoundaryReviewError('BOUNDARY_EXPECTED_PB_BINDING')
+                        if q['source_reportperiod'] == e['arq']['source_key'][3]:
+                            if source['fiscalperiod'] != e['arq']['provider_label'] or source['fiscal_identity_resolution_id'] != rid:
+                                raise BoundaryReviewError('BOUNDARY_EXPECTED_PB_RESOLUTION')
+                        elif source['fiscal_identity_resolution_id'] == rid:
+                            raise BoundaryReviewError('BOUNDARY_EXPECTED_PB_RESOLUTION')
+            checked.append({'ticker': ticker, 'resolution_id': rid,
+                            'decision_fingerprint': app['decision']['decision_fingerprint']})
+    return {'validated': True, 'expected_resolutions': checked}
+
+
+def validate_candidate_input(application, histories, *, ticker=None):
+    e=_application_evidence(ticker, application)
+    for history in histories.values():
+        for row in history.rows:
+            if (row['reportperiod'] in (ARQ_KEY[3], CURRENT_MRQ_KEY[3]) or row['fiscalperiod']=='2019-Q4') and _key(row) not in {ARQ_KEY, CURRENT_MRQ_KEY}:
+                raise BoundaryReviewError('BOUNDARY_NEW_ACCOUNTING_CONFLICT')
     for dim,key,expected in (('ARQ',ARQ_KEY,e['arq']['incoming']),('MRQ',CURRENT_MRQ_KEY,e['mrq']['incoming'])):
         if _incoming(histories[dim],key)!=expected:
             raise BoundaryReviewError('BOUNDARY_CANDIDATE_INPUT_STALE')
@@ -656,6 +727,9 @@ def validate_candidate_input(application, histories):
         raise BoundaryReviewError('BOUNDARY_CANDIDATE_ABSENCE_STALE')
     if application['phase']=='PENDING' and histories['MRQ'].evidence()!=e['mrq']['absence_proof']:
         raise BoundaryReviewError('BOUNDARY_CANDIDATE_RESPONSE_STALE')
+    binding = application['decision'].get('rehearsal_receipt_binding')
+    if application['phase']=='PENDING' and binding and binding['source_histories'] != {d:h.evidence() for d,h in histories.items()}:
+        raise BoundaryReviewError('BOUNDARY_COMPLETE_SOURCE_STALE')
 
 
 def rehearse(proposal, provider_db, canonical_db, histories, identity, output_dir):

@@ -405,9 +405,10 @@ def replace_provider_histories(
 ) -> dict[str, Any]:
     from . import accounting_boundary_review as boundary
     for ticker, application in (boundary_applications or {}).items():
-        if not application.get("applied"):
-            raise boundary.BoundaryReviewError("BOUNDARY_UNVALIDATED_CANDIDATE_APPLICATION")
-        boundary.validate_candidate_input(application, histories[ticker])
+        if ticker not in histories:
+            raise boundary.BoundaryReviewError("BOUNDARY_APPLICATION_TICKER_MISMATCH")
+        boundary.validate_candidate_input(application, histories[ticker], ticker=ticker)
+    for application in (boundary_applications or {}).values():
         boundary.install_on_copy(provider_db, application["decision"])
     tickers = sorted(histories)
     unrelated_before = _provider_unrelated_fingerprint(provider_db, tickers)
@@ -481,7 +482,7 @@ def replace_provider_histories(
                 "source_history_action": (merge_plans or {}).get(ticker, {}).get("action", {}),
             })
         connection.commit()
-    boundary.validate_store(provider_db)
+    boundary.validate_expected_store(provider_db, boundary_applications or {})
     verification = validate_provider_candidate(provider_db, histories, merge_plans=merge_plans)
     unrelated_after = _provider_unrelated_fingerprint(provider_db, tickers)
     if unrelated_before != unrelated_after:
@@ -1179,10 +1180,11 @@ def run_apply(
         failed_stage = ProgressStage.PROVIDER_REPLACEMENT
         progress.running(failed_stage, "Replacing complete ARQ/MRQ histories in provider candidate.", total_items=len(changed_tickers))
         with _background_heartbeat(progress, "Provider complete-history replacement is still running."):
+            from .accounting_boundary_review import applied_applications
             provider_result = replace_provider_histories(
                 provider_candidate, selected_histories, identities,
                 applied_at=applied_at, merge_plans=selected_merge_plans,
-                boundary_applications={item["ticker"]: item["accounting_boundary_resolution"] for item in changed if (item.get("accounting_boundary_resolution") or {}).get("applied")},
+                boundary_applications=applied_applications(changed),
             )
         writer.write_json("provider_replacement_summary.json", provider_result)
         progress.completed(failed_stage, "Provider candidate replacement completed.", processed_items=len(changed_tickers), total_items=len(changed_tickers))
