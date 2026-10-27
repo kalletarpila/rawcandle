@@ -1,6 +1,6 @@
 # WFRD combined preservation approval history
 
-Latest status: the Stage 1 restart below registered the exact V2-bound review **OPEN** at `2026-10-27T10:10:31Z`. Explicit operator approval remains pending. Earlier STOP entries are preserved as historical evidence.
+Latest status: after the user's explicit YES and fresh post-YES revalidation, the exact combined review is **APPROVED** under operator `kalle`. New MANUAL/PREVIEW_ONLY run `20261027T101828Z_refresh_fundamentals_052a88da4fba` completed with **0 global blockers, 94 safe changes, and Test authorized**. No Test or Production was executed. Earlier STOP and Stage 1 entries are preserved as historical evidence.
 
 Date: 2026-10-27. Task: WFRD-REVIEW-APPROVAL-1.
 
@@ -328,3 +328,104 @@ The final response asks the following exact-scope question. No answer is assumed
 > Do you approve this exact WFRD combined accounting-boundary resolution, resolution ID `boundary_3446e01f1422ebb5f7b3ea9e4a7e0f194cb5c8503669e5ed06b515659d0d1f5d`, bound to proposal fingerprint `0ddf1bdf2b398145521d990ed4a468e7a23a38e58ebfaf719f5f1484efc5ce34` and registered V2 rehearsal receipt fingerprint `b154760b9e948ce98e5515a661e1df8b87de91fddf2dffe92b934804bcdb07b3`, consisting of BOTH linked actions: (1) PRESERVE_ACCEPTED_FISCAL_IDENTITY for exact source key (WFRD, ARQ, 2020-03-16, 2019-12-31), preserving effective canonical 2019 Q4 while retaining raw provider 2020 Q4; and (2) RETAIN_REMOVED_ACCEPTED_MRQ_AS_HISTORICAL_SOURCE for exact removed key (WFRD, MRQ, 2019-12-31, 2019-12-31), while keeping current (WFRD, MRQ, 2019-12-13, 2019-12-13) as predecessor partial-period evidence and calculation-ineligible? YES/NO
 
 YES approves both linked actions together. It authorizes no Test, no Production, and no unrelated review item. Any source/baseline/evidence drift before approval application invalidates consent. Stop here and await the explicit answer. Only a later YES permits post-YES fresh revalidation, exact named-operator combined approval, and the original Stage 2's one new MANUAL/PREVIEW_ONLY run. Neither approval nor that Preview is performed by this Stage 1 task.
+
+## Stage 2: explicit YES, exact combined approval, and new Preview only
+
+Date: 2026-10-27. Starting HEAD: `e2782d0b956cf72029926c73370e63efaefb3f12`. Source unchanged; no pytest or full suite was run.
+
+### Explicit consent and post-YES revalidation
+
+The user replied **YES** to the immediately preceding Stage 1 question naming this exact resolution, proposal fingerprint, registered V2 receipt fingerprint, and both linked actions. The approval operator is the verified local account `kalle`. The consent covers the linked WFRD actions and the original Stage 2 Preview-only validation; it covers no Test, Production, or unrelated review approval.
+
+Before applying approval, fresh read-only checks confirmed that the live OPEN item and registered compact receipt binding were exactly the Stage 1 objects. All financial authority/manifest/journal hashes, generation, refresh state/watermark, Q4s/dates, identity, full P/B source/provenance, and queue semantic evidence matched the registered baseline. Documentation-only HEAD movement did not change bound evidence.
+
+Fresh normal-client WFRD ARQ/MRQ requests were COMPLETE and error-free, with 28/32 rows and the same raw/effective fingerprints as Stage 1. `verify()`, `validate_pending()`, `validate_receipt_binding()`, and the registered current-state/full-response checks passed. Old MRQ remained absent, current MRQ and ARQ were exact, there was no new boundary conflict, and the accepted-state fingerprint remained `52a21f789a5d471a7969d714ef3c70ee7585075c5b253554dc9d23f5a6a446cc`.
+
+The durable registered binding was the approval authority. Approval did not depend on loading a temporary receipt file or candidate path. The existing service then independently fetched both histories and revalidated again before its atomic approval transaction.
+
+### Atomic combined approval and audit
+
+`approve_accounting_boundary_review(resolution_id, operator="kalle", proposal_fingerprint=..., receipt_fingerprint=...)` approved exactly:
+
+1. PRESERVE_ACCEPTED_FISCAL_IDENTITY.
+2. RETAIN_REMOVED_ACCEPTED_MRQ_AS_HISTORICAL_SOURCE.
+
+| Identity | Value |
+| --- | --- |
+| Resolution ID | `boundary_3446e01f1422ebb5f7b3ea9e4a7e0f194cb5c8503669e5ed06b515659d0d1f5d` |
+| Proposal fingerprint | `0ddf1bdf2b398145521d990ed4a468e7a23a38e58ebfaf719f5f1484efc5ce34` |
+| V2 receipt fingerprint | `b154760b9e948ce98e5515a661e1df8b87de91fddf2dffe92b934804bcdb07b3` |
+| Receipt-binding fingerprint, unchanged | `a80ab6d8172059a17507b76b829d8f0bc4e62f3c4397b4aea58d83ba224f05f6` |
+| Decision fingerprint | `be718f56947cc3774bcd4fa9567620d4bf94511a704b503d59ffc9e086b71865` |
+| Status / operator / approved at | APPROVED / kalle / 2026-10-27T10:17:47Z |
+
+The item has no stale/rejection reason; the approved decision is `copy_only=false` and contains the exact unchanged registered binding. Decision integrity verification and a read-only current-source evaluation passed, with `applied=true`, `stale=false` against the published baseline. The application phase `PENDING` means pending candidate publication, not pending operator approval.
+
+The append-only combined audit contains exactly the original REGISTERED_OPEN event and one APPROVED event. The registration event is unchanged; both events bind the same proposal, receipt, resolution, actions, and baseline. No unrelated queue rows changed. Approval changed neither financial DBs nor active generation/watermark and installed neither the historical MRQ archive nor an ARQ overlay in active stores.
+
+### New manual Preview: measured outcome
+
+The normal `run_preview()` path ran once with `trigger_source="MANUAL"`, `workflow_mode="PREVIEW_ONLY"`, the normal Sharadar client, and the administration operation lock. No Full workflow, Test, or Production function was invoked. Startup recovery remained disabled.
+
+| Field | New Preview result |
+| --- | --- |
+| Run ID | `20261027T101828Z_refresh_fundamentals_052a88da4fba` |
+| Start / completion | 2026-10-27T10:18:28Z / 2026-10-27T10:20:57Z |
+| Outcome / mode | COMPLETED / PREVIEW |
+| Trigger / workflow mode | MANUAL / PREVIEW_ONLY |
+| Preview fingerprint | `777f76d7ba4750772307fdb39f1545bfd6ce760e2fe78cd952e2f7069ab715e9` |
+| WFRD classification | NEW_QUARTER_AND_REVISION |
+| WFRD combined resolution | Applied true; stale false; exact approved decision/proposal/receipt linkage |
+| WFRD global blocker | NO |
+| Total global blockers | 0 |
+| Safe effective changes | 94 |
+| Held/local items | 0 |
+| Review required | 0 |
+| Test authorized | YES |
+| Test authorization reason | SAFE_CHANGES_TEST_AUTHORIZED |
+| Operational decision | SAFE_CHANGES_AUTHORIZED |
+| Production gate | NOT_EVALUATED; TEST_MUST_COMPLETE_FIRST |
+
+The new Preview independently fetched and verified WFRD COMPLETE ARQ/MRQ histories (28/32). Its per-dimension complete-response evidence exactly matches the registered receipt binding:
+
+| Dimension | Raw comparison fingerprint | Effective fingerprint |
+| --- | --- | --- |
+| ARQ | `fba6bf8b3bf554f9a1d501362facb3db82ce78df4fc0d62d373489d0a173838c` | `94a9e4940bcaf351f0a28b6628da5a3edf6d7ee250ed1a77ee9ebc255780b695` |
+| MRQ | `d8fd585f22669710e25f160ae326e322312d9bbe97a56b79a426ed1d015d9cef` | `f64e0a571711993723d7bbba91c4a80f7ff01c0ae0bed842d304d7cb03372edb` |
+
+The Preview explicitly recognizes both reviewed accounting events: the exact ARQ fiscal-identity revision with unchanged financial payload and the exact MRQ true removal / SAME_FISCAL_SOURCE_KEY_REPLACEMENT. Neither event was hidden, rewritten as an ordinary local approval, or discarded as harmless metadata. Raw provider ARQ 2020 Q4 remains visible; the explicit reviewed effective identity is 2019 Q4. Genuine 2020 Q4 remains separate.
+
+Runtime artifacts are under `fundamental_reports/admin_runs/20261027T101828Z_refresh_fundamentals_052a88da4fba/`, including `result.json`, `refresh_preview.json`, and `operation_report.md`. They are not committed. The overnight Scheduler parent/child remain separate, unchanged historical evidence.
+
+### Projected canonical, publication-date, MRQ, and P/B checks
+
+The new Preview's WFRD publication-impact simulation reports:
+
+| Quarter | Existing first-public date | Proposed date | Result |
+| --- | --- | --- | --- |
+| 2019 Q4 | 2020-03-16 | 2020-03-16 | PRESERVE_EXISTING_FIRST_PUBLIC_RESULT_DATE; source availability drift false |
+| 2020 Q4 | 2021-02-19 | 2021-02-19 | PRESERVE_EXISTING_FIRST_PUBLIC_RESULT_DATE; source availability drift false |
+| 2026 Q3, independently new | None | Ordinary initial-date policy using source date 2026-10-21 | ESTABLISH_INITIAL_DATE_USING_EXISTING_CANONICAL_POLICY |
+
+WFRD publication status is NEW_QUARTER_AND_PRESERVED_HISTORY: two established quarters preserved, one expected new-quarter initialization, zero source-availability changes. Four source-only fiscal identities have NO_CANONICAL_DATE_IMPACT because no ARQ canonical winner exists for them; no predecessor MRQ publication authority or dates were manufactured. Across the Preview, all 89,970 established first-public dates remain preservation-applicable, historical bootstrap eligible is 0, and repair required is 0.
+
+For financial/P/B projected consequences, the exact previously bound inactive rehearsal copies were rechecked read-only: both hashes still match the durable registered binding, physical SQLite/quarter/date/P/B checks pass, and the exact old MRQ archive/current MRQ context remain intact. This was a read of existing copy evidence, not a new Test or candidate installation. Combined with the new Preview's exact source/baseline match, that evidence establishes:
+
+- Canonical 2019 Q4 projected intact: PASS.
+- Genuine canonical 2020 Q4 projected intact: PASS.
+- Both first-public dates projected intact: PASS.
+- Parent-equity/P/B source binding: PASS. Candidate 2019 Q4 source is ARQ, raw 2020-Q4, effective 2019-Q4, with the exact resolution ID; genuine 2020 Q4 remains ARQ/effective 2020-Q4.
+- Historical MRQ is exact successor-year-end-stock evidence, historical-only and calculation-ineligible; old December 31 is excluded from the candidate current/native response view.
+- Current December 13 MRQ is PREDECESSOR / PARTIAL_PERIOD_FLOW, calculation-ineligible, with 32 current MRQ rows and no cross-observation filling or financial hybrid.
+
+Approval/Preview recognize historical retention but do not install the historical archive into the live provider DB. Likewise the approved ARQ interpretation is available for candidate handling without replacing the published financial stores in this phase.
+
+### Final invariance and stopping boundary
+
+After approval and Preview, active provider/canonical/analysis, active and generation manifests, journal, generation, watermark, both Q4 rows/dates, identity, and all captured WFRD financial/P/B source/provenance records are unchanged from the post-YES baseline. `production_file_state_unchanged=true`, Preview is read-only, and `published_watermark_advanced=false`. Active provider still has no installed reviewed decision or historical archive.
+
+The active generation remains `refresh_20261022T043408Z_refresh_fundamentals_bb23ca223d59_production_eb6f648d`; watermark remains `2026-10-21`. All non-queue hashes in the Stage 1 invariance table remain identical. Live queue SHA-256 moved from `18006f50998084a7e0674d353f46814b76b69892100eea8186e24bdc62d53fef` to `b3955d6c874113b9db9e6067a61517a4fa22d45485f702a08d040d314ae738b0` solely for the WFRD approved item and its one approval audit append. Full unrelated legacy review/audit/P/B table fingerprints and existing operator actions are unchanged. The combined item and its two audit events are unchanged by Preview.
+
+**Test executed: NO. Production executed: NO. Production financial state changed: NO. Active generation changed: NO. Watermark changed: NO.** The Preview's Test authorization is a measured gate result, not permission to execute Test in this phase. Stage 2 ends here. Recommended next phase: separately review and authorize Test on copies for this fresh Preview's 94 safe changes, following the normal evidence revalidation and candidate checks; Production remains gated on the later Test lifecycle.
+
+Only approval/Preview documentation is committed. Runtime queue changes, provider downloads, Preview artifacts, candidates, manifests, journal, logs, and unrelated work remain uncommitted. Nothing is pushed.
