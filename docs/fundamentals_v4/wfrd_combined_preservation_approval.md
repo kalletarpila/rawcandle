@@ -127,3 +127,75 @@ The two linked actions remain `PRESERVE_ACCEPTED_FISCAL_IDENTITY` and `RETAIN_RE
 No pytest was run because source was unchanged. Verification was limited to scheduler/runtime artifact inspection, backend contract inspection, read-only SQLite checks, and file hashing.
 
 Recommended next phase: a separate bounded implementation task to persist the exact validated rehearsal receipt/fingerprint alongside the OPEN proposal and its audit, and require that same receipt binding at approval. Preserve proposal immutability, both linked actions, existing copy-only rejection, and the financial publication lifecycle. Then restart Stage 1 with a fresh live provider fetch and complete proposal/receipt/baseline revalidation. Only after successful OPEN registration should the exact fingerprint-bound YES/NO question be presented. This report grants no approval and no Test/Production authorization.
+
+## Fresh Stage 1 attempt after OPEN receipt binding V2
+
+Task: WFRD-REVIEW-APPROVAL-1-STAGE1. Date: 2026-10-27. HEAD at inspection: `c937d67e6bf03f2ebad95cc6ceaafb802084f14c`.
+
+**STOPPED_CONFIRMATION_CONTRACT_GAP, before real registration.** The previous receipt-registration defect above was resolved by [OPEN receipt binding V2](wfrd_open_receipt_binding.md). This attempt found a different mismatch between the requested confirmation output and the implemented read-only confirmation method. No source was changed, and the previous STOP history is preserved.
+
+### Latest scheduler inspected first
+
+The newest scheduler FULL_WORKFLOW parent remains `20261027T052613Z_refresh_fundamentals_d00eb7239fed_full_workflow_08a70a67`, with exact Preview child `20261027T052613Z_refresh_fundamentals_c274483eb886`. Freshly reading the parent's request/result and child's result confirmed:
+
+| Field | Result |
+| --- | --- |
+| Workflow outcome | STOPPED |
+| Preview outcome | REVIEW_REQUIRED |
+| WFRD classification | REVIEW_REQUIRED |
+| WFRD scope | GLOBAL_BLOCKING_REVIEW |
+| WFRD reasons | REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION; SAME_FISCAL_SOURCE_KEY_REPLACEMENT |
+| Safe effective changes | 93 |
+| Global blockers | 1, WFRD |
+| Held/local items | 0 |
+| Review required | 1 |
+| Test authorized | NO, GLOBAL_BLOCKER_PRESENT |
+| Test ran | NO; only Preview appears in stages |
+| Production ran | NO; entered/completed false, database writes 0 |
+
+These are measurements of the latest stored scheduler Preview, not a new Preview or newly granted authorization. No scheduler artifact was modified.
+
+### Exact confirmation mismatch
+
+Section H requires `accounting_boundary_approval_confirmation(resolution_id)` to return the existing confirmation fields plus “both actions / resolution identity.” In `rawcandle/fundamentals/admin/ui_service.py`, the method currently returns only:
+
+```text
+status
+proposal_fingerprint
+receipt_fingerprint
+receipt_passed
+baseline_generation
+candidate_sha256
+```
+
+It does not explicitly return `resolution_id` or the linked actions. Those values are already present in the durable item/binding, and the function validates that binding internally. Therefore this is a confirmation-output contract gap; it is not a loss of stored receipt evidence or a claim that the implemented fingerprint checks are invalid.
+
+Reading the two fields separately from the item would prove their identity, but would not make the specified method return the output Section H explicitly requires. No substituted confirmation output was represented as a passing method result. No real item was registered with a known subsequent gate mismatch.
+
+The current request says, “If a source defect appears: STOP.” It also excludes source changes from this runtime-only phase. Adding the missing confirmation fields and adjusting the focused presentation test therefore belongs to a separate bounded implementation phase. No source fix or pytest run was made here.
+
+### Read-only closeout baseline
+
+The active generation remains `refresh_20261022T043408Z_refresh_fundamentals_bb23ca223d59_production_eb6f648d`; provider watermark remains `2026-10-21`. The journal remains COMPLETED / ACTIVATED_AND_VERIFIED / PASSED / NOT_REQUIRED. Fresh hashes reproduce the values in the previous baseline table: provider, canonical, analysis, active manifest, Review Queue, and publication journal are unchanged.
+
+The queue still has 6 legacy review rows, 42 legacy audit rows, and 4 P/B ownership reviews. No combined item or combined audit table exists. No queue constructor/initializer, registration method, approval method, recovery operation, or financial write was invoked. Existing unrelated worktree changes were left untouched.
+
+### Gates not reached
+
+| Gate | Result |
+| --- | --- |
+| Fresh provider fetch | Not performed after confirmation-contract stop |
+| Current proposal freshness | NOT_REVALIDATED in this attempt |
+| Current V2 receipt freshness / physical candidate checks | NOT_REVALIDATED in this attempt |
+| Registration preflight | Not run |
+| Real OPEN registration | NO |
+| Registered decision / receipt binding / audit | No item registered; no event appended |
+| Explicit approval question | Not presented; prerequisites unmet |
+| Approval / new Preview / Test / Production | None performed |
+| WFRD blocker cleared | NO |
+| Financial DBs / active generation / watermark changed | NO |
+| Live Review Queue changed | NO |
+
+The request's known proposal fingerprint remains `0ddf1bdf2b398145521d990ed4a468e7a23a38e58ebfaf719f5f1484efc5ce34`; its known V2 receipt fingerprint is `b154760b9e948ce98e5515a661e1df8b87de91fddf2dffe92b934804bcdb07b3`. Neither is certified fresh by this stopped attempt. The earlier implementation's successful checks are historical evidence, not reused authorization.
+
+Recommended next phase: add explicit resolution identity and both linked actions to the read-only confirmation response, preserving all existing fingerprint checks and non-authoritative semantics, and cover that response with the directly relevant service test. Then restart Stage 1 from the latest scheduler inspection and fresh live provider/proposal/V2 receipt validation. No approval consent, Test authorization, or Production authorization is granted by this report. Only this documentation update is committed; nothing is pushed.
