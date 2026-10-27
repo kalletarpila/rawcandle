@@ -77,9 +77,21 @@ def case(tmp_path,monkeypatch):
     incoming=trusts([dict(arq,fiscalperiod='2020-Q4',lastupdated='2026-10-22'),genuine],[stub])
     proposal=b.create_proposal(provider,canonical,incoming,identity,created_at=NOW)
     proof=b.rehearse(proposal,provider,canonical,incoming,identity,tmp_path/'approval_rehearsal')
-    decision=b.approve(proposal,operator='fixture-operator',rehearsal=proof)
+    fixture_queue=tmp_path/'fixture_approval_queue.db'
+    b.save_item(fixture_queue,proposal,rehearsal=proof)
+    decision=b.approve_registered(fixture_queue,proposal['resolution_id'],operator='fixture-operator',
+        proposal_fingerprint=proposal['proposal_fingerprint'],receipt_fingerprint=proof['receipt_fingerprint'],
+        provider_db=provider,canonical_db=canonical,histories=incoming,identity=identity)['decision']
     return {'p':provider,'c':canonical,'h':incoming,'identity':identity,
-            'proposal':proposal,'decision':decision,'tmp':tmp_path}
+            'proposal':proposal,'decision':decision,'receipt':proof,'tmp':tmp_path}
+
+
+def approve_queue(case, queue, **overrides):
+    arguments = dict(operator='fixture-operator', proposal_fingerprint=case['proposal']['proposal_fingerprint'],
+                     receipt_fingerprint=case['receipt']['receipt_fingerprint'], provider_db=case['p'],
+                     canonical_db=case['c'], histories=case['h'], identity=case['identity'])
+    arguments.update(overrides)
+    return b.approve_registered(queue, case['proposal']['resolution_id'], **arguments)
 
 
 def apply(case):
@@ -177,11 +189,11 @@ def test_tampered_proposal_rejects(case,section,field,value):
 
 def test_queue_registration_does_not_approve_and_stale_reopens_separate_global_item(case):
     q=case['tmp']/'queue.db';p=case['proposal']
-    b.save_item(q,p)
+    b.save_item(q,p,rehearsal=case['receipt'])
     assert b.read_items(q)[0]['status']=='OPEN' and b.queued_decision(q,'WFRD') is None
-    b.save_item(q,p,decision=case['decision'])
+    approved=approve_queue(case,q)
     assert b.queued_decision(q,'OTHER') is None
-    assert b.queued_decision(q,'WFRD')==case['decision']
+    assert b.queued_decision(q,'WFRD')==approved['decision']
     b.save_item(q,p,stale_reason='financial drift')
     assert b.read_items(q)[0]['status']=='STALE' and b.queued_decision(q,'WFRD') is None
     with sqlite3.connect(q) as c:assert c.execute(f'SELECT count(*) FROM {b.QUEUE}_audit').fetchone()[0]==3
@@ -274,11 +286,11 @@ def test_new_synthetic_preview_required_and_revalidates_approved_combined_artifa
                      [{'ticker':'WFRD','dimension':d,'lastupdated':'2026-10-22'}])
             return SimpleNamespace(ok=True,records=records)
     runs=case['tmp']/'runs';q=queue_path_for_run_root(runs)
-    b.save_item(q,case['proposal'])
+    b.save_item(q,case['proposal'],rehearsal=case['receipt'])
     first=r.run_preview(source_paths=paths,run_root=runs,client=Client(),as_of_date=date(2026,10,25))
     old=json.loads(Path(first['artifacts']['refresh_preview']).read_text())
     assert old['future_test_authorized'] is False and len(old['review_partition']['global_blockers'])==1
-    b.save_item(q,case['proposal'],decision=case['decision'])
+    approve_queue(case,q)
     with pytest.raises(ValueError,match='NOT_AUTHORIZED'):
         runtime._load_bound_preview(Path(first['artifacts']['refresh_preview']),first['preview_fingerprint'],runs)
     second=r.run_preview(source_paths=paths,run_root=runs,client=Client(),as_of_date=date(2026,10,26))
@@ -299,9 +311,9 @@ def test_bound_authority_context_and_absence_response_reject_even_with_new_check
         else:p['evidence']['mrq']['absence_proof']['row_count']+=1
         p['evidence_fingerprint']=fingerprint(p['evidence']);p['resolution_id']='boundary_'+p['evidence_fingerprint']
         p['proposal_fingerprint']=fingerprint({k:v for k,v in p.items() if k!='proposal_fingerprint'})
-        try:d=b.approve(p,operator='fixture',rehearsal=receipt(p))
+        try:b.receipt_binding(p,receipt(p))
         except b.BoundaryReviewError:continue
-        assert b.evaluate(case['p'],case['c'],case['h'],case['identity'],decision=d)['stale']
+        pytest.fail('Tampered proposal received a registered receipt binding')
     original=b.authority
     monkeypatch.setattr(b,'authority',lambda:dict(original(),boundary='2019-12-14'))
     assert b.evaluate(case['p'],case['c'],case['h'],case['identity'],decision=case['decision'])['stale']
@@ -327,10 +339,12 @@ def test_rejected_resolution_keeps_global_review(case):
     assert b.queued_decision(q,'WFRD') is None
 
 
-def test_review_ui_backend_registration_exposes_both_actions_without_approval(case):
+def test_review_ui_backend_registration_exposes_both_actions_without_approval(case,monkeypatch):
     from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
     svc=FundamentalsAdminUIService(run_root=case['tmp']/'runs',recover_publication_on_startup=False)
-    item=svc.register_accounting_boundary_proposal(case['proposal'])
+    from types import SimpleNamespace
+    monkeypatch.setattr(svc,'_accounting_boundary_evidence',lambda:(SimpleNamespace(provider_db=case['p'],canonical_db=case['c']),case['h'],case['identity']))
+    item=svc.register_accounting_boundary_proposal(case['proposal'],rehearsal=case['receipt'])
     assert item['status']=='OPEN' and item['decision'] is None
     visible=svc.list_accounting_boundary_reviews()
     assert len(visible)==1
@@ -364,19 +378,305 @@ def test_new_same_period_conflict_is_not_ignored_after_publication(case,period):
     assert b.evaluate(case['p'],case['c'],h,case['identity'])['stale']
 
 
-def test_approval_requires_real_unchanged_rehearsal_candidates(case):
-    with pytest.raises(b.BoundaryReviewError,match='PHYSICAL_PROOF'):
-        b.approve(case['proposal'],operator='fixture',rehearsal=receipt(case['proposal']))
-    proof=case['decision']['rehearsal']
+def test_registration_requires_real_unchanged_rehearsal_candidates(case):
+    with pytest.raises(b.BoundaryReviewError,match='RECEIPT_INVALID'):
+        b.receipt_binding(case['proposal'],receipt(case['proposal']))
+    proof=case['receipt']
     with sqlite3.connect(proof['canonical_candidate']) as c:
         c.execute('CREATE TABLE changed_after_rehearsal(value)')
     with pytest.raises(b.BoundaryReviewError,match='CANDIDATE_CHANGED'):
-        b.approve(case['proposal'],operator='fixture',rehearsal=proof)
+        b.receipt_binding(case['proposal'],proof)
     assert case['proposal']['status']=='OPEN'
 
 
 def test_copy_only_decision_cannot_be_registered_as_live_approval(case):
-    synthetic=b.installed_decisions(case['decision']['rehearsal']['provider_candidate'])[0]
+    synthetic=b.installed_decisions(case['receipt']['provider_candidate'])[0]
     assert synthetic['copy_only']
     with pytest.raises(b.BoundaryReviewError,match='COPY_ONLY_IS_NOT_OPERATOR_APPROVAL'):
         b.save_item(case['tmp']/'queue.db',case['proposal'],decision=synthetic)
+
+
+def signed_receipt(proof, **changes):
+    value = deepcopy(proof)
+    value.update(changes)
+    value['receipt_fingerprint'] = fingerprint({k:v for k,v in value.items() if k!='receipt_fingerprint'})
+    return value
+
+
+def queue_audit(queue):
+    with b._ro(queue) as c:
+        return [json.loads(r[0]) for r in c.execute(f'SELECT record_json FROM {b.QUEUE}_audit ORDER BY id')]
+
+
+def test_registration_requires_actual_receipt(case):
+    q=case['tmp']/'queue.db'
+    with pytest.raises(b.BoundaryReviewError,match='RECEIPT_REQUIRED'):
+        b.save_item(q,case['proposal'])
+    assert not q.exists()
+
+
+def test_open_binding_and_audit_are_compact_immutable_and_idempotent(case):
+    q=case['tmp']/'queue.db';p=deepcopy(case['proposal']);proof=case['receipt']
+    before={f:b.file_fingerprint(f) for f in (case['p'],case['c'])}
+    item=b.save_item(q,p,rehearsal=proof);binding=item['rehearsal_receipt_binding']
+    assert item['schema_version']==b.ITEM_VERSION
+    assert item['status']=='OPEN' and item['decision'] is None
+    assert item['proposal']==p==case['proposal']
+    assert binding['receipt_fingerprint']==proof['receipt_fingerprint']
+    assert binding['proposal_fingerprint']==p['proposal_fingerprint']
+    assert binding['resolution_id']==p['resolution_id']
+    assert binding['passed'] is True and binding['receipt_schema_version']==b.RECEIPT_VERSION
+    assert binding['baseline_generation']==p['evidence']['baseline']['generation']
+    assert binding['baseline_manifest_fingerprint']==p['evidence']['baseline']['manifest_fingerprint']
+    assert binding['baseline_state_fingerprint']==p['evidence']['baseline_fingerprint']
+    assert binding['candidate_sha256']==proof['candidate_sha256']
+    assert binding['linked_actions']==[b.PRESERVE,b.RETAIN]
+    assert binding['source_keys']['arq']==list(b.ARQ_KEY)
+    assert '/tmp' not in json.dumps(binding)
+    assert 'provider_candidate' not in binding and 'canonical_candidate' not in binding
+    assert b.save_item(q,p,rehearsal=proof)==item
+    assert b.read_items(q)==[item]
+    audit=queue_audit(q)
+    assert len(audit)==1
+    assert audit[0]['event_type']=='REGISTERED_OPEN' and audit[0]['status']=='OPEN'
+    assert audit[0]['receipt_fingerprint']==proof['receipt_fingerprint']
+    assert audit[0]['proposal_fingerprint']==p['proposal_fingerprint']
+    assert audit[0]['resolution_id']==p['resolution_id']
+    assert audit[0]['baseline_generation']==binding['baseline_generation']
+    assert audit[0]['candidate_sha256']==proof['candidate_sha256']
+    assert audit[0]['receipt_passed'] is True and audit[0]['timestamp']
+    assert audit[0]['item']==item and item['proposal']['operator'] is None
+    assert item['proposal']['production_authorized'] is False
+    with sqlite3.connect(q) as c:
+        for sql in (f'DELETE FROM {b.QUEUE}_audit',f"UPDATE {b.QUEUE}_audit SET record_json='{{}}'"):
+            with pytest.raises(sqlite3.IntegrityError,match='IMMUTABLE_BOUNDARY_AUDIT'):c.execute(sql)
+        changed=deepcopy(item);changed['rehearsal_receipt_binding']['receipt_fingerprint']='0'*64
+        with pytest.raises(sqlite3.IntegrityError,match='IMMUTABLE_BOUNDARY_RECEIPT_BINDING'):
+            c.execute(f'UPDATE {b.QUEUE} SET record_json=?',(json.dumps(changed,sort_keys=True),))
+    assert before=={f:b.file_fingerprint(f) for f in before}
+    assert b.queued_decision(q,'WFRD') is None
+    assert b.evaluate_for_refresh(case['p'],case['c'],case['h'],case['identity'],q)['pending']
+    assert not b.historical_evidence(case['p'])
+
+
+@pytest.mark.parametrize('changes',[
+    {'schema_version':'unsupported'}, {'proposal_fingerprint':'0'*64},
+    {'resolution_id':'other'}, {'passed':False}, {'mode':'LIVE'},
+    {'candidate_sha256':{}}, {'candidate_sha256':{'provider':'bad','canonical':'0'*64}},
+    {'baseline_generation':'other'}, {'baseline_manifest_fingerprint':'0'*64},
+    {'baseline_state_fingerprint':None}, {'accepted_state_fingerprint':None},
+    {'linked_actions':[b.PRESERVE]}, {'source_keys':{}}, {'created_at':None},
+    {'result_fingerprint':'0'*64}, {'checks':None}, {'source_histories':{}},
+    {'provider_candidate':None}, {'canonical_candidate':'/nonexistent/wfrd/canonical.db'},
+])
+def test_invalid_receipt_rejects_before_queue_write(case,changes):
+    q=case['tmp']/'queue.db'
+    proof=signed_receipt(case['receipt'],**changes)
+    with pytest.raises(b.BoundaryReviewError):b.save_item(q,case['proposal'],rehearsal=proof)
+    assert not q.exists()
+
+
+@pytest.mark.parametrize('check',b.REHEARSAL_CHECKS)
+def test_failed_rehearsal_assertion_rejects_registration(case,check):
+    checks={**case['receipt']['checks'],check:False}
+    with pytest.raises(b.BoundaryReviewError):
+        b.save_item(case['tmp']/'queue.db',case['proposal'],rehearsal=signed_receipt(case['receipt'],checks=checks))
+
+
+@pytest.mark.parametrize('field',['receipt_fingerprint','baseline_state_fingerprint','baseline_manifest_fingerprint','candidate_sha256'])
+def test_missing_receipt_binding_data_rejects(case,field):
+    proof=deepcopy(case['receipt']);proof.pop(field)
+    if field!='receipt_fingerprint':proof=signed_receipt(proof)
+    with pytest.raises(b.BoundaryReviewError):
+        b.save_item(case['tmp']/'queue.db',case['proposal'],rehearsal=proof)
+
+
+def test_conflicting_receipt_and_changed_proposal_leave_original_unchanged(case):
+    q=case['tmp']/'queue.db';p=case['proposal'];proof=case['receipt']
+    original=b.save_item(q,p,rehearsal=proof);audit=queue_audit(q)
+    other=signed_receipt(proof,created_at='2026-10-27T12:00:00Z')
+    b.receipt_binding(p,other)  # A different passing receipt, not just an invalid checksum.
+    with pytest.raises(b.BoundaryReviewError,match='IMMUTABLE_RECEIPT_CONFLICT'):
+        b.save_item(q,p,rehearsal=other)
+    changed=deepcopy(p);changed['created_at']='2026-10-27T12:00:00Z'
+    changed['proposal_fingerprint']=fingerprint({k:v for k,v in changed.items() if k!='proposal_fingerprint'})
+    # The existing registered proposal is checked before any attempted replacement.
+    with pytest.raises(b.BoundaryReviewError,match='IMMUTABLE_PROPOSAL_CONFLICT'):
+        b.save_item(q,changed,rehearsal=proof)
+    assert b.read_items(q)==[original] and queue_audit(q)==audit
+
+
+@pytest.mark.parametrize('field',['proposal_fingerprint','receipt_fingerprint'])
+def test_approval_rejects_wrong_registered_fingerprint(case,field):
+    q=case['tmp']/'queue.db';item=b.save_item(q,case['proposal'],rehearsal=case['receipt'])
+    with pytest.raises(b.BoundaryReviewError,match='FINGERPRINT_MISMATCH'):
+        approve_queue(case,q,**{field:'0'*64})
+    assert b.read_items(q)==[item] and len(queue_audit(q))==1
+
+
+def test_approval_rejects_different_valid_receipt(case):
+    q=case['tmp']/'queue.db';b.save_item(q,case['proposal'],rehearsal=case['receipt'])
+    different=signed_receipt(case['receipt'],created_at='2026-10-27T12:00:00Z')
+    b.receipt_binding(case['proposal'],different)
+    with pytest.raises(b.BoundaryReviewError,match='FINGERPRINT_MISMATCH'):
+        approve_queue(case,q,receipt_fingerprint=different['receipt_fingerprint'])
+
+
+def test_approval_uses_durable_binding_after_candidate_files_are_gone(case):
+    q=case['tmp']/'queue.db';item=b.save_item(q,case['proposal'],rehearsal=case['receipt'])
+    before={f:b.file_fingerprint(f) for f in (case['p'],case['c'])}
+    for key in ('provider_candidate','canonical_candidate'):Path(case['receipt'][key]).unlink()
+    approved=approve_queue(case,q)
+    assert approved['status']=='APPROVED' and approved['decision']['operator']=='fixture-operator'
+    assert approved['rehearsal_receipt_binding']==item['rehearsal_receipt_binding']
+    assert approved['decision']['rehearsal_receipt_binding']==item['rehearsal_receipt_binding']
+    assert 'rehearsal' not in approved['decision']
+    assert '/tmp' not in json.dumps(approved)
+    assert b.verify_decision(approved['decision'])==case['proposal']['evidence']
+    assert [a['event_type'] for a in queue_audit(q)]==['REGISTERED_OPEN','APPROVED']
+    assert all(a['receipt_fingerprint']==case['receipt']['receipt_fingerprint'] for a in queue_audit(q))
+    assert before=={f:b.file_fingerprint(f) for f in before}
+    assert not b.historical_evidence(case['p'])
+
+
+@pytest.mark.parametrize('drift',['source','baseline','date','pb','identity','old_key','new_boundary','complete_arq'])
+def test_registered_approval_rejects_fresh_evidence_drift_and_preserves_binding(case,drift):
+    q=case['tmp']/'queue.db';item=b.save_item(q,case['proposal'],rehearsal=case['receipt'])
+    args={}
+    if drift in ('baseline','date','pb'):
+        with sqlite3.connect(case['c']) as c:
+            sql={'baseline':"UPDATE v4_quarter SET period_end='2019-12-30' WHERE fiscal_year=2019",
+                 'date':"UPDATE v4_quarter SET first_public_result_date='2020-03-17' WHERE fiscal_year=2019",
+                 'pb':"UPDATE v4_parent_equity_source SET observation_id=observation_id||'drift' WHERE quarter_id=(SELECT quarter_id FROM v4_quarter WHERE fiscal_year=2019)"}[drift]
+            c.execute(sql)
+    elif drift=='identity':args['identity']={**case['identity'],'provider_security_id':'other'}
+    else:
+        h=case['h'].copy();d='MRQ' if drift in ('old_key','new_boundary') else 'ARQ'
+        rows=[deepcopy(r['_acquisition_payload']) for r in h[d].rows]
+        if drift=='source':rows[0]['lastupdated']='2026-10-23'
+        elif drift=='old_key':rows.append(case['proposal']['evidence']['mrq']['accepted']['normalized'])
+        elif drift=='new_boundary':rows.append(row(('WFRD','MRQ','2019-12-14','2019-12-13'),'2019-Q4',ncfo=1))
+        else:rows.append(row(('WFRD','ARQ','2021-05-01','2021-03-31'),'2021-Q1',revenue=1))
+        h[d]=validate_complete_history(rows,ticker='WFRD',dimension=d);args['histories']=h
+    with pytest.raises(b.BoundaryReviewError):approve_queue(case,q,**args)
+    assert b.read_items(q)==[item] and len(queue_audit(q))==1
+    b.save_item(q,case['proposal'],stale_reason=drift)
+    stale=b.read_items(q)[0]
+    assert stale['status']=='STALE' and stale['rehearsal_receipt_binding']==item['rehearsal_receipt_binding']
+    assert queue_audit(q)[0]['item']==item
+    with pytest.raises(b.BoundaryReviewError,match='NOT_OPEN'):approve_queue(case,q)
+
+
+def test_old_open_item_is_readable_but_not_approvable_or_silently_upgraded(case):
+    q=case['tmp']/'legacy_queue.db';p=case['proposal']
+    old={'proposal':p,'decision':None,'status':'OPEN','stale_reason':None,'rejected_reason':None}
+    with sqlite3.connect(q) as c:
+        c.execute(f'CREATE TABLE {b.QUEUE}(resolution_id TEXT PRIMARY KEY,record_json TEXT NOT NULL)')
+        c.execute(f'INSERT INTO {b.QUEUE} VALUES(?,?)',(p['resolution_id'],json.dumps(old,sort_keys=True)))
+    assert b.read_items(q)==[old]
+    with pytest.raises(b.BoundaryReviewError,match='REGISTERED_RECEIPT_REQUIRED'):approve_queue(case,q)
+    with pytest.raises(b.BoundaryReviewError,match='IMMUTABLE_RECEIPT_CONFLICT'):
+        b.save_item(q,p,rehearsal=case['receipt'])
+    assert b.read_items(q)==[old]
+
+
+def test_service_confirmation_and_exact_approval_use_fresh_evidence(case,monkeypatch):
+    from types import SimpleNamespace
+    from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+    svc=FundamentalsAdminUIService(run_root=case['tmp']/'runs',recover_publication_on_startup=False)
+    calls=[]
+    def current():
+        calls.append(True)
+        return SimpleNamespace(provider_db=case['p'],canonical_db=case['c']),case['h'],case['identity']
+    monkeypatch.setattr(svc,'_accounting_boundary_evidence',current)
+    monkeypatch.setattr('rawcandle.fundamentals.admin.publication_journal.safety_status',lambda:{'production_writes_blocked':False})
+    p=case['proposal'];proof=case['receipt']
+    with pytest.raises(TypeError):svc.register_accounting_boundary_proposal(p)
+    item=svc.register_accounting_boundary_proposal(p,rehearsal=proof)
+    display=svc.accounting_boundary_approval_confirmation(p['resolution_id'])
+    assert display==dict(status='OPEN',proposal_fingerprint=p['proposal_fingerprint'],
+                         receipt_fingerprint=proof['receipt_fingerprint'],receipt_passed=True,
+                         baseline_generation=p['evidence']['baseline']['generation'],candidate_sha256=proof['candidate_sha256'])
+    display['candidate_sha256']['provider']='bad'  # Presentation cannot mutate stored identity.
+    assert svc.list_accounting_boundary_reviews()==[item]
+    with pytest.raises(b.BoundaryReviewError,match='FINGERPRINT_MISMATCH'):
+        svc.approve_accounting_boundary_review(p['resolution_id'],operator='operator',
+            proposal_fingerprint=p['proposal_fingerprint'],receipt_fingerprint='0'*64)
+    assert len(calls)==1
+    approved=svc.approve_accounting_boundary_review(p['resolution_id'],operator='operator',
+        proposal_fingerprint=p['proposal_fingerprint'],receipt_fingerprint=proof['receipt_fingerprint'])
+    assert len(calls)==2 and approved['status']=='APPROVED'
+
+
+def test_service_fetches_complete_source_again_for_registration_and_approval(case,monkeypatch):
+    from types import SimpleNamespace
+    from rawcandle.fundamentals.admin import refresh_fundamentals as refresh
+    from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+    calls=[]
+    class Client:
+        def fundamentals(self,**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(ok=True,records=[deepcopy(r['_acquisition_payload']) for r in case['h'][kwargs['dimension']].rows])
+    monkeypatch.setattr(refresh,'resolve_identity',lambda *_:case['identity'])
+    monkeypatch.setattr('rawcandle.fundamentals.admin.publication_journal.safety_status',lambda:{'production_writes_blocked':False})
+    svc=FundamentalsAdminUIService(run_root=case['tmp']/'runs',recover_publication_on_startup=False,
+        accounting_boundary_paths=SimpleNamespace(provider_db=case['p'],canonical_db=case['c']),accounting_boundary_client=Client())
+    svc.register_accounting_boundary_proposal(case['proposal'],rehearsal=case['receipt'])
+    svc.approve_accounting_boundary_review(case['proposal']['resolution_id'],operator='operator',
+        proposal_fingerprint=case['proposal']['proposal_fingerprint'],receipt_fingerprint=case['receipt']['receipt_fingerprint'])
+    assert [r['dimension'] for r in calls]==['ARQ','MRQ','ARQ','MRQ']
+    assert all(r['ticker']=='WFRD' and r['limit']==refresh.DISCOVERY_LIMIT for r in calls)
+
+
+def test_existing_unrelated_queue_tables_and_rows_are_unchanged(case):
+    from rawcandle.fundamentals.admin.refresh_review_queue import _connect
+    q=case['tmp']/'queue.db'
+    with _connect(q) as c:
+        c.execute("INSERT INTO refresh_review_queue_audit(ticker,event_type,occurred_at_utc,evidence_json) VALUES('OTHER','WAIT_FOR_PROVIDER',?,'{}')",(NOW,))
+        c.execute('CREATE TABLE pb_ownership_review(id PRIMARY KEY,record_json TEXT)')
+        c.execute("INSERT INTO pb_ownership_review VALUES(1,'existing P/B review')")
+    def old_state():
+        with b._ro(q) as c:
+            schemas=[tuple(r) for r in c.execute("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'accounting_boundary_%' ORDER BY name")]
+            return schemas,{n:[tuple(r) for r in c.execute(f'SELECT * FROM {n} ORDER BY rowid')] for n,_ in schemas}
+    before=old_state()
+    b.save_item(q,case['proposal'],rehearsal=case['receipt']);approve_queue(case,q)
+    assert old_state()==before
+
+
+def test_post_approval_complete_source_drift_requires_fresh_review(case):
+    q=case['tmp']/'queue.db';b.save_item(q,case['proposal'],rehearsal=case['receipt']);approve_queue(case,q)
+    rows=[deepcopy(r['_acquisition_payload']) for r in case['h']['ARQ'].rows]
+    rows.append(row(('WFRD','ARQ','2021-05-01','2021-03-31'),'2021-Q1',revenue=1))
+    h={**case['h'],'ARQ':validate_complete_history(rows,ticker='WFRD',dimension='ARQ')}
+    result=b.evaluate_for_refresh(case['p'],case['c'],h,case['identity'],q)
+    assert result['stale'] and not result['applied']
+
+
+def test_fingerprint_only_and_legacy_approval_entry_points_are_not_registration(case):
+    q=case['tmp']/'queue.db'
+    for proof in (case['receipt']['receipt_fingerprint'],{'receipt_fingerprint':case['receipt']['receipt_fingerprint']}):
+        with pytest.raises(b.BoundaryReviewError):b.save_item(q,case['proposal'],rehearsal=proof)
+    with pytest.raises(b.BoundaryReviewError,match='APPROVAL_REQUIRES_CURRENT_EVIDENCE'):
+        b.save_item(q,case['proposal'],decision=case['decision'])
+    with pytest.raises(b.BoundaryReviewError,match='APPROVAL_REQUIRES_REGISTERED_RECEIPT'):
+        b.approve(case['proposal'],operator='operator',rehearsal=case['receipt'])
+    assert not q.exists()
+
+
+def test_manifested_generation_binding_is_preserved_and_drift_rejected(case):
+    manifest=case['tmp']/'generation_manifest.json'
+    value={'generation_id':case['tmp'].name,'fixture_version':1}
+    manifest.write_text(json.dumps(value))
+    p=b.create_proposal(case['p'],case['c'],case['h'],case['identity'],created_at=NOW)
+    proof=b.rehearse(p,case['p'],case['c'],case['h'],case['identity'],case['tmp']/'manifested_rehearsal')
+    q=case['tmp']/'manifested_queue.db';item=b.save_item(q,p,rehearsal=proof)
+    binding=item['rehearsal_receipt_binding']
+    assert binding['baseline_manifest_fingerprint']==fingerprint(value)
+    assert binding['baseline_state_fingerprint']==p['evidence']['baseline_fingerprint']
+    manifest.write_text(json.dumps({**value,'fixture_version':2}))
+    with pytest.raises(b.BoundaryReviewError,match='EVIDENCE_STALE'):
+        b.approve_registered(q,p['resolution_id'],operator='operator',
+            proposal_fingerprint=p['proposal_fingerprint'],receipt_fingerprint=proof['receipt_fingerprint'],
+            provider_db=case['p'],canonical_db=case['c'],histories=case['h'],identity=case['identity'])
+    assert b.read_items(q)==[item]

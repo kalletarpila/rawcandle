@@ -8,13 +8,18 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
 from .contracts import fingerprint, utc_now
 
 VERSION = 'WFRD_ACCOUNTING_BOUNDARY_REVIEW_V1'
+RECEIPT_VERSION = 'WFRD_ACCOUNTING_BOUNDARY_REHEARSAL_V2'
+ITEM_VERSION = 'WFRD_ACCOUNTING_BOUNDARY_REVIEW_ITEM_V2'
+BINDING_VERSION = 'WFRD_ACCOUNTING_BOUNDARY_RECEIPT_BINDING_V1'
 PRESERVE = 'PRESERVE_ACCEPTED_FISCAL_IDENTITY'
 RETAIN = 'RETAIN_REMOVED_ACCEPTED_MRQ_AS_HISTORICAL_SOURCE'
 ARQ_KEY = ('WFRD', 'ARQ', '2020-03-16', '2019-12-31')
@@ -186,22 +191,130 @@ def verify(proposal):
 
 def validate_pending(proposal, provider_db, canonical_db, histories, identity):
     verify(proposal)
+    expected = {ARQ_KEY, CURRENT_MRQ_KEY}
+    for h in histories.values():
+        for row in h.rows:
+            if (row['reportperiod'] in (ARQ_KEY[3], CURRENT_MRQ_KEY[3]) or row['fiscalperiod'] == '2019-Q4') and _key(row) not in expected:
+                raise BoundaryReviewError('BOUNDARY_NEW_ACCOUNTING_CONFLICT')
     actual = create_proposal(provider_db,canonical_db,histories,identity)
     if actual['evidence_fingerprint'] != proposal['evidence_fingerprint']:
         raise BoundaryReviewError('BOUNDARY_EVIDENCE_STALE')
     return True
 
 
-def approve(proposal, *, operator, rehearsal):
-    """Explicit operator action, never invoked by proposal generation/Preview."""
+def accepted_state_fingerprint(canonical_db, proposal):
+    """Bind accepted Q4 values and all provenance, including parent-equity/P/B."""
+    state = []
+    with _ro(canonical_db) as c:
+        for q in proposal['evidence']['baseline']['quarters']:
+            quarter_id = q['quarter_id']
+            state.append({table: [dict(r) for r in c.execute(
+                f'SELECT * FROM {table} WHERE quarter_id=? ORDER BY rowid', (quarter_id,))]
+                for table in ('v4_quarter', 'v4_quarter_financials',
+                              'v4_field_provenance', 'v4_parent_equity_source',
+                              'v4_parent_equity_provenance')})
+    return fingerprint(state)
+
+
+def _receipt_scope(proposal):
+    e = verify(proposal)
+    return {'resolution_id': proposal['resolution_id'],
+            'proposal_fingerprint': proposal['proposal_fingerprint'],
+            'baseline_generation': e['baseline']['generation'],
+            'baseline_manifest_fingerprint': e['baseline']['manifest_fingerprint'],
+            'baseline_state_fingerprint': e['baseline_fingerprint'],
+            'linked_actions': [e['arq']['action'], e['mrq']['action']],
+            'source_keys': {'arq': e['arq']['source_key'],
+                            'removed_mrq': e['mrq']['removed_key'],
+                            'current_mrq': e['mrq']['current_key']}}
+
+
+def _sha256(value):
+    return isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value)
+
+
+def _timestamp(value):
+    try:
+        return isinstance(value, str) and datetime.fromisoformat(value.replace('Z', '+00:00')).tzinfo is not None
+    except ValueError:
+        return False
+
+
+def validate_receipt_binding(proposal, binding):
+    """Validate durable registration evidence without touching rehearsal files."""
+    if not isinstance(binding, dict):
+        raise BoundaryReviewError('BOUNDARY_REGISTERED_RECEIPT_REQUIRED')
+    if (not isinstance(binding.get('checks'), dict)
+            or not isinstance(binding.get('candidate_sha256'), dict)
+            or not isinstance(binding.get('source_histories'), dict)
+            or any(not isinstance(v, dict) for v in binding.get('source_histories', {}).values())):
+        raise BoundaryReviewError('BOUNDARY_REGISTERED_RECEIPT_INVALID')
+    expected = binding.get('binding_fingerprint')
+    if (binding.get('schema_version') != BINDING_VERSION
+            or expected != fingerprint({k: v for k, v in binding.items() if k != 'binding_fingerprint'})
+            or binding.get('receipt_schema_version') != RECEIPT_VERSION
+            or any(k not in binding or binding[k] != v for k, v in _receipt_scope(proposal).items())
+            or binding.get('mode') != 'COPY_ONLY' or binding.get('passed') is not True
+            or not all(binding.get('checks', {}).get(k) is True for k in REHEARSAL_CHECKS)
+            or not _timestamp(binding.get('receipt_created_at')) or not _timestamp(binding.get('registered_at'))
+            or set(binding.get('candidate_sha256', {})) != {'provider', 'canonical'}
+            or set(binding.get('source_histories', {})) != {'ARQ', 'MRQ'}
+            or any(v.get('status') != 'COMPLETE' for v in binding.get('source_histories', {}).values())
+            or binding.get('source_histories', {}).get('MRQ') != proposal['evidence']['mrq']['absence_proof']
+            or any(not _sha256(v) for v in binding.get('candidate_sha256', {}).values())
+            or (binding.get('baseline_manifest_fingerprint') is not None and not _sha256(binding['baseline_manifest_fingerprint']))
+            or any(not _sha256(binding.get(k)) for k in (
+                'receipt_fingerprint', 'baseline_state_fingerprint',
+                'accepted_state_fingerprint', 'result_fingerprint'))):
+        raise BoundaryReviewError('BOUNDARY_REGISTERED_RECEIPT_INVALID')
+    return binding
+
+
+def receipt_binding(proposal, receipt):
+    """Validate the actual receipt/candidates, then retain only compact evidence."""
     verify(proposal)
-    if not all(rehearsal.get('checks',{}).get(k) is True for k in REHEARSAL_CHECKS) or not str(operator).strip() or rehearsal.get('proposal_fingerprint') != proposal['proposal_fingerprint'] or rehearsal.get('passed') is not True or rehearsal.get('receipt_fingerprint') != fingerprint({k:v for k,v in rehearsal.items() if k!='receipt_fingerprint'}):
-        raise BoundaryReviewError('BOUNDARY_OPERATOR_AND_REHEARSAL_REQUIRED')
-    validate_rehearsal_receipt(proposal,rehearsal)
-    decision = {'proposal':deepcopy(proposal),'status':'APPROVED','operator':operator,
-                'approved_at':utc_now(),'rehearsal':dict(rehearsal),'copy_only':False}
-    decision['decision_fingerprint'] = fingerprint(decision)
-    return decision
+    if not isinstance(receipt, dict):
+        raise BoundaryReviewError('BOUNDARY_REHEARSAL_RECEIPT_REQUIRED')
+    if not isinstance(receipt.get('checks'), dict):
+        raise BoundaryReviewError('BOUNDARY_REHEARSAL_RECEIPT_INVALID')
+    if (receipt.get('schema_version') != RECEIPT_VERSION
+            or any(k not in receipt or receipt[k] != v for k, v in _receipt_scope(proposal).items())
+            or receipt.get('mode') != 'COPY_ONLY' or receipt.get('passed') is not True
+            or receipt.get('receipt_fingerprint') != fingerprint({k:v for k,v in receipt.items() if k!='receipt_fingerprint'})
+            or not all(receipt.get('checks', {}).get(k) is True for k in REHEARSAL_CHECKS)
+            or not _timestamp(receipt.get('created_at'))
+            or receipt.get('result_fingerprint') != fingerprint({k:receipt.get(k) for k in (
+                'provider_validation', 'canonical_impact', 'independent_new_quarters')})):
+        raise BoundaryReviewError('BOUNDARY_REHEARSAL_RECEIPT_INVALID')
+    binding = dict(_receipt_scope(proposal), schema_version=BINDING_VERSION,
+                   receipt_schema_version=receipt['schema_version'],
+                   receipt_fingerprint=receipt['receipt_fingerprint'], mode=receipt['mode'],
+                   passed=receipt['passed'], checks={k:receipt['checks'][k] for k in REHEARSAL_CHECKS},
+                   candidate_sha256=deepcopy(receipt.get('candidate_sha256', {})),
+                   source_histories=deepcopy(receipt.get('source_histories', {})),
+                   receipt_created_at=receipt['created_at'], registered_at=utc_now(),
+                   accepted_state_fingerprint=receipt.get('accepted_state_fingerprint'),
+                   result_fingerprint=receipt['result_fingerprint'])
+    binding['binding_fingerprint'] = fingerprint(binding)
+    validate_receipt_binding(proposal, binding)
+    try:
+        validate_rehearsal_receipt(proposal, receipt)
+    except (OSError, KeyError, TypeError, sqlite3.DatabaseError) as exc:
+        raise BoundaryReviewError('BOUNDARY_REHEARSAL_CANDIDATE_INVALID') from exc
+    return binding
+
+
+def validate_registration(proposal, receipt, provider_db, canonical_db, histories, identity):
+    """Read-only preflight shared by registration and operational revalidation."""
+    binding = receipt_binding(proposal, receipt)
+    validate_pending(proposal, provider_db, canonical_db, histories, identity)
+    _validate_registered_state(proposal, binding, canonical_db, histories)
+    return binding
+
+
+def approve(proposal, *, operator, rehearsal):
+    """Legacy unregistered approval is closed; use approve_registered instead."""
+    raise BoundaryReviewError('BOUNDARY_APPROVAL_REQUIRES_REGISTERED_RECEIPT')
 
 
 def verify_decision(decision):
@@ -209,6 +322,11 @@ def verify_decision(decision):
     if fp != fingerprint(d) or d.get('status')!='APPROVED' or not str(d.get('operator') or '').strip():
         raise BoundaryReviewError('BOUNDARY_NOT_APPROVED')
     verify(d['proposal'])
+    if 'rehearsal_receipt_binding' in d:
+        if d.get('copy_only') is not False:
+            raise BoundaryReviewError('BOUNDARY_REGISTERED_DECISION_SCOPE_INVALID')
+        validate_receipt_binding(d['proposal'], d['rehearsal_receipt_binding'])
+        return d['proposal']['evidence']
     if d.get('copy_only') is True and d['operator']!='COPY_ONLY_REHEARSAL_NOT_RUNTIME_APPROVAL':
         raise BoundaryReviewError('BOUNDARY_REHEARSAL_SCOPE_INVALID')
     r=d['rehearsal']
@@ -337,6 +455,8 @@ def evaluate(provider_db,canonical_db,histories,identity, *, decision=None):
             phase='PUBLISHED'
         else:
             verify_decision(decision);validate_pending(decision['proposal'],provider_db,canonical_db,histories,identity);phase='PENDING'
+            if 'rehearsal_receipt_binding' in decision:
+                _validate_registered_state(decision['proposal'], decision['rehearsal_receipt_binding'], canonical_db, histories)
         return {'applied':True,'stale':False,'phase':phase,'decision':deepcopy(decision),
                 'proposal_fingerprint':decision['proposal']['proposal_fingerprint'],
                 'absence_attestation':histories['MRQ'].evidence()}
@@ -380,23 +500,114 @@ def read_items(queue_db):
         return [json.loads(r[0]) for r in c.execute(f'SELECT record_json FROM {QUEUE} ORDER BY resolution_id')]
 
 
-def save_item(queue_db, proposal, *, decision=None, stale_reason=None, rejected_reason=None):
-    """Explicit review registration/action. Never called by proposal creation."""
-    verify(proposal)
-    if decision is not None:
-        verify_decision(decision)
-        if decision.get('copy_only'):
-            raise BoundaryReviewError('BOUNDARY_COPY_ONLY_IS_NOT_OPERATOR_APPROVAL')
-        if decision['proposal']!=proposal:raise BoundaryReviewError('BOUNDARY_QUEUE_PROPOSAL_MISMATCH')
-    item={'proposal':deepcopy(proposal),'decision':decision,'status':'REJECTED' if rejected_reason else 'STALE' if stale_reason else 'APPROVED' if decision else 'OPEN','stale_reason':stale_reason,'rejected_reason':rejected_reason}
-    from .refresh_review_queue import _connect as connect_queue
-    with connect_queue(Path(queue_db)) as c:
+@contextmanager
+def _queue_connect(queue_db):
+    """Create only the additive combined tables; leave legacy queue schemas alone."""
+    path = Path(queue_db)
+    if not path.exists():
+        from .refresh_review_queue import _connect
+        c = _connect(path)  # Normal initialization for a new shared queue only.
+    else:
+        c = sqlite3.connect(path)
+    try:
         c.execute(f'CREATE TABLE IF NOT EXISTS {QUEUE}(resolution_id TEXT PRIMARY KEY,record_json TEXT NOT NULL)')
         c.execute(f'CREATE TABLE IF NOT EXISTS {QUEUE}_audit(id INTEGER PRIMARY KEY,record_json TEXT NOT NULL)')
-        old=c.execute(f'SELECT record_json FROM {QUEUE} WHERE resolution_id=?',(proposal['resolution_id'],)).fetchone()
-        if old and json.loads(old[0])['proposal']!=proposal:raise BoundaryReviewError('BOUNDARY_IMMUTABLE_PROPOSAL_CONFLICT')
-        c.execute(f'INSERT OR REPLACE INTO {QUEUE} VALUES(?,?)',(proposal['resolution_id'],json.dumps(item,sort_keys=True)))
-        c.execute(f'INSERT INTO {QUEUE}_audit(record_json) VALUES(?)',(json.dumps(item,sort_keys=True),))
+        c.execute(f"""CREATE TRIGGER IF NOT EXISTS {QUEUE}_immutable_binding BEFORE UPDATE ON {QUEUE}
+            WHEN json_extract(OLD.record_json,'$.proposal') IS NOT json_extract(NEW.record_json,'$.proposal')
+              OR json_extract(OLD.record_json,'$.rehearsal_receipt_binding') IS NOT json_extract(NEW.record_json,'$.rehearsal_receipt_binding')
+            BEGIN SELECT RAISE(ABORT,'IMMUTABLE_BOUNDARY_RECEIPT_BINDING'); END""")
+        for operation in ('UPDATE', 'DELETE'):
+            c.execute(f"CREATE TRIGGER IF NOT EXISTS {QUEUE}_audit_no_{operation.lower()} BEFORE {operation} ON {QUEUE}_audit BEGIN SELECT RAISE(ABORT,'IMMUTABLE_BOUNDARY_AUDIT'); END")
+        c.execute('BEGIN IMMEDIATE')
+        with c:
+            yield c
+    finally:
+        c.close()
+
+
+def _queue_item(c, resolution_id):
+    r = c.execute(f'SELECT record_json FROM {QUEUE} WHERE resolution_id=?', (resolution_id,)).fetchone()
+    return json.loads(r[0]) if r else None
+
+
+def _write_item(c, item, event_type):
+    p = item['proposal']; b = item.get('rehearsal_receipt_binding') or {}
+    value = json.dumps(item, sort_keys=True)
+    if _queue_item(c, p['resolution_id']) is None:
+        c.execute(f'INSERT INTO {QUEUE} VALUES(?,?)', (p['resolution_id'], value))
+    else:
+        c.execute(f'UPDATE {QUEUE} SET record_json=? WHERE resolution_id=?', (value, p['resolution_id']))
+    audit = {'event_type': event_type, 'timestamp': utc_now(), 'status': item['status'],
+             'proposal_fingerprint': p['proposal_fingerprint'], 'resolution_id': p['resolution_id'],
+             'receipt_fingerprint': b.get('receipt_fingerprint'),
+             'baseline_generation': b.get('baseline_generation'),
+             'candidate_sha256': b.get('candidate_sha256'), 'receipt_passed': b.get('passed'),
+             'item': item}
+    c.execute(f'INSERT INTO {QUEUE}_audit(record_json) VALUES(?)', (json.dumps(audit, sort_keys=True),))
+
+
+def save_item(queue_db, proposal, *, rehearsal=None, decision=None, stale_reason=None, rejected_reason=None):
+    """Register validated non-authoritative evidence, or preserve it on a stop event."""
+    verify(proposal)
+    if decision is not None:
+        if decision.get('copy_only'):
+            raise BoundaryReviewError('BOUNDARY_COPY_ONLY_IS_NOT_OPERATOR_APPROVAL')
+        raise BoundaryReviewError('BOUNDARY_APPROVAL_REQUIRES_CURRENT_EVIDENCE')
+    if any(i['proposal'] != proposal for i in read_items(queue_db)
+           if i['proposal']['resolution_id'] == proposal['resolution_id']):
+        raise BoundaryReviewError('BOUNDARY_IMMUTABLE_PROPOSAL_CONFLICT')
+    stopping = bool(stale_reason or rejected_reason)
+    binding = None if stopping else receipt_binding(proposal, rehearsal)
+    with _queue_connect(queue_db) as c:
+        old = _queue_item(c, proposal['resolution_id'])
+        if old and old['proposal'] != proposal:
+            raise BoundaryReviewError('BOUNDARY_IMMUTABLE_PROPOSAL_CONFLICT')
+        if old and not stopping:
+            previous = old.get('rehearsal_receipt_binding')
+            if not previous or any(previous.get(k) != v for k,v in binding.items()
+                                   if k not in ('registered_at', 'binding_fingerprint')):
+                raise BoundaryReviewError('BOUNDARY_IMMUTABLE_RECEIPT_CONFLICT')
+            return old  # Idempotent, including audit; never reopen a terminal item.
+        item = deepcopy(old) if old else {
+            'schema_version': ITEM_VERSION, 'proposal': deepcopy(proposal), 'decision': None,
+            'rehearsal_receipt_binding': binding}
+        item.update(status='REJECTED' if rejected_reason else 'STALE' if stale_reason else 'OPEN',
+                    stale_reason=stale_reason, rejected_reason=rejected_reason)
+        _write_item(c, item, 'REJECTED' if rejected_reason else 'STALE' if stale_reason else 'REGISTERED_OPEN')
+    return item
+
+
+def _validate_registered_state(proposal, binding, canonical_db, histories):
+    validate_receipt_binding(proposal, binding)
+    if accepted_state_fingerprint(canonical_db, proposal) != binding['accepted_state_fingerprint']:
+        raise BoundaryReviewError('BOUNDARY_ACCEPTED_STATE_STALE')
+    if binding['source_histories'] != {d:h.evidence() for d,h in histories.items()}:
+        raise BoundaryReviewError('BOUNDARY_COMPLETE_SOURCE_STALE')
+
+
+def approve_registered(queue_db, resolution_id, *, operator, proposal_fingerprint,
+                       receipt_fingerprint, provider_db, canonical_db, histories, identity):
+    """Approve only the registered identity after fresh read-only evidence checks."""
+    if not str(operator or '').strip():
+        raise BoundaryReviewError('BOUNDARY_OPERATOR_REQUIRED')
+    if not Path(queue_db).exists():
+        raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
+    with _queue_connect(queue_db) as c:
+        item = _queue_item(c, resolution_id)
+        if item is None or item['status'] != 'OPEN':
+            raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
+        p = item['proposal']; binding = item.get('rehearsal_receipt_binding')
+        validate_receipt_binding(p, binding)
+        if p['proposal_fingerprint'] != proposal_fingerprint or binding['receipt_fingerprint'] != receipt_fingerprint:
+            raise BoundaryReviewError('BOUNDARY_APPROVAL_FINGERPRINT_MISMATCH')
+        validate_pending(p, provider_db, canonical_db, histories, identity)
+        _validate_registered_state(p, binding, canonical_db, histories)
+        decision = {'proposal': deepcopy(p), 'status': 'APPROVED', 'operator': str(operator).strip(),
+                    'approved_at': utc_now(), 'rehearsal_receipt_binding': deepcopy(binding), 'copy_only': False}
+        decision['decision_fingerprint'] = fingerprint(decision)
+        verify_decision(decision)
+        item.update(status='APPROVED', decision=decision)
+        _write_item(c, item, 'APPROVED')
     return item
 
 
@@ -489,13 +700,18 @@ def rehearse(proposal, provider_db, canonical_db, histories, identity, output_di
         pb=cc.execute("SELECT effective_fiscalperiod,dimension FROM v4_parent_equity_source s JOIN v4_quarter q USING(quarter_id) WHERE q.company_id=? AND q.fiscal_year=2019 AND q.fiscal_quarter='Q4'",(identity['company_id'],)).fetchone()
         if pb is None or tuple(pb)!=('2019-Q4','ARQ'):raise BoundaryReviewError('BOUNDARY_REHEARSAL_PB_BINDING')
     validate_store(p)
-    receipt={'proposal_fingerprint':proposal['proposal_fingerprint'],'passed':True,'mode':'COPY_ONLY',
+    receipt={'schema_version': RECEIPT_VERSION, 'created_at': utc_now(), **_receipt_scope(proposal),
+             'accepted_state_fingerprint': accepted_state_fingerprint(canonical_db, proposal),
+             'source_histories': {d:h.evidence() for d,h in histories.items()},
+             'passed':True,'mode':'COPY_ONLY',
              'checks':{'both_q4s':True,'established_dates':True,'no_existing_financial_change':True,
                        'unrelated_tickers':True,'historical_only_archive':True,'mrq_nonfinancial':True,'pb_arq_binding':True},
              'independent_new_quarters':[list(k) for k in sorted(added)],
              'provider_candidate':str(p),'canonical_candidate':str(c),
              'candidate_sha256':{'provider':file_fingerprint(p),'canonical':file_fingerprint(c)},
              'provider_validation':replaced['verification'],'canonical_impact':rebuilt['impact']}
+    receipt['result_fingerprint'] = fingerprint({k:receipt[k] for k in (
+        'provider_validation', 'canonical_impact', 'independent_new_quarters')})
     receipt['receipt_fingerprint']=fingerprint(receipt)
     return receipt
 
@@ -557,7 +773,7 @@ def file_fingerprint(path):
 
 
 def validate_rehearsal_receipt(proposal,receipt):
-    """Approval requires the real, unchanged candidate artifacts, not booleans."""
+    """Physical validation before registration; later approval uses its durable binding."""
     from rawcandle.fundamentals.schema.parent_equity import assert_inactive_copy
     if receipt.get('mode')!='COPY_ONLY' or set(receipt.get('candidate_sha256',{}))!={'provider','canonical'}:
         raise BoundaryReviewError('BOUNDARY_REHEARSAL_PHYSICAL_PROOF_REQUIRED')
@@ -566,6 +782,9 @@ def validate_rehearsal_receipt(proposal,receipt):
         assert_inactive_copy(path)
         if file_fingerprint(path)!=receipt['candidate_sha256'][role]:
             raise BoundaryReviewError('BOUNDARY_REHEARSAL_CANDIDATE_CHANGED')
+        with _ro(path) as c:
+            if c.execute('PRAGMA quick_check').fetchone()[0] != 'ok' or c.execute('PRAGMA foreign_key_check').fetchone():
+                raise BoundaryReviewError('BOUNDARY_REHEARSAL_CANDIDATE_INTEGRITY')
     validate_store(receipt['provider_candidate'])
     with _ro(receipt['provider_candidate']) as p:
         decisions=_records(p,DECISIONS)
@@ -576,4 +795,7 @@ def validate_rehearsal_receipt(proposal,receipt):
             actual=_quarter(c,proposal['evidence']['identity']['company_id'],q['fiscal_year'])
             if {k:v for k,v in actual.items() if k!='quarter_id'}!={k:v for k,v in q.items() if k!='quarter_id'}:
                 raise BoundaryReviewError('BOUNDARY_REHEARSAL_PUBLICATION_MISMATCH')
+            source = c.execute('SELECT dimension,effective_fiscalperiod FROM v4_parent_equity_source WHERE quarter_id=?', (actual['quarter_id'],)).fetchone()
+            if source is None or tuple(source) != ('ARQ', f"{q['fiscal_year']}-Q4"):
+                raise BoundaryReviewError('BOUNDARY_REHEARSAL_PB_BINDING')
     return True

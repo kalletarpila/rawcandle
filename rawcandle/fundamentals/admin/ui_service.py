@@ -256,6 +256,8 @@ class FundamentalsAdminUIService:
         identity_paths: Any | None = None,
         ownership_paths: Any | None = None,
         ownership_publication_workflow: Any | None = None,
+        accounting_boundary_paths: Any | None = None,
+        accounting_boundary_client: Any | None = None,
         cleanup_inspect: Callable[[str], Mapping[str, Any]] | None = None,
         cleanup_apply: Callable[[str], Mapping[str, Any]] | None = None,
         operation_lock_path: Path | None = None,
@@ -286,6 +288,8 @@ class FundamentalsAdminUIService:
         self._identity_paths = identity_paths
         self._ownership_paths = ownership_paths
         self._ownership_publication_workflow = ownership_publication_workflow
+        self._accounting_boundary_paths = accounting_boundary_paths
+        self._accounting_boundary_client = accounting_boundary_client
         self._cleanup_inspect = cleanup_inspect
         self._cleanup_apply = cleanup_apply
         self.operation_lock_path = (
@@ -946,26 +950,56 @@ class FundamentalsAdminUIService:
         from .refresh_review_queue import queue_path_for_run_root
         return read_items(queue_path_for_run_root(self.run_root))
 
-    def register_accounting_boundary_proposal(self, proposal: Mapping[str, Any]) -> Mapping[str, Any]:
-        from .accounting_boundary_review import save_item
+    def _accounting_boundary_evidence(self):
+        from .batch_add_tickers import BatchAddTickerPaths
+        from .refresh_fundamentals import fetch_complete_history, resolve_identity
+        from rawcandle.fundamentals.providers.sharadar import SharadarClient
+        paths = self._accounting_boundary_paths or BatchAddTickerPaths()
+        client = self._accounting_boundary_client or SharadarClient()
+        histories = {d: fetch_complete_history(client, 'WFRD', d) for d in ('ARQ', 'MRQ')}
+        return paths, histories, resolve_identity(paths, 'WFRD')
+
+    def register_accounting_boundary_proposal(self, proposal: Mapping[str, Any], *,
+                                               rehearsal: Mapping[str, Any]) -> Mapping[str, Any]:
+        from .accounting_boundary_review import save_item, validate_registration
         from .refresh_review_queue import queue_path_for_run_root
         with self._operation_lock():
-            return save_item(queue_path_for_run_root(self.run_root), proposal)
+            paths, histories, identity = self._accounting_boundary_evidence()
+            validate_registration(proposal, rehearsal, paths.provider_db, paths.canonical_db, histories, identity)
+            return save_item(queue_path_for_run_root(self.run_root), proposal, rehearsal=rehearsal)
+
+    def accounting_boundary_approval_confirmation(self, resolution_id: str) -> Mapping[str, Any]:
+        """Read-only confirmation fields; approval must echo these exact identities."""
+        from .accounting_boundary_review import validate_receipt_binding, BoundaryReviewError
+        items = [i for i in self.list_accounting_boundary_reviews()
+                 if i['proposal']['resolution_id'] == resolution_id]
+        if len(items) != 1 or items[0]['status'] != 'OPEN':
+            raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
+        item = items[0]
+        binding = validate_receipt_binding(item['proposal'], item.get('rehearsal_receipt_binding'))
+        return dict(status=item['status'], proposal_fingerprint=item['proposal']['proposal_fingerprint'],
+                    receipt_fingerprint=binding['receipt_fingerprint'], receipt_passed=binding['passed'],
+                    baseline_generation=binding['baseline_generation'], candidate_sha256=dict(binding['candidate_sha256']))
 
     def approve_accounting_boundary_review(self, resolution_id: str, *, operator: str,
-                                          rehearsal: Mapping[str, Any]) -> Mapping[str, Any]:
-        from .accounting_boundary_review import approve, read_items, save_item, BoundaryReviewError
+                                          proposal_fingerprint: str,
+                                          receipt_fingerprint: str) -> Mapping[str, Any]:
+        from .accounting_boundary_review import approve_registered, BoundaryReviewError
         from .refresh_review_queue import queue_path_for_run_root
         from .publication_journal import safety_status
         with self._operation_lock():
             if safety_status().get('production_writes_blocked'):
                 raise BoundaryReviewError('BOUNDARY_PUBLICATION_RECOVERY_BLOCKED')
             path = queue_path_for_run_root(self.run_root)
-            items = [i for i in read_items(path) if i['proposal']['resolution_id'] == resolution_id]
-            if len(items) != 1 or items[0]['status'] != 'OPEN':
-                raise BoundaryReviewError('BOUNDARY_REVIEW_NOT_OPEN')
-            proposal = items[0]['proposal']
-            return save_item(path, proposal, decision=approve(proposal, operator=operator, rehearsal=rehearsal))
+            confirmation = self.accounting_boundary_approval_confirmation(resolution_id)
+            if (confirmation['proposal_fingerprint'] != proposal_fingerprint
+                    or confirmation['receipt_fingerprint'] != receipt_fingerprint):
+                raise BoundaryReviewError('BOUNDARY_APPROVAL_FINGERPRINT_MISMATCH')
+            paths, histories, identity = self._accounting_boundary_evidence()
+            return approve_registered(path, resolution_id, operator=operator,
+                                      proposal_fingerprint=proposal_fingerprint, receipt_fingerprint=receipt_fingerprint,
+                                      provider_db=paths.provider_db, canonical_db=paths.canonical_db,
+                                      histories=histories, identity=identity)
 
     def history_result_summary(
         self,
