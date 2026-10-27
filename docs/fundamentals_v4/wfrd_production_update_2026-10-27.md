@@ -1,3 +1,5 @@
+**Current result — Stage 2: Production COMPLETED; atomic generation activation and postflight PASS. Explicit operator YES was received after Stage 1. OLD and three verified rollback backups are retained. Earlier STOP and Stage 1 consent records are preserved below; the completed Stage 2 record follows them.**
+
 # WFRD Production authorization — stopped before consent
 
 Task: WFRD-PRODUCTION-AUTHORIZATION-1. Date: 2026-10-27. Starting HEAD: `fb90d46854fd94c77a338a41f616bd696fd885fd`.
@@ -193,3 +195,88 @@ All Stage 1 gates passed. No Production answer has been inferred or consumed. Se
 Do you authorize the Production update for exact Preview 20261027T101828Z_refresh_fundamentals_052a88da4fba, fingerprint 777f76d7ba4750772307fdb39f1545bfd6ce760e2fe78cd952e2f7069ab715e9, and exact Test 20261027T105748Z_refresh_fundamentals_f3c7e2a627f5_test, using the freshly revalidated authorized change set of 94 safe effective changes and the approved WFRD accounting-boundary resolution boundary_3446e01f1422ebb5f7b3ea9e4a7e0f194cb5c8503669e5ed06b515659d0d1f5d, through the existing Fundamentals Production publication path? YES/NO
 
 YES authorizes only this exact Preview/Test pair, the freshly revalidated safe set, and the already approved WFRD application through the normal Fundamentals Production path. It does not authorize DHR/other review approval, rollback-backup cleanup, historical publication backlog drain, Policy V1 changes, or resolver changes. Before any later publication, critical gates must be freshly revalidated; material source/market/taxonomy/WFRD/baseline authorization drift makes consent stale and requires STOP. This Stage 1 prompt executes no Production.
+
+
+## Stage 2 — explicit YES and normal Production publication
+
+Task: WFRD-PRODUCTION-AUTHORIZATION-1, Stage 2 after the explicit conversation reply **YES** to the exact Stage 1 question. Starting HEAD: `6e7b65f593eb542cb97cae582c34e8e6d1f67000`. Source/parity commit remains `310429b622ac31efb66cf94ad9414c7c3430f5e4`; no source or policy/resolver change was made. Consent recorded at `2026-10-27T18:43:11Z` after documentation commit `6e7b65f593eb542cb97cae582c34e8e6d1f67000`. Consent and its exact scope were persisted in the Production run's `wfrd_operator_authorization.json`.
+
+**Production outcome: COMPLETED / SUCCESS_WITH_PUBLICATION_PARTIAL. Publication boundary entered: YES. Published generation and independent WFRD validation PASS.** Repository pytest and the full suite were not run.
+
+### Exact authority, post-YES freshness, and execution
+
+| Field | Evidence |
+| --- | --- |
+| Preview | `20261027T101828Z_refresh_fundamentals_052a88da4fba` |
+| Preview fingerprint | `777f76d7ba4750772307fdb39f1545bfd6ce760e2fe78cd952e2f7069ab715e9` |
+| Test | `20261027T105748Z_refresh_fundamentals_f3c7e2a627f5_test`; COMPLETED |
+| WFRD resolution | `boundary_3446e01f1422ebb5f7b3ea9e4a7e0f194cb5c8503669e5ed06b515659d0d1f5d` |
+| Production authorization | Explicit YES; backend AUTHORIZED / MATCHING_SUCCESSFUL_TEST_VALIDATED |
+| Production run | `20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3` |
+| Trigger / mode | MANUAL / PRODUCTION_APPLY |
+| Start / completion | `2026-10-27T18:45:15Z` / `2026-10-27T19:06:59Z` |
+| Post-YES preflight | PASS; exact Stage 1 baseline and complete source binding remained current |
+| Effective changed tickers | 94; exact authorized set, no holds or global blockers |
+| OLD | `refresh_20261022T043408Z_refresh_fundamentals_bb23ca223d59_production_eb6f648d` |
+| NEW active | `refresh_20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3` |
+| Published watermark | `2026-10-21` → `2026-10-26` |
+
+After YES, the scheduler was idle; normal Fundamentals, scheduler, Production, and taxonomy guard availability passed. The exact saved Preview/Test loader, WFRD approval/proposal/receipt/decision, complete live queue decisions, active OLD generation, terminal journal, watermark, source code/parity files, scheduler config, and market/taxonomy source files matched the Stage 1 consent baseline. The existing `revalidate_bound_source()` fetched and validated the entire authorized set again, returning the exact fingerprint and exact 94-member ticker list; WFRD remained applied=true/stale=false, with its exact approved decision. No replacement Preview/Test or approval mutation was performed.
+
+The normal `refresh_production.run_production_apply()` backend ran with explicit confirmation and Production intent, normal paths/run/temp/journal/backup roots, MANUAL trigger, and the normal exclusion guards. Reentrant lock handling retained the already-held scheduler/Production guard during the backend call; no lock was bypassed. It independently repeated full source revalidation, built fresh provider/canonical/analysis candidates from OLD, derived WFRD applications from the current validated change set, and performed its final complete source recheck before backups/publication. The Stage 1 candidate was not reused.
+
+Fresh Production market/taxonomy semantic comparison returned **MATCH**, no differing sections: market `STABLE_SOURCE_BUNDLE` / `FUNDAMENTALS_READ_ONLY_SOURCE_V1`, semantic `70ac1b42b6258e69a9e2ab8da86db0112172dc4e68f94cc0769adf9d7788796c`; taxonomy `DIRECT_LOCKED_READ` / `dc_ecosystem` / `DC_TAXONOMY_FULL_V2_1`, semantic `801698f6b352c445cc8e6f5fd51a1cac2779d11f6ce72a1c10bf71bb8aae4559`. Normal storage/recovery/prepublication checks passed. The backend created verified rollback backups, durably prepared the journal, assembled a complete immutable NEW generation, atomically activated its manifest, verified published roles/cross-role lineage, and committed the journal. No manual role copy, manual WFRD installation, policy override, or alternate publication path was used.
+
+### Published WFRD result
+
+| Invariant | Published result |
+| --- | --- |
+| Preserved ARQ | `(WFRD, ARQ, 2020-03-16, 2019-12-31)`; native raw `2020-Q4`, reviewed effective `2019-Q4` |
+| Genuine 2020 Q4 | Separate `(WFRD, ARQ, 2021-02-19, 2020-12-31)`, effective `2020-Q4`; no borrowed preservation resolution |
+| Reviewed decision | Exact approved decision installed and auditable; proposal/receipt/approval lineage preserved |
+| Historical MRQ | Exact original Dec 31 source evidence archived, HISTORICAL_ONLY / SUCCESSOR_YEAR_END_STOCKS / calculation=false; absent from native/current history |
+| Current MRQ | Exact Dec 13 native observation, PREDECESSOR / PARTIAL_PERIOD_FLOW; calculation/full-quarter/canonical/TTM/P/B/share/stock-fallback=false |
+| MRQ row integrity | Exact bound incoming acquisition/normalized evidence, no hybrid or null filling; 32 current MRQ rows |
+| Canonical 2019 Q4 | Company 2368, period end 2019-12-31, first-public/availability 2020-03-16 |
+| Canonical 2020 Q4 | Independent period end 2020-12-31, first-public/availability 2021-02-19 |
+| Existing WFRD quarters | All 27 existing identity/value/date projections preserved; none lost or unexpectedly changed |
+| Legitimate new quarter | WFRD 2026 Q3 published through ordinary source/initial-date policy, first-public 2026-10-21; separate from preservation effects |
+| Share/P/B binding | ARQ source authority, exact preserved resolution binding, genuine 2020 Q4 independent; shares 69,999,966 and 70,017,356 from distinct exact ARQ observations |
+| Canonical provenance | 327 WFRD financial provenance rows are ARQ; zero MRQ financial/share/P/B authority |
+| Saved Test parity | Published WFRD quarter/date/share/P/B projections match the validated Test, ignoring internal quarter IDs |
+
+The new published generation passed normal expected-boundary-state postflight, followed by independent read-only validation of the published decision/archive/context, source keys, raw/effective identities, both Q4s/dates, all existing WFRD financial projections, and ARQ share/P/B provenance against OLD and saved Test evidence. The live WFRD queue decision remains APPROVED and exactly unchanged; installation is on NEW rather than an edit to that approval.
+
+### Complete financial package and publication authority
+
+Canonical impact: **86 added / 178 changed / 0 removed**, with 89,792 unchanged existing quarters and zero unexplained unaffected changes. All 89,970 established first-public dates were preserved; 86 new dates followed normal policy. Historical bootstrap/repair count is 0. The 21 source-availability changes belong to the separately authorized source revisions; established WFRD Q4 dates did not drift. Company/security identity mappings are unchanged; duplicate quarter keys are zero.
+
+V2 is `READY`, RP snapshot `c9152b1f63cd2efb4bddee0de67149df7d635283f0ae69e968045fc45d0d41ba` validates, and RV outcome is `ACTIVATED`, snapshot `99e8d0da082ad9bc6d5b614aaa8d149d99091232c606d2ce79906cbc9916f69d`. Normal package physical integrity, source lineage, taxonomy dependency, active readers, and cross-role checks passed. All seven calculation fingerprints match the authorizing Test: **YES**.
+
+| Published role | quick_check / FK errors | SHA-256 matching active manifest and journal |
+| --- | --- | --- |
+| provider | ok / 0 | `5986536f13891e506c7a009269d731fdc7f97d7da87a6544b2390b4ae49e794f` |
+| canonical | ok / 0 | `5ec357a3a137b9cf3018c0603e17db191ec30033167fdf5c0f1c199805cc8a0e` |
+| analysis | ok / 0 | `2bb68fb3029a6821c098c57b8f314e2af9693e566c030e75d2ee1e02b1d384e7` |
+
+The normal bounded result-publication subworkflow ended **PARTIAL**, separately from core Refresh: 86 new quarters, 45 recent retries selected under unchanged 60-day / 100-quarter policy; 131 processed. Status counts: `{"AMBIGUOUS": 4, "NOT_FOUND": 30, "UNRESOLVED": 16, "VERIFIED": 81}`. Network statistics: `{"candidate_filings_inspected": 107, "candidate_filings_outside_scope_skipped": 4660, "document_requests": 135, "documents_fetched": 135, "metadata_requests": 129, "network_requests": 264, "result_context_exhibits_fetched": 28}`. No scope expansion, manual historical drain, retry-cap change, or resolver/Policy V1 change occurred. A PARTIAL authority outcome is retained as such under the existing core-success contract.
+
+### Journal, backups, cleanup, and invariants
+
+Journal terminal state/step: **COMPLETED / COMPLETED**; generation activation **ACTIVATED_AND_VERIFIED**; postflight **PASSED**; rollback/recovery **NOT_REQUIRED**. Active manifest and the NEW generation manifest identify the same complete generation, and published role hashes match their recorded verification and journal candidate fingerprints. The original OLD generation's provider/canonical/analysis files remain byte-identical to the preflight baseline.
+
+**Three verified rollback backups are retained**, 2,628,214,784 bytes total. Each still exists with the backend's verified SHA-256. No deletion or acceptance was performed.
+
+| Role | Bytes | Retained backup |
+| --- | --- | --- |
+| provider | 968,331,264 | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/provider.db` |
+| canonical | 749,371,392 | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/canonical.db` |
+| analysis | 910,512,128 | `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/analysis.db` |
+
+The backend's normal terminal cleanup removed its candidate DB/source-bundle/runtime lane. All 25 pre-existing unrelated lanes were preserved. The normal terminal cleanup record and retained backups remain available for a separate explicit acceptance decision.
+
+DHR's P/B review remains **OPEN**, unapproved, with no operator approval. All typed P/B review decision states and approvals remain unchanged. In this run the entire live Review Queue also remained byte-identical: before/after SHA-256 `d92e21f51d002fe6d9093f1db0da0b02d062fe466217b7285d19ddbbb680c17d`, with every queue table/schema fingerprint unchanged. Normal ownership synchronization observed five cases and created zero; no existing legacy approval was finalized. WFRD's approved combined decision is unchanged. Scheduler configuration hash remains `3a0b74412a0fb9cf5e7a9b370e97a6d48af031d5094d53b5689669e630c9e894`. No unrelated approval, taxonomy edit, Policy V1 change, resolver change, manual backlog drain, or backup cleanup occurred. The financial generation/manifest/journal/watermark and bounded publication-authority mutations are the authorized Production result.
+
+Runtime evidence: `fundamental_reports/admin_runs/20261027T184515Z_refresh_fundamentals_f3c7e2a627f5_production_72bba2f3/` (normal source/binding/candidate/postflight/result/journal-related reports and explicit consent) and `/tmp/wfrd_production_stage2` (post-YES source/baseline/terminal checks, independent published WFRD and role validation, retained backup verification, manifest/Test semantic comparison). Runtime DBs, manifests, journals, queue, backups, downloads, reports, logs, caches, and unrelated worktree changes are excluded from Git. This documentation is the only commit change; nothing is pushed.
+
+**Next phase:** review the published result and perform a separate explicit rollback-backup acceptance/cleanup decision. The three backups and OLD generation remain retained; this task does not authorize deletion.
