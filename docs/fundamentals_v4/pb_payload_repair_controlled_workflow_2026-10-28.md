@@ -1,5 +1,7 @@
 # Provider payload repair: controlled workflow and frozen copy rehearsal
 
+**Current Stage 1 update:** exact GE/RTX/T live OPEN registration is complete; no source repair or approval has been performed. See the successful restart appended below for the current bindings and pending YES/NO gate. Earlier blocked-attempt text is retained as history.
+
 2026-10-28. Governing [completeness-repair report](pb_provider_payload_completeness_repair_2026-10-28.md), commit `f1b56911e1efebc859eb7dcff4904a06cd10a034`, and [factor-null audit](pb_ownership_provider_factor_null_audit_2026-10-28.md).
 
 **The controlled source-repair workflow is implemented. GE/RTX/T each passed exact-source copy rehearsal and independent fresh revalidation. All 384 distinct focused tests passed. Existing financial values, ownership decisions and live runtime remain unchanged.**
@@ -232,3 +234,91 @@ Task sections A and M explicitly require STOP when a legitimate scheduler operat
 No fresh registered repair IDs, binding confirmations or source freshness results are asserted. The exact prior proposal-derived repair IDs remain documented in section 7, but none was registered by this attempt. No backup cleanup, bulk repair, normal Preview/Test/Production or ownership continuation occurred. This attempt writes only this documentation section; any externally concurrent runtime activity is outside this attempt and is not certified unchanged by it.
 
 Stage 1 is **incomplete**, and no source defect was discovered. The single recommended next phase remains **P/B-PAYLOAD-REPAIR-OPEN-REGISTRATION-1**, retried after the existing scheduler operation has finished: restart at fresh operational preflight, then proceed through fresh evidence validation, queue-copy validation, exact live OPEN registration, read-only confirmation and invariance checks. Present the exact combined YES/NO question only if all preceding gates pass, and stop for the later answer. This stopped attempt grants no authorization to publish a repair.
+
+### 2026-10-28T16:48:09.201680+00:00 restart: Stage 1 PASS, exact live OPEN registration
+
+User task: **P/B-PAYLOAD-REPAIR-OPEN-REGISTRATION-1**, explicitly restarted from the beginning after the scheduler process ended. Starting HEAD: `2f6287d20cb6dbc5dfdf1198a384729a0a764c98`. The pre-existing journal/runtime/research worktree changes remain outside this documentation commit. The original implementation and blocked-attempt sections above describe historical snapshots; **this successful restart supersedes their incomplete OPEN-registration status**. Stage 2 source repair remains unauthorized and unperformed.
+
+#### Fresh operational preflight and baseline
+
+At `2026-10-28T16:45:35.949831+00:00`, all existing scheduler, Fundamentals UI-operation and Production kernel locks were acquired nonblocking through `provider_payload_workflow.preflight`. They remained held through fresh fetches, queue-copy validation, immediate live-registration gates, live OPEN registration and post-registration verification. No lock owner text was rewritten. No live scheduler process or conflicting refresh was found. The terminal journal is COMPLETED / postflight PASSED / rollback-recovery NOT_REQUIRED; taxonomy is safe, recovery is not pending, and no visible or hidden `.preparing` generation exists. The same guards were rechecked before live registration and after confirmation.
+
+The generation remains `refresh_20261028T054130Z_refresh_fundamentals_f0854217d4df_production_14d59fd7`, watermark **2026-10-27**. Fresh baseline role/manifest/market/configuration/code hashes exactly match the frozen proposals. Exact old provider observations and all existing ownership review rows were captured; the live repair table did not exist before this attempt. Original proposals and receipts were reloaded unchanged, not regenerated or rebound.
+
+One preliminary temporary helper assumed a journal key named run_id; the actual journal uses production_run_id. That read-only formatting failure occurred before baseline capture, provider acquisition or queue writes. The temporary helper was corrected and every gate restarted. No repository source defect or source change was involved.
+
+#### Independent fresh source evidence and original candidate revalidation
+
+Normal Sharadar complete ARQ histories were independently acquired twice: `2026-10-28T16:45:36.009465+00:00`–`2026-10-28T16:45:37.301217+00:00`, then immediately before live registration at `2026-10-28T16:47:14.036874+00:00`–`2026-10-28T16:47:15.298276+00:00`. Both sets passed the existing COMPLETE validator. Each exact source row, identity, full acquisition payload, financial fingerprints, completeness fingerprint, restored-field set and factor matched the frozen proposal exactly. No drift was accepted. Original proposal fetch timestamps remain immutable; these new revalidation fetch times are recorded separately.
+
+| Ticker | Exact source key | COMPLETE ARQ rows, both fetches | Fresh factor | Restored fields proposed | Financial values changed | Stale |
+| --- | --- | --- | --- | --- | --- | --- |
+| GE | GE\|ARQ\|2026-10-20\|2026-09-30 | 42 | 1.0 | 83 | NO | NO |
+| RTX | RTX\|ARQ\|2026-10-20\|2026-09-30 | 40 | 1.0 | 83 | NO | NO |
+| T | T\|ARQ\|2026-10-21\|2026-09-30 | 42 | 1.0 | 83 | NO | NO |
+
+The same 83 sorted fields listed in section 8 remain bound, including sharefactor, equity, equityusd, price, marketcap and pb. Field-list fingerprint remains `d03a4b213f417f1d28a3e3c81cf7f8c6a17b4f0258ebd1f9a83c0f83a5a88ed2`. These are proposed restorations; **no live field was restored in Stage 1**.
+
+Current `verify_receipts` remeasured the original disposable provider/canonical/analysis files. Exact candidate hashes, source payloads, new observation IDs/hashes, financial/no-unrelated-change assertions, SQLite integrity and no-approval assertions passed. The unchanged detector still gives CONTINUATION_CANDIDATE for GE/RTX/T; hypothetical P/B remains 17.55436232103115 / 3.7920742076120066 / 1.3211122199455392. Actual Current P/B remains OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED. No new provider candidate or production generation was prepared.
+
+| Candidate role | Unchanged receipt-bound SHA-256 |
+| --- | --- |
+| analysis | ce5a09a8782660703e5160aa44a798ea2029318732466f0aa90b28c38321e3e8 |
+| canonical | 147e6ef965af071062fb89170d62b9bb471267c2cc5ac6cad4278afa2dbba054 |
+| provider | 45883cb5083d2847876b29f350387e56d1a0476eb8cfb853fe3e6c5646da123a |
+
+#### Queue-copy validation, immediate live gate and exact registration
+
+A disposable exact copy of the original operational queue was registered through `register`, then read through `_read` and `confirmation`. Each returned one OPEN item, NULL decision, receipt PASS, stale=False, exact proposal/receipt/binding/source identity and all live-repair/ownership/PB authorization flags False. Exactly three REGISTERED_OPEN events were appended; existing table contents, audit rows, ownership rows and schemas remained intact. Queue quick/FK checks passed.
+
+Before live registration, retained kernel exclusion and fresh journal/taxonomy/preparing checks were confirmed, baseline and all exact provider rows remained unchanged, the live queue byte hash and logical contents still equalled the initial baseline, and no repair item existed. The second independent fresh-source acquisition and full receipt remeasurement passed. **Section H explicitly authorizes this exact live OPEN registration after A–G PASS.** The normal controlled-workflow service then atomically registered the three items. No manual queue SQL, approval action or provider writer was used.
+
+All three live confirmations are byte-for-byte equal as JSON values to the queue-copy confirmations. The following full identities are bound to the one frozen batch `03a973f7d891b895d2bf2c3cec424a42f7dc9f378a52ff7c87d9e2114546c02c`. Each proposal fingerprint is the repair ID below with the `ppr_` prefix removed.
+
+| Ticker | Exact registered repair ID / proposal binding | Receipt fingerprint | Binding fingerprint |
+| --- | --- | --- | --- |
+| GE | ppr_ec59380018faafdc85892995d381025a1c2ab90cec73f16cb3f95b8e57b00f2b | a47ee93a5eabb8fc9daf6e3f8e47e77e7c8e9703cc2b0e8df71f79152973bff9 | 676a9673f444fad1c8048b9e533c1f147ef7435cdb69d07ae4525ee5a44bb03a |
+| RTX | ppr_fa48737bb61a6474741efd0898b566be33d244b0a3edb8043d99a20c840ea8b6 | 321385e8419079c0f1fcc9429157c4aa7f5beedc6d0615e411f47ff0ff7bec62 | 902073de4948367f158e79c3272a7359a4593fe797f2f0052c61845fcd3b4b85 |
+| T | ppr_76eda17a57f14875241e571fc7836f101b09f7fe29b46a5c77e3e0924ad8e017 | 4cf9b61c0341be6846aebfc6e45df03c659fd293e8ae89ef28efce39fbff6b50 | 6b17885ed521864a69fe705feef771219a7111a5f5ec68bc131fa43c11d1d7da |
+
+| Ticker | Old observation ID | Old content hash | Fresh source payload fingerprint |
+| --- | --- | --- | --- |
+| GE | 5806bfc4a10a7d809ef83498c8360b26660ce28502d81408e7b189426a2cab24 | d47fcb1f67a85963201f7d0c0745672e6ba99bb75c9c7ad50f8581cfdcb86375 | 14eba2facdb54dd1247923e9b684401709621787e8728ee8ab7665551a36e816 |
+| RTX | bfd42bf2f633cfb8e511931673bc6769ea1bad22859c227d602d7328d42ea4f1 | 50238350ed044491f6198bbb922dc0a562f2badfc46bde9ad266a8ed6d6462ec | 56b0a3e45b7b69e3308c4e3863aadb44c789746259283cfb0c08fab8361e2e84 |
+| T | a04ecf0968eaee10a2018c39e9d80057e59520770412d784f518bdd0c3ad6e1c | 0fbe9ab6418a1f910f4bb40dc6231889a9c91e423354b94d43075c173e500be0 | 6f744958e889dc70bbeec7162a795a6cc451e77189fbd34ead8d1a8f07eee577 |
+
+All proposal/receipt/binding schemas remain the V1 schemas in sections 2–4. The confirmations also include exact old/new completeness, baseline generation, candidate hashes, factor, full restored-field list, financial_values_changed=False, decision=None, approval_action=EXPLICIT_YES_SOURCE_REPAIR_ONLY and all authorization flags False. Full confirmation payloads are retained outside Git in stage1_result.json.
+
+| Audit ID | Ticker | Event | Occurred UTC | Repair ID |
+| --- | --- | --- | --- | --- |
+| 49 | GE | PROVIDER_PAYLOAD_REPAIR_REGISTERED_OPEN | 2026-10-28T16:48:01Z | ppr_ec59380018faafdc85892995d381025a1c2ab90cec73f16cb3f95b8e57b00f2b |
+| 50 | RTX | PROVIDER_PAYLOAD_REPAIR_REGISTERED_OPEN | 2026-10-28T16:48:01Z | ppr_fa48737bb61a6474741efd0898b566be33d244b0a3edb8043d99a20c840ea8b6 |
+| 51 | T | PROVIDER_PAYLOAD_REPAIR_REGISTERED_OPEN | 2026-10-28T16:48:01Z | ppr_76eda17a57f14875241e571fc7836f101b09f7fe29b46a5c77e3e0924ad8e017 |
+
+Live totals: **3 OPEN items, 3 registration events, 0 approval events**. Existing audit entries remain identical; no duplicate items/events exist. All nine original ownership cases, including GE/RTX/T, retain their exact prior state, NULL approval/result and unchanged candidate JSON/hashes. The only queue changes are the typed repair table/required primary-key index, its three OPEN rows, three appended audit rows and the required audit SQLite sequence advancement by three. No unrelated schema, sequence or queue row changed.
+
+#### Runtime invariance and documentation-only validation
+
+| Protected binding | Unchanged SHA-256 |
+| --- | --- |
+| active manifest | 4ed37754c69b475bb0341eb85fd24581a49a63049f03487045f6a1da99a54198 |
+| active analysis | ce5a09a8782660703e5160aa44a798ea2029318732466f0aa90b28c38321e3e8 |
+| active canonical | 11ad0c3106a80bd8583a317f595e5d21f49a5431ec9dfc99fc4db8bb7eccd35e |
+| active provider | 6d0262597c4248d40ce8b7ac79b164b1f8fcdfc09fa72283e35486d94380ae81 |
+| market | 0dd3a0fe6d4de465a075e7771128d11b370f3159b26a27c9d05d810fb360832f |
+| journal | 8c88e3894b9376be4b56cc51041274d7ca368967e87dbf532f5c491e54190eae |
+| scheduler configuration | 3a0b74412a0fb9cf5e7a9b370e97a6d48af031d5094d53b5689669e630c9e894 |
+
+Queue SHA-256 changed only as authorized: `746836b89c2bc2bcf5880812bdcdd64024c2c4398e196e21746b74fbf0f68b99` → `0c61f100e9b36b2cd5ce392b83f37a88fb1d050bc321ded8c7063b3a46c88951`. Whole-row provider observation equality and full baseline equality were rechecked after registration. Active generation, watermark, provider/canonical/analysis/market, manifest, journal and scheduler configuration remain unchanged. Existing WFRD state is preserved by unchanged provider/canonical role hashes and unchanged relevant code/contract hashes. No source repair, ownership/PB approval, Preview/Test/Production run, auto-continuation, bulk/historical repair, registry repin or backup cleanup occurred.
+
+Repository/full-suite tests run: **NO**; runtime source is unchanged, as required. Validation consists of fresh normal-provider reacquisition, current exact proposal/receipt validators, queue-copy/live readbacks, six read-only confirmations, SQLite checks and row/hash invariance. No approval or source-repair completion is inferred from successful registration.
+
+Evidence lane: `/tmp/pb_payload_repair_open_registration_20261028/attempt_164533` (before.json, original proposal/receipt copies, two fresh-source snapshots, disposable queue, queue_copy.json and stage1_result.json); log: `/tmp/pb_payload_repair_open_registration_20261028.log`. Only this documentation file is committed; no DB, provider download, queue, journal, manifest, log or unrelated worktree change is included. Nothing is pushed.
+
+#### Exact combined authorization boundary — STOP and wait
+
+Stage 1 is complete. The current action is to wait for the explicit answer required by section L of the user task; the earlier OPEN-registration next-phase recommendation has now been fulfilled. The pending question binds all three exact registered repair IDs, their proposal/receipt/binding fingerprints, source keys, the baseline generation and all 83 restored fields with financial-values-unchanged assertions above.
+
+> Do you authorize the exact source-payload completeness repairs for GE, RTX and T bound to the three OPEN repair items and exact proposal/receipt/binding fingerprints above, for GE|ARQ|2026-10-20|2026-09-30, RTX|ARQ|2026-10-20|2026-09-30 and T|ARQ|2026-10-21|2026-09-30, using the existing controlled provider-repair lifecycle? YES/NO
+
+A later YES authorizes **only this exact source-payload repair set**, through its existing verified candidate/immutable-generation/journal/rollback lifecycle. It does not authorize ownership continuation, P/B approval, auto-continuation, Preview/Test/Production beyond the lifecycle necessary for this source repair, unrelated repairs, historical bulk repair, review-queue cleanup or policy/resolver changes. Any source, baseline, proposal or receipt drift before the repair boundary invalidates consent and requires STOP. No Stage 2 action has been executed or authorized in this turn.
