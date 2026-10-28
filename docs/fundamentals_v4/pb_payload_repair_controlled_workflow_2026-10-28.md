@@ -200,3 +200,35 @@ Only the new bounded workflow source, focused test file and this report are comm
 ## 15. Exactly one recommended next phase
 
 **P/B-PAYLOAD-REPAIR-OPEN-REGISTRATION-1:** after the shared scheduler operation finishes, fresh-revalidate the exact frozen three-item proposal/receipt batch, stop on any drift, register OPEN items on a disposable queue copy, obtain the exact read-only confirmations, and present the single combined source-repair YES/NO question. Stop and wait for that later answer. Do not perform live repair or ownership/PB approval in that phase.
+
+## Stage 1 OPEN registration
+
+### 2026-10-28T15:38:55Z attempt: STOP at operational preflight
+
+Requested task: **P/B-PAYLOAD-REPAIR-OPEN-REGISTRATION-1**, starting HEAD `61b5fb9d05cb2f83250690593183ea6d3e69e5ab`. The worktree still contains the previously reported unrelated journal/runtime/research changes; none is included in this documentation commit. The exact prior proposal and receipt files still exist under `/tmp/pb_payload_repair_controlled_workflow`; their existence is not a claim of current freshness.
+
+The scheduler is **not free**. A fresh read of kernel lock ownership identifies PID `666030` holding `/home/kalle/projects/rawcandle/logs/stock_update_scheduler.lock`; a separate process check identifies `/home/kalle/projects/stockcore/.venv/bin/python -B -m tools.daily_yahoo run`. The normal `provider_payload_workflow.preflight` independently failed on nonblocking `fcntl.flock(..., LOCK_EX | LOCK_NB)` with `BlockingIOError: [Errno 11] Resource temporarily unavailable`. Its earlier UI/Production lock acquisitions were scoped read-open locks and were released on failure; no owner metadata was rewritten. No lock was removed, bypassed or waited on.
+
+Task sections A and M explicitly require STOP when a legitimate scheduler operation is active. Accordingly, stages B–L were not entered. The existing last-verified baseline remains a historical reference only: generation `refresh_20261028T054130Z_refresh_fundamentals_f0854217d4df_production_14d59fd7`, provider watermark `2026-10-27`; no fresh baseline hash/invariance certification is claimed for this stopped attempt while another operation is running.
+
+| Stage 1 evidence/action | This attempt |
+| --- | --- |
+| Operational preflight | STOP: active scheduler lock |
+| Fresh GE/RTX/T acquisitions and factors | Not checked; prior factors were 1.0 |
+| Current proposal/receipt/source/candidate validation | Not performed; stale/current status unknown |
+| Queue-copy registration and confirmations | Not run |
+| Live OPEN items registered | 0 |
+| REGISTERED_OPEN audit events appended | 0 |
+| Live read-only item confirmations | Not run |
+| Restored source fields | 0 applied; prior proposals each specify 83 |
+| Financial values changed by this attempt | NO |
+| Ownership/P/B approvals and approval events | 0 |
+| Provider/canonical/analysis mutation or repair | NO |
+| Generation activation, watermark advance, journal/config mutation | NO |
+| Queue mutation, including unrelated rows | NO |
+| Repository/full-suite tests | Not run; source unchanged |
+| Explicit combined YES/NO gate | Not reached; no consent requested or inferred |
+
+No fresh registered repair IDs, binding confirmations or source freshness results are asserted. The exact prior proposal-derived repair IDs remain documented in section 7, but none was registered by this attempt. No backup cleanup, bulk repair, normal Preview/Test/Production or ownership continuation occurred. This attempt writes only this documentation section; any externally concurrent runtime activity is outside this attempt and is not certified unchanged by it.
+
+Stage 1 is **incomplete**, and no source defect was discovered. The single recommended next phase remains **P/B-PAYLOAD-REPAIR-OPEN-REGISTRATION-1**, retried after the existing scheduler operation has finished: restart at fresh operational preflight, then proceed through fresh evidence validation, queue-copy validation, exact live OPEN registration, read-only confirmation and invariance checks. Present the exact combined YES/NO question only if all preceding gates pass, and stop for the later answer. This stopped attempt grants no authorization to publish a repair.
