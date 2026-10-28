@@ -598,6 +598,7 @@ def fetch_complete_history(client: SharadarClient, ticker: str, dimension: str) 
 
 
 def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict[str, Any]:
+    from .provider_payload import payload_fingerprint
     columns = ",".join(f"s.{field}" for field in REFRESH_REQUEST_FIELDS)
     with _readonly(provider_db) as connection:
         provider_columns = {
@@ -605,8 +606,12 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
         }
         provenance = "po.provenance_json" if "provenance_json" in provider_columns else "'{}' AS provenance_json"
         payload = "po.payload_json" if "payload_json" in provider_columns else "'{}' AS payload_json"
+        identity_columns = ",".join(
+            f"po.{key}" if key in provider_columns else f"NULL AS {key}"
+            for key in ("content_hash", "provider", "native_table", "company_id", "security_id", "provider_security_id")
+        )
         rows = [dict(row) for row in connection.execute(
-            f"SELECT po.observation_id,{payload},{provenance},{columns} FROM sharadar_fundamental_observation s "
+            f"SELECT po.observation_id,{identity_columns},{payload},{provenance},{columns} FROM sharadar_fundamental_observation s "
             "JOIN provider_observation po USING(observation_id) "
             "WHERE UPPER(s.ticker)=? AND s.dimension=? "
             "ORDER BY s.lastupdated,po.observation_id",
@@ -621,6 +626,11 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
             if not isinstance(parsed, dict):
                 raise ValueError("not an object")
             item["_acquisition_payload"] = json.loads(row["payload_json"])
+            item["_provider_observation_id"] = row["observation_id"]
+            item["_provider_content_hash"] = row["content_hash"]
+            item["_provider_identity"] = {key: row[key] for key in (
+                "provider", "native_table", "company_id", "security_id", "provider_security_id",
+            )}
             item["_provider_provenance"] = parsed
             item["_history_retention_status"] = parsed.get("history_retention_status")
             item["_history_retention_evidence"] = parsed.get("history_retention_evidence")
@@ -637,7 +647,8 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
         maximum = max(str(item["lastupdated"]) for item in versions)
         latest = [item for item in versions if str(item["lastupdated"]) == maximum]
         effective = {fingerprint(_effective_row(item)) for item in latest}
-        if len(effective) > 1:
+        payloads = {payload_fingerprint(item["_acquisition_payload"]) for item in latest}
+        if len(effective) > 1 or len(payloads) > 1:
             ambiguities.append({
                 "source_key": source_key_evidence(dict(zip(SOURCE_PRIMARY_KEY, key, strict=True))),
                 "maximum_lastupdated": maximum,
@@ -1290,6 +1301,25 @@ def compare_ticker_histories(
     retention_transition = bool(
         action["newly_aged_out_source_rows"] or action["current_source_reappearances"]
     )
+    from .provider_payload import REPAIR, compare_payload
+    payload_changes = []
+    for dimension in REFRESH_DIMENSIONS:
+        old_map = _row_maps(current[dimension]["rows"])
+        # Only authoritative response rows can improve completeness; retained
+        # history carried by the merge is not fresh acquisition evidence.
+        for row in source[dimension].rows:
+            old = old_map.get(source_key(row))
+            # Fiscal relabels are governed by the existing reviewed identity
+            # path above; they cannot be completeness-only repairs.
+            if old is not None and old["fiscalperiod"] == row["fiscalperiod"]:
+                comparison = compare_payload(old, row)
+                if comparison and comparison["reason"] not in {
+                    "NO_PAYLOAD_CHANGE", "FINANCIAL_OR_SOURCE_METADATA_REVISION",
+                }:
+                    payload_changes.append(comparison)
+    blocked_payloads = [item for item in payload_changes if item["reason"] not in {
+        REPAIR, "SOURCE_PAYLOAD_VALUE_REVISION",
+    }]
     if not added and not removed and not effective_changed:
         classification = (
             SOURCE_HISTORY_CHANGE if retention_transition
@@ -1304,6 +1334,12 @@ def compare_ticker_histories(
         classification = "SOURCE_REMOVAL"
     else:
         classification = "HISTORICAL_REVISION"
+    if blocked_payloads:
+        classification = "REVIEW_REQUIRED"
+    elif any(item["reason"] == "SOURCE_PAYLOAD_VALUE_REVISION" for item in payload_changes):
+        classification = "HISTORICAL_REVISION"
+    elif payload_changes and not (added or removed or effective_changed or metadata_changed or retention_transition):
+        classification = REPAIR
     result = {
         "ticker": ticker,
         "classification": classification,
@@ -1341,6 +1377,11 @@ def compare_ticker_histories(
         "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
         "legacy_versions_collapsed": sum(int(current[dimension]["legacy_versions_collapsed"]) for dimension in REFRESH_DIMENSIONS),
     }
+    if payload_changes:
+        result["source_payload_changes"] = payload_changes
+        result["source_payload_change_fingerprint"] = fingerprint(payload_changes)
+    if blocked_payloads:
+        result["review_reason"] = blocked_payloads[0]["reason"]
     if retained_history_approval and retained_history_approval.get("applied"):
         result["retained_history_approval"] = dict(retained_history_approval)
     if fiscal_revision_approval and fiscal_revision_approval.get("applied"):
@@ -1662,6 +1703,8 @@ def refresh_binding_change(item: Mapping[str, Any]) -> dict[str, Any]:
     result = {key: item.get(key) for key in REFRESH_BINDING_FIELDS}
     if item.get("accounting_boundary_resolution"):
         result["accounting_boundary_resolution"] = item["accounting_boundary_resolution"]
+    if item.get("source_payload_change_fingerprint"):
+        result["source_payload_change_fingerprint"] = item["source_payload_change_fingerprint"]
     return result
 
 
