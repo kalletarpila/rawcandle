@@ -1,6 +1,6 @@
 # Provider payload repair: controlled workflow and frozen copy rehearsal
 
-**Current Stage 1 update:** exact GE/RTX/T live OPEN registration is complete; no source repair or approval has been performed. See the successful restart appended below for the current bindings and pending YES/NO gate. Earlier blocked-attempt text is retained as history.
+**Current Stage 2 update:** after the explicit YES, the three exact GE/RTX/T source-payload repairs are complete in a verified immutable generation. Ownership continuation and P/B remain unapproved. See the Stage 2 completion section below; earlier registration/blocked-attempt/gate sections are retained as history.
 
 2026-10-28. Governing [completeness-repair report](pb_provider_payload_completeness_repair_2026-10-28.md), commit `f1b56911e1efebc859eb7dcff4904a06cd10a034`, and [factor-null audit](pb_ownership_provider_factor_null_audit_2026-10-28.md).
 
@@ -322,3 +322,67 @@ Stage 1 is complete. The current action is to wait for the explicit answer requi
 > Do you authorize the exact source-payload completeness repairs for GE, RTX and T bound to the three OPEN repair items and exact proposal/receipt/binding fingerprints above, for GE|ARQ|2026-10-20|2026-09-30, RTX|ARQ|2026-10-20|2026-09-30 and T|ARQ|2026-10-21|2026-09-30, using the existing controlled provider-repair lifecycle? YES/NO
 
 A later YES authorizes **only this exact source-payload repair set**, through its existing verified candidate/immutable-generation/journal/rollback lifecycle. It does not authorize ownership continuation, P/B approval, auto-continuation, Preview/Test/Production beyond the lifecycle necessary for this source repair, unrelated repairs, historical bulk repair, review-queue cleanup or policy/resolver changes. Any source, baseline, proposal or receipt drift before the repair boundary invalidates consent and requires STOP. No Stage 2 action has been executed or authorized in this turn.
+
+## Stage 2 — explicit YES, exact source repair and verified publication
+
+Completed at `2026-10-28T17:00:25.902054+00:00`. The operator answered **YES** to the exact combined question after documentation commit `ab772f0782727a5f5d41ba2f94440f8e7a602390`. That answer authorizes only the three registered GE/RTX/T source-payload repairs and the required controlled publication lifecycle. It does not approve ownership continuation or P/B. The earlier pending-question sections above are retained as history; the source-repair gate has now been answered and executed. Starting HEAD was `ab772f0782727a5f5d41ba2f94440f8e7a602390`; unrelated worktree changes remain excluded.
+
+### Fresh gates and existing publication owner
+
+Before publication, native nonblocking UI/Production/scheduler locks, taxonomy safety, terminal COMPLETED/PASSED/NOT_REQUIRED journal, no pending recovery and no `.preparing` generation were verified. The current baseline exactly matched Stage 1 and the authorized original generation. All three items were still OPEN with NULL decisions and identical repair IDs, source keys, proposal/receipt/binding fingerprints and batch `03a973f7d891b895d2bf2c3cec424a42f7dc9f378a52ff7c87d9e2114546c02c`. The queue and journal physical hashes matched the Stage 1 recorded values; exact selected rows/bindings and logical queue contents were also checked rather than relying on file hashes alone.
+
+Independent COMPLETE ARQ source acquisition and exact revalidation ran at `2026-10-28T16:57:17.786873+00:00`–`2026-10-28T16:57:40.558039+00:00`. All source, financial, completeness and factor-one bindings remained exact; no proposal or receipt was regenerated. Original candidate hashes and all receipt assertions passed current measurement. The unchanged `publish_batch` then reacquired its own UI, Production/scheduler and taxonomy locks, independently reacquired COMPLETE sources again, repeated source/baseline/item/candidate gates and held an immediate queue transaction through publication.
+
+The service cloned only the approved candidates into its run-owned directory, fsynced/verified them, created verified rollback backups of all OLD roles, wrote the durable GENERATION_POINTER journal and prepared an immutable generation. Last-boundary checks passed, the generation pointer activated atomically, and postflight remeasured exact repairs/unrelated data against the retained OLD generation. Only after COMPLETED/PASSED were the three source-repair decisions finalized. No active provider rows were updated in place, and no ordinary Fundamentals Preview/Test/Production workflow was run.
+
+OLD generation: `refresh_20261028T054130Z_refresh_fundamentals_f0854217d4df_production_14d59fd7`.
+
+NEW active generation: **`payload_repair_03a973f7d891b895_b68015aea920`**.
+
+### Exact live repairs and source-only decisions
+
+| Ticker | Exact source key | New live observation ID | Payload keys / restored | Fresh factor | Recovered parent equity USD |
+| --- | --- | --- | --- | --- | --- |
+| GE | GE\|ARQ\|2026-10-20\|2026-09-30 | 30891b203267dfa12056544407c8dcdff68edd3001822a4622d975c71d7e2248 | 112 / 83 | 1.0 | 17522000000 |
+| RTX | RTX\|ARQ\|2026-10-20\|2026-09-30 | 9dda4193acb8676c52ee8b235e9822b609c4693234323ef25452681d366146f5 | 112 / 83 | 1.0 | 69250000000 |
+| T | T\|ARQ\|2026-10-21\|2026-09-30 | 26198cc5927cf7a291d0fcb52eec541a1f16216c31b41670ffb4f9705c8dd2aa | 112 / 83 | 1.0 | 106775000000 |
+
+All three full-payload/content/completeness fingerprints and new IDs equal the original approved receipts. The same 83 fields in section 8 were restored for each exact observation; no field was inferred from a previous quarter. Existing provider native financial rows are unchanged except observation identity. Existing canonical financial values and non-null equity values were preserved; only the selected same-quarter previously missing equity/source projections and their exact observation provenance were restored. Unique source keys, no unrelated provider/canonical changes, ownership artifact invariance and SQLite quick/FK/integrity checks all pass. WFRD reviewed source/accounting state is unchanged under the full unrelated-content checks.
+
+| Ticker | Fresh detector classification | Hypothetical P/B | Actual Current P/B reason |
+| --- | --- | --- | --- |
+| GE | CONTINUATION_CANDIDATE | 17.55436232103115 | OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED |
+| RTX | CONTINUATION_CANDIDATE | 3.7920742076120066 | OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED |
+| T | CONTINUATION_CANDIDATE | 1.3211122199455392 | OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED |
+
+These hypothetical values remain read-only measurements. **Ownership approvals = 0; P/B approvals = 0.** All nine existing ownership review rows and their decisions/results/candidate evidence remain identical. No auto-continuation, ownership queue refresh/cleanup, historical bulk repair, policy/resolver or registry change occurred.
+
+| Source-only audit ID | Ticker | Event | Repair ID |
+| --- | --- | --- | --- |
+| 52 | GE | PROVIDER_PAYLOAD_REPAIR_APPROVED_SOURCE_REPAIR | ppr_ec59380018faafdc85892995d381025a1c2ab90cec73f16cb3f95b8e57b00f2b |
+| 53 | RTX | PROVIDER_PAYLOAD_REPAIR_APPROVED_SOURCE_REPAIR | ppr_fa48737bb61a6474741efd0898b566be33d244b0a3edb8043d99a20c840ea8b6 |
+| 54 | T | PROVIDER_PAYLOAD_REPAIR_APPROVED_SOURCE_REPAIR | ppr_76eda17a57f14875241e571fc7836f101b09f7fe29b46a5c77e3e0924ad8e017 |
+
+Exactly three typed source-repair items are now APPROVED with applied=True, authorization=EXPLICIT_OPERATOR_YES, source_repair_only=True, the exact new generation, and ownership_authorized=False/pb_authorized=False. Their original proposals, receipts and bindings are unchanged. Exactly three source-only approval events were appended; original registration events and all earlier audit rows are intact. No ownership/PB approval event was created. Unrelated queue tables/rows/schema are unchanged; only selected repair status/decision, three audit appends and the audit sequence advancement by three changed.
+
+### Journal, role hashes, retained OLD backups and invariance
+
+Final journal: **COMPLETED / postflight PASSED / rollback-recovery NOT_REQUIRED**. No rollback or recovery was needed. Active provider/canonical/analysis hashes exactly match the approved combined candidates; the analysis role remains byte-identical to OLD.
+
+| Role | New active SHA-256 | Verified retained OLD backup |
+| --- | --- | --- |
+| analysis | ce5a09a8782660703e5160aa44a798ea2029318732466f0aa90b28c38321e3e8 | /home/kalle/projects/rawcandle/backups/fundamentals_admin_production/payload_repair_03a973f7d891b895_b68015aea920/analysis.db |
+| canonical | 147e6ef965af071062fb89170d62b9bb471267c2cc5ac6cad4278afa2dbba054 | /home/kalle/projects/rawcandle/backups/fundamentals_admin_production/payload_repair_03a973f7d891b895_b68015aea920/canonical.db |
+| provider | 45883cb5083d2847876b29f350387e56d1a0476eb8cfb853fe3e6c5646da123a | /home/kalle/projects/rawcandle/backups/fundamentals_admin_production/payload_repair_03a973f7d891b895_b68015aea920/provider.db |
+
+All three backup files independently pass quick/FK verification and exactly match their original role hashes. All original OLD-generation files remain byte-identical. The unchanged parent manifest/data are retained for the existing full OLD-generation rollback contract; no backup or candidate cleanup was performed. Published source watermark stays **2026-10-27**. Market, scheduler configuration, implementation/ownership contract hashes, unrelated records and ownership artifacts are unchanged. The active pointer and publication journal changed only as required for this authorized source operation.
+
+The operational review queue uses SQLite **WAL** mode. Its main-file SHA alone remained `0c61f100e9b36b2cd5ce392b83f37a88fb1d050bc321ded8c7063b3a46c88951` while committed source decisions/audit appends were present in WAL. Therefore queue preservation is established by exact selected-row/audit checks, per-table logical fingerprints and a consistent SQLite-backup-API image (`review_queue_after.sqlite`, SHA-256 `302e182b5b87c970de3a36ca232e430265a1d55c86c214a1a3ae8eee3185c62c`), not a main-file-only copy. The only changed logical tables are provider_payload_repair_review and refresh_review_queue_audit. No manual checkpoint, journal-mode change or WAL cleanup was performed.
+
+### Completion evidence and validation limits
+
+Durable completion/authorization/before-state/fresh-source/role-backup/queue evidence and checksums are retained under `backups/fundamentals_admin_production/payload_repair_03a973f7d891b895_b68015aea920/source_repair_evidence`. This includes the prior publication journal, original Stage 1 confirmations, the native publication return, detailed Stage 2 result, WAL-aware queue acceptance and a consistent post-repair queue snapshot. Full OLD role backups remain in the parent run directory. Working evidence/logs remain under `/tmp/pb_payload_repair_live_20261028/attempt_165715`, `/tmp/pb_payload_repair_stage2_20261028.log` and `/tmp/pb_payload_repair_stage2_verification_20261028.log`. No runtime evidence or database is committed to Git.
+
+The publication service returned COMPLETED/PASSED before the temporary reporting helper encountered a wrong GenerationBinding attribute name. That helper had already verified active role hashes, all receipt assertions, unrelated content and OLD backups. Its read-only role lookup was corrected, and independent verification completed without another publication, source fetch, queue mutation or rollback. No runtime source defect was found and no runtime source was changed.
+
+Repository/full-suite tests run in this authorization turn: **NO**. The unchanged implementation retains its previously documented focused fixture coverage; current acceptance is the actual fresh-source, exact-item, candidate, SQLite, journal/postflight, backup and row/hash validation above. Only this report update is committed, with all pre-existing unrelated worktree changes preserved. Push: **NO**. The authorized source-repair set is complete; ownership continuation and P/B eligibility decisions remain separate and unapproved.
