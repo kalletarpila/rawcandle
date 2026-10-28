@@ -102,7 +102,8 @@ def unsafe_new_event(text: str) -> bool:
     ))
 
 
-def result_context(text: str) -> str | None:
+def result_context(text: str, *, allow_lexical_variants: bool = False) -> str | None:
+    """Keep acquisition vocabulary stable; matching can opt into lexical forms."""
     compact = " ".join(text.split())
     if unsafe_new_event(compact):
         return None
@@ -117,7 +118,8 @@ def result_context(text: str) -> str | None:
         if unsafe_new_event(context):
             continue
         if re.search(r"\b(?:quarter|months|full[- ]year|fiscal year)\b", context, re.I):
-            if result_periods(context) or result_fiscal_tokens(context):
+            tokens = lexical_result_fiscal_tokens if allow_lexical_variants else result_fiscal_tokens
+            if result_periods(context) or tokens(context):
                 return context
     return None
 
@@ -138,5 +140,28 @@ def result_fiscal_tokens(context: str) -> frozenset[str]:
         ):
             tokens.add(f"{year}:Q{number}")
     for number, year in re.findall(r"\bq([1-4])\s+(?:fy\s*)?(\d{4})\b", context, re.I):
+        tokens.add(f"{year}:Q{number}")
+    return frozenset(tokens)
+
+
+def lexical_result_fiscal_tokens(context: str) -> frozenset[str]:
+    """Matching-only observed variants; acquisition keeps its original vocabulary.
+
+    These tokens describe explicit wording, not event eligibility. Callers must
+    still establish actual-result context and preserve all competing tokens.
+    Unhyphenated year-before-quarter forms need separate guard review: they can
+    bypass acquisition-related holds through a newly recognized primary clause.
+    """
+    tokens = set(result_fiscal_tokens(context))
+    for number, word in enumerate(("first", "second", "third", "fourth"), start=1):
+        patterns = (
+            rf"\b(\d{{4}})\s+{word}-quarter\b",
+            rf"\b{word}-quarter\s+(\d{{4}})\b",
+            rf"\b{word}\s+quarter\s+(?:of\s+)?fiscal\s+(\d{{4}})\b",
+        )
+        for pattern in patterns:
+            for year in re.findall(pattern, context, re.I):
+                tokens.add(f"{year}:Q{number}")
+    for number, year in re.findall(r"\bq([1-4])\s+fiscal\s+(\d{4})\b", context, re.I):
         tokens.add(f"{year}:Q{number}")
     return frozenset(tokens)

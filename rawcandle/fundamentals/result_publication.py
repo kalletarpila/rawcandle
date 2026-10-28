@@ -17,8 +17,9 @@ from urllib.request import Request, urlopen
 
 from rawcandle.fundamentals.admin.contracts import utc_now
 from rawcandle.fundamentals.sec_result_context import (
-    item_202_sections, linked_result_exhibits, result_context, result_fiscal_tokens,
-    result_periods, same_accession_document, unsafe_new_event,
+    item_202_sections, lexical_result_fiscal_tokens, linked_result_exhibits,
+    result_context, result_fiscal_tokens, result_periods, same_accession_document,
+    unsafe_new_event,
 )
 from rawcandle.fundamentals.schema.result_publication import (
     RESULT_PUBLICATION_RULE_VERSION,
@@ -406,7 +407,8 @@ def _new_sec_context_matches(
         for exhibit in filing.result_exhibits
     ):
         return []
-    primary_contexts = [context for section in filing.result_sections if (context := result_context(section))]
+    primary_contexts = [context for section in filing.result_sections
+                        if (context := result_context(section, allow_lexical_variants=True))]
     primary_matches = []
     for quarter in quarters:
         for context in primary_contexts:
@@ -415,11 +417,12 @@ def _new_sec_context_matches(
                 break
     if primary_matches:
         return [(quarter, "NORMALIZED_ITEM_2_02_HEADING:" + method) for quarter, method in primary_matches]
-    contexts = [(exhibit, context) for exhibit in filing.result_exhibits if (context := result_context(exhibit.text))]
+    contexts = [(exhibit, context) for exhibit in filing.result_exhibits
+                if (context := result_context(exhibit.text, allow_lexical_variants=True))]
     periods = {period for _, context in contexts for period in result_periods(context)}
-    fiscal_tokens = {token for _, context in contexts for token in result_fiscal_tokens(context)}
+    fiscal_tokens = {token for _, context in contexts for token in lexical_result_fiscal_tokens(context)}
     primary_periods = {period for context in primary_contexts for period in result_periods(context)}
-    primary_tokens = {token for context in primary_contexts for token in result_fiscal_tokens(context)}
+    primary_tokens = {token for context in primary_contexts for token in lexical_result_fiscal_tokens(context)}
     if (len(periods) > 1 or len(fiscal_tokens) > 1
             or (primary_periods and periods != primary_periods)
             or (primary_tokens and fiscal_tokens and primary_tokens != fiscal_tokens)):
@@ -443,9 +446,14 @@ def _new_sec_context_matches(
 
 
 def _new_context_method(context: str, quarter: Mapping[str, Any]) -> str | None:
-    if len(result_periods(context)) > 1 or len(result_fiscal_tokens(context)) > 1:
+    fiscal_tokens = lexical_result_fiscal_tokens(context)
+    if len(result_periods(context)) > 1 or len(fiscal_tokens) > 1:
         return None
     method = match_quarter_context(context, quarter)
+    # Consume equivalent explicit tokens only when the legacy matcher found no
+    # method. An exact-date method that later fails validation still fails closed.
+    if method is None and fiscal_tokens == {f"{quarter['fiscal_year']}:{quarter['fiscal_quarter']}"}:
+        return "CIK_ITEM_2_02_EXPLICIT_FISCAL_QUARTER"
     if method == "CIK_ITEM_2_02_EXACT_PERIOD_END":
         end = datetime.strptime(str(quarter["period_end"]), "%Y-%m-%d")
         expected = f"{end.strftime('%B')} {end.day}, {end.year}".lower().replace(",", "")
