@@ -4,9 +4,9 @@
 
 **The reported live 10× mismatch is not reproduced.** The three supplied equity figures are exactly one-tenth of the frozen live queue, accepted canonical values, raw provider equity and actual dialog text. Current displayed shares, price and equity reconstruct every available hypothetical P/B exactly using the existing binary64 formula. No hidden ×10/÷10 factor, formula defect or live UI scale conversion was found.
 
-The supplied numbers do reproduce an approximately 10× arithmetic discrepancy. That establishes a difference between the supplied reproduction and current evidence; it does not establish that the application ever displayed those smaller equity values. No original screenshots, display timestamp or generation binding were attached to this task. Consequently the primary classification is **OTHER — supplied reproduction/current-evidence equity-basis discrepancy**, with the origin of the reported earlier display unverified. A transcription or reading error is possible, not proven. No backend value should be divided or multiplied by ten to fit the supplied figures.
+The supplied numbers do reproduce an approximately 10× arithmetic discrepancy. The user subsequently confirmed that those figures were read from screenshots, not copied as text from the dialog, and accepted the directly recovered equity values. The primary classification is **OTHER — screenshot-transcription discrepancy**. A missing zero in each transcribed equity value is the working explanation, supported by the exact tenfold denominator difference and the consistent UI/backend trace. The original screenshot pixels were not independently examined, so this is not a claim to have reconstructed the reading error itself. No application scale defect is established, and no backend value should be divided or multiplied by ten to fit the supplied figures.
 
-**Approval safety: UNKNOWN for the reported original incident.** The present calculation passes the economic-units checks; this audit neither certifies the unseen earlier dialog nor approves any quarterly ownership continuation. All nine cases remain OPEN with no approval or result. No source/tests/runtime state changed. The only deliverable is this report.
+**Economic-unit arithmetic: PASS. Ownership-continuation approval safety: UNKNOWN beyond this arithmetic audit.** The screenshot clarification removes the reported 10× discrepancy as evidence of an application defect. It does not constitute an ownership review or approval. In the frozen audit, all nine cases remain OPEN with no approval or result. No source/tests/runtime state changed. The only deliverable is this report.
 
 ## Governing scope and evidence
 
@@ -19,6 +19,8 @@ The active generation is `refresh_20261028T054130Z_refresh_fundamentals_f0854217
 The audit froze all nine current ownership rows and independently regenerated their cases using the existing read-only detector. Each complete queued case equals the freshly detected case, its candidate fingerprint verifies, and the preview accepts the exact case/hash. No stale queued value is observed. Read-only ownership `preview()` means the existing pure review calculation; no Refresh Fundamentals Preview/Test/Production workflow or publication preview was run.
 
 Baseline captured at `2026-10-28T12:55:55.495617+00:00`; final invariance check at `2026-10-28T13:01:38.885422+00:00`. Complete audit artifacts remain under `/tmp/pb_review_economic_units_audit` and are not committed.
+
+**User clarification, 2026-10-28:** the supplied equity amounts were transcribed from screenshots. The user confirmed AMT 3,516,600,000, BA 6,547,000,000 and DHR 53,621,000,000 as the directly recovered current values, yielding approximately 24.24 / 20.36 / 3.04 P/B, and requested that exact UI/backend evidence take precedence over the unreliable transcription. This clarification updates interpretation of the existing frozen evidence; it does not represent a new runtime snapshot or approve any action.
 
 ## 1. Exact real AMT / BA / DHR cases
 
@@ -141,7 +143,7 @@ Steps 1–13 below are the requested complete economic-unit chain. “Raw” pro
 
 There is **no first divergence inside the current application chain**. The first observable divergence is between the task's supplied equity figures and both steps 7–10 of the current chain. Each supplied denominator is one-tenth of the actual denominator; shares and prices agree within the request's stated approximation. There is no evidence that calculation equity is ten times actual displayed equity.
 
-Primary root-cause class: **OTHER**, as defined in this report's opening finding. UI_DISPLAY_SCALE_BUG, P/B_CALCULATION_SCALE_BUG, SHARES_NORMALIZATION_BUG, EQUITY_NORMALIZATION_BUG, FACTOR_APPLICATION_BUG and MIXED_UNIT_CONTRACT_BUG are not supported by this frozen current evidence. Secondary finding: ungrouped raw floats impair readability, and arithmetic reconstruction is not an explicit UI approval invariant. Neither establishes an actual current scale bug. Earlier screenshot provenance remains unverified rather than being silently substituted with current state.
+Primary root-cause class: **OTHER — screenshot-transcription discrepancy**, incorporating the user's subsequent confirmation that the supplied figures were read from images. UI_DISPLAY_SCALE_BUG, P/B_CALCULATION_SCALE_BUG, SHARES_NORMALIZATION_BUG, EQUITY_NORMALIZATION_BUG, FACTOR_APPLICATION_BUG and MIXED_UNIT_CONTRACT_BUG are not supported by this frozen current evidence. Secondary finding: ungrouped raw floats impair readability, and arithmetic reconstruction is not an explicit UI approval invariant. Neither establishes an actual current scale bug. The original screenshot pixels and historical display binding remain unexamined; the supplied transcription is not treated as an exact application output.
 
 ## 8. Current published, hypothetical and historical impact
 
@@ -194,7 +196,7 @@ The sample is the complete current ownership-review table: nine OPEN cases, not 
 
 ## 10. Approval safety and inactive candidate implications
 
-**UNKNOWN** is the approval-safety classification for the reported historical incident: its exact earlier displayed evidence is not available. This is not a finding that the backend candidate has a bad unit basis. Current AMT/BA/DHR economic-unit arithmetic is correct, and the current dialog emits consistent operands. No operator ownership evidence review or continuation approval was authorized or performed; theoretical arithmetic consistency alone is not a new ownership authorization. The class SAFE_TO_APPROVE_DESPITE_UI_DISPLAY_BUG would wrongly assert an established UI bug, so it is not used.
+**UNKNOWN** remains the classification for ownership-continuation approval beyond the arithmetic checks performed here. The earlier uncertainty attributed to the reported 10× incident is superseded by the user's screenshot-transcription clarification: this audit identifies no economic-unit arithmetic blocker. Current AMT/BA/DHR calculations are correct, and the current dialog emits consistent operands. No operator ownership evidence review or continuation approval was authorized or performed; arithmetic consistency alone is not a new ownership authorization. The class SAFE_TO_APPROVE_DESPITE_UI_DISPLAY_BUG would wrongly assert an established UI bug, so it is not used.
 
 The existing read-only ownership preview is the available dry-run. It calls proposed_record only in memory with operator HYPOTHETICAL, adds that record to the supplied review-record tuple and runs the existing current_pb against the new row. No review JSON file, candidate DB or decision was created. Its exact prospective financial values are:
 
