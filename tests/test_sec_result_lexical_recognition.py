@@ -251,15 +251,15 @@ def test_brc_frozen_primary_stays_held_and_three_links_stay_rejected():
     assert linked_result_exhibits(links, parent) == ()
 
 
-def test_tsla_frozen_future_defect_is_not_worsened_by_lexical_change():
-    # Compact exact disclaimer/primary excerpts. Historical source payload drift
-    # and the unimplemented one-candidate expectation are explicit in the report.
+def test_tsla_frozen_passive_future_reference_is_rejected():
+    # Compact exact disclaimer/primary excerpts. Acquisition keeps its prior
+    # context behavior; post-acquisition matching rejects the pending trigger.
     early = ("Our net income and cash flow results will be announced along with the rest of our financial performance "
              "when we announce Q3 earnings. Tesla vehicle deliveries and storage deployments represent only two measures "
              "of the Company’s financial performance and should not be relied on as an indicator of quarterly financial results, "
              "which depend on a variety of factors, including average selling price, cost of sales, foreign exchange movements "
              "and others as to be disclosed in the 10-Q for the quarter ended on September 30, 2026.")
-    q = {**QUARTER, "company_id": 2216}
+    q = {**QUARTER, "company_id": 2216, "quarter_id": 78864}
     base = "https://www.sec.gov/Archives/edgar/data/1318605/"
     parent = base + "000162828026064366/tsla-20261002.htm"
     ex = SecResultExhibit(base + "000162828026064366/exhibit991111111.htm", "a" * 64, early)
@@ -269,9 +269,13 @@ def test_tsla_frozen_future_defect_is_not_worsened_by_lexical_change():
     later = filing("Item 2.02 Results of Operations. Tesla released its financial results for the quarter ended September 30, 2026.",
                    accession="0001628280-26-066738", reference=base+"000162828026066738/tsla-20261021.htm",
                    accepted="2026-10-21T20:41:42Z", legacy=True)
-    assert result_context(early) == result_context(early, allow_lexical_variants=True)
+    assert result_context(early) is not None
+    assert result_context(early, allow_lexical_variants=True) is None
+    actual_only, _, _ = resolve_sec_filings_detailed([q], [later])
     m, _, d = resolve_sec_filings_detailed([q], [first, later])
-    assert len(m[(2216, 2026, 'Q3')]) == 2  # known pre-existing defect, not a claimed fix
-    assert d[(2216, 2026, 'Q3')]['reason'] == 'MULTIPLE_VALID_CANDIDATES'
-    assert {r['accession_number'] for r in m[(2216, 2026, 'Q3')]} == {
-        '0001628280-26-064366', '0001628280-26-066738'}
+    assert m == actual_only
+    row, = m[(2216, 2026, 'Q3')]
+    assert d[(2216, 2026, 'Q3')]['reason'] == 'VERIFIED'
+    assert row['accession_number'] == '0001628280-26-066738'
+    assert row['source_timestamp_utc'] == '2026-10-21T20:41:42Z'
+    assert row['evidence_hash'] == '5fb30e63fc916111e4ed11043b3297b98f467eb83e346087f2c903c5e37702dc'

@@ -102,18 +102,57 @@ def unsafe_new_event(text: str) -> bool:
     ))
 
 
+def _pending_result_trigger(prefix: str, verb: str) -> bool:
+    """Reject a pending verb, not an actual report with outlook elsewhere.
+
+    The caller supplies at most 100 characters immediately before the trigger.
+    Only its governing clause/auxiliary is inspected; later dates and result
+    words cannot turn a scheduled or conditional announcement into an event.
+    """
+    clause = re.split(r"[.!?;]", prefix)[-1]
+    pending = (
+        r"\b(?:will|shall|would|may|might|could|should)\s+"
+        r"(?:(?:not|be|have|been|being|soon|later|\w+ly)\s+)*$",
+        r"\b(?:is|are|was|were)\s+(?:expected|scheduled|planned|anticipated|due)"
+        r"\s+to\s+(?:(?:not|be)\s+)*$",
+        r"\b(?:expects?|expected|expecting|plans?|planned|planning|"
+        r"intends?|intended|intending|prepares?|prepared|preparing)"
+        r"\s+to\s+(?:be\s+)?$",
+    )
+    if any(re.search(pattern, clause, re.I) for pattern in pending):
+        return True
+    # A present-tense dependent clause ("when we announce") is not an
+    # assertion that results have been announced. Past declarations stay valid.
+    return verb.lower() in {
+        "announce", "announces", "announcing", "report", "reports",
+        "reporting", "release", "releases",
+    } and bool(re.search(
+        r"\b(?:when|once|until|before|after)\s+(?:[\w&'-]+\s+){1,4}$",
+        clause, re.I,
+    ))
+
+
 def result_context(text: str, *, allow_lexical_variants: bool = False) -> str | None:
-    """Keep acquisition vocabulary stable; matching can opt into lexical forms."""
+    """Keep acquisition stable; matching adds lexical and local modality guards."""
     compact = " ".join(text.split())
     if unsafe_new_event(compact):
         return None
     # Require an actual result event, not just a heading or a cover-date match.
-    events = re.finditer(
-        r"\b(?:announce(?:s|d)?|report(?:s|ed)?|release(?:s|d)?|reporting|announcing)\b.{0,240}?"
+    events = re.compile(
+        r"\b(?P<verb>announce(?:s|d)?|report(?:s|ed)?|release(?:s|d)?|reporting|announcing)\b.{0,240}?"
         r"\b(?:(?:financial|quarterly|fiscal|operating|annual)\s+)*results\b",
-        compact[:6000], re.I,
+        re.I,
     )
-    for event in events:
+    offset = 0
+    while event := events.search(compact[:6000], offset):
+        offset = event.end()
+        if allow_lexical_variants:
+            prefix = compact[max(0, event.start() - 100):event.start()]
+            if _pending_result_trigger(prefix, event.group("verb")):
+                # The broad result span may contain a separate actual report.
+                # Reject this trigger without swallowing that later assertion.
+                offset = event.start() + len(event.group("verb"))
+                continue
         context = compact[max(0, event.start() - 100):event.end() + 650]
         if unsafe_new_event(context):
             continue
