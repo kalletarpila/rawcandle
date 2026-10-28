@@ -1,5 +1,7 @@
 # GE / RTX / T — Ownership revalidation after source repair
 
+**Current approval update:** the explicit YES was applied with operator Kalle and note “ok”. All three ownership reviews are APPROVED_PENDING_PUBLICATION, with validated inactive candidates. Live P/B publication has not occurred; the active generation and ownership artifact remain unchanged. Earlier sections are retained as pre-approval history.
+
 2026-10-28. Governing [source repair and completed publication](pb_payload_repair_controlled_workflow_2026-10-28.md), commit `00c1dbaa6ab203a53b48d0070fd82b5baa226405`; [new-quarter ownership workflow](fundamentals_v4_pb_new_quarter_review_workflow.md), [quarterly ownership contract](fundamentals_v4_pb_quarterly_ownership_durability_v2.md) and [P/B reporting](fundamentals_v4_pb_reporting_v1.md).
 
 **All three cases are READY_FOR_EXPLICIT_CONTINUATION_APPROVAL.** Source evidence is complete, factor 1.0→1.0 and company/security/category continuity pass, fresh detector classifications are CONTINUATION_CANDIDATE, and the hypothetical P/B values reconstruct independently. Three current observation-bound OPEN cases are registered; the three old pre-repair cases are retained as SUPERSEDED history. No ownership approval, P/B publication or auto-continuation occurred. This phase stops at the combined YES/NO gate.
@@ -148,3 +150,59 @@ The pending question is bound to the three current OPEN case IDs and candidate h
 > Do you approve quarterly ownership continuation for GE, RTX and T using these exact current OPEN cases and freshly repaired/revalidated Q3 source observations, factor 1.0, unchanged security/category identity, the exact current share observations and hypothetical P/B values above? YES/NO. This authorizes ownership approval evidence and inactive-candidate preparation only; live P/B publication remains a separate later authorization.
 
 YES does not authorize an auto-continuation policy, unrelated ownership reviews, provider payload repair, historical bulk repair, publication-authority decisions, policy/resolver changes or backup cleanup. Any source, observation, candidate, market/baseline or preview drift before approval application invalidates consent and requires STOP. The existing operator-name and review-note requirements remain in force; neither has been invented or waived here.
+
+## 10. Explicit YES applied — ownership approval pending publication
+
+Completed `2026-10-28T19:11:34.637989+00:00`, starting HEAD `a5e0b60873a5590e6fe63dbb0ab0eb04c4e3326d`. After the exact combined gate, the operator replied **yes** and then supplied **operator Kalle; review note “ok”** in response to the existing mandatory backend fields. These inputs authorize only the three named ownership approvals and their inactive preparation. Earlier source-repair consent was not reused as ownership consent. No live P/B publication authorization was provided or inferred. The preceding revalidation/gate sections are retained as historical pre-approval evidence.
+
+### Fresh gates and normal approval service
+
+Immediately before application, the exact source/market/canonical/analysis/manifest/watermark/configuration/implementation baseline matched the consented review, all three case IDs/candidate hashes and previews were current, and all three rows were OPEN with NULL approval/result. The logical WAL-aware queue matched the revalidation result. Source, observation and candidate drift checks passed; no `.preparing` generation, active conflicting operation, taxonomy activity or recovery requirement was present. The journal remained terminal COMPLETED/PASSED/NOT_REQUIRED.
+
+The normal Admin operation and Production/scheduler locks were held throughout preparation. The existing `pb_ownership_review.approve` backend was called once per case with literal confirmed=True, operator **Kalle**, note **ok**, the exact current case/hash, current live source paths and the existing Admin inactive-candidate output root. Startup publication recovery was disabled on the wrapper; no publication workflow was invoked. This uses the same guarded approval boundary as the existing Admin action. No backend/UX/source change was made.
+
+### Three exact approved operational records
+
+| Ticker | Exact case ID | Backend result | Inactive candidate Current P/B |
+| --- | --- | --- | --- |
+| GE | 884c628dd47abcff07f81b2c81d0dd48a676c6fd7637e9ace306b7aac5277592 | APPROVED_PENDING_PUBLICATION | 17.55436232103115 |
+| RTX | 4e13dd3de19b68f7cede3591268e94cab77f2abb266239a2092b5e2573aabc78 | APPROVED_PENDING_PUBLICATION | 3.7920742076120066 |
+| T | 11046955fa9183b592c70add087ee021d1cc627bc12309947c29dd166c9b175b | APPROVED_PENDING_PUBLICATION | 1.3211122199455392 |
+
+All three ownership queue rows are now **APPROVED**, with result status **APPROVED_PENDING_PUBLICATION** and publication_required=True. Each approval record binds the repaired observation/hash, Q3 quarter/report period, approved current shares, factor 1.0, category/security/company identity, prior reviewed reference/hash and actual approval timestamp. The user-provided operator and note are retained verbatim after the normal whitespace trimming. No other review row or prior record was approved or altered.
+
+| Audit ID | Ticker | Event |
+| --- | --- | --- |
+| 61 | GE | PB_OWNERSHIP_APPROVED |
+| 62 | RTX | PB_OWNERSHIP_APPROVED |
+| 63 | T | PB_OWNERSHIP_APPROVED |
+
+Exactly three PB_OWNERSHIP_APPROVED events were appended; every existing audit row remains identical. The selected candidate JSON/hashes and all non-decision metadata remain unchanged. The six unrelated OPEN reviews, three SUPERSEDED histories and all completed source-repair decisions remain identical. Only selected ownership status/approval/result, the three normal audit appends and required audit sequence advancement changed. Source-repair decisions retain their original source-only authorization flags; the later ownership approval is a distinct decision.
+
+### Inactive candidates and independent checks
+
+| Ticker | Versioned registry SHA-256 | Prepared records / new records | Candidate canonical SHA-256 |
+| --- | --- | --- | --- |
+| GE | 8f734c87475686ff6fd0098bfb2e08a12668d4ff408058cee7f78360dc35f091 | 64 / 1 | 12a975b9d0e3f6f5a451a323bf89dc735675a87555bd62ccccc1140269d0edc9 |
+| RTX | a458c6c661bbeaa629ff68339a550f3cb8674b1b9ff711d058b6b7aac9040d37 | 65 / 2 | accf516432f78bcd49bef3448682a37821fba53ec0bfc4bf8d207742f996892c |
+| T | d4e10ce64374063203310dbd8f9d6de7f93567027683687efae2b83878cbdb3c | 66 / 3 | d8dfa2258889f42e32625dfa0b771e2f804b1f5859bbed7c90f82a3d1d2e088b |
+
+The original artifact has 63 records. Native preparation preserves those records exactly and appends the authorized reviews cumulatively: GE has 64 total records, RTX has 65, and T has 66. Each versioned exported artifact matches its embedded/pinned SHA. Independent readback verifies candidate P/B equals its original normal preview and the backend result, every non-ownership canonical table is unchanged, and candidate SQLite quick/FK checks pass. No prior ownership record, financial value or source provenance was rewritten.
+
+| Ticker | Retained inactive canonical candidate |
+| --- | --- |
+| GE | /home/kalle/projects/rawcandle/fundamental_reports/admin_runs/pb_ownership_candidates/884c628dd47abcff07f81b2c81d0dd48a676c6fd7637e9ace306b7aac5277592/8f734c87475686ff6fd0098bfb2e08a12668d4ff408058cee7f78360dc35f091/canonical.db |
+| RTX | /home/kalle/projects/rawcandle/fundamental_reports/admin_runs/pb_ownership_candidates/4e13dd3de19b68f7cede3591268e94cab77f2abb266239a2092b5e2573aabc78/a458c6c661bbeaa629ff68339a550f3cb8674b1b9ff711d058b6b7aac9040d37/canonical.db |
+| T | /home/kalle/projects/rawcandle/fundamental_reports/admin_runs/pb_ownership_candidates/11046955fa9183b592c70add087ee021d1cc627bc12309947c29dd166c9b175b/d4e10ce64374063203310dbd8f9d6de7f93567027683687efae2b83878cbdb3c/canonical.db |
+
+These files are approval evidence, not active generations. Later publication must use the existing separate workflow, current source/baseline guards and exact selected approved records; an individual rehearsal is not automatically a publication role. No active artifact repin, generation activation, source replacement, scoring rebuild or P/B publication occurred.
+
+### Active runtime remains unchanged
+
+Active generation remains **`payload_repair_03a973f7d891b895_b68015aea920`**, watermark **2026-10-27**. Full before/after baseline equality verifies provider/canonical/analysis/market, active manifest, scheduler configuration and pinned code/contract hashes unchanged. The publication journal hash remains `2f22eb0ab73cb0aa75dd509ceca383e6f25f1da77936f8209ffa83549d53def2`; it is still the prior completed source-repair receipt, not a new ownership-publication journal. Active embedded ownership artifact/pin and all original records are unchanged. Existing retained source-repair rollback backups were not modified or cleaned up.
+
+A fresh live report for GE/RTX/T still returns **OWNERSHIP_NEW_QUARTER_REVIEW_REQUIRED**, because the approved records exist only in operational evidence and inactive candidates. **Ownership approvals performed: 3. Live P/B publications performed: 0.** No auto-continuation, unrelated review action, provider repair, historical bulk repair, publication-authority decision, policy/resolver change or backup cleanup occurred.
+
+Detailed working evidence: `/tmp/pb_ownership_continuation_approval_ge_rtx_t_20261028/attempt_191102` (`before.json`, three per-case approval receipts and `result.json`); log `/tmp/pb_ownership_apply_ge_rtx_t_20261028.log`. Durable operational approval records and versioned candidate/artifact paths are retained by the existing queue/backend. Repository/full-suite tests run: **NO**; runtime source is unchanged and validation used actual native inactive preparation, independent SQLite/artifact/row/hash checks and live readback. Only this documentation update is committed; no DB, queue, artifact export, runtime report, log/cache, manifest, journal or unrelated worktree change is staged. Push: **NO**.
+
+The earlier P/B-OWNERSHIP-CONTINUATION-APPROVAL-1 next phase is complete. Any live P/B publication remains a later separately authorized controlled action. No new publication preview or publish action has been started by this consent.
