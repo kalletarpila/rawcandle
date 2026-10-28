@@ -151,7 +151,11 @@ def _audit(conn, case, event, run_id, evidence):
                              json.dumps({'case_id':case['case_id'],**evidence},sort_keys=True)))
 
 
-def sync(queue_path: Path, canonical_db: Path, *, as_of: str, run_id: str) -> dict:
+def sync(queue_path: Path, canonical_db: Path, *, as_of: str, run_id: str,
+         auto_continue: bool = False, provider_db: Path | None = None,
+         market_db: Path | None = None, output_root: Path | None = None) -> dict:
+    if auto_continue and (provider_db is None or market_db is None or output_root is None):
+        raise ValueError('PB_OWNERSHIP_AUTO_SOURCES_REQUIRED')
     from rawcandle.fundamentals.admin.refresh_review_queue import _connect
     with _ro(canonical_db) as canonical:
         if reporting_ownership_contract(canonical, as_of=as_of) != QUARTERLY_OWNERSHIP_CONTRACT:
@@ -174,12 +178,22 @@ def sync(queue_path: Path, canonical_db: Path, *, as_of: str, run_id: str) -> di
                 conn.execute(f"UPDATE {CASE_TABLE} SET candidate_hash=?,candidate_json=?,status='OPEN',last_seen_at=?,run_id=? WHERE case_id=?",
                     (case['candidate_hash'],json.dumps(case,sort_keys=True),utc_now(),run_id,case['case_id']))
                 _audit(conn,case,'UPDATED',run_id,case)
+            elif prior['candidate_hash']!=case['candidate_hash'] and prior['status']=='AUTO_CONTINUED':
+                _audit(conn,case,'AUTO_INVALIDATED',run_id,{'previous_candidate_hash':prior['candidate_hash'],
+                    'previous_approval':json.loads(prior['approval_json']),'previous_result':json.loads(prior['result_json'])})
+                conn.execute(f"UPDATE {CASE_TABLE} SET candidate_hash=?,candidate_json=?,status='OPEN',last_seen_at=?,run_id=?,approval_json=NULL,result_json=NULL WHERE case_id=?",
+                    (case['candidate_hash'],json.dumps(case,sort_keys=True),utc_now(),run_id,case['case_id']))
         # Historical cases remain visible; completed postflight receipts consume exact approvals above.
-        for row in conn.execute(f"SELECT * FROM {CASE_TABLE} WHERE status IN ('OPEN','HELD','APPROVED')").fetchall():
+        for row in conn.execute(f"SELECT * FROM {CASE_TABLE} WHERE status IN ('OPEN','HELD','APPROVED','AUTO_CONTINUED')").fetchall():
             case=json.loads(row['candidate_json'])
-            if row['status'] in ('OPEN','HELD') and any(c['company_id']==row['company_id'] and c['case_id']!=row['case_id'] for c in cases):
+            if row['status'] in ('OPEN','HELD','AUTO_CONTINUED') and any(c['company_id']==row['company_id'] and c['case_id']!=row['case_id'] for c in cases):
                 conn.execute(f"UPDATE {CASE_TABLE} SET status='SUPERSEDED' WHERE case_id=?",(row['case_id'],));_audit(conn,case,'SUPERSEDED',run_id,{})
-    return {'candidate_count':len(cases),'created':created}
+    result={'candidate_count':len(cases),'created':created}
+    if auto_continue:
+        from .pb_ownership_auto import reconcile
+        result['auto_continuation']=reconcile(queue_path,canonical_db,provider_db,market_db,
+            output_root=output_root,as_of=as_of,run_id=run_id,enabled=True)
+    return result
 
 
 def list_cases(queue_path: Path, *, include_resolved: bool=False) -> list[dict]:
@@ -191,7 +205,7 @@ def list_cases(queue_path: Path, *, include_resolved: bool=False) -> list[dict]:
         rows=conn.execute(f'SELECT * FROM {CASE_TABLE} ORDER BY ticker,first_seen_at,case_id').fetchall()
     result=[]
     for row in rows:
-        if not include_resolved and row['status'] not in ('OPEN','HELD','APPROVED'):
+        if not include_resolved and row['status'] not in ('OPEN','HELD','APPROVED','AUTO_CONTINUED'):
             continue
         case=json.loads(row['candidate_json']);case.update(status=row['status'],approval=json.loads(row['approval_json']) if row['approval_json'] else None,
                                                          result=json.loads(row['result_json']) if row['result_json'] else None)
@@ -206,8 +220,9 @@ def _current(conn: sqlite3.Connection, case: dict, *, as_of: str) -> dict:
     return matches[0]
 
 
-def proposed_record(case: dict, *, approved_at: str, operator: str, note: str) -> dict:
+def proposed_record(case: dict, *, approved_at: str, operator: str = '', note: str = '', automatic: dict | None = None) -> dict:
     r=deepcopy(case['previous']);new=case['new']
+    r.pop('auto_policy_version',None);r.pop('auto_decision',None)
     r.update({k:new[k] for k in (*BINDING,'fiscal_year','fiscal_quarter','reportperiod')})
     r.update(accepted_sharesbas=new['sharesbas'],provider_declared_factor=new['sharefactor'],accepted_category=new['category'],
         accepted_provider_date=new['provider_date'],accepted_source_availability_date=new['source_availability_date'],
@@ -217,6 +232,12 @@ def proposed_record(case: dict, *, approved_at: str, operator: str, note: str) -
         evidence_reference=REVIEW_TYPE+':'+case['case_id'],prior_review_hash=case['prior_review_hash'],
         prior_evidence_reference=case['prior_review_reference'],operator=operator,operator_note=note,
         parent_equity=new['parent_equity'],parent_equity_usd=new['parent_equity_usd'])
+    if automatic is not None:
+        from .pb_ownership_auto import POLICY
+        r.update(approval_mode='AUTO_CONTINUED',review_version=POLICY,
+                 auto_policy_version=POLICY,auto_decision=deepcopy(automatic),
+                 notes='Automatic ordinary quarterly continuation. Prior evidence URLs support the reviewed unit interpretation; current shares bind the accepted provider observation. Corporate-action coverage is incomplete; quarterly shares are a dated approximation.')
+        r.pop('operator',None);r.pop('operator_note',None)
     return r
 
 
@@ -248,11 +269,19 @@ def preview(case: dict, canonical_db: Path, market_db: Path, *, as_of: str) -> d
 
 
 def approve(queue_path: Path, case_id: str, *, candidate_hash: str, canonical_db: Path, market_db: Path,
-            output_root: Path, as_of: str, operator: str, note: str, confirmed: bool=False) -> dict:
+            output_root: Path, as_of: str, operator: str | None = None, note: str | None = None, confirmed: bool=False) -> dict:
+    return _approve(queue_path,case_id,candidate_hash=candidate_hash,canonical_db=canonical_db,market_db=market_db,
+                    output_root=output_root,as_of=as_of,operator=operator,note=note,confirmed=confirmed)
+
+
+def _approve(queue_path: Path, case_id: str, *, candidate_hash: str, canonical_db: Path, market_db: Path,
+             output_root: Path, as_of: str, operator: str | None = None, note: str | None = None, confirmed: bool=False,
+             automatic: dict | None = None, provider_db: Path | None = None, decision_run_id: str | None = None) -> dict:
     """Write approved operational evidence and an inactive rehearsal only; never publish."""
     from rawcandle.fundamentals.admin.refresh_review_queue import _connect
     from rawcandle.fundamentals.book_value import book_value_report
-    if confirmed is not True or not operator.strip() or not note.strip():
+    operator=(operator or '').strip();note=(note or '').strip()
+    if confirmed is not True:
         raise PermissionError('PB_OWNERSHIP_EXPLICIT_CONFIRMATION_REQUIRED')
     with _connect(queue_path) as queue, _ro(canonical_db) as source:
         queue.executescript(SCHEMA);queue.execute('BEGIN IMMEDIATE');source.execute('BEGIN')
@@ -264,12 +293,18 @@ def approve(queue_path: Path, case_id: str, *, candidate_hash: str, canonical_db
         case=_current(source,json.loads(row['candidate_json']),as_of=as_of)
         if case['classification']!='CONTINUATION_CANDIDATE':
             raise ValueError('PB_OWNERSHIP_MANUAL_EVIDENCE_REVIEW_REQUIRED')
+        if automatic is not None:
+            from .pb_ownership_auto import evaluate
+            current=evaluate(case,canonical_db=canonical_db,provider_db=provider_db,market_db=market_db,
+                             as_of=as_of,queue_path=queue_path)
+            if current['partition']!='AUTO_CONTINUE' or current!=automatic:
+                raise ValueError('PB_OWNERSHIP_AUTO_EVIDENCE_CHANGED')
         effect=preview(case,canonical_db,market_db,as_of=as_of)
-        record=proposed_record(case,approved_at=utc_now(),operator=operator.strip(),note=note.strip())
+        record=proposed_record(case,approved_at=utc_now(),operator=operator,note=note,automatic=automatic)
         if record['reviewed_at'][:10]>as_of:
             raise ValueError('PB_OWNERSHIP_APPROVAL_DATE_AFTER_AS_OF')
         artifact,old_sha=generation_ownership_artifact(source);old_records=deepcopy(artifact['records'])
-        previous_approvals=[json.loads(r[0])['record'] for r in queue.execute(f"SELECT approval_json FROM {CASE_TABLE} WHERE status IN ('APPROVED','PUBLISHED') ORDER BY first_seen_at,case_id")]
+        previous_approvals=[json.loads(r[0])['record'] for r in queue.execute(f"SELECT approval_json FROM {CASE_TABLE} WHERE status IN ('APPROVED','AUTO_CONTINUED','PUBLISHED') ORDER BY first_seen_at,case_id")]
         supported_scopes = {(r['company_id'], r['company_key'], r['security_id'], r['canonical_ticker'])
                             for r in old_records if r['evidence_status']=='REVIEWED_SUPPORTED'}
         for r in [*previous_approvals,record]:
@@ -308,9 +343,14 @@ def approve(queue_path: Path, case_id: str, *, candidate_hash: str, canonical_db
                 'source_canonical_sha256':sha256_file(canonical_db),
                 'current':after['current'],'publication_required':True}
             approval={'record':record,'candidate_hash':candidate_hash,'approved_at':record['reviewed_at'],'operator':operator.strip(),'note':note.strip()}
-            queue.execute(f"UPDATE {CASE_TABLE} SET status='APPROVED',approval_json=?,result_json=? WHERE case_id=?",
-                (json.dumps(approval,sort_keys=True),json.dumps(result,sort_keys=True),case_id))
-            _audit(queue,case,'APPROVED',None,approval)
+            status='APPROVED'
+            if automatic is not None:
+                status='AUTO_CONTINUED';approval.pop('operator');approval.pop('note')
+                approval.update(decision_type=status,policy_version=automatic['policy_version'],decision=automatic)
+                result['status']='AUTO_CONTINUED_PENDING_PUBLICATION'
+            queue.execute(f"UPDATE {CASE_TABLE} SET status=?,approval_json=?,result_json=? WHERE case_id=?",
+                (status,json.dumps(approval,sort_keys=True),json.dumps(result,sort_keys=True),case_id))
+            _audit(queue,case,status,decision_run_id,approval)
         except BaseException:
             shutil.rmtree(lane,ignore_errors=True)
             raise

@@ -111,7 +111,9 @@ def test_multiclass_and_known_conflicts_are_not_released(review):
 
 @pytest.mark.parametrize('change', [dict(share_source_date='2026-10-10'), dict(unit_effective_from='2026-10-10'),
                                      dict(valid_from_as_of='2026-10-10'), dict(reviewed_at='2026-10-10T00:00:00Z'),
-                                     dict(approval_mode='CANDIDATE'), dict(evidence_urls=[])])
+                                     dict(approval_mode='CANDIDATE'), dict(evidence_urls=[]),
+                                     dict(approval_mode='AUTO_CONTINUED',auto_decision='invalid'),
+                                     dict(approval_mode='AUTO_CONTINUED',auto_decision={})])
 def test_dates_and_unapproved_evidence_fail_closed(review, change):
     review.update(change)
     assert calc(row_for(review))['reason'] == 'OWNERSHIP_REVIEW_UNVERIFIED'

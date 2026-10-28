@@ -957,9 +957,12 @@ class RefreshReviewQueue:
         from .pb_ownership_review import list_cases
         return list_cases(self.path, include_resolved=include_resolved)
 
-    def sync_ownership(self, canonical_db: Path, *, as_of: str, run_id: str) -> dict[str, Any]:
+    def sync_ownership(self, canonical_db: Path, *, as_of: str, run_id: str,
+                       auto_continue: bool = False, provider_db: Path | None = None,
+                       market_db: Path | None = None, output_root: Path | None = None) -> dict[str, Any]:
         from .pb_ownership_review import sync
-        return sync(self.path, canonical_db, as_of=as_of, run_id=run_id)
+        return sync(self.path, canonical_db, as_of=as_of, run_id=run_id,auto_continue=auto_continue,
+                    provider_db=provider_db,market_db=market_db,output_root=output_root)
 
     def pending_tickers(self) -> list[str]:
         if not self.path.exists():

@@ -960,8 +960,8 @@ def build_fundamentals_admin_page(
             if hasattr(page, 'update'):
                 page.update()
             return
-        operator = ft.TextField(label='Operator name', value='')
-        note = ft.TextField(label='Quarterly basis review note', value='', multiline=True)
+        operator = ft.TextField(label='Operator name (optional)', value='')
+        note = ft.TextField(label='Hold reason' if hold else 'Quarterly basis review note (optional)', value='', multiline=True)
         confirmed = ft.Checkbox(label='I confirm this exact quarterly observation and the displayed ownership interpretation.', value=False)
         text = f"{item['ticker']} · {item['new']['fiscal_year']}-{item['new']['fiscal_quarter']}\nObservation: {item['new']['observation_id']}\nHash: {item['new']['content_hash']}"
         if effect:
@@ -994,7 +994,7 @@ def build_fundamentals_admin_page(
         button = ft.ElevatedButton('Keep on hold' if hold else 'Approve quarterly ownership continuation', on_click=confirm, disabled=True)
 
         def enable(_event: Any) -> None:
-            button.disabled = not (str(note.value or '').strip() and (hold or (str(operator.value or '').strip() and confirmed.value is True)))
+            button.disabled = not (str(note.value or '').strip() if hold else confirmed.value is True)
             if hasattr(page, 'update'):
                 page.update()
         operator.on_change = note.on_change = confirmed.on_change = enable
@@ -1069,8 +1069,8 @@ def build_fundamentals_admin_page(
         try:
             items = reader(include_resolved=bool(review_queue_include_resolved_checkbox.value))
             rows = []
-            if any(item['status']=='APPROVED' for item in items):
-                rows.append(ft.Text(f"Approved ownership publications pending: {sum(item['status']=='APPROVED' for item in items)}"))
+            if any(item['status'] in ('APPROVED','AUTO_CONTINUED') for item in items):
+                rows.append(ft.Text(f"Ownership publications pending: {sum(item['status'] in ('APPROVED','AUTO_CONTINUED') for item in items)}"))
             for raw in items:
                 item = dict(raw);old,new = item['previous'],item['new'];ratio = ''
                 if old['economic_unit_rule'] == 'ADS_EQUIVALENTS':
@@ -1080,9 +1080,11 @@ def build_fundamentals_admin_page(
                     f"Provider factor {old['provider_declared_factor']} → {new['sharefactor']}{ratio}\n"
                     f"Category {old['accepted_category']} → {new['category']}\n"
                     f"{item['classification']} · {item['status']} · Current P/B: {item['current_pb_status']}")
-                if item['status']=='APPROVED':
+                if item['status'] in ('APPROVED','AUTO_CONTINUED'):
                     approval=item.get('approval') or {};result=item.get('result') or {};eligibility=item.get('publication_eligibility') or {}
-                    description += (f"\nApproved {approval.get('approved_at')} by {approval.get('operator')} · Observation {new['observation_id'][:12]}/{new['content_hash'][:12]}"
+                    decision_label=(f"Automatically continued {approval.get('approved_at')}" if item['status']=='AUTO_CONTINUED'
+                                    else f"Approved {approval.get('approved_at')}"+(f" by {approval['operator']}" if approval.get('operator') else ''))
+                    description += (f"\n{decision_label} · Observation {new['observation_id'][:12]}/{new['content_hash'][:12]}"
                         f"\nApproval artifact {result.get('registry_sha256')} · Source canonical {result.get('source_canonical_sha256')}"
                         f"\nCurrent source generation {eligibility.get('source_generation')} · Publishability: {eligibility.get('status','Revalidate on preview')} {eligibility.get('reason','')}")
                 rows.append(ft.Column([ft.Text(description), ft.Row([
@@ -1091,7 +1093,7 @@ def build_fundamentals_admin_page(
                     ft.TextButton('Keep on hold', disabled=item['status']!='OPEN', on_click=lambda _e, case=item: open_pb_ownership_review(case,hold=True)),
                     *([ft.ElevatedButton('Publish approved P/B ownership reviews',
                         disabled=item.get('publication_eligibility',{}).get('status')=='STALE_OR_UNAVAILABLE',
-                        on_click=lambda _e,case=item:open_pb_ownership_publication(case))] if item['status']=='APPROVED' else []),
+                        on_click=lambda _e,case=item:open_pb_ownership_publication(case))] if item['status'] in ('APPROVED','AUTO_CONTINUED') else []),
                 ])]))
             pb_ownership_column.controls = rows or [ft.Text('No quarterly ownership reviews pending.')]
             if not items:

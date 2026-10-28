@@ -138,7 +138,9 @@ def current_pb(row: Mapping[str, Any] | None, *, as_of: str, price: Mapping[str,
     if equity <= 1_000_000:
         result['warnings'].append('NEAR_ZERO_EQUITY')
     if quarterly:
-        result['ownership_basis_status'] = 'OPERATOR_CONFIRMED_QUARTER' if ownership else 'EXISTING_UNREVIEWED_COMMON_RULE'
+        result['ownership_basis_status'] = (
+            'AUTO_CONTINUED_QUARTER' if ownership and ownership.get('metadata',{}).get('approval_mode')=='AUTO_CONTINUED'
+            else 'OPERATOR_CONFIRMED_QUARTER' if ownership else 'EXISTING_UNREVIEWED_COMMON_RULE')
     return {**result, 'market_cap': cap, 'value': value, 'status': 'OK', 'reason': 'OK',
             'warnings': result['warnings']}
 

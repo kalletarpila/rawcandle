@@ -42,6 +42,7 @@ BINDING_FIELDS = (*BINDING, 'fiscal_year', 'fiscal_quarter', 'reportperiod')
 CODE_FILES = (
     'rawcandle/fundamentals/admin/pb_ownership_publication.py',
     'rawcandle/fundamentals/admin/pb_ownership_review.py',
+    'rawcandle/fundamentals/admin/pb_ownership_auto.py',
     'rawcandle/fundamentals/admin/publication_journal.py',
     'rawcandle/fundamentals/admin/production_transaction.py',
     'rawcandle/fundamentals/admin/refresh_production.py',
@@ -107,12 +108,13 @@ def _record_matches(case: dict, record: dict) -> bool:
             ('accepted_category','category'),('accepted_provider_date','provider_date'),
             ('accepted_source_availability_date','source_availability_date'),
             ('parent_equity','parent_equity'),('parent_equity_usd','parent_equity_usd')))
-        and record.get('approval_mode') == 'OPERATOR_CONFIRMED'
+        and record.get('approval_mode') in ('OPERATOR_CONFIRMED','AUTO_CONTINUED')
         and record.get('evidence_status') == 'REVIEWED_SUPPORTED'
         and record.get('prior_review_hash') == case['prior_review_hash'])
 
 
-def _selected(queue: sqlite3.Connection, canonical: Path, case_ids: list[str], *, as_of: str) -> list[dict]:
+def _selected(queue: sqlite3.Connection, canonical: Path, case_ids: list[str], *, as_of: str,
+              provider: Path | None = None, market: Path | None = None, queue_path: Path | None = None) -> list[dict]:
     if not case_ids or len(set(case_ids)) != len(case_ids):
         raise ValueError('PB_PUBLICATION_EXPLICIT_UNIQUE_SELECTION_REQUIRED')
     with _ro(canonical) as c:
@@ -120,7 +122,7 @@ def _selected(queue: sqlite3.Connection, canonical: Path, case_ids: list[str], *
         selected = []
         for case_id in sorted(case_ids):
             row = queue.execute(f'SELECT * FROM {CASE_TABLE} WHERE case_id=?',(case_id,)).fetchone()
-            if row is None or row['status'] != 'APPROVED':
+            if row is None or row['status'] not in ('APPROVED','AUTO_CONTINUED'):
                 raise ValueError('PB_PUBLICATION_APPROVED_CASE_REQUIRED:'+case_id)
             case = json.loads(row['candidate_json']);approval = json.loads(row['approval_json'])
             result = json.loads(row['result_json']);record = approval['record']
@@ -133,7 +135,21 @@ def _selected(queue: sqlite3.Connection, canonical: Path, case_ids: list[str], *
             unhashed = {k:v for k,v in case.items() if k != 'candidate_hash'}
             if fingerprint(unhashed) != case['candidate_hash']:
                 raise ValueError('PB_PUBLICATION_CANDIDATE_HASH_INVALID')
-            expected_record=proposed_record(case,approved_at=approval['approved_at'],operator=approval['operator'],note=approval['note'])
+            automatic=None
+            if row['status']=='AUTO_CONTINUED':
+                from .pb_ownership_auto import evaluate, POLICY
+                if (provider is None or market is None or approval.get('decision_type')!='AUTO_CONTINUED'
+                    or approval.get('policy_version')!=POLICY):
+                    raise ValueError('PB_PUBLICATION_AUTO_EVIDENCE_REQUIRED')
+                automatic=approval['decision']
+                original=evaluate(case,canonical_db=canonical,provider_db=provider,market_db=market,
+                                  as_of=automatic['evidence']['as_of'],queue_path=queue_path)
+                current=evaluate(case,canonical_db=canonical,provider_db=provider,market_db=market,
+                                 as_of=as_of,queue_path=queue_path)
+                if current['partition']!='AUTO_CONTINUE' or original!=automatic:
+                    raise ValueError('PB_PUBLICATION_AUTO_EVIDENCE_CHANGED')
+            expected_record=proposed_record(case,approved_at=approval['approved_at'],operator=approval.get('operator',''),
+                                            note=approval.get('note',''),automatic=automatic)
             if record!=expected_record:
                 raise ValueError('PB_PUBLICATION_REVIEW_RECORD_CHANGED')
             if latest_basis(c,case['company_id'],as_of=as_of) != case['new']:
@@ -169,7 +185,7 @@ def _finish_queue(queue: sqlite3.Connection, receipt: dict) -> None:
             operator=scope['operator'],publication_run_id=receipt['production_run_id'])
         if row['status']=='PUBLISHED' and result.get('publication')==metadata:
             continue
-        if (row['status']!='APPROVED' or row['candidate_hash']!=item['candidate_hash']
+        if (row['status'] not in ('APPROVED','AUTO_CONTINUED') or row['candidate_hash']!=item['candidate_hash']
             or fingerprint(json.loads(row['approval_json']))!=item['approval_hash']):
             raise ValueError('PB_PUBLICATION_QUEUE_APPROVAL_CHANGED')
         result['publication']=metadata
@@ -251,7 +267,8 @@ class OwnershipPublicationWorkflow:
         try:
             active=resolve_active_generation(self.root,require_generation=True)
             with _ro(self.queue_path) as q:
-                selected=_selected(q,active.role_paths()['canonical'],[case_id],as_of=self.as_of or utc_now()[:10])
+                selected=_selected(q,active.role_paths()['canonical'],[case_id],as_of=self.as_of or utc_now()[:10],
+                    provider=active.role_paths()['provider'],market=self.root/'data/osakedata.db',queue_path=self.queue_path)
             return {'status':'READY','source_generation':active.generation_id,
                     'source_canonical_sha256':sha256_file(active.role_paths()['canonical']),
                     'approval_hash':selected[0]['approval_hash']}
@@ -264,7 +281,8 @@ class OwnershipPublicationWorkflow:
             self._recover_and_sync()
             active,source=self._sources()
             with _ro(self.queue_path) as q:
-                selected=_selected(q,active.role_paths()['canonical'],case_ids,as_of=as_of)
+                selected=_selected(q,active.role_paths()['canonical'],case_ids,as_of=as_of,
+                    provider=active.role_paths()['provider'],market=self.root/'data/osakedata.db',queue_path=self.queue_path)
             key=fingerprint({'source':source,'selected':selected,'as_of':as_of})
             self.lanes.mkdir(parents=True,exist_ok=True)
             cache=self.lanes/(key+'.json')
@@ -362,12 +380,14 @@ class OwnershipPublicationWorkflow:
             try:
                 with _connect(self.queue_path) as queue:
                     queue.execute('BEGIN IMMEDIATE')
-                    selected=_selected(queue,active.role_paths()['canonical'],saved['selection'],as_of=saved['as_of'])
+                    selected=_selected(queue,active.role_paths()['canonical'],saved['selection'],as_of=saved['as_of'],
+                        provider=active.role_paths()['provider'],market=self.root/'data/osakedata.db',queue_path=self.queue_path)
                     if selected!=saved['selected']:raise ValueError('PB_PUBLICATION_APPROVAL_CHANGED')
                     candidates={r:Path(p) for r,p in saved['candidates'].items()}
                     def gate(paths):
                         if self._sources()[1]!=source:raise ValueError('PB_PUBLICATION_FINAL_SOURCE_DRIFT')
-                        if _selected(queue,active.role_paths()['canonical'],saved['selection'],as_of=saved['as_of'])!=selected:raise ValueError('PB_PUBLICATION_FINAL_APPROVAL_DRIFT')
+                        if _selected(queue,active.role_paths()['canonical'],saved['selection'],as_of=saved['as_of'],
+                            provider=active.role_paths()['provider'],market=self.root/'data/osakedata.db',queue_path=self.queue_path)!=selected:raise ValueError('PB_PUBLICATION_FINAL_APPROVAL_DRIFT')
                         if any(sha256_file(p)!=saved['candidate_hashes'][r] for r,p in paths.items()):raise ValueError('PB_PUBLICATION_CANDIDATE_DRIFT')
                         if sha256_file(Path(saved['market']))!=saved['market_sha256']:raise ValueError('PB_PUBLICATION_MARKET_PREVIEW_DRIFT')
                     gate(candidates)

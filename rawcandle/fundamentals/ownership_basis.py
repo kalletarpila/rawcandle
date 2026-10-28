@@ -177,8 +177,21 @@ def reviewed_quarterly_ownership(row: Mapping[str, Any], *, as_of: str,
         provider = date.fromisoformat(row['provider_date'])
         activated = date.fromisoformat(r['valid_from_as_of'])
         reviewed = date.fromisoformat(r['reviewed_at'][:10])
+        automatic = r.get('auto_decision') or {}
+        if not isinstance(automatic, dict):
+            automatic = {}
+        auto_evidence = automatic.get('evidence') or {}
+        if not isinstance(auto_evidence, dict):
+            auto_evidence = {}
+        automatic_valid = (r.get('approval_mode') == 'AUTO_CONTINUED'
+            and r.get('auto_policy_version') == automatic.get('policy_version') == 'PB_ORDINARY_AUTO_CONTINUATION_V1'
+            and automatic.get('partition') == 'AUTO_CONTINUE' and automatic.get('reasons') == []
+            and auto_evidence.get('observation_id') == row.get('observation_id')
+            and auto_evidence.get('content_hash') == row.get('content_hash')
+            and r.get('evidence_reference') == 'PB_OWNERSHIP_NEW_QUARTER:'+str(auto_evidence.get('case_id'))
+            and r.get('economic_unit_rule') == 'ORDINARY_COMMON' and r.get('provider_declared_factor') == 1.0)
         if (r['validity_mode'] != 'LATEST_ACCEPTED_QUARTER_OBSERVATION'
-            or r['approval_mode'] != 'OPERATOR_CONFIRMED'
+            or not (r['approval_mode'] == 'OPERATOR_CONFIRMED' or automatic_valid)
             or not r['evidence_reference'] or not r['evidence_urls']
             or not r['share_source_date_basis'] or not r['review_version']
             or row.get('category') != r['accepted_category']

@@ -834,7 +834,7 @@ class FundamentalsAdminUIService:
         from .refresh_review_queue import RefreshReviewQueue, queue_path_for_run_root
         items = RefreshReviewQueue(queue_path_for_run_root(self.run_root)).ownership_items(include_resolved=include_resolved)
         for item in items:
-            if item['status']=='APPROVED':
+            if item['status'] in ('APPROVED','AUTO_CONTINUED'):
                 item['publication_eligibility'] = self._pb_publication().inspect(item['case_id'])
         return items
 
@@ -865,7 +865,7 @@ class FundamentalsAdminUIService:
         return preview(case, paths['canonical'], paths['market'], as_of=utc_now()[:10])
 
     def approve_pb_ownership_review(self, case_id: str, *, candidate_hash: str,
-                                   operator: str, note: str, confirmed: bool = False) -> Mapping[str, Any]:
+                                   operator: str | None = None, note: str | None = None, confirmed: bool = False) -> Mapping[str, Any]:
         from .pb_ownership_review import approve
         from .refresh_review_queue import queue_path_for_run_root
         from .production_transaction import production_lock

@@ -177,11 +177,18 @@ def test_registry_version_change_prevents_approval(factory,monkeypatch):
     with pytest.raises(ValueError,match='ARTIFACT_MISMATCH'):approve(f)
 
 
-@pytest.mark.parametrize('changes',[{'confirmed':False},{'confirmed':1},{'operator':''},{'note':''}])
-def test_explicit_confirmation_and_operator_evidence_required(factory,changes):
+@pytest.mark.parametrize('changes',[{'confirmed':False},{'confirmed':1}])
+def test_explicit_confirmation_required(factory,changes):
     f=factory()
     with pytest.raises(PermissionError,match='EXPLICIT_CONFIRMATION'):approve(f,**changes)
     assert not f['output'].exists()
+
+
+@pytest.mark.parametrize('changes',[{'operator':None},{'operator':''},{'note':None},{'note':''},{'operator':None,'note':None}])
+def test_manual_operator_and_note_optional(factory,changes):
+    f=factory();result=approve(f,**changes)
+    assert result['status']=='APPROVED_PENDING_PUBLICATION'
+    assert RefreshReviewQueue(f['queue']).ownership_items()[0]['approval']['record']['approval_mode']=='OPERATOR_CONFIRMED'
 
 
 def test_wrong_candidate_hash_and_duplicate_approval_rejected_safely(factory):
@@ -263,6 +270,8 @@ def test_admin_ui_explicit_dialog_before_action():
     row=controls.pb_ownership_column.controls[0];row.controls[1].controls[0].on_click(None)
     assert calls==[] and page.dialog.actions[1].disabled is True
     content=page.dialog.content.controls;operator=content[1];confirmed=content[2];note=content[3]
+    confirmed.value=True;confirmed.on_change(None)
+    assert page.dialog.actions[1].disabled is False  # Name/note are optional.
     operator.value='Operator';note.value='Reviewed exact new-Q evidence';confirmed.value=True;confirmed.on_change(None)
     assert page.dialog.actions[1].disabled is False
     page.dialog.actions[1].on_click(None)
