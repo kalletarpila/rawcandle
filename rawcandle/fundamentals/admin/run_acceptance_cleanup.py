@@ -71,6 +71,7 @@ def _run_dir(run_id: str, run_root: Path) -> Path:
     # Only the established sibling operation directory, never a recursive search.
     if root.name == "admin_runs":
         roots.append(root.parent / "publication_drains")
+        roots.append(root / "pb_ownership_publications")
     candidates = [base / run_id for base in roots
                   if (base / run_id).exists() or (base / run_id).is_symlink()]
     if len(candidates) != 1:
@@ -438,6 +439,115 @@ def _publication_drain_result(result, *, run_id, journal_path, backup_root, live
     return normalized
 
 
+def _ownership_check(condition: bool, reason: str) -> None:
+    if not condition:
+        raise RunAcceptanceCleanupError("OWNERSHIP_PUBLICATION_" + reason)
+
+
+def _ownership_publication_result(*, directory, run_id, journal_path, backup_root, live_paths):
+    """Adapt native ownership receipts; deletion stays in the shared locked owner.
+
+    Only the current successful publication is supported. A later journal or
+    generation requires a separately proven historical-release contract.
+    """
+    from rawcandle.fundamentals.admin.pb_ownership_publication import OPERATION, exact_hash
+    from rawcandle.fundamentals.admin.contracts import fingerprint
+    from rawcandle.fundamentals.admin.production_transaction import _no_sidecars
+
+    preview = _load_json(directory / "preview.json")
+    archived = _load_json(directory / "completed_journal.json")
+    journal = load_journal(journal_path)
+    _ownership_check(isinstance(journal, dict) and journal == archived, "JOURNAL_DISAGREEMENT")
+    _ownership_check(journal.get("operation_type") == preview.get("operation_type") == OPERATION
+                     and journal.get("production_run_id") == journal.get("new_generation_id")
+                     == preview.get("preview_id") == preview.get("candidate_generation_id") == run_id
+                     and journal.get("publication_mode") == "GENERATION_POINTER", "OWNER_MISMATCH")
+    _ownership_check(preview.get("preview_hash") == exact_hash({k: v for k, v in preview.items() if k != "preview_hash"})
+                     == journal.get("refresh_set_fingerprint"), "PREVIEW_MISMATCH")
+    sources = _generation_publication_sources({"journal": journal}, run_id=run_id)
+    _ownership_check(sources is not None, "GENERATION_REQUIRED")
+    old = journal["old_generation"]
+    active_path = Path(journal["active_generation_manifest_path"])
+    generation_root = active_path.parent / "fundamentals_generations"
+    new_dir = Path(journal["new_generation_dir"])
+    old_dir = Path(old["generation_dir"])
+    _ownership_check(new_dir == generation_root / run_id and old_dir == generation_root / old["generation_id"]
+                     and old_dir.parent == generation_root
+                     and old_dir != new_dir and not generation_root.is_symlink()
+                     and not old_dir.is_symlink() and not new_dir.is_symlink(), "GENERATION_PATH_INVALID")
+    active = _load_json(active_path)
+    published = _load_json(new_dir / "generation_manifest.json")
+    original = _load_json(old_dir / "generation_manifest.json")
+    _ownership_check(active == published == journal.get("new_generation_manifest")
+                     and published.get("generation_id") == run_id and original == old.get("manifest")
+                     and original.get("generation_id") == preview.get("source", {}).get("generation_id")
+                     == old["generation_id"], "GENERATION_MANIFEST_MISMATCH")
+    for item in (journal.get("roles"), published.get("roles"), original.get("roles"),
+                 published.get("role_verification"), original.get("role_verification"),
+                 preview.get("candidate_hashes"), preview.get("source", {}).get("role_hashes")):
+        _ownership_check(isinstance(item, dict) and set(item) == KNOWN_ROLES, "ROLE_SET_INVALID")
+    selected = preview.get("selected")
+    _ownership_check(isinstance(selected, list) and bool(selected), "SCOPE_MISSING")
+    scope = journal.get("scope_evidence", {})
+    expected_scope = [dict(case_id=s["case"]["case_id"], candidate_hash=s["candidate_hash"],
+                           approval_hash=s["approval_hash"], record_hash=fingerprint(s["record"])) for s in selected]
+    ids = [s["case_id"] for s in expected_scope]
+    _ownership_check(len(set(ids)) == len(ids) and sorted(ids) == preview.get("selection")
+                     and scope.get("selected") == expected_scope
+                     and scope.get("artifact_sha256") == preview.get("artifact_sha256"), "SCOPE_MISMATCH")
+    backups = {}
+    postflight = {}
+    expected_dir = backup_root.resolve() / run_id
+    _ownership_check(expected_dir.is_dir() and not expected_dir.is_symlink(), "BACKUP_DIRECTORY_INVALID")
+    # Evidence directories may coexist with backups; never select them implicitly.
+    _ownership_check({p.name for p in expected_dir.iterdir() if p.suffix == ".db"}
+                     == {r + ".db" for r in KNOWN_ROLES}, "BACKUP_INVENTORY_INVALID")
+    for role in sorted(KNOWN_ROLES):
+        jr = journal["roles"][role]
+        old_name, new_name = original["roles"][role], published["roles"][role]
+        _ownership_check(all(isinstance(n, str) and n not in {"", ".", ".."} and Path(n).name == n
+                             for n in (old_name, new_name)), "ROLE_PATH_INVALID")
+        old_path, new_path = old_dir / old_name, new_dir / new_name
+        path = expected_dir / (role + ".db")
+        before, after = original["role_verification"][role], published["role_verification"][role]
+        _ownership_check(sources[role] == old_path.resolve() and Path(live_paths[role]).resolve() == new_path.resolve()
+                         and jr.get("production_path") == str(new_path)
+                         and jr.get("backup_path") == str(path), "ROLE_LINEAGE_MISMATCH")
+        _ownership_check(before.get("sha256") == preview["source"]["role_hashes"][role]
+                         == jr.get("old_production_fingerprint") == jr.get("verified_backup_fingerprint")
+                         and after.get("sha256") == preview["candidate_hashes"][role] == jr.get("candidate_fingerprint")
+                         and before.get("quick_check") == after.get("quick_check") == "ok"
+                         and jr.get("candidate_replacement_verified") is True
+                         and jr.get("replacement_state") == "GENERATION_ACTIVATED_AND_VERIFIED", "ROLE_EVIDENCE_MISMATCH")
+        for db, proof in ((path, before), (old_path, before), (new_path, after)):
+            try:
+                _no_sidecars(db)
+            except RuntimeError as exc:
+                raise RunAcceptanceCleanupError(str(exc)) from exc
+            _integrity(db)
+            _ownership_check(db.stat().st_size == proof.get("size_bytes")
+                             and sha256_file(db) == proof.get("sha256"), "ROLE_HASH_OR_SIZE_MISMATCH")
+        _ownership_check(not path.samefile(old_path) and not path.samefile(new_path), "BACKUP_IN_USE")
+        backups[role] = dict(source=str(old_path), backup=str(path),
+                             verification=dict(sha256=before["sha256"], size=before["size_bytes"]))
+        postflight[role] = dict(sha256=after["sha256"], size=after["size_bytes"])
+    _ownership_check(load_journal(journal_path) == journal and _load_json(active_path) == active
+                     and _load_json(directory / "preview.json") == preview
+                     and _load_json(directory / "completed_journal.json") == archived, "EVIDENCE_CHANGED")
+    return dict(run_id=run_id, mode="PRODUCTION_APPLY", outcome="COMPLETED", journal=journal,
+                rollback={"status": "NOT_REQUIRED"}, postflight=postflight, backups=backups,
+                acceptance_run_kind="OWNERSHIP_PUBLICATION", ownership_preview_hash=preview["preview_hash"],
+                ownership_receipt_hash=exact_hash(archived))
+
+
+def _load_acceptance_result(*, directory, run_id, journal_path, backup_root, live_paths):
+    if directory.parent.name == "pb_ownership_publications":
+        return _ownership_publication_result(directory=directory, run_id=run_id, journal_path=journal_path,
+                                             backup_root=backup_root, live_paths=live_paths)
+    return _acceptance_result(_load_json(directory / "result.json"), directory=directory, run_id=run_id,
+                              journal_path=journal_path, backup_root=backup_root, live_paths=live_paths)
+
+
 def _acceptance_result(result, *, directory, run_id, journal_path, backup_root, live_paths):
     if result.get("operation") == "RESULT_PUBLICATION_BACKLOG_DRAIN":
         return _publication_drain_result(result, run_id=run_id, journal_path=journal_path,
@@ -455,7 +565,7 @@ def inspect_cleanup_eligibility(
     journal_path: Path = ACTIVE_JOURNAL_PATH,
     live_paths: Mapping[str, Path] | None = None,
 ) -> dict[str, Any]:
-    """Inspect one explicit run; publication drains additionally verify exact bytes/integrity."""
+    """Inspect one explicit owner; native publication adapters verify bytes/integrity."""
     live_paths = live_paths or BatchAddTickerPaths().as_dict()
     try:
         directory = _run_dir(run_id, run_root)
@@ -469,7 +579,7 @@ def inspect_cleanup_eligibility(
                 "backup_count": len(prior.get("files_deleted") or []),
                 "bytes_freed": int(prior.get("bytes_freed") or 0),
             }
-        result = _acceptance_result(_load_json(directory / "result.json"), directory=directory,
+        result = _load_acceptance_result(directory=directory,
                                     run_id=run_id, journal_path=journal_path,
                                     backup_root=backup_root, live_paths=live_paths)
         if result.get("run_id") != run_id:
@@ -567,7 +677,7 @@ def _accept_run_and_cleanup_backups_locked(
     )
     if not eligibility.get("eligible"):
         raise RunAcceptanceCleanupError(str(eligibility.get("reason") or "CLEANUP_NOT_ELIGIBLE"))
-    result = _acceptance_result(_load_json(directory / "result.json"), directory=directory,
+    result = _load_acceptance_result(directory=directory,
                                 run_id=run_id, journal_path=journal_path,
                                 backup_root=backup_root, live_paths=live_paths)
     if eligibility.get("run_kind") == "PUBLICATION_DRAIN":
@@ -607,7 +717,7 @@ def _accept_run_and_cleanup_backups_locked(
         live_before[role] = live_integrity
 
     # Re-read terminal evidence and journal immediately before crossing the delete boundary.
-    current = _acceptance_result(_load_json(directory / "result.json"), directory=directory,
+    current = _load_acceptance_result(directory=directory,
                                  run_id=run_id, journal_path=journal_path,
                                  backup_root=backup_root, live_paths=live_paths)
     if current != result:
@@ -653,6 +763,12 @@ def _accept_run_and_cleanup_backups_locked(
     }
     if current.get("acceptance_run_kind") == "PUBLICATION_DRAIN" and "terminal_receipt" in current:
         evidence.update(run_id=run_id, run_kind="PUBLICATION_DRAIN", terminal_receipt=identity)
+    if current.get("acceptance_run_kind") == "OWNERSHIP_PUBLICATION":
+        evidence.update(run_id=run_id, run_kind="OWNERSHIP_PUBLICATION",
+                        published_generation_id=current["journal"]["new_generation_id"],
+                        source_generation_id=current["journal"]["old_generation"]["generation_id"],
+                        ownership_preview_hash=current["ownership_preview_hash"],
+                        ownership_receipt_hash=current["ownership_receipt_hash"])
     write_text_atomic(
         directory / CLEANUP_EVIDENCE_NAME,
         json.dumps(evidence, indent=2, sort_keys=True, allow_nan=False) + "\n",

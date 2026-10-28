@@ -1,4 +1,70 @@
-# P/B ownership rollback-backup acceptance — blocked
+# P/B ownership rollback-backup acceptance — completed
+
+**Current outcome: cleanup COMPLETED. Exactly 3 rollback backups deleted, 2,629,734,400 bytes freed, 0 selected backups remaining. No unrelated backup or live financial state changed.**
+
+2026-10-28, Europe/Helsinki. Follow-up task P/B-OWNERSHIP-ROLLBACK-CLEANUP-INTEGRATION-1 explicitly authorized the bounded native integration and deletion in the same phase if all fresh gates passed. The original stop at commit `6a34dbadd08c88c119fb83a9a2aa8544004c0b34` was respected; its historical report is retained below. See [ownership cleanup integration contract and tests](ownership_publication_cleanup_contract_2026-10-28.md).
+
+## Final acceptance and exact selection
+
+Publication/NEW active generation remains `pb_ownership_903cf258a97f4873aa0f4797404a61ac`; OLD remains `payload_repair_03a973f7d891b895_b68015aea920`. No generation, generation manifest or source-repair backup was deleted.
+
+Before any source edit, fresh reproduction again returned the exact original refusals: `CLEANUP_RUN_DIRECTORY_INVALID` at the default root and `CLEANUP_EVIDENCE_INVALID:result.json` with diagnostic native-lane inspection. Publication health, exact backup provenance and unchanged queue were proven. The generic read-only ownership adapter now maps native preview/completed receipts into the existing locked cleanup owner; no fabricated Production result or separate deletion path was introduced.
+
+Fresh pre-delete snapshot: **2026-10-28T21:49:14.834317+02:00**. Final live/collateral verification: **2026-10-28T21:49:50.381847+02:00**. Read-open nonblocking preflight confirmed free UI/Production/scheduler locks, no active taxonomy operation, terminal journal, no pending recovery and no `.preparing` generation. Exact native inspection returned **ELIGIBLE / OWNERSHIP_PUBLICATION**, exactly three bound paths and 2,629,734,400 bytes. Classification: **ACCEPTANCE_READY_DELETE_CANDIDATES**. Provenance **PASS**; recovery independence **PASS** under the extended current-publication contract.
+
+Fresh backup identity/size/hash validation agreed with the canonical completed journal, archived receipt, preview, OLD role manifests/actual files and successful publication evidence. The complete pre-delete backup inventory equals the fresh reproduction inventory, including inode/ctime/mtime/size. Thus the filesystem birth times and exact paths in the historical inventory below identify these same freshly revalidated files. All selected backup, OLD role and current role quick/FK/hash checks passed. Current/OLD role files were distinct from selected backups; no sidecar/in-use or nonterminal recovery dependency existed.
+
+| Selected role | Fresh selected bytes | Deleted | Remaining |
+| --- | ---: | --- | --- |
+| analysis | 912,031,744 | YES | NO |
+| canonical | 749,371,392 | YES | NO |
+| provider | 968,331,264 | YES | NO |
+
+Selected count: **3**. Deleted count: **3**. Deleted roles: **provider, canonical, analysis**. Selected/deleted bytes: **2,629,734,400**. Selected remaining: **0**.
+
+## Execution and durable receipt
+
+After all focused tests and runtime gates passed, the normal `FundamentalsAdminUIService.accept_run_and_cleanup_backups` entry point acquired its UI-operation guard and invoked the existing public cleanup owner with default Production/scheduler locking. No lock factory override, bypass, manual unlink or `rm` was used in the live invocation. The shared mechanism revalidated exact receipts/generations/role bytes and terminal safety before its native deletion loop. Cleanup returned COMPLETED; no exception or partial deletion occurred. No second YES was requested because this task explicitly authorized the exact deletion.
+
+Durable native audit: `/home/kalle/projects/rawcandle/fundamental_reports/admin_runs/pb_ownership_publications/pb_ownership_903cf258a97f4873aa0f4797404a61ac/backup_cleanup.json`. Audit SHA-256: `a38e476313b60b6968b0445f851fcac371e59291dce4ef5bd5be66dfe2f4a20e`. It records exact deleted paths, verified backup hashes, sizes, integrity, OLD/NEW generation identities, preview hash and completed-receipt hash. The run directory and original preview/completed receipt remain. A fresh post-cleanup inspector returns **ALREADY_CLEANED**, recorded count 3 and bytes 2,629,734,400.
+
+## Collateral and final live invariance
+
+Bounded backup inventory changed from **53 to 50 files**, with the only removed paths being the three exact selected role backups. Every retained file has identical path, inode, size, mtime, ctime and symlink status. The selected owner’s seven original publication-evidence JSON files remain. Earlier payload-repair/source-repair backups and all unrelated historical backups are untouched. The native cleanup audit is retained outside the backup root, so it does not alter that collateral inventory. The historical directory table below describes the original 53-file pre-delete inventory; only the selected owner now has 7 files / 1,803,216 evidence bytes instead of 10 files / 2,631,537,616 bytes.
+
+| Final invariant | Result |
+| --- | --- |
+| Active generation / all three financial DBs / active manifest | Unchanged, exact successful publication baseline |
+| Provider watermark | 2026-10-27 → 2026-10-27 |
+| Main journal / postflight / recovery | Unchanged: COMPLETED / PASSED / NOT_REQUIRED |
+| Live provider/canonical/analysis SQLite quick/FK health | PASS / zero FK errors |
+| Complete Review Queue logical content, decisions and audit | Unchanged |
+| Source-repair decisions / WFRD / unrelated ownership reviews | Unchanged |
+| Scheduler config / market / protected workflow code | Unchanged; only the cleanup module intentionally changed |
+| OLD immutable generation / current generation | Retained, unchanged |
+| Unrelated backup deletion or metadata change | NO |
+
+| Ticker | Final Current P/B | Status / reason |
+| --- | ---: | --- |
+| GE | 17.55436232103115 | OK / OK |
+| RTX | 3.7920742076120066 | OK / OK |
+| T | 1.3211122199455392 | OK / OK |
+
+Every full final Current P/B result equals the successful publication readback and fresh pre-delete result, with independent Decimal reconstruction from accepted current inputs. Final live role SHA-256 values and active manifest SHA remain those listed in the original audit below. Complete queue equality preserves GE/RTX/T ownership publication and all original source-only approval boundaries.
+
+## Tests, scope and next phase
+
+**324 compatibility/lifecycle tests passed**, plus **31 final-source focused tests passed** (353 distinct cases, two repeated compatibility cases). Coverage includes standard Production and source-repair envelope compatibility, native ownership cleanup, both publication/recovery lifecycles, existing current/historical drain cleanup, WFRD candidate parity, exact refusal matrix, locks, boundary drift and collateral retention. See the linked integration contract for exact modules, commands/logs, limits and timings. Full suite: **NO**.
+
+Working runtime evidence: `/tmp/pb_ownership_cleanup_integration_20261028/before.json`, `cleanup_returned.json` and `after.json`. Final evidence SHA-256: `ae4b343fc89b2979362d1fd9cb3fdd72b94246b402fe7e830835b79557f0d2e4`. Original publication and source-repair evidence remain untouched; no runtime DB, journal, manifest, log or evidence JSON is part of the source/documentation commit.
+
+**Recommended next Fundamentals phase:** formal closeout of this ownership publication/rollback-cleanup phase using the retained receipts, then resume the separately prioritized Fundamentals backlog. Historical generation retention, unrelated source-repair backup acceptance and broader disk cleanup remain separate work. No automatic follow-on cleanup is authorized.
+
+---
+
+**Historical section:** the original blocked acceptance result and its then-current recommendations below are superseded by the completed integration/cleanup above. They are preserved as the reason no deletion occurred before native support existed.
+
+# Original acceptance stop — historical evidence
 
 2026-10-28, Europe/Helsinki. Governing [successful ownership publication](pb_ownership_publication_ge_rtx_t_2026-10-28.md), documentation commit `925a3a3a558eb425824145492c8bea52271b51bd`.
 

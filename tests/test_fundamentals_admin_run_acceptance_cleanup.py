@@ -198,6 +198,21 @@ def test_historical_completed_production_run_is_eligible(tmp_path: Path) -> None
     assert eligibility["bytes_freed"] > 0
 
 
+@pytest.mark.parametrize("operation", ["REFRESH_FUNDAMENTALS", "REPAIR_PROVIDER_PAYLOAD_COMPLETENESS"])
+def test_production_and_source_repair_cleanup_compatibility(tmp_path: Path, operation: str) -> None:
+    # The standard cleanup envelope remains operation-neutral. Native payload
+    # publishing/recovery is exercised separately in test_provider_payload_workflow.
+    fixture = _fixture(tmp_path)
+    _make_generation_publication(fixture)
+    fixture["result"]["operation_type"] = operation
+    (fixture["run_dir"] / "result.json").write_text(json.dumps(fixture["result"]))
+    assert _inspect(fixture)["run_kind"] == "ADMIN_PRODUCTION_APPLY"
+    result = _cleanup(fixture)
+    assert result["cleanup_outcome"] == "COMPLETED"
+    assert len(result["files_deleted"]) == 3
+    assert all(p.is_file() for p in fixture["live_paths"].values())
+
+
 def test_generation_production_run_is_eligible_and_ui_shows_cleanup_action(
     tmp_path: Path,
 ) -> None:
