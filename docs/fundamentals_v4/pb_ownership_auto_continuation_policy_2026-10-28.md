@@ -115,3 +115,82 @@ Rehearsal result SHA-256: `a2972376b320ce56fb768d3d59e724a5a6d19c85b6cf66194b6ce
 **Live rollout: NO.** This task explicitly says: “If no operator gate is already present in this prompt: STOP before live rollout and report the exact safe set.” No approval gate has been satisfied for these new six cases. Backend implementation, tests and copy-only rehearsal are completed; the exact six-case set above is reviewable. Prior YES replies authorize different completed operations, not these decisions.
 
 **Next hobby-mode phase:** explicit operator gate for the exact freshly revalidated six-case policy partition; then bounded guarded live reconciliation and controlled ownership publication. Enabling automatic reconciliation for future normal refreshes should be an explicit rollout choice after that acceptance, while exceptional cases stay in manual/deep review. Do not enable unattended publication, loosen source repairs or broaden queue/UI redesign as an implicit follow-on.
+
+## Six-case controlled live rollout
+
+### Stage 1 — 2026-10-29: PASS, awaiting explicit YES/NO
+
+Task P/B-OWNERSHIP-AUTO-CONTINUATION-ROLLOUT-1. This section supersedes the earlier rehearsal’s generation/price baseline for the rollout authorization. **Live mutation: NO. Live rollout: NOT STARTED. Unattended future scheduler continuation remains disabled.** No source change, pytest/full suite or production recovery/refresh/publication/cleanup was performed. Only documentation is committed at this gate.
+
+Implementation HEAD before this documentation update: `f9a912d387e9b1848c3a88e5aae2fe733255beff`. Fresh baseline captured **2026-10-29T08:30:28.314179+02:00**; final core invariance verified **2026-10-29T08:34:08.171349+02:00**. The existing nonblocking preflight acquired free UI-operation, Production and scheduler locks, verified safe taxonomy, terminal journal and no `.preparing` generation. No legitimate operation was waited for or bypassed. All live roles passed read-only quick_check/FK verification and matched active manifest hashes.
+
+A newer legitimate scheduled publication is active: **`refresh_20261029T054405Z_refresh_fundamentals_4c3b99953d00_production_a7f5b976`**. Its production run is `20261029T054405Z_refresh_fundamentals_4c3b99953d00_production_a7f5b976`. Journal/postflight/recovery remain **COMPLETED / PASSED / NOT_REQUIRED**. Actual provider watermark is **2026-10-28**, advanced by that completed refresh rather than this audit. The older GE/RTX/T publication was not forced current.
+
+| Frozen live baseline | SHA-256 |
+| --- | --- |
+| Active manifest | `48353487b8ee82de3a6fa96c83ec631a9137abace1693a00e7ce5bdf688e0f3e` |
+| analysis | `b1fef5fd8eb651e0337c9f6128b1e068df2999873da158c653b45fff42223327` |
+| canonical | `ad90e9827575609403663b7a98a747dcaf3b68d4f185131d01e0e2a7b16ac152` |
+| provider | `0f23acbd064d1859fa1d9f71996d1eb4979a9cdbac2db1d805a774d4215770f1` |
+| Market | `1e00094ca1813455e630b4deb183d9dfdf56efcc9a28de5c82f29a5821058722` |
+| Scheduler configuration | `3a0b74412a0fb9cf5e7a9b370e97a6d48af031d5094d53b5689669e630c9e894` |
+| Publication journal | `f22429919140f1d40500b160ba777e9d939606a6cdf2db489897c28b760928e3` |
+
+Full table-level logical queue fingerprints, original ownership/source-repair/audit rows, ownership artifact/pin and protected code hashes are frozen in `before.json`. All are unchanged on final verification. GE/RTX/T remain PUBLISHED with their operator-confirmed ownership records; their current prices/P/B are compared against this fresh baseline, not yesterday’s quotes. Whole provider/canonical/analysis and queue invariance also protects WFRD and publication-authority state.
+
+### Exact refreshed six-case partition
+
+As-of **2026-10-29**. All six are still AUTO_CONTINUE under the unchanged policy. Case IDs, current candidate hashes and exact accepted observation IDs/hashes equal the six identity tables above. All source shapes remain complete (112 fields), factors 1.0→1.0, category/security/provider identity continuous, shares provenance ARQ/DIRECT/HIGH, and there is no unresolved source/current action/hold conflict. Diagnostic share deltas are unchanged; no percentage threshold is added. Both incomplete-action-coverage and quarterly-share-approximation warnings remain disclosed.
+
+| Ticker | Price | Quote date | Accepted ordinary shares | Parent equity USD | Fresh hypothetical P/B |
+| --- | ---: | --- | ---: | ---: | ---: |
+| AMT | 183.75 | 2026-10-28 | 463,763,555 | 3,516,600,000 | 24.232654618452482 |
+| BA | 167.13999938964844 | 2026-10-28 | 792,449,940 | 6,547,000,000 | 20.230652587127988 |
+| DHR | 234.07000732421875 | 2026-10-28 | 703,530,815 | 53,621,000,000 | 3.0711001849996005 |
+| GM | 82.4800033569336 | 2026-10-28 | 843,549,423 | 62,806,000,000 | 1.1077916001779988 |
+| PNR | 64.37000274658203 | 2026-10-28 | 159,654,682 | 3,859,800,000 | 2.6625660186653923 |
+| PSA | 310.04998779296875 | 2026-10-28 | 186,843,449 | 14,502,357,000 | 3.9945788868420617 |
+
+Every P/B independently reconstructs as current usable price × accepted ordinary shares / parent_equity_usd within 1e-12 relative/absolute tolerance. The legitimately newer 2026-10-28 quotes replace the prior rehearsal values; no target P/B was forced.
+
+### Nonselected scope and exceptional controls
+
+Fresh detection now also finds **TMUS** as AUTO_CONTINUE. It is explicitly **not authorized or selected** in this six-case gate. Its OPEN row, decision history and P/B remain untouched. A global `auto.reconcile(enabled=True)`/global auto_continue pass would include TMUS, so it is not the execution recipe for this bounded rollout. The copy rehearsal uses normal binding reconciliation without automatic decisions, checks every nonselected row is identical, then invokes the exact installed automatic decision builder (`pb_ownership_review._approve(..., automatic=<fresh policy evidence>)`) for the six frozen case IDs only. This is the same builder called by the installed auto-reconciler; no separate decision/policy or manual approval path is introduced. Stage 2 must preserve this exact selection boundary under the normal operation/Production/scheduler guards.
+
+The following real-shape runtime controls were injected only into disposable DB/queue copies, evaluated by the unchanged policy, then restored. Every control was excluded and the original normal case returned to AUTO_CONTINUE afterward. No source edits or pytest were used.
+
+| Exceptional control | Policy partition |
+| --- | --- |
+| NULL_FACTOR | DEEP_REVIEW/BLOCKED |
+| INCOMPLETE_ABSENT_FACTOR | DEEP_REVIEW/BLOCKED |
+| FACTOR_CHANGE | DEEP_REVIEW/BLOCKED |
+| CATEGORY_CHANGE | DEEP_REVIEW/BLOCKED |
+| SECURITY_IDENTITY_CHANGE | DEEP_REVIEW/BLOCKED |
+| ADS_ADR | MANUAL_REVIEW |
+| SOURCE_HISTORY_ANOMALY | DEEP_REVIEW/BLOCKED |
+| CORPORATE_ACTION_CONFLICT | DEEP_REVIEW/BLOCKED |
+| MISSING_EQUITY | DEEP_REVIEW/BLOCKED |
+| MISSING_PRICE | MANUAL_REVIEW |
+| STALE_EVIDENCE | DEEP_REVIEW/BLOCKED |
+| TAMPERED_EVIDENCE | DEEP_REVIEW/BLOCKED |
+| EXPLICIT_HOLD | MANUAL_REVIEW |
+
+### Complete live-shape copy rehearsal
+
+An isolated project received exact current provider/canonical/analysis copies, a verified immutable baseline generation and SQLite-backup market/taxonomy/queue snapshots. Normal binding sync and six exact automatic-builder calls created **exactly six AUTO_CONTINUED** decisions with policy version, exact evidence, timestamps and no operator/note. No PB_OWNERSHIP_APPROVED manual event was used. All nonselected rows, including TMUS and every GE/RTX/T history row, and all source-repair/other queue tables remain identical.
+
+The installed OwnershipPublicationWorkflow preview/publish executed with rehearsal=True and a clearly labeled COPY_ONLY_REHEARSAL publishing actor. Rehearsal generation: `pb_ownership_ca373606668f430ca310784194f8be34`. Exactly the six frozen IDs were published through the existing backup, generation, atomic activation and journal lifecycle. Native postflight was PASSED and recovery NOT_REQUIRED. All six reports are OK / AUTO_CONTINUED_QUARTER and match the preview with independent reconstruction. Provider/analysis hashes and canonical financial/publication-authority content remain unchanged, with only the intended ownership artifact/configuration changes. GE/RTX/T full reports equal the fresh pre-rehearsal reports.
+
+Cleanup eligibility selected exactly the copied publication’s provider/canonical/analysis rollback set: **3 files / 2,630,086,656 bytes**. The existing locked cleanup mechanism then deleted those exact three copied files, freed the same bytes and left zero selected copies. The copied OLD/current generations, copied live role hashes/queue/journal and unrelated backup evidence remain intact. This rehearsed both eligibility and execution, without deleting any live backup.
+
+### Frozen authorization boundary
+
+All A–F gates are PASS. The single pending question is:
+
+Do you authorize live AUTO_CONTINUATION and controlled ownership/P/B publication for the exact freshly revalidated safe set AMT, BA, DHR, GM, PNR and PSA under policy PB_ORDINARY_AUTO_CONTINUATION_V1, followed by exact rollback-backup cleanup if publication completes with PASSED postflight and NOT_REQUIRED recovery? YES/NO
+
+YES authorizes only the exact six AUTO_CONTINUED decisions, their controlled immutable-generation ownership/P/B publication using the existing formula, and deletion of that publication’s exact rollback backups after healthy terminal postflight. It does not authorize TMUS or any other nonselected review, unattended future scheduler continuation, incomplete/null/factor-change cases, ADS/ADR, source repair, publication-authority decisions, historical bulk repair, policy/resolver changes or broader backup cleanup. Any material source/candidate/baseline drift after YES invalidates consent; repeat critical gates before any live mutation. No YES has been inferred from prior workstreams.
+
+Stage 2 is pending. Post-YES decisions/publication/live P/B/rollback-backup cleanup and future-enable recommendation have not been performed or certified by this Stage 1 report. No production generation ID or backup size is predetermined by the copy rehearsal. Until successful bounded live rollout, the future-enablement recommendation remains KEEP_ROLLOUT_DISABLED.
+
+Evidence directory: `/tmp/pb_auto_rollout_20261029/stage1_063022`. `before.json` SHA-256 `d3e3a63138efee5dc8494efeddd4048f640f8dc9710813b058291a42f42c432c`; `rehearsal.json` SHA-256 `0d1b0c4ed7ce717869d2fd60627969e7671cfa64351abd687d65c718415b4b2e`; `exception_controls.json` SHA-256 `a6b938efa8b394323c73f1ea42f353afa80b79ef074b16e23ec1522cab6061f8`. `stage1_result.json` freezes the exact selected IDs/candidates, code hashes, live baseline and queue fingerprints. Runtime DBs, journals, reports/logs and backups remain excluded from Git.
