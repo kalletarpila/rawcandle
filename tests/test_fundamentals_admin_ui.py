@@ -1683,8 +1683,8 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     assert row.controls[0].value == "YYAI"
     assert "BOUNDARY_FISCAL_WINDOW_TOO_SHORT" in row.controls[3].tooltip
     assert "Next action:" in row.controls[3].value
-    assert "preview-first" in row.controls[4].value
-    assert "preview-latest" in row.controls[5].value
+    assert "preview-first" in row.controls[4].tooltip
+    assert "preview-latest" in row.controls[5].tooltip
 
     row.controls[6].on_click(None)
     assert "2017 Q1" in controls.review_queue_detail_field.value
@@ -1695,7 +1695,8 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     assert row.controls[9].disabled is False
     row.controls[9].on_click(None)
     assert "Affected source rows: 23" in page.dialog.content.controls[0].value
-    assert "published-generation-7" in page.dialog.content.controls[0].value
+    assert "published-generation-7" not in page.dialog.content.controls[0].value
+    assert "published-generation-7" in page.dialog.content.controls[2].controls[0].content.controls[0].value
     page.dialog.content.controls[1].value = "Reviewed exact history"
     page.dialog.actions[1].on_click(None)
     assert service.actions[-1] == ("YYAI", "ACCEPT_RETAINED_HISTORY")

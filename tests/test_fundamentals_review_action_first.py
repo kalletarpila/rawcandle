@@ -192,8 +192,9 @@ def test_manual_deep_current_ownership_remains_visible_with_correct_controls(par
     item=ownership(classification=classification);p=policy(item,partition,reason='SOURCE_PAYLOAD_INCOMPLETE')
     service=Service(owners=[item,ownership('DONE',status='PUBLISHED')],diag=diagnostic([p]));controls=render(service)
     assert 'Needs your attention (1)' in controls.pb_ownership_status_field.value
-    assert 'AAA' in text(controls.pb_ownership_column) and 'DONE' not in text(controls.pb_ownership_column)
-    card=controls.pb_ownership_column.controls[0];buttons=[c for c in walk(card) if isinstance(c,(ft.ElevatedButton,ft.TextButton))]
+    current_surface=controls.deep_review_column if partition=='DEEP_REVIEW/BLOCKED' else controls.pb_ownership_column
+    assert 'AAA' in text(current_surface) and 'DONE' not in text(controls.pb_ownership_column)
+    card=current_surface.controls[0];buttons=[c for c in walk(card) if isinstance(c,(ft.ElevatedButton,ft.TextButton))]
     labels=[b.text for b in buttons]
     assert 'Keep on hold' in labels
     assert ('Approve quarterly ownership continuation' in labels)==(classification=='CONTINUATION_CANDIDATE')

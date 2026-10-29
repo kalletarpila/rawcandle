@@ -14,6 +14,9 @@ from rawcandle.fundamentals.admin.operation_report import OPERATION_REPORT_NAME,
 from rawcandle.fundamentals.admin.review_presentation import (
     provider_review, ownership_review, review_groups, classification_label,
 )
+from rawcandle.fundamentals.admin.operational_presentation import (
+    NORMAL, REVIEW, DEEP_REVIEW, review_route, boundary_route, normal_summary,
+)
 from rawcandle.fundamentals.admin.ui_service import (
     AdminUIRunResult,
     FundamentalsAdminUIService,
@@ -71,6 +74,11 @@ class FundamentalsAdminPageControls:
     pb_ownership_status_field: Any
     activate: Any
     history_loader: Any
+    operational_summary_field: Any
+    normal_workflow_button: Any
+    review_section: Any
+    deep_review_section: Any
+    deep_review_column: Any
 
 
 def admin_report_download_url(run_id: str, filename: str = OPERATION_REPORT_NAME) -> str:
@@ -269,6 +277,9 @@ def build_fundamentals_admin_page(
     review_queue_column = ft.Column(spacing=6)
     pb_ownership_column = ft.Column(spacing=6)
     pb_ownership_status_field = ft.Text('Not loaded.')
+    operational_summary_field = ft.Text('Fundamentals: status not loaded. Refresh operational status before deciding whether action is required.')
+    deep_review_column = ft.Column(spacing=8)
+    operational_state = dict(loaded=False, providers=[], owners=[], boundaries=[], settings={}, last=None, error='')
     review_queue_status_field = ft.Text("Not loaded.")
     review_queue_detail_field = ft.TextField(
         label="Selected review item",
@@ -326,9 +337,34 @@ def build_fundamentals_admin_page(
     history_limit = 8
     cleanup_eligibility_cache: dict[str, dict[str, Any]] = {}
     operation_running = False
+    running_full_workflow = False
     last_progress_count: tuple[object, object] | None = None
     progress_lines: list[str] = []
     progress_follow_latest = True
+
+    def update_operational_summary() -> None:
+        provider_views = [provider_review(item) for item in operational_state['providers']]
+        owner_views = operational_state['owners']
+        routes = [(view, review_route(view, policy=policy)) for view, policy in owner_views]
+        routes += [(view, review_route(view)) for view in provider_views]
+        review_count = sum(view.needs_action and route.mode == REVIEW for view, route in routes)
+        deep_count = sum(not view.history_or_terminal and route.mode == DEEP_REVIEW for view, route in routes) + len(operational_state['boundaries'])
+        review_count += operational_state.get('unregistered_manual',0)
+        deep_count += operational_state.get('unregistered_deep',0)
+        operational_summary_field.value = '\n'.join(normal_summary(
+            loaded=operational_state['loaded'],review_count=review_count,deep_count=deep_count,
+            safety=publication_safety,settings=operational_state['settings'],
+            last_workflow=operational_state['last'],running=operation_running,error=operational_state['error']))
+        guidance = []
+        for item in operational_state['providers']:
+            route = review_route(provider_review(item))
+            if route.deep_guidance:
+                guidance.append(ft.Column([ft.Text(f"{item.get('ticker','Unknown')}: {route.deep_guidance}"),
+                    review_history('Source history evidence',[ft.Text(review_item_details(item),selectable=True),
+                        ft.Text(json.dumps(item,indent=2,default=str),selectable=True)])]))
+        deep_review_column.controls = [*operational_state.get('owner_controls', []),
+            *operational_state.get('boundary_controls', []), *guidance,
+            review_history('Publication / recovery status',[ft.Text(json.dumps(publication_safety,indent=2,default=str),selectable=True)])]
 
     def render_progress(*, replace: list[str] | None = None, append: str | None = None) -> None:
         nonlocal progress_lines
@@ -626,6 +662,7 @@ def build_fundamentals_admin_page(
 
     def select_review_item(item: dict[str, Any]) -> None:
         review_queue_detail_field.value = review_item_details(item)
+        selected_review_evidence.controls[0].expanded = True
         if hasattr(page, "update"):
             page.update()
 
@@ -686,12 +723,12 @@ def build_fundamentals_admin_page(
                         f"Ticker: {ticker}\n"
                         f"Affected source rows: {item.get('affected_source_count') or 0}\n"
                         f"Classification: {item.get('classification') or 'UNKNOWN'}\n"
-                        f"Evidence: {item.get('source_evidence_fingerprint') or 'not recorded'}\n"
-                        f"Published binding: {item.get('last_published_binding') or 'not recorded'}\n\n"
+                        "\n"
                         "Preserve these exact previously published historical observations "
                         "if the next Preview sees the same missing-source evidence."
                     ),
                     comment,
+                    review_history('Exact retained-history evidence', [ft.Text(review_item_details(item), selectable=True)]),
                 ],
                 tight=True,
             ),
@@ -854,9 +891,9 @@ def build_fundamentals_admin_page(
         if hasattr(page, "update"):
             page.update()
 
-    def review_history(title: str, controls: list[Any]) -> Any:
+    def review_history(title: str, controls: list[Any], *, show_count: bool = True) -> Any:
         return ft.ExpansionPanelList(controls=[ft.ExpansionPanel(
-            header=ft.ListTile(title=ft.Text(f"{title} ({len(controls)})")),
+            header=ft.ListTile(title=ft.Text(f"{title} ({len(controls)})" if show_count else title)),
             content=ft.Column(controls, spacing=8), expanded=False,
         )])
 
@@ -893,14 +930,14 @@ def build_fundamentals_admin_page(
                             width=380, tooltip=reason_codes,
                         ),
                         ft.Text(
-                            f"{item.get('first_seen_at_utc') or 'not recorded'}\n"
-                            f"{item.get('first_seen_run_id') or 'run not recorded'}",
+                            str(item.get('first_seen_at_utc') or 'not recorded'),
                             width=145,
+                            tooltip=str(item.get('first_seen_run_id') or 'run not recorded'),
                         ),
                         ft.Text(
-                            f"{item.get('last_seen_at_utc') or 'not recorded'}\n"
-                            f"{item.get('last_seen_run_id') or 'run not recorded'}",
+                            str(item.get('last_seen_at_utc') or 'not recorded'),
                             width=145,
+                            tooltip=str(item.get('last_seen_run_id') or 'run not recorded'),
                         ),
                         ft.IconButton(
                             icon=ft.Icons.INFO,
@@ -985,7 +1022,7 @@ def build_fundamentals_admin_page(
         operator = ft.TextField(label='Operator name (optional)', value='')
         note = ft.TextField(label='Hold reason' if hold else 'Quarterly basis review note (optional)', value='', multiline=True)
         confirmed = ft.Checkbox(label='I confirm this exact quarterly observation and the displayed ownership interpretation.', value=False)
-        text = f"{item['ticker']} · {item['new']['fiscal_year']}-{item['new']['fiscal_quarter']}\nObservation: {item['new']['observation_id']}\nHash: {item['new']['content_hash']}"
+        text = f"{item['ticker']} · {item['new']['fiscal_year']}-{item['new']['fiscal_quarter']}"
         if effect:
             hypothetical = effect.get('hypothetical_current') or {}
             text += (f"\nPrior reviewed Current P/B reference: {effect.get('prior_current_reference', {}).get('reason')} (as of {effect.get('prior_reference_as_of')})\n"
@@ -1021,7 +1058,8 @@ def build_fundamentals_admin_page(
                 page.update()
         operator.on_change = note.on_change = confirmed.on_change = enable
         dialog = ft.AlertDialog(modal=True, title=ft.Text('Keep quarterly ownership on hold?' if hold else 'Approve quarterly ownership continuation?'),
-            content=ft.Column([ft.Text(text), *([] if hold else [operator, confirmed]), note], tight=True),
+            content=ft.Column([ft.Text(text), *([] if hold else [operator, confirmed]), note,
+                review_history('Exact observation evidence', [ft.Text(json.dumps(item,indent=2,default=str),selectable=True)])], tight=True),
             actions=[ft.TextButton('Cancel', on_click=lambda _event: close_dialog()), button])
         setattr(page, 'dialog', dialog)
         if hasattr(page, 'open'):
@@ -1040,16 +1078,17 @@ def build_fundamentals_admin_page(
                 page.update()
             return
         comparisons = preview['comparisons']
-        lines = [f"Selected approved cases: {len(preview['selection'])}",
+        evidence_lines = [f"Selected approved cases: {len(preview['selection'])}",
             f"Active generation: {preview['source']['generation_id']}",
             f"Candidate generation: {preview['candidate_generation_id']}",
             f"Artifact: {preview['active_artifact_sha256']} → {preview['artifact_sha256']}",
             f"Source canonical: {preview['source']['role_hashes']['canonical']}",
             f"Score invariance: {preview['score_invariance']} · Source revalidation: {preview['source_revalidation']}"]
+        lines = [f"Selected approved cases: {len(preview['selection'])}"]
         for result in comparisons:
             a,b = result['before'],result['candidate']
             lines.append(f"{result['ticker']}: Current P/B {a['value']} ({a['reason']}) → {b['value']} ({b['reason']})")
-        lines.extend(f"Candidate {role}: {sha}" for role,sha in preview['candidate_hashes'].items())
+        evidence_lines.extend(f"Candidate {role}: {sha}" for role,sha in preview['candidate_hashes'].items())
         lines.append('Production publication: APPROVED → PUBLISHED after successful postflight. This is a separate decision from ownership approval.')
         operator = ft.TextField(label='Publishing operator', value='')
         confirmation = ft.Checkbox(label='I explicitly confirm Production publication of this selected approved ownership review.', value=False)
@@ -1074,7 +1113,8 @@ def build_fundamentals_admin_page(
                 page.update()
         operator.on_change = confirmation.on_change = enable
         dialog = ft.AlertDialog(modal=True,title=ft.Text('Confirm Production ownership publication'),
-            content=ft.Column([ft.Text('\n'.join(lines)),operator,confirmation],tight=True,scroll=ft.ScrollMode.AUTO),
+            content=ft.Column([ft.Text('\n'.join(lines)),operator,confirmation,
+                review_history('Publication evidence',[ft.Text('\n'.join(evidence_lines)),ft.Text(json.dumps(preview,indent=2,default=str),selectable=True)])],tight=True,scroll=ft.ScrollMode.AUTO),
             actions=[ft.TextButton('Cancel',on_click=lambda _e:close_dialog()),button])
         setattr(page,'dialog',dialog)
         if hasattr(page,'open'):
@@ -1098,7 +1138,10 @@ def build_fundamentals_admin_page(
                 policy_items={v['case']['case_id']:v for v in diagnostic['items']}
             enabled = diagnostic['enabled'] if diagnostic else None
             current, historical = review_groups(items, lambda item: ownership_review(item, policy_items.get(item['case_id']), policy_enabled=enabled))
-            rows, history_rows = [], []
+            operational_state['owners'] = [(view,policy_items.get(item['case_id'])) for item,view in current]
+            if diagnostic:
+                operational_state['settings']['ownership_enabled'] = diagnostic['enabled']
+            rows, history_rows, deep_rows = [], [], []
             for raw, view in [*current, *historical]:
                 item=dict(raw);auto_policy=policy_items.get(item['case_id'])
                 approval=item.get('approval') or {}
@@ -1124,7 +1167,8 @@ def build_fundamentals_admin_page(
                     header=ft.ListTile(title=ft.Text('Evidence / technical details')),
                     content=ft.Text(json.dumps(evidence,indent=2,sort_keys=True,default=str),selectable=True),expanded=False)])
                 card=ft.Column([ft.Text(description), *([ft.Row(actions,wrap=True)] if actions else []), details])
-                (history_rows if view.history_or_terminal else rows).append(card)
+                (history_rows if view.history_or_terminal else deep_rows if review_route(view,policy=auto_policy).mode==DEEP_REVIEW else rows).append(card)
+            operational_state['owner_controls'] = deep_rows
             attention=sum(view.needs_action for _,view in current)
             if attention:
                 headline=f'Needs your attention ({attention})'
@@ -1136,6 +1180,8 @@ def build_fundamentals_admin_page(
                 diagnostic_count=sum(diagnostic[k] for k in ('auto_continue','manual_review','deep_review'))
                 queued_ids={item['case_id'] for item in items}
                 missing_policy=[p for p in diagnostic['items'] if p['case']['case_id'] not in queued_ids]
+                operational_state['unregistered_manual'] = sum(p['partition']=='MANUAL_REVIEW' for p in missing_policy)
+                operational_state['unregistered_deep'] = sum(p['partition']=='DEEP_REVIEW/BLOCKED' for p in missing_policy)
                 missing_count=len(missing_policy) or (diagnostic_count if not current else 0)
                 if missing_count:
                     if current:
@@ -1149,12 +1195,17 @@ def build_fundamentals_admin_page(
                 headline += (f"\nAutomatic continuation {'enabled' if diagnostic['enabled'] else 'disabled'} · {diagnostic['policy_version']}"
                              f"\nautomatic {diagnostic['auto_continue']} / manual {diagnostic['manual_review']} / deep {diagnostic['deep_review']}")
             if history_rows:rows.append(review_history('Resolved / published history',history_rows))
+            if deep_rows:headline += f'\nDeep Review: {len(deep_rows)} current ownership case(s); see Deep Review / evidence'
             pb_ownership_column.controls=rows
             pb_ownership_status_field.value=headline
         except Exception as exc:
             pb_ownership_status_field.value = f'Quarterly ownership queue could not be loaded: {exc}'
+            operational_state['error'] = 'Ownership status unavailable; inspect Details and refresh status.'
+        finally:
+            update_operational_summary()
 
     def refresh_review_queue(_event: Any | None = None) -> None:
+        operational_state['error'] = ''
         review_queue_refresh_button.disabled = True
         review_queue_status_field.value = "Loading review queue..."
         if hasattr(page, "update"):
@@ -1169,16 +1220,21 @@ def build_fundamentals_admin_page(
                 payload = {"status": "READY" if items else "EMPTY", "items": items}
             status = str(payload.get("status") or "ERROR")
             items = [dict(item) for item in payload.get("items") or []]
+            operational_state['providers'] = items
+            operational_state['loaded'] = status in ('READY','EMPTY')
             render_review_queue(items)
             boundary_reader = getattr(admin_service, "list_accounting_boundary_reviews", None)
             boundary_items = boundary_reader() if callable(boundary_reader) else []
+            operational_state['boundaries'] = boundary_items
+            boundary_controls = []
             for boundary_item in boundary_items:
                 proposal = boundary_item["proposal"]
                 evidence = proposal["evidence"]
-                review_queue_column.controls.append(ft.Column([
-                    ft.Text("WFRD global accounting-boundary review — " + boundary_item["status"], weight=ft.FontWeight.BOLD),
-                    ft.Text(json.dumps({
-                        "classification": "GLOBAL_BLOCKING_REVIEW until exact approval and new Preview",
+                boundary_controls.append(ft.Column([
+                    ft.Text("Accounting-boundary review — " + boundary_item["status"], weight=ft.FontWeight.BOLD),
+                    ft.Text(boundary_route(boundary_item).deep_guidance),
+                    review_history('Accounting-boundary evidence', [ft.Text(json.dumps({
+                        "classification": "Accounting-boundary review; consult recorded status and evidence",
                         "ARQ source": evidence["arq"]["source_key"],
                         "provider label": evidence["arq"]["provider_label"],
                         "accepted label": evidence["arq"]["accepted_label"],
@@ -1195,8 +1251,10 @@ def build_fundamentals_admin_page(
                         "actions": [evidence["arq"]["action"], evidence["mrq"]["action"]],
                         "consequence": "Retain both canonical Q4 identities and their established dates; no Production authorization",
                         "proposal fingerprint": proposal["proposal_fingerprint"],
-                    }, indent=2), selectable=True),
+                        "stored_review": boundary_item,
+                    }, indent=2), selectable=True)]),
                 ]))
+            operational_state['boundary_controls'] = boundary_controls
             empty_message = (
                 "No Refresh review items are currently quarantined."
                 if not review_queue_include_resolved_checkbox.value
@@ -1211,7 +1269,7 @@ def build_fundamentals_admin_page(
             current_count=sum(not view.history_or_terminal for view in views)
             ready_message=(f'Needs your attention ({attention})' if attention else
                            f'No action required now · {current_count} waiting/pending review(s)' if current_count else 'No action required')
-            if boundary_items:ready_message += f' · {len(boundary_items)} accounting-boundary review(s), see below'
+            if boundary_items:ready_message += f' · {len(boundary_items)} accounting-boundary review(s), see Deep Review'
             status_message = {
                 "NOT_INITIALIZED": "Review queue has not been initialized.",
                 "EMPTY": empty_message,
@@ -1220,12 +1278,16 @@ def build_fundamentals_admin_page(
             review_queue_status_field.value = status_message
             if status in {"NOT_INITIALIZED", "ERROR"}:
                 review_queue_column.controls = [ft.Text(status_message)]
+                operational_state['error'] = status_message
         except Exception:
             LOGGER.exception("Refresh review queue load failed")
             review_queue_column.controls = []
             review_queue_status_field.value = "Review queue could not be loaded."
+            operational_state['loaded'] = False
+            operational_state['error'] = 'Review queue could not be loaded.'
         finally:
             load_pb_ownership_reviews()
+            update_operational_summary()
             review_queue_refresh_button.disabled = False
             if hasattr(page, "update"):
                 page.update()
@@ -1268,10 +1330,24 @@ def build_fundamentals_admin_page(
         pending = pending_reader(
             projection_cache=getattr(history_cursor, "projections", None),
         ) if callable(pending_reader) else None
-        return {"entries": entries, "pending": pending, "publication_safety": safety}
+        last = next((item for item in entries if item.mode == 'FULL_WORKFLOW' and item.operation_type == 'REFRESH_FUNDAMENTALS'), None)
+        last_summary = None
+        reader = getattr(admin_service, 'history_operational_summary', None)
+        if last and callable(reader):
+            try:
+                last_summary = reader(last.run_id,projection_cache=getattr(history_cursor,'projections',None))
+            except (OSError,ValueError,RuntimeError):
+                last_summary = dict(mode=DEEP_REVIEW,rows=('Full Workflow result unavailable; inspect retained history.',))
+        if last and last_summary is None:
+            last_summary = dict(mode=NORMAL if last.outcome in ('COMPLETED','NO_CHANGE') else REVIEW,
+                                rows=(f'Financial workflow: {last.outcome}',),running=last.status=='running')
+        if last and last.status == 'running':
+            last_summary = dict(mode=NORMAL,rows=('Full Workflow: running',),running=True)
+        return {"entries": entries, "pending": pending, "publication_safety": safety, 'last_workflow':last_summary}
 
     def apply_history(payload: dict[str, Any]) -> None:
         nonlocal publication_safety
+        operational_state['last'] = payload.get('last_workflow')
         loaded_safety = payload.get("publication_safety")
         if loaded_safety is not None:
             publication_safety = loaded_safety
@@ -1301,12 +1377,27 @@ def build_fundamentals_admin_page(
         render_history(payload.get("entries") or [])
         history_show_more_button.disabled = False
         history_refresh_button.disabled = False
+        settings_reader = getattr(admin_service, 'operational_settings', None)
+        if callable(settings_reader):
+            settings_error = ''
+            try:
+                operational_state['settings'] = dict(settings_reader())
+            except (OSError,ValueError,RuntimeError):
+                settings_error = 'Operational settings unavailable.'
+            refresh_review_queue()
+            if settings_error:
+                operational_state['error'] = settings_error
+                update_operational_summary()
+        else:
+            update_operational_summary()
 
     def history_failed(_exc: Exception) -> None:
         history_column.controls = [ft.Text("Administration history could not be loaded.")]
         history_show_more_button.visible = False
         history_show_more_button.disabled = False
         history_refresh_button.disabled = False
+        operational_state['error'] = 'Administration history could not be loaded; refresh status before deciding whether action is required.'
+        update_operational_summary()
 
     def history_loading() -> None:
         history_column.controls = [ft.Text("Loading administration history...")]
@@ -1588,8 +1679,10 @@ def build_fundamentals_admin_page(
         progress_section.visible = True
         progress_field.visible = True
         progress_details.visible = True
-        progress_details.controls[0].expanded = True
-        progress_summary.visible = False
+        progress_details.controls[0].expanded = not running_full_workflow
+        progress_summary.visible = running_full_workflow
+        if running_full_workflow:
+            progress_summary.value = f"Full Workflow running · {event.get('current_stage_id','Stage in progress')}"
         last_progress_count = (event.get("current_stage_number", "?"), event.get("total_declared_stages", "?"))
         progress_line = (
             f"[{event.get('current_stage_number', '?')}/{event.get('total_declared_stages', '?')}] "
@@ -1597,6 +1690,7 @@ def build_fundamentals_admin_page(
             f"{event.get('message', '')}"
         )
         render_progress(append=progress_line)
+        update_operational_summary()
         if hasattr(page, "update"):
             page.update()
 
@@ -1605,7 +1699,8 @@ def build_fundamentals_admin_page(
         nonlocal current_preview_fingerprint, current_test_run_id, current_report_run_id, selected_history_run_id
         is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "ACTIVE_TAXONOMY_PREVIEW"}
         is_workflow = result.mode == "FULL_WORKFLOW"
-        status_field.value = _result_text(result)
+        status_field.value = '\n'.join(result.operational_summary['rows']) if is_workflow and result.operational_summary else _result_text(result)
+        status_field.max_lines = 12 if is_workflow else 5
         final_section.visible = not is_preview or result.status == "FAILED"
         status_field.visible = not is_preview or result.status == "FAILED"
         if result.preview_payload_path:
@@ -1684,7 +1779,9 @@ def build_fundamentals_admin_page(
             preview_title.value = "No changes"
             summary_column.controls = [ft.Text("No update is required.")]
         if progress_section.visible:
-            if result.status == "FAILED":
+            if is_workflow and result.operational_summary:
+                progress_summary.value = f"Full Workflow finished · financial {result.operational_summary['financial_outcome']} · see result"
+            elif result.status == "FAILED":
                 progress_summary.value = "Operation failed"
             elif last_progress_count:
                 completed_count = (
@@ -1697,9 +1794,14 @@ def build_fundamentals_admin_page(
                 progress_summary.value = "Preview completed" if is_preview else "Operation completed"
             progress_summary.visible = True
             progress_details.visible = True
-            progress_details.controls[0].expanded = True
+            progress_details.controls[0].expanded = not is_workflow
         refresh_history(force=True)
+        if is_workflow and result.operational_summary:
+            operational_state['last'] = result.operational_summary
+        update_operational_summary()
         technical_details_column.controls = [
+            ft.Text('Recorded result: '+result.message),
+            *[ft.Text(row) for row in result.summary_rows],
             ft.Text(f"Run id: {result.run_id or 'not recorded'}"),
             ft.Text(f"Operation: {(operation_dropdown.value or '').strip()}"),
             ft.Text(f"Execution status: {result.status}; backend outcome: {result.outcome or 'not recorded'}"),
@@ -1708,6 +1810,7 @@ def build_fundamentals_admin_page(
             ft.Text(f"Exception type: {result.exception_type or 'not recorded'}"),
             ft.Text(f"Technical error: {result.technical_error or 'not recorded'}"),
             ft.Text(f"Preview fingerprint: {result.preview_fingerprint or 'not recorded'}"),
+            ft.Text(f"Preview payload: {result.preview_payload_path or 'not recorded'}"),
             ft.Text(f"Artifact directory: {result.artifact_dir or 'not recorded'}"),
             ft.Text(f"Report sha256: {result.report_sha256 or 'not recorded'}"),
         ]
@@ -1754,6 +1857,9 @@ def build_fundamentals_admin_page(
             or not can_preview()
             or current_preview_signature is not None
         )
+        normal_capability = capabilities.get('REFRESH_FUNDAMENTALS')
+        normal_workflow_button.disabled = bool(operation_running or publication_safety.get('production_writes_blocked') or
+            (normal_capability and not normal_capability.production_apply_enabled))
 
     def invalidate_preview(_event: Any | None = None) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
@@ -1783,29 +1889,33 @@ def build_fundamentals_admin_page(
         if button is not preview_button:
             last_progress_count = None
         operation_running = True
+        update_operational_summary()
         button.disabled = True
         preview_button.disabled = True
         copy_apply_button.disabled = True
         production_apply_button.disabled = True
         full_workflow_button.disabled = True
+        normal_workflow_button.disabled = True
         progress_section.visible = True
         progress_field.visible = True
         progress_follow_latest = True
         render_progress(replace=["Starting..."])
         progress_summary.visible = False
         progress_details.visible = True
-        progress_details.controls[0].expanded = True
+        progress_details.controls[0].expanded = not running_full_workflow
         if hasattr(page, "update"):
             page.update()
         try:
             apply_result(fn())
         except Exception:
             LOGGER.exception("Fundamentals administration UI run failed")
+            operational_state['last'] = dict(mode=DEEP_REVIEW,rows=('Administration run failed; inspect the recorded error and workflow evidence.',))
             final_section.visible = True
             status_field.visible = True
             status_field.value = "Administration run failed. See the operation log or report for details."
         finally:
             operation_running = False
+            update_operational_summary()
             apply_capabilities()
             if hasattr(page, "update"):
                 page.update()
@@ -1922,6 +2032,7 @@ def build_fundamentals_admin_page(
     def on_full_workflow(_event: Any) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
         nonlocal current_preview_fingerprint, current_test_run_id, last_progress_count
+        nonlocal running_full_workflow
         current_preview_signature = None
         current_preview_result = None
         current_preview_payload_path = None
@@ -1930,20 +2041,31 @@ def build_fundamentals_admin_page(
         preview_payload_field.value = ""
         preview_fingerprint_field.value = ""
         last_progress_count = None
-        run_guarded(
-            full_workflow_button,
-            lambda: admin_service.full_workflow(
-                operation_type=operation_dropdown.value or "ADD_TICKERS",
-                raw_inputs=tickers_field.value or "",
-                market=market_field.value or "usa",
-                progress_callback=progress_callback,
-            ),
-        )
+        running_full_workflow = True
+        try:
+            run_guarded(
+                full_workflow_button,
+                lambda: admin_service.full_workflow(
+                    operation_type=operation_dropdown.value or "ADD_TICKERS",
+                    raw_inputs=tickers_field.value or "",
+                    market=market_field.value or "usa",
+                    progress_callback=progress_callback,
+                ),
+            )
+        finally:
+            running_full_workflow = False
 
     preview_button = ft.ElevatedButton("Preview", icon=ft.Icons.PREVIEW, on_click=on_preview)
     copy_apply_button = ft.OutlinedButton("Test on copies", icon=ft.Icons.CHECKLIST, on_click=on_copy_apply, visible=False)
     production_apply_button = ft.ElevatedButton("Production update", icon=ft.Icons.LOCK, on_click=on_production_apply, visible=False)
     full_workflow_button = ft.ElevatedButton("Run full workflow", icon=ft.Icons.PLAY_ARROW, on_click=on_full_workflow)
+    def run_normal_workflow(_event: Any) -> None:
+        if normal_workflow_button.disabled:
+            return
+        operation_dropdown.value = 'REFRESH_FUNDAMENTALS'
+        invalidate_preview()
+        on_full_workflow(_event)
+    normal_workflow_button = ft.ElevatedButton('Refresh Fundamentals — Full Workflow',icon=ft.Icons.PLAY_ARROW,on_click=run_normal_workflow)
     for control in (
         operation_dropdown,
         tickers_field,
@@ -1963,18 +2085,42 @@ def build_fundamentals_admin_page(
     if not defer_initial_load:
         refresh_history()
 
+    selected_review_evidence = review_history('Selected review evidence',[review_queue_detail_field])
+    review_section = review_history('Review — current exceptions', [
+        ft.Row([ft.Text('Provider history / source removal',size=18),review_queue_refresh_button,review_queue_include_resolved_checkbox],wrap=True),
+        review_queue_status_field,review_queue_column,
+        selected_review_evidence,
+        review_queue_blocked_actions,
+        ft.Text('Quarterly P/B ownership reviews',size=18),pb_ownership_status_field,pb_ownership_column,
+    ],show_count=False)
+    deep_review_section = review_history('Deep Review — exceptional evidence',[deep_review_column],show_count=False)
+    def open_review(_event: Any) -> None:
+        refresh_review_queue()
+        review_section.controls[0].expanded = True
+        if hasattr(page,'update'):page.update()
+    def open_deep(_event: Any) -> None:
+        refresh_review_queue()
+        deep_review_section.controls[0].expanded = True
+        if hasattr(page,'update'):page.update()
     content = ft.Column(
         [
             ft.Text("Fundamentals Administration", size=24, weight=ft.FontWeight.BOLD),
+            operational_summary_field,
+            ft.Row([normal_workflow_button,
+                    ft.TextButton('Review current exceptions',on_click=open_review),
+                    ft.TextButton('Deep Review / evidence',on_click=open_deep),
+                    ft.TextButton('Refresh operational status',on_click=refresh_review_queue)],wrap=True),
+            publication_safety_field,
+            pending_refresh_field,
+            review_history('Advanced — operations and individual stages', [
             ft.Text("Administration operation", size=18, weight=ft.FontWeight.BOLD),
             ft.Row([operation_dropdown, market_field, taxonomy_domain_dropdown], wrap=True, spacing=12),
             operation_guidance_field,
-            publication_safety_field,
-            pending_refresh_field,
-            ft.Text("Preview checks proposed changes. Test on copies runs them in isolated databases. Production update writes an approved change under the existing safeguards."),
+            ft.Text("Full Workflow runs Preview, Test on copies and safe publication under the existing safeguards. Individual stages remain available for exceptions."),
             tickers_field,
             ft.Row([candidate_path_field, candidate_version_field], wrap=True, spacing=12),
             ft.Row([full_workflow_button, preview_button, copy_apply_button, production_apply_button], spacing=12, wrap=True),
+            ],show_count=False),
             preview_section,
             progress_section,
             final_section,
@@ -1992,37 +2138,10 @@ def build_fundamentals_admin_page(
                 ]
             ),
             ft.Divider(),
-            ft.Row(
-                [
-                    ft.Text("Refresh Review Queue", size=18, weight=ft.FontWeight.BOLD),
-                    review_queue_refresh_button,
-                    review_queue_include_resolved_checkbox,
-                ],
-                spacing=12,
-                wrap=True,
-            ),
-            review_queue_status_field,
-            ft.Row(
-                [
-                    ft.Text("Ticker", width=65, weight=ft.FontWeight.BOLD),
-                    ft.Text("Status", width=125, weight=ft.FontWeight.BOLD),
-                    ft.Text("Classification", width=170, weight=ft.FontWeight.BOLD),
-                    ft.Text("Reason / next action", width=380, weight=ft.FontWeight.BOLD),
-                    ft.Text("First seen", width=145, weight=ft.FontWeight.BOLD),
-                    ft.Text("Last seen", width=145, weight=ft.FontWeight.BOLD),
-                    ft.Container(width=48),
-                    ft.Container(width=48),
-                    ft.Container(width=48),
-                    ft.Container(width=48),
-                ]
-            ),
-            review_queue_column,
-            review_queue_detail_field,
-            review_queue_blocked_actions,
-            ft.Text('Quarterly P/B ownership reviews', size=18, weight=ft.FontWeight.BOLD),
-            pb_ownership_status_field,
-            pb_ownership_column,
+            review_section,
+            deep_review_section,
             ft.Divider(),
+            review_history('Run history and cleanup evidence', [
             ft.Row([
                 ft.Text("Run history", size=18, weight=ft.FontWeight.BOLD),
                 history_refresh_button,
@@ -2047,6 +2166,7 @@ def build_fundamentals_admin_page(
             history_detail_field,
             cleanup_status_field,
             cleanup_button,
+            ],show_count=False),
         ],
         spacing=12,
         expand=True,
@@ -2113,4 +2233,9 @@ def build_fundamentals_admin_page(
         pb_ownership_status_field=pb_ownership_status_field,
         activate=activate,
         history_loader=history_loader,
+        operational_summary_field=operational_summary_field,
+        normal_workflow_button=normal_workflow_button,
+        review_section=review_section,
+        deep_review_section=deep_review_section,
+        deep_review_column=deep_review_column,
     )

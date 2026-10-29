@@ -73,6 +73,7 @@ class AdminUIRunResult:
     workflow_stage_run_ids: tuple[str, ...] = ()
     test_run_id: str | None = None
     direct_test_retry_available: bool = False
+    operational_summary: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -757,6 +758,22 @@ class FundamentalsAdminUIService:
         return partition(paths['canonical'],paths['provider'],paths['market'],queue_path_for_run_root(self.run_root),
                          as_of=utc_now()[:10],enabled=configured())
 
+    def operational_settings(self) -> Mapping[str, Any]:
+        """Read existing configuration only; this does not run any workflow."""
+        from rawcandle.scheduler.config import read_scheduler_config
+        from .artifacts import ROOT
+        config = read_scheduler_config(str(ROOT / 'scheduler_config.json'))
+        return dict(full_workflow=config.fundamentals_refresh_mode == 'FULL_WORKFLOW',
+                    ownership_enabled=config.pb_ownership_auto_continuation_enabled)
+
+    def history_operational_summary(self, run_id: str, *, projection_cache=None) -> Mapping[str, Any]:
+        from .operational_presentation import workflow_view
+        projection = self._cached_projection(run_id, projection_cache)
+        result = projection.result if projection else self._load_json_file(self.history.artifact_path(run_id, 'result.json'))
+        if not result or result.get('mode') != 'FULL_WORKFLOW':
+            raise ValueError('Full Workflow result unavailable')
+        return workflow_view(result)
+
     def progress(
         self,
         run_id: str,
@@ -1354,6 +1371,7 @@ class FundamentalsAdminUIService:
             return None
 
     def _finalize(self, result: Mapping[str, Any], *, default_message: str) -> AdminUIRunResult:
+        from .operational_presentation import workflow_view
         run_id = str(result.get("run_id") or "")
         taxonomy = taxonomy_preview_presentation(result)
         retry_value = result.get("retry_authorization")
@@ -1437,4 +1455,5 @@ class FundamentalsAdminUIService:
             ),
             test_run_id=str(result.get("test_run_id")) if result.get("test_run_id") else None,
             direct_test_retry_available=bool(result.get("manual_test_retry_available")),
+            operational_summary=workflow_view(result) if workflow_mode else None,
         )
