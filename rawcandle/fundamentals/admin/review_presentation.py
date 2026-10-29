@@ -113,8 +113,19 @@ def provider_review(item: Mapping[str, Any]) -> ReviewPresentation:
                 stages.append('If still unresolved: Investigate source history manually.')
             stages.append('Guidance only; no automatic escalation. Wait/Retry does not grant approval.')
             explanation = '\n'.join(stages)
+    from .historical_freeze import HELD, REVIEW_REASON
+    frozen = any(d.get('decision') == HELD for d in
+                 ((item.get('review_context') or {}).get('historical_freeze') or {}).get('conflicts', []))
+    display_status = str(item.get('operator_status_label') or (status + (' — no action required' if terminal else '')))
+    if frozen and not terminal and not item.get('approval_pending_publication'):
+        display_status = 'Historical value preserved'
+        classification = REVIEW_REASON
+        needs_action = False
+        reason = 'Provider data changed for a period ending on or before 2024-12-31. Accepted history was preserved.'
+        next_action = 'No immediate action required.'
+        explanation = 'Review only if you intend to repair this historical period. Wait/Retry does not authorize a historical repair.'
     return ReviewPresentation(
-        display_status=status + (' — no action required' if terminal else ''), classification=classification,
+        display_status=display_status, classification=classification,
         needs_action=needs_action, next_action=next_action, next_action_explanation=explanation,
         history_or_terminal=terminal, allowed_actions=tuple(actions), blocked_action_reason=blocked,
         reason=str(reason), reason_codes=codes)

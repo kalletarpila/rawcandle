@@ -380,6 +380,11 @@ def _fixture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, include_yyai_hold: bool = False,
     include_trug_hold: bool = False,
 ) -> WorkflowFixture:
+    if include_yyai_hold:
+        # These fixtures exercise explicit retained-history approvals, rather
+        # than the newer default automatic historical-window retention policy.
+        from functools import partial
+        monkeypatch.setattr(__name__ + ".run_preview", partial(run_preview, historical_source_window_review_years=0))
     monkeypatch.setattr(
         taxonomy_locking,
         "DEFAULT_TAXONOMY_OPERATION_ROOT",

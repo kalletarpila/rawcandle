@@ -22,6 +22,8 @@ def review_route(view: ReviewPresentation, *, policy: Mapping[str, Any] | None =
         return OperationalRoute(NORMAL)
     if policy and policy.get('partition') == 'DEEP_REVIEW/BLOCKED':
         return OperationalRoute(DEEP_REVIEW, 'Inspect ownership evidence before any decision.')
+    if view.classification == 'FROZEN_HISTORICAL_PROVIDER_CONFLICT':
+        return OperationalRoute(REVIEW)
     # These codes supply conditional investigation advice, not a claim that
     # OPEN has persisted or that the backend has escalated the review.
     if 'SAME_FISCAL_SOURCE_KEY_REPLACEMENT' in view.reason_codes:

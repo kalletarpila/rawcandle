@@ -938,9 +938,7 @@ def build_fundamentals_admin_page(
         historical = [(item,view) for item,view in historical if recent_history_visible(item,kind='provider')]
         for item, view in [*current, *historical]:
             ticker = str(item.get("ticker") or "UNKNOWN")
-            status_lines = [str(
-                item.get("operator_status_label") or view.display_status
-            )]
+            status_lines = [view.display_status]
             if item.get("operator_action"):
                 status_lines.append(str(item["operator_action"]))
             if item.get("reevaluation_pending") and not item.get(

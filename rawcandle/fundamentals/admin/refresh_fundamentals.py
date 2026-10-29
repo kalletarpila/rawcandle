@@ -25,6 +25,7 @@ from rawcandle.fundamentals.admin.contracts import (
     fingerprint,
     utc_now,
 )
+from rawcandle.fundamentals.admin.historical_freeze import apply_to_comparison, policy_evidence
 from rawcandle.fundamentals.admin.progress import (
     REFRESH_FUNDAMENTALS_STAGES,
     ProgressCallback,
@@ -1703,6 +1704,8 @@ def refresh_binding_change(item: Mapping[str, Any]) -> dict[str, Any]:
     result = {key: item.get(key) for key in REFRESH_BINDING_FIELDS}
     if item.get("accounting_boundary_resolution"):
         result["accounting_boundary_resolution"] = item["accounting_boundary_resolution"]
+    if item.get("historical_freeze"):
+        result["historical_freeze"] = item["historical_freeze"]
     if item.get("source_payload_change_fingerprint"):
         result["source_payload_change_fingerprint"] = item["source_payload_change_fingerprint"]
     return result
@@ -1715,6 +1718,7 @@ def refresh_binding(
 ) -> dict[str, Any]:
     return {
         "contract_version": CONTRACT_VERSION,
+        "historical_financial_freeze_policy": policy_evidence(),
         "dataset": SOURCE_DATASET,
         "table": SOURCE_TABLE,
         "schema_fingerprint": schema["schema_fingerprint"],
@@ -2022,6 +2026,11 @@ def run_preview(
             current = {dimension: load_current_history(source_paths.provider_db, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
             comparison = compare_ticker_histories(ticker, current, histories[ticker], **policy_args)
             comparison["identity"] = identities[ticker]
+            comparison = apply_to_comparison(
+                comparison, canonical_db=source_paths.canonical_db,
+                provider_db=source_paths.provider_db, current=current,
+                histories=histories[ticker], policy_args=policy_args,
+            )
             if comparison["classification"] == "REVIEW_REQUIRED":
                 current_scope = classify_review_scope(comparison)
                 queue_item = review_queue.get(ticker)
@@ -2085,6 +2094,11 @@ def run_preview(
                 comparison["publication_date_status"] = publication_date_status(
                     comparison["publish_date_impact"]
                 )
+            comparison = apply_to_comparison(
+                comparison, canonical_db=source_paths.canonical_db,
+                provider_db=source_paths.provider_db, current=current,
+                histories=histories[ticker], policy_args=policy_args,
+            )
             changes.append(comparison)
             progress.running(ProgressStage.SOURCE_COMPARISON, f"Compared {ticker}.", processed_items=index, total_items=len(known))
         for ticker in tickers:
@@ -2150,6 +2164,7 @@ def run_preview(
         progress.running(ProgressStage.REPORT, "Writing durable Preview artifacts and report.")
         preview = {
             "contract_version": CONTRACT_VERSION,
+            "historical_financial_freeze_policy": policy_evidence(),
             "trigger_source": trigger_source,
             "workflow_mode": workflow_mode,
             "historical_source_window_policy": policy,

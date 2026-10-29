@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -253,14 +254,19 @@ def test_retention_merge_persists_provenance_rebuilds_canonical_and_stabilizes(
         provider, newer_histories, identity, applied_at="2026-09-21T11:00:00Z",
         merge_plans={"TEST": newer_plan},
     )
-    fresh_rebuild_canonical(
-        provider, canonical, applied_at="2026-09-21T11:00:00Z", affected_company_ids=[1],
-    )
+    # Retention does not authorize replacing accepted frozen history. Rejected
+    # disposable candidates must never replace the accepted canonical store.
+    candidate = tmp_path / "unreviewed-key-candidate.db"
+    shutil.copy2(canonical, candidate)
+    with pytest.raises(ValueError, match="HISTORICAL_FREEZE_CANONICAL_MUTATION_BLOCKED"):
+        fresh_rebuild_canonical(
+            provider, candidate, applied_at="2026-09-21T11:00:00Z", affected_company_ids=[1],
+        )
     with sqlite3.connect(canonical) as connection:
         assert connection.execute(
             "SELECT q.first_public_result_date,f.revenue FROM v4_quarter q "
             "JOIN v4_quarter_financials f USING(quarter_id) WHERE q.fiscal_year=2016"
-        ).fetchone() == ("2016-08-15", 777)
+        ).fetchone() == ("2016-08-15", 100)
 
     second_current = {
         dimension: load_current_history(provider, "TEST", dimension) for dimension in ("ARQ", "MRQ")
@@ -285,14 +291,17 @@ def test_retention_merge_persists_provenance_rebuilds_canonical_and_stabilizes(
     current_arq = {source_key(row): row for row in load_current_history(provider, "TEST", "ARQ")["rows"]}
     assert current_arq[source_key(old)]["revenue"] == 999
     assert current_arq[source_key(old)].get("_history_retention_status") is None
-    fresh_rebuild_canonical(
-        provider, canonical, applied_at="2026-09-21T12:00:00Z", affected_company_ids=[1],
-    )
+    candidate = tmp_path / "unreviewed-reappearance-candidate.db"
+    shutil.copy2(canonical, candidate)
+    with pytest.raises(ValueError, match="HISTORICAL_FREEZE_CANONICAL_MUTATION_BLOCKED"):
+        fresh_rebuild_canonical(
+            provider, candidate, applied_at="2026-09-21T12:00:00Z", affected_company_ids=[1],
+        )
     with sqlite3.connect(canonical) as connection:
         assert connection.execute(
             "SELECT q.first_public_result_date,f.revenue FROM v4_quarter q "
             "JOIN v4_quarter_financials f USING(quarter_id) WHERE q.fiscal_year=2016"
-        ).fetchone() == ("2016-08-15", 777)
+        ).fetchone() == ("2016-08-15", 100)
 
 
 def test_true_interior_removal_deletes_key_but_preserves_alternate_canonical_quarter(
@@ -861,6 +870,7 @@ def test_revalidation_rejects_source_fingerprint_b_after_preview_a(monkeypatch: 
     monkeypatch.setattr(refresh_copy_runtime, "fetch_complete_history", lambda *_args: trust)
     monkeypatch.setattr(refresh_copy_runtime, "load_current_history", lambda *_args: {})
     monkeypatch.setattr(refresh_copy_runtime, "compare_ticker_histories", lambda *_args, **_kwargs: dict(common, source_effective_fingerprint="B"))
+    monkeypatch.setattr(refresh_copy_runtime, "apply_to_comparison", lambda change, **_kwargs: change)
     paths = BatchAddTickerPaths(*(Path(f"/{name}") for name in ("p", "c", "a", "m", "t")))
     with pytest.raises(StaleRefreshPreview, match="STALE_REFRESH_PREVIEW"):
         revalidate_bound_source(preview, paths, object())

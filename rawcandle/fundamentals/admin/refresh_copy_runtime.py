@@ -19,6 +19,7 @@ from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, ADMIN_TEMP_RO
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths, _background_heartbeat
 from rawcandle.fundamentals.admin.contracts import AdminFinalResult, AdminOperationType, AdminStatus, RunStage, fingerprint, utc_now
 from rawcandle.fundamentals.admin.full_v2_downstream import run_full_v2_downstream
+from rawcandle.fundamentals.admin.historical_freeze import apply_to_comparison, validate_candidate
 from rawcandle.fundamentals.admin.progress import ProgressCallback, ProgressStage, ProgressTracker, REFRESH_FUNDAMENTALS_TEST_STAGES
 from rawcandle.fundamentals.admin.refresh_fundamentals import (
     CONTRACT_VERSION,
@@ -258,6 +259,10 @@ def revalidate_bound_source(
         current = {dimension: load_current_history(paths.provider_db, ticker, dimension) for dimension in REFRESH_DIMENSIONS}
         item = compare_ticker_histories(ticker, current, histories[ticker], **policy_args)
         item["identity"] = identity
+        item = apply_to_comparison(
+            item, canonical_db=paths.canonical_db, provider_db=paths.provider_db,
+            current=current, histories=histories[ticker], policy_args=policy_args,
+        )
         preview_change = preview_changes.get(ticker, {})
         preview_approval = preview_change.get("retained_history_approval") or {}
         fiscal_preview_approval = preview_change.get("fiscal_revision_approval") or {}
@@ -346,6 +351,10 @@ def revalidate_bound_source(
                 **policy_args,
             )
         item["identity"] = identity
+        item = apply_to_comparison(
+            item, canonical_db=paths.canonical_db, provider_db=paths.provider_db,
+            current=current, histories=histories[ticker], policy_args=policy_args,
+        )
         changes.append(item)
     changes.sort(key=lambda item: str(item["ticker"]))
     partition = partition_changes(changes)
@@ -679,6 +688,7 @@ def fresh_rebuild_canonical(
     provider_db: Path, canonical_db: Path, *, applied_at: str,
     affected_company_ids: Sequence[int] = (),
     ownership_review_queue_path: Path | None = None,
+    historical_freeze_changes: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     identity_before = _identity_mapping(canonical_db)
     before = _quarter_rows(canonical_db)
@@ -755,6 +765,8 @@ def fresh_rebuild_canonical(
     ttm = rebuild_ttm(canonical_db, applied_at=applied_at)
     structural = structural_break.apply_contract(canonical_db, events=_events(), applied_at_utc=applied_at)
     after = _quarter_rows(canonical_db)
+    validate_candidate(before, after, historical_freeze_changes,
+                       provider_db=provider_db, canonical_db=canonical_db)
     identity_after = _identity_mapping(canonical_db)
     if identity_before != identity_after:
         raise RuntimeError("REFRESH_CANONICAL_IDENTITY_MAPPING_CHANGED")
@@ -1208,6 +1220,7 @@ def run_apply(
                 provider_candidate, canonical_candidate, applied_at=applied_at,
                 ownership_review_queue_path=queue_path_for_run_root(run_root),
                 affected_company_ids=[int(identity["company_id"]) for identity in identities.values()],
+                historical_freeze_changes=changed,
             )
         writer.write_json("publish_date_bootstrap_summary.json", canonical_result["publication_date_bootstrap"])
         writer.write_json("canonical_rebuild_summary.json", canonical_result)

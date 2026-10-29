@@ -22,9 +22,12 @@ def historical_classification(code: str) -> str:
 
 def provider_card_fields(item: Mapping[str, Any], view: ReviewPresentation) -> tuple[str, ...]:
     codes = set(view.reason_codes)
-    reason = ('Same-fiscal source key replacement detected' if 'SAME_FISCAL_SOURCE_KEY_REPLACEMENT' in codes else
+    reason = (view.reason if view.classification == 'FROZEN_HISTORICAL_PROVIDER_CONFLICT' else
+              'Same-fiscal source key replacement detected' if 'SAME_FISCAL_SOURCE_KEY_REPLACEMENT' in codes else
               'Interior source key disappeared' if 'INTERIOR_SOURCE_KEY_REMOVAL' in codes else view.reason)
     rows = [f'Reason: {reason}']
+    if view.classification == 'FROZEN_HISTORICAL_PROVIDER_CONFLICT':
+        rows.append('Accepted history changed: No · Provider evidence changed: Yes')
     staged = (item.get('status')=='OPEN' and view.classification=='TRUE_SOURCE_REMOVAL'
               and not item.get('approval_pending_publication')
               and item.get('accept_retained_history_eligible') is False and
@@ -64,9 +67,18 @@ def evidence_summary(kind: str, item: Mapping[str, Any], *, view: ReviewPresenta
         return tuple(rows)
     if kind == 'provider':
         view = view or provider_review(item)
+        freeze_rows = []
+        for d in ((item.get('review_context') or {}).get('historical_freeze') or {}).get('conflicts', []):
+            old, new = d.get('accepted_source') or {}, d.get('incoming_source') or {}
+            freeze_rows.extend((f"Period end: {d.get('period_end')} · Fiscal identity: {d.get('identity')}",
+                f"Accepted source: {old.get('date')} / {old.get('reportperiod')} · Incoming: {new.get('date', 'absent')} / {new.get('reportperiod', 'absent')}",
+                *[f"{field}: accepted {values.get('accepted')} → provider {values.get('incoming')}"
+                  for field,values in (d.get('value_changes') or {}).items()],
+                f"Evidence fingerprint: {d.get('evidence_fingerprint')}",
+                'Repair eligibility: existing exact reviewed evidence required; ordinary provider evidence grants no repair.'))
         return (f"Ticker: {item.get('ticker','Not recorded')}",f"Review status: {item.get('status','Not recorded')}",
                 'Classification: '+classification_label(view.classification),*provider_card_fields(item,view),
-                'Approval availability: '+(view.blocked_action_reason or 'See permitted actions and exact evidence.'))
+                'Approval availability: '+(view.blocked_action_reason or 'See permitted actions and exact evidence.'), *freeze_rows)
     if kind == 'boundary':
         proposal = item.get('proposal') or {};evidence=proposal.get('evidence') or {}
         arq,mrq=evidence.get('arq') or {},evidence.get('mrq') or {}

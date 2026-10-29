@@ -990,6 +990,7 @@ def run_production_apply(
                 provider_candidate, canonical_candidate, applied_at=utc_now(),
                 ownership_review_queue_path=queue_path_for_run_root(run_root),
                 affected_company_ids=[int(identity["company_id"]) for identity in identities.values()],
+                historical_freeze_changes=changed,
             )
         if canonical_result["publication_date_bootstrap"]["repair_required"]:
             raise RuntimeError("REFRESH_PUBLISH_DATE_REPAIR_REQUIRED")

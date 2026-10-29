@@ -126,6 +126,7 @@ def _queue_evidence_binding(item: Mapping[str, Any]) -> dict[str, Any]:
         "published_binding": item.get("last_published_binding"),
         "identity_binding": dict(context.get("identity_binding") or {}),
         "locality_proof": dict(context.get("locality_proof") or {}),
+        **({"historical_freeze": context["historical_freeze"]} if context.get("historical_freeze") else {}),
     }
 
 
@@ -345,7 +346,33 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
         )
         and not any(item.get("companion_dimension_conflict") for item in events)
     )
-    local = source_window_local or fiscal_revision_local or true_removal_local
+    from .historical_freeze import REVIEW_REASON, HELD
+    freeze = change.get("historical_freeze") or {}
+    frozen_events = [e for e in events if e.get("event") == REVIEW_REASON]
+    approval = change.get("true_removal_approval") or {}
+    approved_binding = approval.get("approved_binding") or {}
+    approved_removals = (
+        _ordered_evidence(approval.get("approved_source_keys") or [])
+        if approval.get("applied") and approval.get("operator_reviewed") is True
+        and approval.get("resolution_contract_version") == TRUE_REMOVAL_APPROVAL_VERSION
+        and approval.get("approval_evidence_fingerprint") == fingerprint(approved_binding)
+        and approval.get("approved_source_keys") == approved_binding.get("affected_source_keys")
+        else []
+    )
+    frozen_local = (
+        change.get("classification") == "REVIEW_REQUIRED"
+        and change.get("review_reason") == REVIEW_REASON
+        and fiscal_identity_binding and complete_arq_mrq
+        and bool(frozen_events) and event_tickers == {ticker}
+        and all(e.get("event") in {REVIEW_REASON, "AGED_OUT_OF_SOURCE_WINDOW"}
+                or (e.get("event") == TRUE_SOURCE_REMOVAL
+                    and e.get("source_identity") in approved_removals)
+                for e in events)
+        and all((e.get("historical_freeze_evidence") or {}).get("decision") == HELD
+                and (e.get("historical_freeze_evidence") or {}).get("identity", [None])[0] == identity.get("company_id")
+                for e in frozen_events)
+    )
+    local = source_window_local or fiscal_revision_local or true_removal_local or frozen_local
     affected_source_keys = [
         item.get("source_identity") for item in events if item.get("source_identity")
     ]
@@ -375,6 +402,7 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
         "fiscal_identities": fiscal_identities,
         "source_evidence_fingerprint": fingerprint(evidence),
         "identity_binding": _identity_binding(identity),
+        **({"historical_freeze": freeze} if freeze else {}),
         "locality_proof": {
             "known_unique_identity": identity.get("status") == "KNOWN",
             "complete_arq_mrq": complete_arq_mrq,
@@ -383,7 +411,8 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
                 "MRQ_FISCAL_REVISION_WITH_ARQ_COMPANION"
                 if fiscal_revision_local else "OLDEST_PREFIX_SOURCE_WINDOW"
                 if source_window_local else "PROVEN_TRUE_SOURCE_REMOVAL"
-                if true_removal_local else None
+                if true_removal_local else "FROZEN_ACCEPTED_HISTORY"
+                if frozen_local else None
             ),
             "fiscal_identity_binding_complete": fiscal_identity_binding,
             "mrq_fiscal_revisions_only": bool(fiscal_events) and len(fiscal_events) == len(events)
@@ -440,6 +469,7 @@ def _review_context(item: Mapping[str, Any]) -> dict[str, Any]:
         "reason_codes": sorted(str(value) for value in item.get("reason_codes") or []),
         "identity_binding": dict(item.get("identity_binding") or {}),
         "locality_proof": dict(item.get("locality_proof") or {}),
+        **({"historical_freeze": item["historical_freeze"]} if item.get("historical_freeze") else {}),
     }
 
 
@@ -479,6 +509,7 @@ def _approval_binding(item: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "identity_binding": dict(context.get("identity_binding") or {}),
         "locality_proof": dict(context.get("locality_proof") or {}),
+        **({"historical_freeze": context["historical_freeze"]} if context.get("historical_freeze") else {}),
     }
 
 
@@ -1040,6 +1071,16 @@ class RefreshReviewQueue:
                 ACCEPT_FISCAL_IDENTITY_REVISION: "FISCAL_REVISION_APPROVAL_INVALIDATED",
                 CONFIRM_TRUE_SOURCE_REMOVAL: "TRUE_REMOVAL_APPROVAL_INVALIDATED",
             }
+            frozen_evidence = context.get("historical_freeze")
+            prior_frozen = (prior_item.get("review_context") or {}).get("historical_freeze") if prior_item else None
+            if frozen_evidence and frozen_evidence != prior_frozen:
+                # Preserve exact diagnostic payloads when the current ticker
+                # item is refreshed; reuse the existing append-only audit path.
+                self._append_audit(connection, ticker=ticker,
+                    event_type="HISTORICAL_PROVIDER_CONFLICT_OBSERVED", run_id=run_id,
+                    evidence={"historical_freeze": frozen_evidence,
+                              "source_evidence_fingerprint": item["source_evidence_fingerprint"],
+                              "published_binding": published_binding})
             if evidence_drift and prior_item.get("operator_action") in approval_events:
                 self._append_audit(
                     connection,
