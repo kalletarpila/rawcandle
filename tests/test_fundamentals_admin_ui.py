@@ -1681,7 +1681,8 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     assert len(controls.review_queue_column.controls) == 1
     row = controls.review_queue_column.controls[0]
     assert row.controls[0].value == "YYAI"
-    assert "BOUNDARY_FISCAL_WINDOW_TOO_SHORT" in row.controls[3].value
+    assert "BOUNDARY_FISCAL_WINDOW_TOO_SHORT" in row.controls[3].tooltip
+    assert "Next action:" in row.controls[3].value
     assert "preview-first" in row.controls[4].value
     assert "preview-latest" in row.controls[5].value
 
@@ -1709,10 +1710,12 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     controls.review_queue_include_resolved_checkbox.value = True
     controls.review_queue_include_resolved_checkbox.on_change(None)
     assert service.queue_reads == 5
-    assert [row.controls[0].value for row in controls.review_queue_column.controls] == ["YYAI", "DONE"]
-    assert controls.review_queue_column.controls[1].controls[7].disabled is True
-    assert controls.review_queue_column.controls[1].controls[8].disabled is True
-    assert controls.review_queue_column.controls[1].controls[9].disabled is True
+    assert controls.review_queue_column.controls[0].controls[0].value == "YYAI"
+    history = controls.review_queue_column.controls[1].controls[0]
+    assert history.expanded is False
+    resolved = history.content.controls[0]
+    assert resolved.controls[0].value == 'DONE'
+    assert all(resolved.controls[i].visible is False for i in (7,8,9))
 
 
 def test_refresh_review_queue_ui_confirms_exact_fiscal_revision() -> None:

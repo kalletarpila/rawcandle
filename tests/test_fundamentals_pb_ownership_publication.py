@@ -326,9 +326,9 @@ def test_admin_ui_separate_publication_preview_and_confirmation():
         def publish_pb_ownership_reviews(self,*args,**kwargs):calls.append(('publish',args,kwargs));return {'outcome':'COMPLETED','generation_id':'candidate'}
     page=_Page();controls=build_fundamentals_admin_page(page=page,service=Service())
     controls.review_queue_refresh_button.on_click(None)
-    row=controls.pb_ownership_column.controls[1];actions=row.controls[1].controls
-    assert actions[0].disabled is True and actions[1].disabled is True
-    actions[2].on_click(None)
+    row=controls.pb_ownership_column.controls[0];actions=row.controls[1].controls
+    assert len(actions)==1  # Only the available publication action; no dead approve/hold controls.
+    actions[0].on_click(None)
     assert calls==[('preview',['selected'])] and page.dialog.actions[1].disabled is True
     page.dialog.actions[1].on_click(None)
     assert len(calls)==1

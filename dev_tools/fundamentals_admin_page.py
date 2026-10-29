@@ -11,6 +11,9 @@ import flet as ft
 
 from dev_tools.deferred_ui import DeferredLoadController, LoadState
 from rawcandle.fundamentals.admin.operation_report import OPERATION_REPORT_NAME, WORKFLOW_REPORT_NAME
+from rawcandle.fundamentals.admin.review_presentation import (
+    provider_review, ownership_review, review_groups, classification_label,
+)
 from rawcandle.fundamentals.admin.ui_service import (
     AdminUIRunResult,
     FundamentalsAdminUIService,
@@ -275,13 +278,14 @@ def build_fundamentals_admin_page(
         min_lines=5,
         max_lines=12,
     )
-    review_queue_include_resolved_checkbox = ft.Checkbox(label="Include resolved history", value=False)
+    review_queue_include_resolved_checkbox = ft.Checkbox(label="Include resolved provider history", value=False)
     review_queue_blocked_actions = ft.Row(
         [
             ft.OutlinedButton("Confirm true source removal", icon=ft.Icons.BLOCK, disabled=True),
         ],
         spacing=12,
         wrap=True,
+        visible=False,
     )
     technical_details_column = ft.Column(spacing=4)
     preview_title = ft.Text("Preview result", size=18, weight=ft.FontWeight.BOLD)
@@ -593,6 +597,9 @@ def build_fundamentals_admin_page(
                 f"Status: {item.get('operator_status_label') or item.get('status', 'UNKNOWN')}",
                 f"Scope: {item.get('review_scope', 'TICKER_LOCAL_REVIEW')}",
                 f"Classification: {item.get('classification', 'UNKNOWN')}",
+                f"Technical reason codes: {', '.join(str(value) for value in item.get('reason_codes') or [])}",
+                f"Next action: {provider_review(item).next_action}",
+                provider_review(item).blocked_action_reason,
                 f"Summary: {item.get('human_summary', 'No additional explanation is available.')}",
                 f"Reasons: {'; '.join(str(value) for value in reasons) or 'None recorded'}",
                 f"Affected fiscal identities ({len(fiscal)}): {', '.join(fiscal) or 'None recorded'}",
@@ -847,14 +854,20 @@ def build_fundamentals_admin_page(
         if hasattr(page, "update"):
             page.update()
 
+    def review_history(title: str, controls: list[Any]) -> Any:
+        return ft.ExpansionPanelList(controls=[ft.ExpansionPanel(
+            header=ft.ListTile(title=ft.Text(f"{title} ({len(controls)})")),
+            content=ft.Column(controls, spacing=8), expanded=False,
+        )])
+
     def render_review_queue(items: list[dict[str, Any]]) -> None:
-        rows = []
-        for item in items:
+        rows, historical_rows = [], []
+        current, historical = review_groups(items, provider_review)
+        for item, view in [*current, *historical]:
             ticker = str(item.get("ticker") or "UNKNOWN")
-            is_resolved = str(item.get("status") or "").upper() == "RESOLVED"
             reason_codes = ", ".join(str(value) for value in item.get("reason_codes") or [])
             status_lines = [str(
-                item.get("operator_status_label") or item.get("status") or "UNKNOWN"
+                item.get("operator_status_label") or view.display_status
             )]
             if item.get("operator_action"):
                 status_lines.append(str(item["operator_action"]))
@@ -862,20 +875,22 @@ def build_fundamentals_admin_page(
                 "approval_pending_publication"
             ):
                 status_lines.append("Reevaluation pending")
-            rows.append(
+            (historical_rows if view.history_or_terminal else rows).append(
                 ft.Row(
                     [
                         ft.Text(ticker, width=65, weight=ft.FontWeight.BOLD),
                         ft.Text("\n".join(status_lines), width=125),
                         ft.Text(
-                            f"{item.get('classification') or 'UNKNOWN'}\n"
-                            f"Evidence: {item.get('evidence_reference') or 'not recorded'}",
+                            ('Historical: ' if view.history_or_terminal else '') + classification_label(view.classification),
                             width=170,
-                            tooltip=f"Published binding: {item.get('last_published_binding') or 'not recorded'}",
+                            tooltip=f"Classification: {view.classification}\nPublished binding: {item.get('last_published_binding') or 'not recorded'}",
                         ),
                         ft.Text(
-                            f"{item.get('human_summary') or ''}\n{reason_codes}",
-                            width=300,
+                            f"Reason: {view.reason}\n"
+                            f"Action required: {'YES / REVIEW' if view.needs_action else 'No immediate action'}\n"
+                            f"Next action: {view.next_action}\n"
+                            + '\n'.join(v for v in (view.next_action_explanation, view.blocked_action_reason) if v),
+                            width=380, tooltip=reason_codes,
                         ),
                         ft.Text(
                             f"{item.get('first_seen_at_utc') or 'not recorded'}\n"
@@ -894,8 +909,9 @@ def build_fundamentals_admin_page(
                         ),
                         ft.IconButton(
                             icon=ft.Icons.HOURGLASS_EMPTY,
-                            tooltip="Wait for provider",
-                            disabled=is_resolved,
+                            tooltip="Wait for Providers",
+                            disabled='WAIT_FOR_PROVIDER' not in view.allowed_actions,
+                            visible='WAIT_FOR_PROVIDER' in view.allowed_actions,
                             on_click=lambda _event, selected=ticker: apply_review_action(
                                 selected, "WAIT_FOR_PROVIDER"
                             ),
@@ -903,7 +919,8 @@ def build_fundamentals_admin_page(
                         ft.IconButton(
                             icon=ft.Icons.REFRESH,
                             tooltip="Retry reevaluation",
-                            disabled=is_resolved,
+                            disabled='RETRY_REEVALUATION' not in view.allowed_actions,
+                            visible='RETRY_REEVALUATION' in view.allowed_actions,
                             on_click=lambda _event, selected=ticker: apply_review_action(
                                 selected, "RETRY_REEVALUATION"
                             ),
@@ -921,6 +938,7 @@ def build_fundamentals_admin_page(
                             disabled=not bool(
                                 item.get("accept_retained_history_eligible")
                             ),
+                            visible='ACCEPT_RETAINED_HISTORY' in view.allowed_actions,
                             on_click=lambda _event, selected=dict(item): (
                                 open_retained_history_confirmation(selected)
                             ),
@@ -933,6 +951,7 @@ def build_fundamentals_admin_page(
                                 else str(item.get("accept_fiscal_revision_reason") or "Fiscal-revision approval unavailable")
                             ),
                             disabled=not bool(item.get("accept_fiscal_revision_eligible")),
+                            visible='ACCEPT_FISCAL_IDENTITY_REVISION' in view.allowed_actions,
                             on_click=lambda _event, selected=dict(item): open_fiscal_revision_confirmation(selected),
                         ),
                         ft.IconButton(
@@ -943,13 +962,16 @@ def build_fundamentals_admin_page(
                                 else str(item.get("confirm_true_removal_reason") or "True source removal confirmation unavailable")
                             ),
                             disabled=not bool(item.get("confirm_true_removal_eligible")),
+                            visible='CONFIRM_TRUE_SOURCE_REMOVAL' in view.allowed_actions,
                             on_click=lambda _event, selected=dict(item): open_true_removal_confirmation(selected),
                         ),
                     ],
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
             )
-        review_queue_column.controls = rows or [ft.Text("No review items found.")]
+        if historical_rows:
+            rows.append(review_history('Resolved / provider history', historical_rows))
+        review_queue_column.controls = rows or [ft.Text("No action required.")]
 
     def open_pb_ownership_review(item: dict[str, Any], *, hold: bool = False) -> None:
         try:
@@ -1067,46 +1089,68 @@ def build_fundamentals_admin_page(
         if not callable(reader):
             return
         try:
-            items = reader(include_resolved=bool(review_queue_include_resolved_checkbox.value))
-            rows = []
+            # History is read-only and always available under a collapsed group.
+            items = reader(include_resolved=True)
             diagnostics=getattr(admin_service,'pb_ownership_auto_diagnostics',None)
-            policy_items={}
+            policy_items={};diagnostic=None
             if callable(diagnostics):
                 diagnostic=diagnostics()
-                rows.append(ft.Text(f"P/B automatic continuation {'enabled' if diagnostic['enabled'] else 'disabled'} · {diagnostic['policy_version']} · automatic {diagnostic['auto_continue']} / manual {diagnostic['manual_review']} / deep {diagnostic['deep_review']}"))
                 policy_items={v['case']['case_id']:v for v in diagnostic['items']}
-            if any(item['status'] in ('APPROVED','AUTO_CONTINUED') for item in items):
-                rows.append(ft.Text(f"Ownership publications pending: {sum(item['status'] in ('APPROVED','AUTO_CONTINUED') for item in items)}"))
-            for raw in items:
-                item = dict(raw);old,new = item['previous'],item['new'];ratio = ''
-                auto_policy=policy_items.get(item['case_id'])
-                if old['economic_unit_rule'] == 'ADS_EQUIVALENTS':
-                    ratio = f" · Reviewed exact ratio {old['exact_factor_numerator']}/{old['exact_factor_denominator']}"
-                description = (f"{item['ticker']} · {old['fiscal_year']}-{old['fiscal_quarter']} → {new['fiscal_year']}-{new['fiscal_quarter']} · {old['release_type']}\n"
-                    f"Shares {old['accepted_sharesbas']} → {new['sharesbas']} ({item['deltas']['shares_percent']}%)\n"
-                    f"Provider factor {old['provider_declared_factor']} → {new['sharefactor']}{ratio}\n"
-                    f"Category {old['accepted_category']} → {new['category']}\n"
-                    f"{item['classification']} · {item['status']} · Current P/B: {item['current_pb_status']}")
-                if item['status'] in ('APPROVED','AUTO_CONTINUED'):
-                    approval=item.get('approval') or {};result=item.get('result') or {};eligibility=item.get('publication_eligibility') or {}
-                    decision_label=(f"Automatically continued {approval.get('approved_at')}" if item['status']=='AUTO_CONTINUED'
-                                    else f"Approved {approval.get('approved_at')}"+(f" by {approval['operator']}" if approval.get('operator') else ''))
-                    description += (f"\n{decision_label} · Observation {new['observation_id'][:12]}/{new['content_hash'][:12]}"
-                        f"\nApproval artifact {result.get('registry_sha256')} · Source canonical {result.get('source_canonical_sha256')}"
-                        f"\nCurrent source generation {eligibility.get('source_generation')} · Publishability: {eligibility.get('status','Revalidate on preview')} {eligibility.get('reason','')}")
-                if auto_policy:
-                    description += '\nAutomatic policy: '+auto_policy['partition']+' · '+', '.join(auto_policy['warnings'])
-                rows.append(ft.Column([ft.Text(description), ft.Row([
-                    ft.ElevatedButton('Approve quarterly ownership continuation', disabled=item['status']!='OPEN' or item['classification']!='CONTINUATION_CANDIDATE',
-                        on_click=lambda _e, case=item: open_pb_ownership_review(case)),
-                    ft.TextButton('Keep on hold', disabled=item['status']!='OPEN', on_click=lambda _e, case=item: open_pb_ownership_review(case,hold=True)),
-                    *([ft.ElevatedButton('Publish approved P/B ownership reviews',
-                        disabled=item.get('publication_eligibility',{}).get('status')=='STALE_OR_UNAVAILABLE',
-                        on_click=lambda _e,case=item:open_pb_ownership_publication(case))] if item['status'] in ('APPROVED','AUTO_CONTINUED') else []),
-                ])]))
-            pb_ownership_column.controls = rows or [ft.Text('No quarterly ownership reviews pending.')]
-            if not items:
-                pb_ownership_status_field.value = 'No quarterly ownership reviews pending.'
+            enabled = diagnostic['enabled'] if diagnostic else None
+            current, historical = review_groups(items, lambda item: ownership_review(item, policy_items.get(item['case_id']), policy_enabled=enabled))
+            rows, history_rows = [], []
+            for raw, view in [*current, *historical]:
+                item=dict(raw);auto_policy=policy_items.get(item['case_id'])
+                approval=item.get('approval') or {}
+                decision=approval.get('decision_type') or (approval.get('record') or {}).get('approval_mode')
+                description=(f"{item['ticker']} · Status: {view.display_status}\n"
+                    f"{'Historical classification' if view.history_or_terminal else 'Classification'}: {classification_label(view.classification)}\nReason: {view.reason}\n"
+                    f"Action required: {'YES / REVIEW' if view.needs_action else 'No'}\nNext action: {view.next_action}")
+                if decision:description += '\nDecision: '+str(decision)
+                if view.next_action_explanation:description += '\n'+view.next_action_explanation
+                if view.blocked_action_reason:description += '\n'+view.blocked_action_reason
+                if auto_policy and auto_policy.get('warnings'):
+                    description += '\nWarnings: '+'; '.join(str(w).replace('_',' ').capitalize() for w in auto_policy['warnings'])
+                actions=[]
+                if 'APPROVE_OWNERSHIP' in view.allowed_actions:
+                    actions.append(ft.ElevatedButton('Approve quarterly ownership continuation', on_click=lambda _e,case=item:open_pb_ownership_review(case)))
+                if 'KEEP_ON_HOLD' in view.allowed_actions:
+                    actions.append(ft.TextButton('Keep on hold',on_click=lambda _e,case=item:open_pb_ownership_review(case,hold=True)))
+                if 'PREVIEW_PUBLICATION' in view.allowed_actions:
+                    actions.append(ft.ElevatedButton('Publish approved P/B ownership reviews',on_click=lambda _e,case=item:open_pb_ownership_publication(case)))
+                evidence={'stored_review':item}
+                if auto_policy:evidence['current_policy']={k:v for k,v in auto_policy.items() if k not in ('case','ticker')}
+                details=ft.ExpansionPanelList(controls=[ft.ExpansionPanel(
+                    header=ft.ListTile(title=ft.Text('Evidence / technical details')),
+                    content=ft.Text(json.dumps(evidence,indent=2,sort_keys=True,default=str),selectable=True),expanded=False)])
+                card=ft.Column([ft.Text(description), *([ft.Row(actions,wrap=True)] if actions else []), details])
+                (history_rows if view.history_or_terminal else rows).append(card)
+            attention=sum(view.needs_action for _,view in current)
+            if attention:
+                headline=f'Needs your attention ({attention})'
+            elif current:
+                headline=f'No manual action required now · {len(current)} current review(s) awaiting normal workflow'
+            else:
+                headline='No action required' if diagnostic else 'No current ownership queue items; policy diagnostics unavailable'
+            if diagnostic:
+                diagnostic_count=sum(diagnostic[k] for k in ('auto_continue','manual_review','deep_review'))
+                queued_ids={item['case_id'] for item in items}
+                missing_policy=[p for p in diagnostic['items'] if p['case']['case_id'] not in queued_ids]
+                missing_count=len(missing_policy) or (diagnostic_count if not current else 0)
+                if missing_count:
+                    if current:
+                        headline += f'\n{missing_count} additional current source case(s) have no matching persisted queue row; inspect diagnostics'
+                    elif enabled is True and missing_policy and all(p['partition']=='AUTO_CONTINUE' for p in missing_policy):
+                        headline=f'No manual action required now · {missing_count} source case(s) awaiting normal workflow reconciliation'
+                    else:
+                        headline=f'Needs attention: {missing_count} source policy case(s); inspect current diagnostics and reload reviews'
+                    rows.append(ft.Text('Current source diagnostics have no matching persisted queue rows. No approval controls are enabled for these unregistered diagnostic cases.'))
+                    rows.append(review_history('Current policy diagnostics', [ft.Text(json.dumps(missing_policy or diagnostic['items'],indent=2,default=str),selectable=True)]))
+                headline += (f"\nAutomatic continuation {'enabled' if diagnostic['enabled'] else 'disabled'} · {diagnostic['policy_version']}"
+                             f"\nautomatic {diagnostic['auto_continue']} / manual {diagnostic['manual_review']} / deep {diagnostic['deep_review']}")
+            if history_rows:rows.append(review_history('Resolved / published history',history_rows))
+            pb_ownership_column.controls=rows
+            pb_ownership_status_field.value=headline
         except Exception as exc:
             pb_ownership_status_field.value = f'Quarterly ownership queue could not be loaded: {exc}'
 
@@ -1162,10 +1206,16 @@ def build_fundamentals_admin_page(
                 status = "READY"
             if status == "EMPTY":
                 review_queue_column.controls = [ft.Text(empty_message)]
+            views=[provider_review(item) for item in items]
+            attention=sum(view.needs_action for view in views)
+            current_count=sum(not view.history_or_terminal for view in views)
+            ready_message=(f'Needs your attention ({attention})' if attention else
+                           f'No action required now · {current_count} waiting/pending review(s)' if current_count else 'No action required')
+            if boundary_items:ready_message += f' · {len(boundary_items)} accounting-boundary review(s), see below'
             status_message = {
                 "NOT_INITIALIZED": "Review queue has not been initialized.",
                 "EMPTY": empty_message,
-                "READY": f"{len(items) + len(boundary_items)} review item(s).",
+                "READY": ready_message,
             }.get(status, str(payload.get("error") or "Review queue could not be loaded."))
             review_queue_status_field.value = status_message
             if status in {"NOT_INITIALIZED", "ERROR"}:
@@ -1957,7 +2007,7 @@ def build_fundamentals_admin_page(
                     ft.Text("Ticker", width=65, weight=ft.FontWeight.BOLD),
                     ft.Text("Status", width=125, weight=ft.FontWeight.BOLD),
                     ft.Text("Classification", width=170, weight=ft.FontWeight.BOLD),
-                    ft.Text("Reason", width=300, weight=ft.FontWeight.BOLD),
+                    ft.Text("Reason / next action", width=380, weight=ft.FontWeight.BOLD),
                     ft.Text("First seen", width=145, weight=ft.FontWeight.BOLD),
                     ft.Text("Last seen", width=145, weight=ft.FontWeight.BOLD),
                     ft.Container(width=48),
