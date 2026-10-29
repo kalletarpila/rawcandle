@@ -466,4 +466,7 @@ class OwnershipPublicationWorkflow:
                     raise PublicationQueueSyncRequired(f'Generation {preview_id} published and postflight PASSED; retry queue synchronization from the durable receipt: {exc}') from exc
                 raise
             return {'outcome':'COMPLETED','generation_id':preview_id,'artifact_sha256':saved['artifact_sha256'],
-                    'published_cases':saved['selection'],'postflight':'PASSED','publication_run_id':preview_id}
+                    'published_cases':saved['selection'],'postflight':'PASSED','publication_run_id':preview_id,
+                    'published_tickers':[s['case']['ticker'] for s in selected],
+                    'decision_types':sorted({s['approval'].get('decision_type') or s['record']['approval_mode'] for s in selected}),
+                    'queue_state':'PUBLISHED','recovery':journal['rollback_recovery_state']}

@@ -293,6 +293,9 @@ def resolve_operation_report_download(
 
 
 def build_operation_summary(result: Mapping[str, Any], progress: Mapping[str, Any] | None = None) -> tuple[str, ...]:
+    if result.get('mode') == 'FULL_WORKFLOW' and result.get('ownership_auto'):
+        from .full_workflow import workflow_ui_summary
+        return workflow_ui_summary(result)
     if result.get("operational_decision"):
         from rawcandle.fundamentals.admin.refresh_operational_decision import operational_decision_rows
 

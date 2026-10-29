@@ -562,6 +562,8 @@ def _compact_json(value: Any) -> str:
 
 
 def workflow_ui_summary(result: Mapping[str, Any]) -> tuple[str, ...]:
+    from .pb_ownership_presentation import ownership_summary_rows
+    ownership_rows = ownership_summary_rows(result)
     terminal = result.get("terminal_summary") or {}
     batch = result.get("final_batch_outcome") or terminal.get("batch_outcome") or {}
     stage_label = "Completed stage" if result.get("outcome") in {"COMPLETED", "NO_CHANGE"} else "Stopped stage"
@@ -574,6 +576,7 @@ def workflow_ui_summary(result: Mapping[str, Any]) -> tuple[str, ...]:
         return (
             *rows[:2], *operational_decision_rows(result["operational_decision"]),
             f"Production ran: {'Yes' if terminal.get('production_entered') else 'No'}.",
+            *ownership_rows,
         )
     if batch:
         rows.append(
@@ -585,7 +588,7 @@ def workflow_ui_summary(result: Mapping[str, Any]) -> tuple[str, ...]:
     if problems:
         rows.append("Affected tickers: " + ", ".join(str(item.get("ticker")) for item in problems) + ".")
     rows.append(f"Production ran: {'Yes' if terminal.get('production_entered') else 'No'}.")
-    return tuple(rows)
+    return (*rows, *ownership_rows)
 
 
 def _refresh_source_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -653,15 +656,9 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
         *operational_decision_section(result.get("operational_decision")),
     ]
     if result.get('ownership_auto'):
-        own=result['ownership_auto']
+        from .pb_ownership_presentation import ownership_summary_rows
         lines += ['', '## P/B ownership auto-continuation', '',
-                  f"- Policy enabled: {own.get('enabled')} ({own.get('policy_version')})",
-                  f"- Financial precondition: {own.get('financial_precondition', 'Not recorded')}; financial workflow result {own.get('financial_outcome', result.get('outcome'))}; reason {own.get('financial_reason_code') or 'see financial decision above'}",
-                  *(['- Financial STOPPED is preserved: no safe financial changes to publish. Local quarantines remain separate; ownership reconciliation runs independently.'] if own.get('financial_precondition') == 'SAFE_FINANCIAL_NO_OP' else []),
-                  f"- Status: {own.get('status')}; evaluated {own.get('evaluated',0)}; automatic {own.get('auto_continued',0)}; published {own.get('published',0)}",
-                  f"- Manual {own.get('manual_review',0)}; deep/blocked {own.get('deep_review',0)}; failed/stale {own.get('failed_stale',0)}",
-                  f"- Ownership Preview (observations, factors, deltas, warnings and P/B): {own.get('preview_path','none')}",
-                  f"- Ownership Test receipt: {own.get('test_receipt','none')}"]
+                  *('- ' + row for row in ownership_summary_rows(result, include_artifacts=True)[1:])]
     if result.get("outcome") not in {"COMPLETED", "NO_CHANGE"}:
         lines.extend([
             "", "## Failure / Review Summary", "",
