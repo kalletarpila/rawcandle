@@ -191,6 +191,7 @@ class ScheduledStockUpdateRunResult:
     fundamentals_refresh_preview_message: str = ""
     fundamentals_refresh_unattended_production_available: bool = False
     fundamentals_refresh_mode: str = "PREVIEW_ONLY"
+    pb_ownership_auto: Dict[str, object] = field(default_factory=dict)
     fundamentals_refresh_test_invoked: bool = False
     fundamentals_refresh_production_invoked: bool = False
     fundamentals_refresh_production_run_id: str = "NONE"
@@ -2364,11 +2365,13 @@ def _run_one_market(
 def _run_fundamentals_refresh_preview_post_step(
     mode: str = "PREVIEW_ONLY",
     scheduler_log_dir: str | None = None,
+    ownership_auto_enabled: bool | None = None,
 ) -> dict[str, object]:
     from rawcandle.fundamentals.admin.refresh_scheduler import run_scheduler_refresh_discovery
 
     return run_scheduler_refresh_discovery(
         scheduler_mode=mode, scheduler_log_dir=scheduler_log_dir,
+        ownership_auto_enabled=ownership_auto_enabled,
     )
 
 
@@ -2553,6 +2556,7 @@ def run_scheduler_config(
                 refresh_discovery = _run_fundamentals_refresh_preview_post_step(
                     config.fundamentals_refresh_mode,
                     config.log_dir,
+                    config.pb_ownership_auto_continuation_enabled,
                 )
             overall_status = (
                 STATUS_FAILED
@@ -2769,6 +2773,7 @@ def run_scheduler_config(
                     refresh_discovery.get("unattended_production_available")
                 ),
                 fundamentals_refresh_mode=config.fundamentals_refresh_mode,
+                pb_ownership_auto=dict(refresh_discovery.get('pb_ownership_auto') or {'enabled':config.pb_ownership_auto_continuation_enabled,'status':'NOT_RUN'}),
                 fundamentals_refresh_test_invoked=bool(refresh_discovery.get("test_invoked")),
                 fundamentals_refresh_production_invoked=bool(refresh_discovery.get("production_invoked")),
                 fundamentals_refresh_production_run_id=str(refresh_discovery.get("production_run_id") or "NONE"),

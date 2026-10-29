@@ -49,7 +49,8 @@ def _full_workflow_summary(
     workflow_outcome = str(payload.get("outcome") or response.outcome or "FAILED")
     production_ran = "Production update" in stage_names
     test_ran = "Test on copies" in stage_names
-    production_completed = bool(payload.get("production_completed"))
+    ownership_completed=bool(payload.get('ownership_production_completed'))
+    production_completed = bool(payload.get("production_completed")) or ownership_completed
     failed = workflow_outcome == "FAILED" or str(response.status) == "FAILED"
     review_required = bool(held_tickers or global_blockers)
     summary_result = (
@@ -67,6 +68,8 @@ def _full_workflow_summary(
     return {
         "operation_type": "REFRESH_FUNDAMENTALS",
         "mode": "SCHEDULER_FULL_WORKFLOW",
+        "pb_ownership_auto": {k:v for k,v in (payload.get('ownership_auto') or {}).items()
+            if k in {'enabled','policy_version','status','evaluated','auto_continued','manual_review','deep_review','published','failed_stale','cleanup_status'}},
         "configured_mode": "FULL_WORKFLOW",
         "trigger_source": "SCHEDULER",
         "outcome": workflow_outcome,
@@ -83,8 +86,8 @@ def _full_workflow_summary(
         "held_review_tickers": held_tickers,
         "global_blockers": global_blockers,
         "test_invoked": test_ran,
-        "production_invoked": production_ran,
-        "production_run_id": production_stage.get("run_id"),
+        "production_invoked": production_ran or ownership_completed,
+        "production_run_id": production_stage.get("run_id") or ((payload.get('ownership_auto') or {}).get('publication') or {}).get('publication_run_id'),
         "production_decision_reason": reason,
         "full_workflow_invoked": True,
         "unattended_production_available": True,
@@ -111,6 +114,7 @@ def run_scheduler_refresh_discovery(
     scheduler_mode: str = "PREVIEW_ONLY",
     scheduler_log_dir: str | None = None,
     full_workflow_backend: Callable[..., Any] | None = None,
+    ownership_auto_enabled: bool | None = None,
 ) -> dict[str, Any]:
     """Run configured Refresh mode without creating operator approvals."""
     if scheduler_mode not in SUPPORTED_FUNDAMENTALS_REFRESH_MODES:
@@ -154,6 +158,7 @@ def run_scheduler_refresh_discovery(
     service = FundamentalsAdminUIService(**kwargs)
     if scheduler_mode == "FULL_WORKFLOW":
         try:
+            ownership_kwargs={} if ownership_auto_enabled is None else {'ownership_auto_enabled':ownership_auto_enabled}
             response = (
                 full_workflow_backend(
                     operation_type="REFRESH_FUNDAMENTALS",
@@ -161,6 +166,7 @@ def run_scheduler_refresh_discovery(
                     trigger_source="SCHEDULER",
                     scheduler_log_dir=scheduler_log_dir,
                     scheduler_managed_locks=True,
+                    **ownership_kwargs,
                 )
                 if full_workflow_backend is not None
                 else service.full_workflow(
@@ -169,6 +175,7 @@ def run_scheduler_refresh_discovery(
                     trigger_source="SCHEDULER",
                     scheduler_log_dir=scheduler_log_dir,
                     scheduler_managed_locks=True,
+                    **ownership_kwargs,
                 )
             )
         except Exception as exc:

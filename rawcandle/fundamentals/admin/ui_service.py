@@ -256,6 +256,7 @@ class FundamentalsAdminUIService:
         identity_paths: Any | None = None,
         ownership_paths: Any | None = None,
         ownership_publication_workflow: Any | None = None,
+        ownership_auto_runner: Callable[..., Mapping[str, Any]] | None = None,
         accounting_boundary_paths: Any | None = None,
         accounting_boundary_client: Any | None = None,
         cleanup_inspect: Callable[[str], Mapping[str, Any]] | None = None,
@@ -288,6 +289,7 @@ class FundamentalsAdminUIService:
         self._identity_paths = identity_paths
         self._ownership_paths = ownership_paths
         self._ownership_publication_workflow = ownership_publication_workflow
+        self._ownership_auto_runner = ownership_auto_runner
         self._accounting_boundary_paths = accounting_boundary_paths
         self._accounting_boundary_client = accounting_boundary_client
         self._cleanup_inspect = cleanup_inspect
@@ -624,6 +626,7 @@ class FundamentalsAdminUIService:
         trigger_source: str = "MANUAL",
         scheduler_log_dir: str | None = None,
         scheduler_managed_locks: bool = False,
+        ownership_auto_enabled: bool | None = None,
         progress_callback: AdminProgressCallback | None = None,
     ) -> AdminUIRunResult:
         with self._operation_lock():
@@ -711,7 +714,43 @@ class FundamentalsAdminUIService:
                 )
             else:
                 raise ValueError("FULL_WORKFLOW_UNSUPPORTED_ADMIN_OPERATION")
+            if operation == "REFRESH_FUNDAMENTALS":
+                from .pb_ownership_future import configured, summary, FutureOwnershipWorkflow
+                enabled=configured() if ownership_auto_enabled is None else ownership_auto_enabled
+                state=summary(enabled,status='SKIPPED_UNSAFE_FINANCIAL_WORKFLOW')
+                if result.get('outcome') in ('COMPLETED','NO_CHANGE'):
+                    if self._ownership_auto_runner is not None:
+                        state=dict(self._ownership_auto_runner(enabled=enabled,directory=Path(result['artifact_dir'])/'ownership_auto',trigger_source=trigger_source))
+                    elif self.run_root == ADMIN_RUN_ROOT.resolve():
+                        try:
+                            state=FutureOwnershipWorkflow(scheduler_log_dir=scheduler_log_dir).run(enabled=enabled,
+                                directory=Path(result['artifact_dir'])/'ownership_auto',trigger_source=trigger_source)
+                        except Exception as exc:
+                            state=summary(enabled,status='FAILED_OR_STALE',reason=str(exc));state['failed_stale']=1
+                    else:
+                        state=summary(False,status='ISOLATED_RUN_ROOT')
+                result['ownership_auto']=state
+                result['ownership_production_completed']=bool(state.get('published'))
+                if result['ownership_production_completed'] and result['outcome']=='NO_CHANGE':
+                    result.update(outcome='COMPLETED',workflow_status='COMPLETED',stop_reason=None,
+                                  final_completed_stage='Ownership publication')
+                if state['status']=='FAILED_OR_STALE':
+                    result['warnings'].append('Ownership auto-continuation stopped: '+state.get('reason','validation failed'))
+                from .artifacts import AdminRunWriter
+                from .contracts import AdminOperationType
+                writer=AdminRunWriter(result['run_id'],AdminOperationType.REFRESH_FUNDAMENTALS,root=self.run_root)
+                for filename in ('workflow_result.json','result.json'):writer.write_json(filename,result)
+                for filename in ('workflow_report.md','operation_report.md'):writer.write_text(filename,workflow_module.render_workflow_report(result))
+                writer.write_manifest()
         return self._finalize(result, default_message="Full workflow completed.")
+
+    def pb_ownership_auto_diagnostics(self) -> Mapping[str, Any]:
+        from .pb_ownership_future import configured, partition
+        from .contracts import utc_now
+        from .refresh_review_queue import queue_path_for_run_root
+        paths=self._ownership_source_paths()
+        return partition(paths['canonical'],paths['provider'],paths['market'],queue_path_for_run_root(self.run_root),
+                         as_of=utc_now()[:10],enabled=configured())
 
     def progress(
         self,

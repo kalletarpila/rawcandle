@@ -774,7 +774,7 @@ def test_scheduler_runner_dispatches_enabled_refresh_preview_into_summary(
     )
     monkeypatch.setattr(
         "rawcandle.scheduler.runner._run_fundamentals_refresh_preview_post_step",
-        lambda mode, log_dir: calls.append((mode, log_dir)) or {
+        lambda mode, log_dir, ownership_auto_enabled=None: calls.append((mode, log_dir)) or {
             "scheduler_summary_result": "REVIEW_REQUIRED",
             "preview_timestamp_utc": "2026-09-22T01:00:00Z",
             "published_baseline": "2026-09-01",
@@ -847,7 +847,7 @@ def test_scheduler_runner_full_workflow_holds_admin_lock_before_dispatch(
         lambda *args, **kwargs: _FakeCompletedProcess(0),
     )
 
-    def refresh(mode, log_dir):
+    def refresh(mode, log_dir, ownership_auto_enabled=None):
         events.append(("REFRESH", mode, log_dir))
         return {
             "scheduler_summary_result": "COMPLETED",

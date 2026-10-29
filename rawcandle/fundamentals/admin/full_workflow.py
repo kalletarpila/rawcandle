@@ -652,6 +652,14 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
         f"- NO_CHANGE: {'Yes' if result.get('outcome') == 'NO_CHANGE' else 'No'}",
         *operational_decision_section(result.get("operational_decision")),
     ]
+    if result.get('ownership_auto'):
+        own=result['ownership_auto']
+        lines += ['', '## P/B ownership auto-continuation', '',
+                  f"- Policy enabled: {own.get('enabled')} ({own.get('policy_version')})",
+                  f"- Status: {own.get('status')}; evaluated {own.get('evaluated',0)}; automatic {own.get('auto_continued',0)}; published {own.get('published',0)}",
+                  f"- Manual {own.get('manual_review',0)}; deep/blocked {own.get('deep_review',0)}; failed/stale {own.get('failed_stale',0)}",
+                  f"- Ownership Preview (observations, factors, deltas, warnings and P/B): {own.get('preview_path','none')}",
+                  f"- Ownership Test receipt: {own.get('test_receipt','none')}"]
     if result.get("outcome") not in {"COMPLETED", "NO_CHANGE"}:
         lines.extend([
             "", "## Failure / Review Summary", "",

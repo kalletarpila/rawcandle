@@ -1069,10 +1069,17 @@ def build_fundamentals_admin_page(
         try:
             items = reader(include_resolved=bool(review_queue_include_resolved_checkbox.value))
             rows = []
+            diagnostics=getattr(admin_service,'pb_ownership_auto_diagnostics',None)
+            policy_items={}
+            if callable(diagnostics):
+                diagnostic=diagnostics()
+                rows.append(ft.Text(f"P/B automatic continuation {'enabled' if diagnostic['enabled'] else 'disabled'} · {diagnostic['policy_version']} · automatic {diagnostic['auto_continue']} / manual {diagnostic['manual_review']} / deep {diagnostic['deep_review']}"))
+                policy_items={v['case']['case_id']:v for v in diagnostic['items']}
             if any(item['status'] in ('APPROVED','AUTO_CONTINUED') for item in items):
                 rows.append(ft.Text(f"Ownership publications pending: {sum(item['status'] in ('APPROVED','AUTO_CONTINUED') for item in items)}"))
             for raw in items:
                 item = dict(raw);old,new = item['previous'],item['new'];ratio = ''
+                auto_policy=policy_items.get(item['case_id'])
                 if old['economic_unit_rule'] == 'ADS_EQUIVALENTS':
                     ratio = f" · Reviewed exact ratio {old['exact_factor_numerator']}/{old['exact_factor_denominator']}"
                 description = (f"{item['ticker']} · {old['fiscal_year']}-{old['fiscal_quarter']} → {new['fiscal_year']}-{new['fiscal_quarter']} · {old['release_type']}\n"
@@ -1087,6 +1094,8 @@ def build_fundamentals_admin_page(
                     description += (f"\n{decision_label} · Observation {new['observation_id'][:12]}/{new['content_hash'][:12]}"
                         f"\nApproval artifact {result.get('registry_sha256')} · Source canonical {result.get('source_canonical_sha256')}"
                         f"\nCurrent source generation {eligibility.get('source_generation')} · Publishability: {eligibility.get('status','Revalidate on preview')} {eligibility.get('reason','')}")
+                if auto_policy:
+                    description += '\nAutomatic policy: '+auto_policy['partition']+' · '+', '.join(auto_policy['warnings'])
                 rows.append(ft.Column([ft.Text(description), ft.Row([
                     ft.ElevatedButton('Approve quarterly ownership continuation', disabled=item['status']!='OPEN' or item['classification']!='CONTINUATION_CANDIDATE',
                         on_click=lambda _e, case=item: open_pb_ownership_review(case)),

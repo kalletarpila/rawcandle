@@ -784,9 +784,13 @@ def accept_run_and_cleanup_backups(
     journal_path: Path = ACTIVE_JOURNAL_PATH,
     live_paths: Mapping[str, Path] | None = None,
     lock_factory: Callable[[], AbstractContextManager[Any]] | None = None,
+    scheduler_managed_locks: bool = False,
+    scheduler_log_dir: str | None = None,
 ) -> dict[str, Any]:
     """Serialize accepted-backup cleanup with all Production-writing workflows."""
     factory = lock_factory or production_lock
+    if scheduler_managed_locks and lock_factory is None:
+        factory = lambda: production_lock(allow_reentrant=True, scheduler_log_dir=scheduler_log_dir)
     with factory():
         return _accept_run_and_cleanup_backups_locked(
             run_id,

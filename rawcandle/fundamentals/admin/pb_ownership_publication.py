@@ -43,6 +43,7 @@ CODE_FILES = (
     'rawcandle/fundamentals/admin/pb_ownership_publication.py',
     'rawcandle/fundamentals/admin/pb_ownership_review.py',
     'rawcandle/fundamentals/admin/pb_ownership_auto.py',
+    'rawcandle/fundamentals/admin/pb_ownership_future.py',
     'rawcandle/fundamentals/admin/publication_journal.py',
     'rawcandle/fundamentals/admin/production_transaction.py',
     'rawcandle/fundamentals/admin/refresh_production.py',
@@ -220,18 +221,21 @@ def synchronize(queue_path: Path, canonical: Path, *, journal_path: Path = journ
 
 
 class OwnershipPublicationWorkflow:
-    def __init__(self, *, project_root: Path=ROOT, run_root: Path=ADMIN_RUN_ROOT, as_of: str|None=None):
+    def __init__(self, *, project_root: Path=ROOT, run_root: Path=ADMIN_RUN_ROOT, as_of: str|None=None,
+                 scheduler_log_dir: str|None=None):
         self.root=project_root.resolve();self.run_root=run_root.resolve();self.as_of=as_of
         if self.root==ROOT.resolve() and self.run_root!=ADMIN_RUN_ROOT.resolve():
             raise PermissionError('PB_PUBLICATION_PRODUCTION_GUARD_OVERRIDE_REJECTED')
         self.queue_path=queue_path_for_run_root(self.run_root)
         self.journal_path=self.root/'data/.fundamentals_admin_publication_journal.json'
         self.lanes=self.run_root/'pb_ownership_publications'
+        self.scheduler_log_dir=scheduler_log_dir
 
     @contextmanager
     def _locked(self):
         with production_lock(lock_path=self.root/'temp/.fundamentals_admin_production.lock',
-                scheduler_log_dir=None if self.root==ROOT.resolve() else str(self.root/'scheduler_logs')):
+                scheduler_log_dir=self.scheduler_log_dir if self.root==ROOT.resolve() else str(self.root/'scheduler_logs'),
+                allow_reentrant=True):
             with taxonomy_operation_lock_context(deployment_id=OPERATION,operation_type=OPERATION,
                     evidence_root=None if self.root==ROOT.resolve() else ROOT/'temp/pb_ownership_rehearsal_locks'/fingerprint(str(self.root))[:24]):
                 yield
