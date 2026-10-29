@@ -17,6 +17,7 @@ from rawcandle.fundamentals.admin.review_presentation import (
 from rawcandle.fundamentals.admin.operational_presentation import (
     NORMAL, REVIEW, DEEP_REVIEW, review_route, boundary_route, normal_summary,
 )
+from rawcandle.fundamentals.admin.recent_history import recent_history_visible, RECENT_HISTORY_NOTE
 from rawcandle.fundamentals.admin.ui_service import (
     AdminUIRunResult,
     FundamentalsAdminUIService,
@@ -891,15 +892,17 @@ def build_fundamentals_admin_page(
         if hasattr(page, "update"):
             page.update()
 
-    def review_history(title: str, controls: list[Any], *, show_count: bool = True) -> Any:
+    def review_history(title: str, controls: list[Any], *, show_count: bool = True, recent_only: bool = False) -> Any:
         return ft.ExpansionPanelList(controls=[ft.ExpansionPanel(
-            header=ft.ListTile(title=ft.Text(f"{title} ({len(controls)})" if show_count else title)),
+            header=ft.ListTile(title=ft.Text(f"{title}{' — visible recent cases' if recent_only else ''} ({len(controls)})" if show_count else title),
+                               subtitle=ft.Text(RECENT_HISTORY_NOTE) if recent_only else None),
             content=ft.Column(controls, spacing=8), expanded=False,
         )])
 
     def render_review_queue(items: list[dict[str, Any]]) -> None:
         rows, historical_rows = [], []
         current, historical = review_groups(items, provider_review)
+        historical = [(item,view) for item,view in historical if recent_history_visible(item,kind='provider')]
         for item, view in [*current, *historical]:
             ticker = str(item.get("ticker") or "UNKNOWN")
             reason_codes = ", ".join(str(value) for value in item.get("reason_codes") or [])
@@ -1007,7 +1010,7 @@ def build_fundamentals_admin_page(
                 )
             )
         if historical_rows:
-            rows.append(review_history('Resolved / provider history', historical_rows))
+            rows.append(review_history('Resolved / provider history', historical_rows,recent_only=True))
         review_queue_column.controls = rows or [ft.Text("No action required.")]
 
     def open_pb_ownership_review(item: dict[str, Any], *, hold: bool = False) -> None:
@@ -1138,6 +1141,7 @@ def build_fundamentals_admin_page(
                 policy_items={v['case']['case_id']:v for v in diagnostic['items']}
             enabled = diagnostic['enabled'] if diagnostic else None
             current, historical = review_groups(items, lambda item: ownership_review(item, policy_items.get(item['case_id']), policy_enabled=enabled))
+            historical = [(item,view) for item,view in historical if recent_history_visible(item,kind='ownership')]
             operational_state['owners'] = [(view,policy_items.get(item['case_id'])) for item,view in current]
             if diagnostic:
                 operational_state['settings']['ownership_enabled'] = diagnostic['enabled']
@@ -1194,7 +1198,7 @@ def build_fundamentals_admin_page(
                     rows.append(review_history('Current policy diagnostics', [ft.Text(json.dumps(missing_policy or diagnostic['items'],indent=2,default=str),selectable=True)]))
                 headline += (f"\nAutomatic continuation {'enabled' if diagnostic['enabled'] else 'disabled'} · {diagnostic['policy_version']}"
                              f"\nautomatic {diagnostic['auto_continue']} / manual {diagnostic['manual_review']} / deep {diagnostic['deep_review']}")
-            if history_rows:rows.append(review_history('Resolved / published history',history_rows))
+            if history_rows:rows.append(review_history('Resolved / published history',history_rows,recent_only=True))
             if deep_rows:headline += f'\nDeep Review: {len(deep_rows)} current ownership case(s); see Deep Review / evidence'
             pb_ownership_column.controls=rows
             pb_ownership_status_field.value=headline

@@ -893,11 +893,37 @@ class FundamentalsAdminUIService:
 
     def list_pb_ownership_reviews(self, *, include_resolved: bool = False) -> list[Mapping[str, Any]]:
         from .refresh_review_queue import RefreshReviewQueue, queue_path_for_run_root
-        items = RefreshReviewQueue(queue_path_for_run_root(self.run_root)).ownership_items(include_resolved=include_resolved)
+        queue_path = queue_path_for_run_root(self.run_root)
+        items = RefreshReviewQueue(queue_path).ownership_items(include_resolved=include_resolved)
+        if include_resolved:
+            self._add_terminal_history_times(queue_path, items)
         for item in items:
             if item['status'] in ('APPROVED','AUTO_CONTINUED'):
                 item['publication_eligibility'] = self._pb_publication().inspect(item['case_id'])
         return items
+
+    @staticmethod
+    def _add_terminal_history_times(queue_path: Path, items: list[dict[str, Any]]) -> None:
+        """Read existing exact case/status audit events; never change the queue."""
+        terminal = {item['case_id']: item for item in items if item['status'] in ('PUBLISHED','SUPERSEDED')}
+        if not terminal or not queue_path.exists():
+            return
+        times: dict[str, set[str]] = {}
+        try:
+            with sqlite3.connect(f'file:{queue_path.resolve()}?mode=ro', uri=True) as conn:
+                rows = conn.execute("SELECT event_type,occurred_at_utc,evidence_json FROM refresh_review_queue_audit WHERE event_type IN ('PB_OWNERSHIP_PUBLISHED','PB_OWNERSHIP_SUPERSEDED')")
+                for event, stamp, raw in rows:
+                    evidence = json.loads(raw)
+                    case_id = evidence.get('case_id')
+                    item = terminal.get(case_id)
+                    if item and event == 'PB_OWNERSHIP_' + item['status']:
+                        times.setdefault(case_id,set()).add(stamp)
+        except (sqlite3.DatabaseError, OSError, ValueError, TypeError, AttributeError):
+            return  # Unavailable audit timestamps must not hide legacy cases.
+        for case_id, stamps in times.items():
+            if len(stamps) == 1:
+                terminal[case_id].update(history_terminal_event=terminal[case_id]['status'],
+                                         history_terminal_at_utc=next(iter(stamps)))
 
     def _pb_publication(self):
         if self._ownership_publication_workflow is None:
