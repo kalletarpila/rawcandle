@@ -102,6 +102,56 @@ def test_wait_retry_availability_follows_backend_unresolved_status(status):
     assert view.needs_action==(status=='OPEN')
 
 
+@pytest.mark.parametrize('reason,final_step',[
+    ('INTERIOR_SOURCE_KEY_REMOVAL','If still unresolved: Investigate source history manually.'),
+    ('SAME_FISCAL_SOURCE_KEY_REPLACEMENT','If replacement persists: Manually inspect old vs new source binding and financial payload before any retained-history or repair decision.'),
+])
+def test_open_source_guidance_is_staged_generic_and_does_not_change_actions(reason,final_step):
+    item=provider('UNRELATED',reason=reason);original=deepcopy(item)
+    service=Service(providers=[item]);controls=render(service)
+    row=controls.review_queue_column.controls[0];shown=text(row)
+    assert 'Recommended now: Wait for Providers.' in shown
+    assert 'After later provider/source refresh: Retry reevaluation after source data changes.' in shown
+    assert final_step in shown and 'no automatic escalation' in shown
+    assert row.controls[9].visible is False and row.controls[7].visible and row.controls[8].visible
+    assert provider_review(item).allowed_actions==('VIEW_DETAILS','WAIT_FOR_PROVIDER','RETRY_REEVALUATION')
+    assert item==original and not service.actions
+
+
+def test_replacement_guidance_takes_priority_without_losing_other_reason_evidence():
+    item=provider();item['reason_codes'].append('SAME_FISCAL_SOURCE_KEY_REPLACEMENT')
+    view=provider_review(item)
+    assert 'If replacement persists:' in view.next_action_explanation
+    assert 'interior published source key disappeared' in view.reason
+    controls=render(Service(providers=[item]));row=controls.review_queue_column.controls[0]
+    assert all(code in row.controls[3].tooltip for code in item['reason_codes'])
+
+
+@pytest.mark.parametrize('status',['WAITING_PROVIDER','RETRY_REEVALUATION','RESOLVED'])
+def test_staged_open_guidance_does_not_leak_to_waiting_pending_or_terminal(status):
+    view=provider_review(provider(status=status))
+    assert 'Recommended now:' not in view.next_action
+    assert 'If still unresolved:' not in view.next_action_explanation
+    assert 'After later provider/source refresh:' not in view.next_action_explanation
+
+
+@pytest.mark.parametrize('blocked_action',['WAIT_FOR_PROVIDER','RETRY_REEVALUATION'])
+def test_staged_guidance_does_not_recommend_backend_blocked_actions(monkeypatch,blocked_action):
+    monkeypatch.setattr('rawcandle.fundamentals.admin.review_presentation.BLOCKED_ACTIONS',(blocked_action,))
+    view=provider_review(provider())
+    assert blocked_action not in view.allowed_actions
+    if blocked_action=='WAIT_FOR_PROVIDER':assert 'Wait for Providers' not in view.next_action
+    else:assert 'After later provider/source refresh:' not in view.next_action_explanation
+
+
+def test_staged_guidance_does_not_override_existing_approval_or_pending_paths():
+    for field in ('accept_retained_history_eligible','accept_fiscal_revision_eligible','confirm_true_removal_eligible','approval_pending_publication'):
+        item=provider();item[field]=True
+        view=provider_review(item)
+        assert 'Recommended now:' not in view.next_action
+        assert 'If still unresolved:' not in view.next_action_explanation
+
+
 @pytest.mark.parametrize('field,action',[('accept_retained_history_eligible','ACCEPT_RETAINED_HISTORY'),('accept_fiscal_revision_eligible','ACCEPT_FISCAL_IDENTITY_REVISION'),('confirm_true_removal_eligible','CONFIRM_TRUE_SOURCE_REMOVAL')])
 def test_only_explicit_backend_eligibility_exposes_approval(field,action):
     item=provider();assert action not in provider_review(item).allowed_actions

@@ -98,6 +98,21 @@ def provider_review(item: Mapping[str, Any]) -> ReviewPresentation:
         options = [label for action,label in (('WAIT_FOR_PROVIDER','Wait for Providers'),('RETRY_REEVALUATION','Retry reevaluation after source data changes')) if action in actions]
         next_action = ' or '.join(options) + '.' if options else 'Inspect persisted evidence.'
         explanation = 'Inspect the retained evidence if this persists. Wait/Retry does not grant approval.' if blocked else ''
+        if (status == 'OPEN' and classification == 'TRUE_SOURCE_REMOVAL'
+                and item.get('accept_retained_history_eligible') is False
+                and {'INTERIOR_SOURCE_KEY_REMOVAL', 'SAME_FISCAL_SOURCE_KEY_REPLACEMENT'}.intersection(codes)):
+            # Guidance only: never add actions, infer persistence, or escalate state.
+            if 'WAIT_FOR_PROVIDER' in actions:
+                next_action = 'Recommended now: Wait for Providers.'
+            stages = []
+            if 'RETRY_REEVALUATION' in actions:
+                stages.append('After later provider/source refresh: Retry reevaluation after source data changes.')
+            if 'SAME_FISCAL_SOURCE_KEY_REPLACEMENT' in codes:
+                stages.append('If replacement persists: Manually inspect old vs new source binding and financial payload before any retained-history or repair decision.')
+            else:
+                stages.append('If still unresolved: Investigate source history manually.')
+            stages.append('Guidance only; no automatic escalation. Wait/Retry does not grant approval.')
+            explanation = '\n'.join(stages)
     return ReviewPresentation(
         display_status=status + (' — no action required' if terminal else ''), classification=classification,
         needs_action=needs_action, next_action=next_action, next_action_explanation=explanation,
