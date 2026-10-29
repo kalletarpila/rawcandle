@@ -121,6 +121,9 @@ def final_status_message(result: Mapping[str, Any]) -> str:
             }.get(outcome, "Remove Tickers Test on copies failed.")
         return "Test on copies completed successfully." if outcome == "COMPLETED" else "Test on copies failed."
     if stage == "Preview":
+        if result.get('operation_type')=='REFRESH_FUNDAMENTALS' and result.get('operational_decision'):
+            from .run_presentation import run_meaning
+            return run_meaning(result)['headline']
         if outcome in {"COMPLETED", "NO_CHANGE"}:
             return "Preview completed."
         if result.get("user_error"):

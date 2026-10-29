@@ -19,6 +19,7 @@ from rawcandle.fundamentals.admin.operational_presentation import (
 )
 from rawcandle.fundamentals.admin.recent_history import recent_history_visible, terminal_history_date, RECENT_HISTORY_NOTE
 from rawcandle.fundamentals.admin.review_evidence_presentation import provider_card_fields, evidence_summary, decision_label, historical_classification
+from rawcandle.fundamentals.admin.run_presentation import source_scan, ACTION_REQUIRED
 from rawcandle.fundamentals.admin.ui_service import (
     AdminUIRunResult,
     FundamentalsAdminUIService,
@@ -247,13 +248,7 @@ def build_fundamentals_admin_page(
         except (AttributeError, OSError, RuntimeError):
             pending_refresh = None
     pending_refresh_field = ft.Text(
-        (
-            "Pending Sharadar fundamentals changes detected: "
-            f"{pending_refresh.get('effective_changed_known', 0)} known tickers; "
-            f"last scheduler Preview {pending_refresh.get('detected_at_utc') or 'time unavailable'}."
-            if pending_refresh else ""
-        ),
-        visible=bool(pending_refresh),
+        '\n'.join(source_scan({})['rows']),visible=True,
     )
     progress_field = ft.ListView(
         height=230,
@@ -369,7 +364,8 @@ def build_fundamentals_admin_page(
         operational_summary_field.value = '\n'.join(normal_summary(
             loaded=operational_state['loaded'],review_count=review_count,deep_count=deep_count,
             safety=publication_safety,settings=operational_state['settings'],
-            last_workflow=operational_state['last'],running=operation_running,error=operational_state['error']))
+            last_workflow=operational_state['last'],running=operation_running,error=operational_state['error'],
+            pending_reviews=sum(not view.needs_action and not view.history_or_terminal for view in provider_views)))
         deep_review_column.controls = [*operational_state.get('owner_controls', []),
             *operational_state.get('boundary_controls', [])]
         for diagnostic_item in operational_state.get('unregistered_deep_items', []):
@@ -381,7 +377,10 @@ def build_fundamentals_admin_page(
             deep_review_column.controls.append(ft.Text('\n'.join(last.get('rows') or ('Inspect workflow evidence.',))))
         if not deep_review_column.controls:
             deep_review_column.controls = [ft.Text('No deep review action required')]
-        latest_workflow_history.value = '\n'.join(last.get('rows') or ())
+        latest_workflow_history.value = ('Latest Full Workflow: '+str(last.get('human_summary') or (last.get('rows') or ['Not recorded'])[0])
+            + (f" · P/B auto-continuation {last['ownership_status']} · published {last.get('ownership_published','not recorded')}" if last.get('ownership_status') else '')
+            + f' · {review_count} current reviews'
+            + (' · Action required — see Deep Review / Details' if last.get('mode')==DEEP_REVIEW else '')) if last else ''
         latest_workflow_history.visible = bool(latest_workflow_history.value)
 
     def render_progress(*, replace: list[str] | None = None, append: str | None = None) -> None:
@@ -499,6 +498,9 @@ def build_fundamentals_admin_page(
         )
 
     def update_summary(result: AdminUIRunResult) -> None:
+        if result.operational_summary and result.operational_summary.get('kind')=='preview':
+            summary_column.controls = [ft.Text(row) for row in result.operational_summary['rows']]
+            return
         summary_column.controls = [ft.Text(row) for row in result.summary_rows] or [
             ft.Text("No summary rows recorded.")
         ]
@@ -532,6 +534,9 @@ def build_fundamentals_admin_page(
         for item in entries:
             run_id = item.run_id
             title = _plain_status(item.outcome)
+            meaning = getattr(item,'operational_meaning',None)
+            if meaning:
+                title += '\n'+meaning['meaning']+'\n'+('ACTION REQUIRED · ' if meaning['category']==ACTION_REQUIRED else '')+'Action: '+meaning['action']
             when = item.completed_at_utc or ("In progress" if item.status == "running" else "Time unavailable")
             category = getattr(item, "category", "Administration run")
             primary = getattr(item, "primary_count", None)
@@ -552,7 +557,7 @@ def build_fundamentals_admin_page(
                 ft.Text(when, width=185, weight=weight),
                 ft.Text(operation_label, width=190, weight=weight),
                 ft.Text(item.stage, width=155, weight=weight),
-                ft.Text(title, width=135, weight=weight),
+                ft.Text(title, width=280, weight=weight,tooltip='Backend outcome: '+item.outcome),
                 ft.Text(count_text, width=125, weight=weight),
                 ft.Text(category, width=170, tooltip=f"run_id={item.run_id}; mode={item.mode}" + (
                     f"; workflow_parent={item.workflow_parent_run_id}; scheduler_provenance="
@@ -1259,8 +1264,8 @@ def build_fundamentals_admin_page(
             operational_state['boundaries'] = active_boundary
             operational_state['boundary_controls'] = [ft.Column([ft.Text('Accounting-boundary review — '+str(item.get('status'))),
                 evidence_panel('Accounting-boundary evidence','boundary',item)]) for item in active_boundary]
-            accounting_history_column.controls = [ft.Column([ft.Text('Accounting-boundary review — '+str(item.get('status'))),
-                evidence_panel('Accounting-boundary history / audit','boundary',item)]) for item in completed_boundary]
+            accounting_history_column.controls = [review_history('Accounting-boundary history / audit',
+                [evidence_panel(str(item.get('status'))+' · accounting-boundary evidence','boundary',item) for item in completed_boundary])] if completed_boundary else []
             accounting_history_column.visible = bool(completed_boundary)
             empty_message = (
                 "No Refresh review items are currently quarantined."
@@ -1372,15 +1377,15 @@ def build_fundamentals_admin_page(
             pending_refresh_field.value = str(pending.get("error") or "Refresh history is unavailable.")
             pending_refresh_field.visible = True
         elif pending:
-            pending_refresh_field.value = (
-                "Pending Sharadar fundamentals changes detected: "
-                f"{pending.get('effective_changed_known', 0)} known tickers; "
-                f"last scheduler Preview {pending.get('detected_at_utc') or 'time unavailable'}."
-            )
+            scan = next((getattr(item,'source_scan',None) for item in payload.get('entries') or []
+                         if item.operation_type=='REFRESH_FUNDAMENTALS' and item.mode in ('PREVIEW','FULL_WORKFLOW')),None)
+            pending_refresh_field.value = '\n'.join((scan or source_scan({}))['rows'])
             pending_refresh_field.visible = True
         else:
-            pending_refresh_field.value = ""
-            pending_refresh_field.visible = False
+            scan = next((getattr(item,'source_scan',None) for item in payload.get('entries') or []
+                         if item.operation_type=='REFRESH_FUNDAMENTALS' and item.mode in ('PREVIEW','FULL_WORKFLOW')),None)
+            pending_refresh_field.value = '\n'.join((scan or source_scan({}))['rows'])
+            pending_refresh_field.visible = True
         render_history(payload.get("entries") or [])
         history_show_more_button.disabled = False
         history_refresh_button.disabled = False
@@ -1437,11 +1442,15 @@ def build_fundamentals_admin_page(
 
     def show_more_history(_event: Any) -> None:
         nonlocal history_limit
+        if history_show_more_button.disabled or (history_cursor is not None and history_cursor.exhausted):
+            return
         history_limit += 8
         if defer_initial_load:
             history_loader.start(force=True)
         else:
             refresh_history()
+            if hasattr(page,'update'):
+                page.update()
 
     history_show_more_button = ft.TextButton(
         "Show more",
@@ -1706,7 +1715,7 @@ def build_fundamentals_admin_page(
         nonlocal current_preview_fingerprint, current_test_run_id, current_report_run_id, selected_history_run_id
         is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "ACTIVE_TAXONOMY_PREVIEW"}
         is_workflow = result.mode == "FULL_WORKFLOW"
-        status_field.value = '\n'.join(result.operational_summary['rows']) if is_workflow and result.operational_summary else _result_text(result)
+        status_field.value = '\n'.join(result.operational_summary['rows']) if result.operational_summary else _result_text(result)
         status_field.max_lines = 12 if is_workflow else 5
         final_section.visible = not is_preview or result.status == "FAILED"
         status_field.visible = not is_preview or result.status == "FAILED"
@@ -1782,7 +1791,7 @@ def build_fundamentals_admin_page(
             preview_title.value = "Preview result" if is_preview else "Result"
         if result.business_outcome == "NO_CHANGE" and result.preview_domain:
             summary_column.controls = [ft.Text("No changes"), *[ft.Text(row) for row in result.summary_rows if row not in {"Taxonomy is up to date", "No changes"}]]
-        elif is_preview and result.outcome == "NO_CHANGE":
+        elif is_preview and result.outcome == "NO_CHANGE" and not result.operational_summary:
             preview_title.value = "No changes"
             summary_column.controls = [ft.Text("No update is required.")]
         if progress_section.visible:
@@ -1803,6 +1812,9 @@ def build_fundamentals_admin_page(
             progress_details.visible = True
             progress_details.controls[0].expanded = not is_workflow
         refresh_history(force=True)
+        if is_preview and result.operational_summary and result.operational_summary.get('source_scan'):
+            pending_refresh_field.value = '\n'.join(result.operational_summary['source_scan']['rows'])
+            pending_refresh_field.visible = True
         if is_workflow and result.operational_summary:
             operational_state['last'] = result.operational_summary
         update_operational_summary()
@@ -1821,6 +1833,11 @@ def build_fundamentals_admin_page(
             ft.Text(f"Artifact directory: {result.artifact_dir or 'not recorded'}"),
             ft.Text(f"Report sha256: {result.report_sha256 or 'not recorded'}"),
         ]
+        if result.operational_decision:
+            decision=result.operational_decision
+            technical_details_column.controls.extend([
+                ft.Text(f"Decision code: {decision.get('decision_code','not recorded')}\nTest reason: {(decision.get('test_gate') or {}).get('reason_code','not recorded')}\nProduction authorization: {(decision.get('production_gate') or {}).get('state','not recorded')}"),
+                review_history('Raw operational decision / JSON',[ft.Text(json.dumps(decision,indent=2,sort_keys=True),selectable=True)],show_count=False)])
         technical_details_section.visible = bool(technical_details_column.controls)
         technical_details_section.controls[0].expanded = False
 
@@ -2132,7 +2149,7 @@ def build_fundamentals_admin_page(
                     ft.Text("Time", width=185, weight=ft.FontWeight.BOLD),
                     ft.Text("Operation", width=190, weight=ft.FontWeight.BOLD),
                     ft.Text("Stage", width=155, weight=ft.FontWeight.BOLD),
-                    ft.Text("Result", width=135, weight=ft.FontWeight.BOLD),
+                    ft.Text("Result / operational meaning", width=280, weight=ft.FontWeight.BOLD),
                     ft.Text("Count", width=125, weight=ft.FontWeight.BOLD),
                     ft.Text("Category", width=170, weight=ft.FontWeight.BOLD),
                     ft.Container(width=48),

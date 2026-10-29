@@ -39,7 +39,8 @@ def test_completed_operator_boundary_evidence_is_history_not_current_deep(status
     assert 'Deep reviews requiring action: 0' in c.operational_summary_field.value
     assert 'Next action: Review current exceptions.' in c.operational_summary_field.value
     assert 'No deep review action required' in text(c.deep_review_column)
-    assert status in text(c.accounting_history_column) and 'WFRD' in text(c.accounting_history_column,collapsed=True)
+    assert status not in text(c.accounting_history_column) and status in text(c.accounting_history_column,collapsed=True)
+    assert 'WFRD' in text(c.accounting_history_column,collapsed=True)
     assert 'c'*64 not in text(c.deep_review_column,collapsed=True)
     assert 'c'*64 in text(c.accounting_history_column,collapsed=True)
 

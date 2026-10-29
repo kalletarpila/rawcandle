@@ -93,6 +93,8 @@ class AdminUIHistoryEntry:
     trigger_source: str = "MANUAL"
     workflow_parent_run_id: str | None = None
     provenance_inherited: bool = False
+    operational_meaning: Mapping[str, Any] | None = None
+    source_scan: Mapping[str, Any] | None = None
 
     @property
     def stage(self) -> str:
@@ -1164,6 +1166,7 @@ class FundamentalsAdminUIService:
         return self._history_entry_from_projection(self._history_projection(run_dir))
 
     def _history_entry_from_projection(self, projection: _RunHistoryProjection) -> AdminUIHistoryEntry | None:
+        from .run_presentation import run_meaning, source_scan
         run_dir = projection.run_dir
         run_id = run_dir.name
         result = projection.result
@@ -1217,6 +1220,8 @@ class FundamentalsAdminUIService:
                 count_label=self._count_label(payload or request or {}),
                 report_filename=WORKFLOW_REPORT_NAME if mode == "FULL_WORKFLOW" else OPERATION_REPORT_NAME,
                 trigger_source=str(payload.get("trigger_source") or "MANUAL"),
+                operational_meaning=run_meaning(payload) if payload.get('operation_type')=='REFRESH_FUNDAMENTALS' else None,
+                source_scan=source_scan(payload) if payload.get('operation_type')=='REFRESH_FUNDAMENTALS' and mode in ('PREVIEW','FULL_WORKFLOW') else None,
             )
         payload = result or request or status or {}
         return AdminUIHistoryEntry(
@@ -1398,6 +1403,7 @@ class FundamentalsAdminUIService:
 
     def _finalize(self, result: Mapping[str, Any], *, default_message: str) -> AdminUIRunResult:
         from .operational_presentation import workflow_view
+        from .run_presentation import run_meaning, source_scan
         run_id = str(result.get("run_id") or "")
         taxonomy = taxonomy_preview_presentation(result)
         retry_value = result.get("retry_authorization")
@@ -1481,5 +1487,6 @@ class FundamentalsAdminUIService:
             ),
             test_run_id=str(result.get("test_run_id")) if result.get("test_run_id") else None,
             direct_test_retry_available=bool(result.get("manual_test_retry_available")),
-            operational_summary=workflow_view(result) if workflow_mode else None,
+            operational_summary=(workflow_view(result) if workflow_mode else
+                dict(run_meaning(result),kind='preview',source_scan=source_scan(result)) if result.get('operation_type')=='REFRESH_FUNDAMENTALS' and result.get('mode')=='PREVIEW' else None),
         )

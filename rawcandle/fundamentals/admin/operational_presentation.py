@@ -43,10 +43,12 @@ def boundary_route(item: Mapping[str, Any]) -> OperationalRoute:
 
 def workflow_view(result: Mapping[str, Any]) -> dict[str, Any]:
     """Compact structured outcome display, separate from native report/gates."""
+    from .run_presentation import run_meaning, ACTION_REQUIRED
+    interpreted = run_meaning(result)
     terminal = result.get('terminal_summary') or {}
     own = result.get('ownership_auto') or {}
     financial = own.get('financial_outcome') or result.get('outcome') or 'UNKNOWN'
-    safe_noop = financial == 'STOPPED' and own.get('financial_precondition') == 'SAFE_FINANCIAL_NO_OP'
+    safe_noop = financial == 'STOPPED' and (own.get('financial_precondition') == 'SAFE_FINANCIAL_NO_OP' or interpreted['safe_noop'])
     running = result.get('status') == 'running' or result.get('workflow_status') == 'RUNNING'
     rows = [f"Financial workflow: {financial}" + (' — safe no-op (NO_SAFE_CHANGES)' if safe_noop else '')]
     financial_published = result.get('production_completed')
@@ -80,7 +82,7 @@ def workflow_view(result: Mapping[str, Any]) -> dict[str, Any]:
     stage = terminal.get('failure_stage') or terminal.get('authoritative_stage') or result.get('current_stage')
     if failed and not running and stage:
         rows.append(f'Failed/stopped stage: {stage}')
-    deep = bool(anomalies) or (failed and terminal.get('stop_kind') != 'REVIEW_REQUIRED')
+    deep = bool(anomalies) or interpreted['category']==ACTION_REQUIRED
     attention = bool(reviews or own.get('manual_review') or own.get('deep_review'))
     mode = DEEP_REVIEW if deep or own.get('deep_review') else REVIEW if attention or failed else NORMAL
     if running:
@@ -90,20 +92,22 @@ def workflow_view(result: Mapping[str, Any]) -> dict[str, Any]:
     elif mode == DEEP_REVIEW:
         next_action = 'Open Deep Review / workflow evidence before retrying.'
     elif mode == REVIEW:
-        next_action = 'Review current exceptions; safe automatic work remains separate.'
+        next_action = 'Review local exceptions separately when appropriate.' if interpreted['safe_noop'] else 'Review current exceptions; safe automatic work remains separate.'
     else:
         next_action = 'None — no corrective workflow action required.'
     rows.extend(anomalies)
-    rows.append('Action required: ' + ('No immediate action while running' if running else 'No' if mode == NORMAL else 'Yes'))
+    rows.append('Action required: ' + ('No immediate action while running' if running else 'No' if mode == NORMAL else
+        'No immediate corrective workflow action; review separately' if mode==REVIEW and interpreted['safe_noop'] else 'Yes'))
     rows.append('Next action: ' + next_action)
     return dict(mode=mode, rows=tuple(rows), financial_outcome=financial, running=running,
-                ownership_status=own.get('status'), ownership_published=own.get('published'))
+                ownership_status=own.get('status'), ownership_published=own.get('published'),
+                human_summary=interpreted['headline'] if interpreted['category'] is not None else rows[0])
 
 
 def normal_summary(*, loaded: bool, review_count: int, deep_count: int,
                    safety: Mapping[str, Any], settings: Mapping[str, Any],
                    last_workflow: Mapping[str, Any] | None = None, running: bool = False,
-                   error: str = '') -> tuple[str, ...]:
+                   error: str = '', pending_reviews: int = 0) -> tuple[str, ...]:
     last_workflow = last_workflow or {}
     running = running or bool(last_workflow.get('running'))
     blocked = safety.get('production_writes_blocked') is True
@@ -115,13 +119,14 @@ def normal_summary(*, loaded: bool, review_count: int, deep_count: int,
     elif safety_unknown:
         rows.append('Publication safety: not loaded / checking.')
     if error:rows.append(error)
-    rows.append('Safe publication: automatic within Full Workflow' if settings.get('full_workflow') is True else 'Safe publication: Full Workflow only; scheduler setting unavailable or not FULL_WORKFLOW')
+    rows.append('Safe publication within Full Workflow: automatic' if settings.get('full_workflow') is True else 'Safe publication: Full Workflow only; scheduler setting unavailable or not FULL_WORKFLOW')
     enabled = settings.get('ownership_enabled')
     rows.append('P/B auto-continuation: ' + ('enabled' if enabled is True else 'disabled' if enabled is False else 'not loaded'))
     rows.append(f'Current reviews requiring action: {review_count}' if loaded else 'Current reviews: not loaded')
+    if pending_reviews:rows.append(f'Current reviews waiting on provider/workflow: {pending_reviews}')
     rows.append(f'Deep reviews requiring action: {deep_count}' if loaded else 'Deep reviews: not loaded')
     if last_workflow.get('rows'):
-        rows.append('Last workflow · ' + last_workflow['rows'][0])
+        rows.append('Last workflow: ' + (last_workflow.get('human_summary') or last_workflow['rows'][0]))
     else:
         rows.append('Last workflow: not loaded / no retained Full Workflow found')
     if last_workflow.get('ownership_status'):
