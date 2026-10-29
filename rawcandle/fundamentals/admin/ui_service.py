@@ -1034,6 +1034,15 @@ class FundamentalsAdminUIService:
                 ),
             )
 
+    def list_source_dispositions(self) -> list[Mapping[str, Any]]:
+        from .legacy_payload_disposition import list_items, current_views
+        from .refresh_review_queue import queue_path_for_run_root
+        items = list_items(queue_path_for_run_root(self.run_root))
+        if not items:
+            return []
+        paths = self._ownership_source_paths()
+        return current_views(items, paths['canonical'], paths['provider'])
+
     def list_accounting_boundary_reviews(self) -> list[Mapping[str, Any]]:
         from .accounting_boundary_review import read_items
         from .refresh_review_queue import queue_path_for_run_root

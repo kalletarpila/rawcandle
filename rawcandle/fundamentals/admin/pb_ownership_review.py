@@ -107,7 +107,7 @@ def detect(conn: sqlite3.Connection, *, as_of: str) -> list[dict]:
         if not reviews:
             continue
         new = latest_basis(conn, company_id, as_of=as_of)
-        if not new:
+        if not new or not new.get('active_securities'):
             continue
         binding = (*BINDING, 'fiscal_year', 'fiscal_quarter', 'reportperiod')
         if any(all(new.get(k) == r.get(k) for k in binding) for r in reviews):

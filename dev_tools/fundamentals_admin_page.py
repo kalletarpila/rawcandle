@@ -87,6 +87,7 @@ class FundamentalsAdminPageControls:
     accounting_history_column: Any
     selected_review_evidence: Any
     technical_details_section: Any
+    source_disposition_column: Any
 
 
 def admin_report_download_url(run_id: str, filename: str = OPERATION_REPORT_NAME) -> str:
@@ -284,6 +285,7 @@ def build_fundamentals_admin_page(
     ownership_history_column = ft.Column(spacing=8)
     provider_history_column = ft.Column(spacing=8)
     accounting_history_column = ft.Column(spacing=8)
+    source_disposition_column = ft.Column(spacing=6)
     latest_workflow_history = ft.Text('',visible=False)
     selected_review_evidence = ft.ExpansionPanelList(controls=[],visible=False)
     selected_review_summary = ft.Text('')
@@ -359,6 +361,7 @@ def build_fundamentals_admin_page(
         routes += [(view, review_route(view)) for view in provider_views]
         review_count = sum(view.needs_action and route.mode == REVIEW for view, route in routes)
         deep_count = sum(not view.history_or_terminal and route.mode == DEEP_REVIEW for view, route in routes) + len(operational_state['boundaries'])
+        review_count += operational_state.get('source_disposition_attention',0)
         review_count += operational_state.get('unregistered_manual',0)
         deep_count += operational_state.get('unregistered_deep',0)
         operational_summary_field.value = '\n'.join(normal_summary(
@@ -1255,6 +1258,18 @@ def build_fundamentals_admin_page(
             operational_state['providers'] = items
             operational_state['loaded'] = status in ('READY','EMPTY')
             render_review_queue(items)
+            from rawcandle.fundamentals.admin.legacy_payload_disposition import presentation as disposition_view
+            disposition_reader = getattr(admin_service, 'list_source_dispositions', None)
+            disposition_items = disposition_reader() if callable(disposition_reader) else []
+            disposition_current, disposition_history = [], []
+            for source_item in disposition_items:
+                source_view = disposition_view(source_item)
+                panel = evidence_panel(source_item['ticker']+' · '+source_view['label'], 'source_disposition', source_item)
+                (disposition_current if source_view['needs_action'] else disposition_history).append(panel)
+            operational_state['source_disposition_attention'] = len(disposition_current)
+            source_disposition_column.controls = (
+                [review_history('Source-data dispositions requiring review', disposition_current)] if disposition_current else []
+            ) + ([review_history('Source-data disposition history / no current action', disposition_history)] if disposition_history else [])
             boundary_reader = getattr(admin_service, "list_accounting_boundary_reviews", None)
             boundary_items = boundary_reader() if callable(boundary_reader) else []
             active_boundary = [item for item in boundary_items if boundary_route(item).mode==DEEP_REVIEW]
@@ -2114,6 +2129,7 @@ def build_fundamentals_admin_page(
     review_section = review_history('Review — current exceptions', [
         ft.Row([ft.Text('Provider history / source removal',size=18),review_queue_refresh_button,review_queue_include_resolved_checkbox],wrap=True),
         review_queue_status_field,review_queue_column,
+        source_disposition_column,
         selected_review_evidence,
         review_queue_blocked_actions,
         ft.Text('Quarterly P/B ownership reviews',size=18),pb_ownership_status_field,pb_ownership_column,
@@ -2251,4 +2267,5 @@ def build_fundamentals_admin_page(
         accounting_history_column=accounting_history_column,
         selected_review_evidence=selected_review_evidence,
         technical_details_section=technical_details_section,
+        source_disposition_column=source_disposition_column,
     )

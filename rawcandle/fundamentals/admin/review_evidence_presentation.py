@@ -48,6 +48,9 @@ def provider_card_fields(item: Mapping[str, Any], view: ReviewPresentation) -> t
 
 
 def evidence_summary(kind: str, item: Mapping[str, Any], *, view: ReviewPresentation | None = None) -> tuple[str, ...]:
+    if kind == 'source_disposition':
+        from .legacy_payload_disposition import presentation
+        return presentation(item)['lines']
     if kind == 'ownership':
         view = view or ownership_review(item)
         previous,new = item.get('previous') or {},item.get('new') or {}
