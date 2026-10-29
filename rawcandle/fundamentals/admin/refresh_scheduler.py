@@ -51,7 +51,9 @@ def _full_workflow_summary(
     test_ran = "Test on copies" in stage_names
     ownership_completed=bool(payload.get('ownership_production_completed'))
     production_completed = bool(payload.get("production_completed")) or ownership_completed
-    failed = workflow_outcome == "FAILED" or str(response.status) == "FAILED"
+    from .pb_ownership_future import financial_result_allows_ownership_reconciliation
+    safe_financial_noop = workflow_outcome == 'STOPPED' and financial_result_allows_ownership_reconciliation(payload)
+    failed = workflow_outcome == "FAILED" or (str(response.status) == "FAILED" and not safe_financial_noop)
     review_required = bool(held_tickers or global_blockers)
     summary_result = (
         "FAILED" if failed
@@ -61,7 +63,9 @@ def _full_workflow_summary(
         else "STOPPED"
     )
     reason = (
-        "Production completed."
+        "Financial workflow STOPPED (NO_SAFE_CHANGES_TO_PUBLISH); independent ownership publication completed."
+        if ownership_completed and workflow_outcome == 'STOPPED'
+        else "Production completed."
         if production_completed
         else str(terminal.get("headline") or payload.get("stop_reason") or response.message)
     )
@@ -69,7 +73,7 @@ def _full_workflow_summary(
         "operation_type": "REFRESH_FUNDAMENTALS",
         "mode": "SCHEDULER_FULL_WORKFLOW",
         "pb_ownership_auto": {k:v for k,v in (payload.get('ownership_auto') or {}).items()
-            if k in {'enabled','policy_version','status','evaluated','auto_continued','manual_review','deep_review','published','failed_stale','cleanup_status'}},
+            if k in {'enabled','policy_version','status','evaluated','auto_continued','manual_review','deep_review','published','failed_stale','cleanup_status','financial_precondition','financial_outcome','financial_reason_code'}},
         "configured_mode": "FULL_WORKFLOW",
         "trigger_source": "SCHEDULER",
         "outcome": workflow_outcome,

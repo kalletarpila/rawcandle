@@ -715,20 +715,25 @@ class FundamentalsAdminUIService:
             else:
                 raise ValueError("FULL_WORKFLOW_UNSUPPORTED_ADMIN_OPERATION")
             if operation == "REFRESH_FUNDAMENTALS":
-                from .pb_ownership_future import configured, summary, FutureOwnershipWorkflow
+                from .pb_ownership_future import configured, summary, FutureOwnershipWorkflow, financial_result_allows_ownership_reconciliation
                 enabled=configured() if ownership_auto_enabled is None else ownership_auto_enabled
                 state=summary(enabled,status='SKIPPED_UNSAFE_FINANCIAL_WORKFLOW')
-                if result.get('outcome') in ('COMPLETED','NO_CHANGE'):
-                    if self._ownership_auto_runner is not None:
-                        state=dict(self._ownership_auto_runner(enabled=enabled,directory=Path(result['artifact_dir'])/'ownership_auto',trigger_source=trigger_source))
-                    elif self.run_root == ADMIN_RUN_ROOT.resolve():
-                        try:
+                allowed = financial_result_allows_ownership_reconciliation(result)
+                financial_outcome = result.get('outcome')
+                precondition = ('SAFE_FINANCIAL_NO_OP' if financial_outcome == 'STOPPED' else 'SAFE_FINANCIAL_RESULT') if allowed else 'UNSAFE_FINANCIAL_RESULT'
+                if allowed:
+                    try:
+                        if self._ownership_auto_runner is not None:
+                            state=dict(self._ownership_auto_runner(enabled=enabled,directory=Path(result['artifact_dir'])/'ownership_auto',trigger_source=trigger_source))
+                        elif self.run_root == ADMIN_RUN_ROOT.resolve():
                             state=FutureOwnershipWorkflow(scheduler_log_dir=scheduler_log_dir).run(enabled=enabled,
                                 directory=Path(result['artifact_dir'])/'ownership_auto',trigger_source=trigger_source)
-                        except Exception as exc:
-                            state=summary(enabled,status='FAILED_OR_STALE',reason=str(exc));state['failed_stale']=1
-                    else:
-                        state=summary(False,status='ISOLATED_RUN_ROOT')
+                        else:
+                            state=summary(False,status='ISOLATED_RUN_ROOT')
+                    except Exception as exc:
+                        state=summary(enabled,status='FAILED_OR_STALE',reason=str(exc));state['failed_stale']=1
+                state.update(financial_precondition=precondition,financial_outcome=financial_outcome,
+                             financial_reason_code=(result.get('operational_decision') or {}).get('test_gate',{}).get('reason_code'))
                 result['ownership_auto']=state
                 result['ownership_production_completed']=bool(state.get('published'))
                 if result['ownership_production_completed'] and result['outcome']=='NO_CHANGE':

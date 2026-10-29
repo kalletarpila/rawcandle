@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import uuid
+from typing import Mapping
 
 from . import pb_ownership_auto as policy, pb_ownership_review as review
 from . import pb_ownership_publication as publication, publication_journal as journal
@@ -23,6 +24,89 @@ from .refresh_review_queue import queue_path_for_run_root
 from rawcandle.fundamentals.generations import resolve_active_generation, prepare_generation_from_candidates, activate_generation
 
 FLAG = 'pb_ownership_auto_continuation_enabled'
+
+
+def financial_result_allows_ownership_reconciliation(result: Mapping) -> bool:
+    """Accept the existing successes or the exact structured Preview no-op.
+
+    This does not relabel financial outcomes. Runtime journal/generation/source
+    safety is independently checked by run/preview under the native locks before
+    any ownership decision; financial labels never substitute for those checks.
+    """
+    if not isinstance(result, Mapping):
+        return False
+    if result.get('outcome') in ('COMPLETED', 'NO_CHANGE'):
+        return True
+    try:
+        terminal = result['terminal_summary']
+        decision = result['operational_decision']
+        source = result['source_summary']
+        stages = result['stages']
+        zero = lambda value: type(value) is int and value == 0
+        if not (result['outcome'] == result['workflow_status'] == terminal['workflow_outcome'] == 'STOPPED'
+                and result['operation_type'] == 'REFRESH_FUNDAMENTALS' and result['mode'] == 'FULL_WORKFLOW'
+                and result.get('completed_at_utc') and result['current_stage'] == 'Preview'
+                and result['production_completed'] is False
+                and terminal['stop_kind'] == decision['decision_code'] == 'NO_SAFE_CHANGES'
+                and terminal['operational_decision'] == decision
+                and terminal['source'] == 'STRUCTURED_CHILD_RESULT'
+                and terminal['authoritative_stage'] == decision['authoritative_stage'] == 'Preview'
+                and terminal['child_status'] == 'COMPLETED'
+                and isinstance(stages, list) and len(stages) == 1 and stages[0]['stage'] == 'Preview'
+                and stages[0]['status'] == 'COMPLETED'
+                and stages[0]['result'] == terminal['child_outcome']
+                and terminal['child_outcome'] in ('COMPLETED', 'REVIEW_REQUIRED')
+                and stages[0]['run_id'] == terminal['child_run_id']
+                and terminal['production_entered'] is False and terminal['production_completed'] is False
+                and zero(terminal['production_database_writes'])
+                and zero(terminal['reporting_integrity_error_count'])
+                and type(decision['schema_version']) is int and decision['schema_version'] == 1
+                and zero(decision['safe_effective_changes']) and zero(decision['global_blocker_count'])
+                and decision['global_blockers'] == []
+                and all(zero(source[k]) for k in ('safe_changes', 'effective_changed_known', 'global_blockers'))
+                and decision['test_gate']['authorized'] is False
+                and decision['test_gate']['reason_code'] == 'NO_SAFE_CHANGES_TO_PUBLISH'
+                and decision['production_gate']['state'] == 'NOT_APPLICABLE'
+                and decision['production_gate']['reason_code'] == 'NO_SAFE_CHANGES_TO_PUBLISH'):
+            return False
+        held = decision['held_items']
+        if not (isinstance(held, list) and isinstance(terminal['problem_items'], list)
+                and type(decision['held_item_count']) is int and type(source['held_for_review']) is int
+                and decision['held_item_count'] == len(held) == source['held_for_review']
+                and all(item['scope'] == 'TICKER_LOCAL_REVIEW' for item in held)
+                and len(terminal['problem_items']) == len(held)
+                and all(item['review_scope'] == 'TICKER_LOCAL_REVIEW'
+                        and item['reporting_integrity_error'] is False for item in terminal['problem_items'])):
+            return False
+        hold_blocked = decision['local_hold_blocked_safe_changes']
+        if not (hold_blocked is False or (not held and hold_blocked is None)):
+            return False
+        # Reject contradictory explicit safety facts, even with a valid label.
+        for facts in (result, terminal, result.get('publication_outcome') or {}, result.get('publication_summary') or {}):
+            if any(facts.get(k) for k in ('error', 'errors', 'technical_failure', 'write_boundary_crossed',
+                                         'production_entered', 'production_writes', 'preparing_generation')):
+                return False
+            if 'production_database_writes' in facts and not zero(facts['production_database_writes']):
+                return False
+            allowed = {'postflight': {'PASSED', 'NOT_RUN'}, 'postflight_state': {'PASSED', 'NOT_RUN'},
+                       'rollback_recovery': {'NOT_REQUIRED'}, 'rollback_recovery_state': {'NOT_REQUIRED'},
+                       'recovery_state': {'NOT_REQUIRED'}, 'publication_recovery': {'NOT_REQUIRED'},
+                       'rollback': {'NOT_REQUIRED'}, 'journal_state': {'COMPLETED'},
+                       'publication_journal_state': {'COMPLETED'}, 'generation_state': {'ACTIVE'},
+                       'generation_activation_state': {'NOT_STARTED'}}
+            for key, states in allowed.items():
+                if key in facts:
+                    value = facts[key]
+                    if isinstance(value, Mapping): value = value.get('status', value.get('state'))
+                    if value not in states: return False
+            for key in ('journal', 'publication_journal'):
+                if key in facts and any(facts[key][k] != v for k,v in {
+                        'state':'COMPLETED', 'postflight_state':'PASSED', 'rollback_recovery_state':'NOT_REQUIRED'}.items()):
+                    return False
+        counts = source.get('classification_counts') or {}
+        return all(zero(counts[k]) for k in ('safe_changes', 'effective_changed_known', 'global_blockers') if k in counts)
+    except (KeyError, TypeError, AttributeError, ValueError):
+        return False
 
 
 def configured(config_path: Path = ROOT / 'scheduler_config.json') -> bool:

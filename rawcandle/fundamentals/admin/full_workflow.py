@@ -656,6 +656,8 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
         own=result['ownership_auto']
         lines += ['', '## P/B ownership auto-continuation', '',
                   f"- Policy enabled: {own.get('enabled')} ({own.get('policy_version')})",
+                  f"- Financial precondition: {own.get('financial_precondition', 'Not recorded')}; financial workflow result {own.get('financial_outcome', result.get('outcome'))}; reason {own.get('financial_reason_code') or 'see financial decision above'}",
+                  *(['- Financial STOPPED is preserved: no safe financial changes to publish. Local quarantines remain separate; ownership reconciliation runs independently.'] if own.get('financial_precondition') == 'SAFE_FINANCIAL_NO_OP' else []),
                   f"- Status: {own.get('status')}; evaluated {own.get('evaluated',0)}; automatic {own.get('auto_continued',0)}; published {own.get('published',0)}",
                   f"- Manual {own.get('manual_review',0)}; deep/blocked {own.get('deep_review',0)}; failed/stale {own.get('failed_stale',0)}",
                   f"- Ownership Preview (observations, factors, deltas, warnings and P/B): {own.get('preview_path','none')}",
