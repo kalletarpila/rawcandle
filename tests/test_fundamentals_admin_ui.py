@@ -1681,8 +1681,8 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     assert len(controls.review_queue_column.controls) == 1
     row = controls.review_queue_column.controls[0]
     assert row.controls[0].value == "YYAI"
-    assert "BOUNDARY_FISCAL_WINDOW_TOO_SHORT" in row.controls[3].tooltip
-    assert "Next action:" in row.controls[3].value
+    assert getattr(row.controls[3],"tooltip",None) is None
+    assert any("Recommended now:" in t.value for t in row.controls[3].controls)
     assert "preview-first" in row.controls[4].tooltip
     assert "preview-latest" in row.controls[5].tooltip
 
@@ -1696,7 +1696,7 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     row.controls[9].on_click(None)
     assert "Affected source rows: 23" in page.dialog.content.controls[0].value
     assert "published-generation-7" not in page.dialog.content.controls[0].value
-    assert "published-generation-7" in page.dialog.content.controls[2].controls[0].content.controls[0].value
+    assert "published-generation-7" in page.dialog.content.controls[2].controls[0].content.controls[1].controls[0].content.controls[0].value
     page.dialog.content.controls[1].value = "Reviewed exact history"
     page.dialog.actions[1].on_click(None)
     assert service.actions[-1] == ("YYAI", "ACCEPT_RETAINED_HISTORY")
@@ -1712,7 +1712,7 @@ def test_refresh_review_queue_ui_is_lazy_and_renders_stored_evidence_and_actions
     controls.review_queue_include_resolved_checkbox.on_change(None)
     assert service.queue_reads == 5
     assert controls.review_queue_column.controls[0].controls[0].value == "YYAI"
-    history = controls.review_queue_column.controls[1].controls[0]
+    history = controls.provider_history_column.controls[0].controls[0]
     assert history.expanded is False
     resolved = history.content.controls[0]
     assert resolved.controls[0].value == 'DONE'

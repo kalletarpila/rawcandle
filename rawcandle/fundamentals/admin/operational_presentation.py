@@ -34,7 +34,10 @@ def review_route(view: ReviewPresentation, *, policy: Mapping[str, Any] | None =
 
 
 def boundary_route(item: Mapping[str, Any]) -> OperationalRoute:
-    # A saved APPROVED proposal is not proof of published/terminal state.
+    # Completed operator review belongs to audit. APPROVED still does not mean
+    # published or authorize Production; this only controls operator attention.
+    if item.get('status') in ('APPROVED','RESOLVED','PUBLISHED','SUPERSEDED'):
+        return OperationalRoute(NORMAL)
     return OperationalRoute(DEEP_REVIEW, 'Inspect the recorded accounting-boundary status and exact evidence; approval does not authorize Production.')
 
 
@@ -106,7 +109,7 @@ def normal_summary(*, loaded: bool, review_count: int, deep_count: int,
     blocked = safety.get('production_writes_blocked') is True
     safety_unknown = safety.get('status') in (None,'UNKNOWN','CHECKING')
     mode = DEEP_REVIEW if blocked or deep_count or last_workflow.get('mode') == DEEP_REVIEW else REVIEW if review_count or error or not loaded or safety_unknown or last_workflow.get('mode') == REVIEW else NORMAL
-    rows = [f'Fundamentals: {mode}' + (' — running' if running or last_workflow.get('running') else '')]
+    rows = [f"Fundamentals: {'REVIEW REQUIRED' if mode == REVIEW else mode}" + (' — running' if running or last_workflow.get('running') else '')]
     if blocked:
         rows.append('Publication/recovery requires attention; production writes remain blocked.')
     elif safety_unknown:
@@ -116,7 +119,7 @@ def normal_summary(*, loaded: bool, review_count: int, deep_count: int,
     enabled = settings.get('ownership_enabled')
     rows.append('P/B auto-continuation: ' + ('enabled' if enabled is True else 'disabled' if enabled is False else 'not loaded'))
     rows.append(f'Current reviews requiring action: {review_count}' if loaded else 'Current reviews: not loaded')
-    rows.append(f'Deep reviews: {deep_count}' if loaded else 'Deep reviews: not loaded')
+    rows.append(f'Deep reviews requiring action: {deep_count}' if loaded else 'Deep reviews: not loaded')
     if last_workflow.get('rows'):
         rows.append('Last workflow · ' + last_workflow['rows'][0])
     else:
@@ -124,5 +127,5 @@ def normal_summary(*, loaded: bool, review_count: int, deep_count: int,
     if last_workflow.get('ownership_status'):
         rows.append(f"Last P/B auto-continuation: {last_workflow['ownership_status']} · published {last_workflow.get('ownership_published',0)}")
     rows.append('Next action: ' + ('Wait for the running workflow.' if running else
-                'Open Deep Review.' if mode == DEEP_REVIEW else 'Open Review / refresh status.' if mode == REVIEW else 'None — no action required.'))
+                'Open Deep Review.' if mode == DEEP_REVIEW else 'Review current exceptions.' if mode == REVIEW else 'None — no action required.'))
     return tuple(rows)

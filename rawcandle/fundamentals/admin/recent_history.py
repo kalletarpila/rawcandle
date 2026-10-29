@@ -29,22 +29,18 @@ def _day(value: Any) -> date | None:
         return None
 
 
-def recent_history_visible(item: Mapping[str, Any], *, kind: str, today: date | None = None) -> bool:
-    """Only hide a known terminal case with an unambiguous old terminal date.
-
-    First/last observation, fiscal period and approval-preparation dates are
-    deliberately not fallbacks for a resolution/publication/supersession date.
-    """
+def terminal_history_date(item: Mapping[str, Any], *, kind: str) -> date | None:
+    """The same authoritative terminal date for filtering and compact display."""
     status = item.get('status')
     if kind == 'provider':
         if status != 'RESOLVED':
-            return True
+            return None
         evidence = item.get('resolution_evidence') or {}
         primary = (item.get('resolution_at_utc'), item.get('approval_published_at_utc'),
                    evidence.get('published_at_utc') if isinstance(evidence, Mapping) else None)
     elif kind == 'ownership':
         if status not in ('PUBLISHED', 'SUPERSEDED'):
-            return True
+            return None
         result = item.get('result') or {}
         publication = result.get('publication') if isinstance(result, Mapping) else None
         primary = (publication.get('published_at'),) if status == 'PUBLISHED' and isinstance(publication, Mapping) else ()
@@ -55,6 +51,18 @@ def recent_history_visible(item: Mapping[str, Any], *, kind: str, today: date | 
         timestamps = [item.get('history_terminal_at_utc')]
     days = [_day(value) for value in timestamps]
     if not days or any(day is None for day in days):
-        return True  # Missing/malformed/ambiguous completion evidence fails open.
+        return None
+    return max(days)
+
+
+def recent_history_visible(item: Mapping[str, Any], *, kind: str, today: date | None = None) -> bool:
+    """Only hide a known terminal case with an unambiguous old terminal date.
+
+    First/last observation, fiscal period and approval-preparation dates are
+    deliberately not fallbacks for a resolution/publication/supersession date.
+    """
+    terminal_date = terminal_history_date(item,kind=kind)
+    if terminal_date is None:
+        return True  # Nonterminal or uncertain completion evidence fails open.
     current_day = today if today is not None else datetime.now(timezone.utc).date()
-    return max(days) >= history_cutoff(current_day)
+    return terminal_date >= history_cutoff(current_day)

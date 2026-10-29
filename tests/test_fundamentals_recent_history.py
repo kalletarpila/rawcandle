@@ -125,8 +125,8 @@ def test_ui_filters_only_terminal_rows_and_keeps_current_counts_deep_and_audit_d
         assert hidden not in text(c.content,collapsed=True)
     for kept in ('RECENT_DONE','UNDATED_DONE','RECENT_PUB','RECENT_SUP','UNDATED_PUB'):
         assert kept in text(c.content,collapsed=True)
-    provider_history=next(control for control in c.review_queue_column.controls if isinstance(control,ft.ExpansionPanelList)).controls[0]
-    owner_history=next(control for control in c.pb_ownership_column.controls if isinstance(control,ft.ExpansionPanelList)).controls[0]
+    provider_history=c.provider_history_column.controls[0].controls[0]
+    owner_history=c.ownership_history_column.controls[0].controls[0]
     assert 'visible recent cases (2)' in provider_history.header.title.value
     assert 'visible recent cases (3)' in owner_history.header.title.value
     assert 'last 2 calendar months' in provider_history.header.subtitle.value

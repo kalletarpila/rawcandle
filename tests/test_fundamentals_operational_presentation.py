@@ -46,7 +46,7 @@ def test_zero_review_landing_is_normal_and_details_history_are_secondary():
     _,c=page_for(OperationalService(owners=[ownership('PAST',status='PUBLISHED')]))
     assert 'Fundamentals: NORMAL' in c.operational_summary_field.value
     assert 'Current reviews requiring action: 0' in c.operational_summary_field.value
-    assert 'Deep reviews: 0' in c.operational_summary_field.value
+    assert 'Deep reviews requiring action: 0' in c.operational_summary_field.value
     assert 'no action required' in c.operational_summary_field.value
     assert 'P/B auto-continuation: enabled' in c.operational_summary_field.value
     assert not c.review_section.controls[0].expanded and not c.deep_review_section.controls[0].expanded
@@ -112,8 +112,8 @@ def test_current_provider_reviews_keep_staged_guidance_and_conditional_deep_advi
     _,c=page_for(OperationalService(providers=[item,provider('SECOND',reason='SAME_FISCAL_SOURCE_KEY_REPLACEMENT')]))
     assert 'Current reviews requiring action: 2' in c.operational_summary_field.value
     assert 'Recommended now: Wait for Providers' in text(c.review_queue_column)
-    assert 'After later provider/source refresh: Retry' in text(c.review_queue_column)
-    assert 'If replacement persists:' in text(c.deep_review_column)
+    assert 'Then: Retry after later provider/source refresh' in text(c.review_queue_column)
+    assert 'If replacement persists:' in text(c.review_queue_column)
     assert item==original and not c.review_queue_column.controls[0].controls[9].visible
 
 
@@ -122,7 +122,7 @@ def test_accounting_boundary_deep_evidence_not_exposed_on_landing_or_review():
         def list_accounting_boundary_reviews(self):return [boundary()]
     _,c=page_for(BoundaryService());stored=boundary();original=deepcopy(stored)
     assert boundary_route(stored).mode==DEEP_REVIEW and stored==original
-    assert 'Deep reviews: 1' in c.operational_summary_field.value
+    assert 'Deep reviews requiring action: 1' in c.operational_summary_field.value
     assert 'c'*64 not in text(c.content) and 'c'*64 not in text(c.review_queue_column)
     assert 'c'*64 in text(c.deep_review_column,collapsed=True)
     assert 'Accounting-boundary review — OPEN' in text(c.deep_review_column)
@@ -133,7 +133,7 @@ def test_ownership_policy_deep_case_remains_actionable_without_frontend_reclassi
     route=review_route(ownership_review(item,p),policy=p)
     assert route.mode==DEEP_REVIEW
     _,c=page_for(OperationalService(owners=[item],diag=diagnostic([p])))
-    assert 'Deep reviews: 1' in c.operational_summary_field.value
+    assert 'Deep reviews requiring action: 1' in c.operational_summary_field.value
     assert 'AAA' not in text(c.pb_ownership_column) and 'AAA' in text(c.deep_review_column)
     assert 'Keep on hold' in [b.text for b in walk(c.deep_review_column) if isinstance(b,ft.TextButton)]
 
@@ -192,8 +192,10 @@ def test_last_retained_workflow_read_is_presentation_only(tmp_path):
 
 def test_unregistered_deep_diagnostic_stays_visible_in_summary():
     item=ownership();_,c=page_for(OperationalService(diag=diagnostic([policy(item,'DEEP_REVIEW/BLOCKED')])))
-    assert 'Deep reviews: 1' in c.operational_summary_field.value
+    assert 'Deep reviews requiring action: 1' in c.operational_summary_field.value
     assert 'no action required' not in c.operational_summary_field.value
+    assert 'Current deep source diagnostic' in text(c.deep_review_column)
+    assert 'No deep review action required' not in text(c.deep_review_column)
 
 
 def test_running_retained_workflow_does_not_require_a_final_result():

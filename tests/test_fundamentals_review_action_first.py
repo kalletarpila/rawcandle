@@ -83,12 +83,14 @@ def text(control, *, collapsed=False):
     return '\n'.join(str(c.value) for c in walk(control,collapsed=collapsed) if isinstance(c,ft.Text))
 
 
-@pytest.mark.parametrize('reason,expected',[('INTERIOR_SOURCE_KEY_REMOVAL','interior published source key disappeared'),('SAME_FISCAL_SOURCE_KEY_REPLACEMENT','same-fiscal source key replacement')])
+@pytest.mark.parametrize('reason,expected',[('INTERIOR_SOURCE_KEY_REMOVAL','Interior source key disappeared'),('SAME_FISCAL_SOURCE_KEY_REPLACEMENT','Same-fiscal source key replacement detected')])
 def test_incompatible_source_exception_has_operational_explanation_and_no_approval(reason,expected):
     source=provider(reason=reason);original=deepcopy(source);service=Service(providers=[source]);controls=render(service)
     row=controls.review_queue_column.controls[0];visible=text(row)
-    assert 'YES / REVIEW' in visible and expected in visible and 'Retained-history approval unavailable' in visible
-    assert 'not retained-history compatible' in visible and 'Wait for Providers' in visible and 'Retry reevaluation after source data changes' in visible
+    assert expected in visible and 'Approval: unavailable' in visible
+    assert 'Wait for Providers' in visible and 'Then: Retry after later provider/source refresh' in visible
+    row.controls[6].on_click(None)
+    assert 'not retained-history compatible' in controls.review_queue_detail_field.value
     assert row.controls[7].visible and row.controls[8].visible and row.controls[9].visible is False
     assert source==original and service.actions==[]
 
@@ -104,15 +106,15 @@ def test_wait_retry_availability_follows_backend_unresolved_status(status):
 
 @pytest.mark.parametrize('reason,final_step',[
     ('INTERIOR_SOURCE_KEY_REMOVAL','If still unresolved: Investigate source history manually.'),
-    ('SAME_FISCAL_SOURCE_KEY_REPLACEMENT','If replacement persists: Manually inspect old vs new source binding and financial payload before any retained-history or repair decision.'),
+    ('SAME_FISCAL_SOURCE_KEY_REPLACEMENT','If replacement persists: Inspect old vs new source binding / financial payload before any retained-history or repair decision'),
 ])
 def test_open_source_guidance_is_staged_generic_and_does_not_change_actions(reason,final_step):
     item=provider('UNRELATED',reason=reason);original=deepcopy(item)
     service=Service(providers=[item]);controls=render(service)
     row=controls.review_queue_column.controls[0];shown=text(row)
-    assert 'Recommended now: Wait for Providers.' in shown
-    assert 'After later provider/source refresh: Retry reevaluation after source data changes.' in shown
-    assert final_step in shown and 'no automatic escalation' in shown
+    assert 'Recommended now: Wait for Providers' in shown
+    assert 'Then: Retry after later provider/source refresh' in shown
+    assert final_step.rstrip('.') in shown and 'no automatic escalation' in provider_review(item).next_action_explanation
     assert row.controls[9].visible is False and row.controls[7].visible and row.controls[8].visible
     assert provider_review(item).allowed_actions==('VIEW_DETAILS','WAIT_FOR_PROVIDER','RETRY_REEVALUATION')
     assert item==original and not service.actions
@@ -124,7 +126,9 @@ def test_replacement_guidance_takes_priority_without_losing_other_reason_evidenc
     assert 'If replacement persists:' in view.next_action_explanation
     assert 'interior published source key disappeared' in view.reason
     controls=render(Service(providers=[item]));row=controls.review_queue_column.controls[0]
-    assert all(code in row.controls[3].tooltip for code in item['reason_codes'])
+    assert getattr(row.controls[3],'tooltip',None) is None
+    row.controls[6].on_click(None)
+    assert all(code in controls.review_queue_detail_field.value for code in item['reason_codes'])
 
 
 @pytest.mark.parametrize('status',['WAITING_PROVIDER','RETRY_REEVALUATION','RESOLVED'])
@@ -162,7 +166,7 @@ def test_only_explicit_backend_eligibility_exposes_approval(field,action):
 def test_source_history_collapsed_and_codes_still_in_details():
     service=Service(providers=[provider(),provider('DONE',status='RESOLVED')]);controls=render(service)
     controls.review_queue_include_resolved_checkbox.value=True;controls.review_queue_include_resolved_checkbox.on_change(None)
-    current,history=controls.review_queue_column.controls
+    current=controls.review_queue_column.controls[0];history=controls.provider_history_column.controls[0]
     assert current.controls[0].value=='AAA' and history.controls[0].expanded is False
     assert 'DONE' not in text(controls.review_queue_column) and 'DONE' in text(history,collapsed=True)
     historical_row=history.controls[0].content.controls[0]
@@ -179,10 +183,10 @@ def test_terminal_ownership_is_history_without_action_buttons(ticker,status):
     assert 'No action required' in controls.pb_ownership_status_field.value
     assert 'automatic 0 / manual 0 / deep 0' in controls.pb_ownership_status_field.value
     assert 'Automatic continuation enabled · PB_ORDINARY_AUTO_CONTINUATION_V1' in controls.pb_ownership_status_field.value
-    assert len(controls.pb_ownership_column.controls)==1
-    history=controls.pb_ownership_column.controls[0];assert history.controls[0].expanded is False
+    assert len(controls.pb_ownership_column.controls)==0
+    history=controls.ownership_history_column.controls[0];assert history.controls[0].expanded is False
     assert ticker not in text(history) and ticker in text(history,collapsed=True)
-    assert status in text(history,collapsed=True) and 'No action required' in text(history,collapsed=True)
+    assert status in text(history,collapsed=True) and 'Action required: No' in text(history,collapsed=True)
     assert not any(isinstance(c,(ft.ElevatedButton,ft.TextButton)) for c in walk(history,collapsed=True))
     assert item==original and ('ownership',True) in service.reads
 
@@ -248,4 +252,4 @@ def test_rendering_uses_structured_inputs_without_database_or_action_calls(monke
     before=deepcopy((owners,providers));service=Service(providers=providers,owners=owners)
     controls=render(service)
     assert before==(owners,providers) and service.actions==[]
-    assert 'Next action:' in text(controls.pb_ownership_column) and 'Next action:' in text(controls.review_queue_column)
+    assert 'Next action:' in text(controls.pb_ownership_column) and 'Recommended now:' in text(controls.review_queue_column)
