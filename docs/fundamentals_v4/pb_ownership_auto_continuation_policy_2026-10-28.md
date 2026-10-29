@@ -1,5 +1,7 @@
 # Ordinary quarterly P/B ownership auto-continuation policy
 
+**Current result — 2026-10-29: six-case live rollout COMPLETED; exact three publication-owned rollback backups cleaned; future unattended continuation remains disabled.** The implementation/copy-only and Stage 1 gate sections below are historical; Stage 2 results follow under “Six-case controlled live rollout”.
+
 2026-10-28, Europe/Helsinki. Task P/B-OWNERSHIP-AUTO-CONTINUATION-1. Starting HEAD `49cad24e9fb54a294a1198a1f4f31342d6f429fb`.
 
 **Implemented, copy-only rehearsal PASS; live rollout NOT performed.** Exact current partition after controlled copy reconciliation: **6 AUTO_CONTINUE, 0 MANUAL_REVIEW, 0 DEEP_REVIEW/BLOCKED**. Safe ordinary set: **AMT, BA, DHR, GM, PNR, PSA**. GE/RTX/T remain published, without duplicate decisions. The explicit rollout gate remains outstanding under this task’s boundary.
@@ -194,3 +196,89 @@ YES authorizes only the exact six AUTO_CONTINUED decisions, their controlled imm
 Stage 2 is pending. Post-YES decisions/publication/live P/B/rollback-backup cleanup and future-enable recommendation have not been performed or certified by this Stage 1 report. No production generation ID or backup size is predetermined by the copy rehearsal. Until successful bounded live rollout, the future-enablement recommendation remains KEEP_ROLLOUT_DISABLED.
 
 Evidence directory: `/tmp/pb_auto_rollout_20261029/stage1_063022`. `before.json` SHA-256 `d3e3a63138efee5dc8494efeddd4048f640f8dc9710813b058291a42f42c432c`; `rehearsal.json` SHA-256 `0d1b0c4ed7ce717869d2fd60627969e7671cfa64351abd687d65c718415b4b2e`; `exception_controls.json` SHA-256 `a6b938efa8b394323c73f1ea42f353afa80b79ef074b16e23ec1522cab6061f8`. `stage1_result.json` freezes the exact selected IDs/candidates, code hashes, live baseline and queue fingerprints. Runtime DBs, journals, reports/logs and backups remain excluded from Git.
+
+### Stage 2 — 2026-10-29: authorized rollout and cleanup COMPLETED
+
+The user answered **YES** to the exact combined Stage 1 question after documentation commit `66e2c99b4843357e2af01303220c35105f8d1f10`. The response authorized only the frozen AMT/BA/DHR/GM/PNR/PSA automatic decisions, controlled ownership/P/B publication and this publication’s exact rollback-backup cleanup after healthy postflight. TMUS and unattended future reconciliation/publication were excluded. No second cleanup question was required or asked.
+
+Post-YES verification captured at **2026-10-29T08:53:43.275232+02:00** matched the complete frozen Stage 1 baseline, current candidate/observation hashes, raw completeness, factor 1→1, company/security/provider identity, category, provenance, action/hold scan, reconstructed P/B, queue, journal, policy/code and report binding. Nonblocking operation/Production/scheduler preflight and taxonomy/no-preparing/recovery checks passed again. No material drift was accepted, no case was dropped and no source fix was made. Final verification completed **2026-10-29T08:56:29.768592+02:00**.
+
+| Publication identity | Result |
+| --- | --- |
+| OLD immutable generation | `refresh_20261029T054405Z_refresh_fundamentals_4c3b99953d00_production_a7f5b976` |
+| NEW/current immutable generation | `pb_ownership_6afe669f1166421bbd0e20f66fff3d07` |
+| Policy | `PB_ORDINARY_AUTO_CONTINUATION_V1` |
+| Outcome / postflight / recovery | COMPLETED / PASSED / NOT_REQUIRED |
+| Actual provider watermark | `2026-10-28` → `2026-10-28` |
+| Ownership artifact SHA-256 | `7749cb94e2d889660aeed708e46b78b250a289977d74b5bfb085c4f2cb5b8909` |
+| Active manifest SHA-256 | `6ef1d0904072082d1ef6620cfb0c933e8d8fc9d67c244c77d09e87f3a3bec98b` |
+
+#### Exact automatic decisions and publication
+
+The normal UI-operation and Production/scheduler owners guarded exact binding reconciliation and the same installed automatic-decision builder rehearsed in Stage 1. Global automatic iteration was not used: it would have included TMUS. Exactly **six** decisions became AUTO_CONTINUED_PENDING_PUBLICATION, with decision_type AUTO_CONTINUED and the exact policy/case/source evidence. Their records and approval objects have **no operator or required note**. Six PB_OWNERSHIP_AUTO_CONTINUED audit events (IDs **74–79**) were appended; no manual PB_OWNERSHIP_APPROVED event was emitted. The original approval/audit history remains unchanged.
+
+Pending inactive candidates were validated for exact registry/source/observation/P/B bindings before publication. The existing OwnershipPublicationWorkflow then produced a fresh source/code-bound preview, merged exactly the six selected records, prepared/fsynced the full NEW generation and verified OLD backups, atomically activated the pointer, ran normal postflight, archived the completed journal and finalized the exact queue cases. The publishing operator was the session’s real supplied name **Kalle**; this identifies the explicitly authorized publishing action and is not an operator identity on the automatic decisions. No active role was patched manually and no normal Fundamentals refresh or score rebuild was invented.
+
+All six selected rows are now **PUBLISHED**, retaining their immutable automatic approval/decision evidence. Exactly six PB_OWNERSHIP_PUBLISHED audit events (IDs **80–85**) followed. All 66 previous ownership records remain byte-for-byte equivalent in their original order; exactly six were appended, giving **72** records. Provider/analysis remained byte-identical to OLD, and canonical financial/schema/publication-authority contents remained identical outside the two ownership artifact/configuration tables.
+
+#### Live Current P/B after publication and cleanup
+
+All quotes below are current usable **2026-10-28** prices, evaluated as-of **2026-10-29**. All six have **status OK, reason OK, ownership_basis_status AUTO_CONTINUED_QUARTER and approval_mode AUTO_CONTINUED**.
+
+| Ticker | Price | Economic ordinary shares | Parent equity USD | Current P/B |
+| --- | ---: | ---: | ---: | ---: |
+| AMT | 183.75 | 463,763,555 | 3,516,600,000 | 24.232654618452482 |
+| BA | 167.13999938964844 | 792,449,940 | 6,547,000,000 | 20.230652587127988 |
+| DHR | 234.07000732421875 | 703,530,815 | 53,621,000,000 | 3.0711001849996005 |
+| GM | 82.4800033569336 | 843,549,423 | 62,806,000,000 | 1.1077916001779988 |
+| PNR | 64.37000274658203 | 159,654,682 | 3,859,800,000 | 2.6625660186653923 |
+| PSA | 310.04998779296875 | 186,843,449 | 14,502,357,000 | 3.9945788868420617 |
+
+Each result equals the native live preview and reconstructs independently at 50-digit Decimal precision as price × accepted economic shares / parent_equity_usd within 1e-12 relative/absolute tolerance. No provider P/B was substituted. Exact accepted Q3 observations/content hashes are those in the six-case tables above. Shares provenance remains SHARADAR ARQ / sharesbas / DIRECT / HIGH under SHARADAR_ARQ_PRIMARY_V1; accepted share-source dates and provider-declared factor 1.0 are retained in each published record. The normal quarterly-share approximation and incomplete-action-coverage disclosures remain visible.
+
+#### Exact rollback-backup provenance and cleanup
+
+Only this publication’s authoritative terminal-journal role paths were selected. Each was a verified copy of the corresponding OLD immutable-generation role, matching its native recorded SHA/size and actual retained OLD file. Provenance and recovery independence passed: active generation healthy, native journal COMPLETED, postflight PASSED, recovery NOT_REQUIRED, no pending/nonterminal dependency and exact ownership cleanup adapter eligibility. OLD/current generations and unrelated source-repair/refresh/history backups were never deletion targets.
+
+| Role / exact path | Bytes | Creation time, Helsinki | Verified OLD SHA-256 |
+| --- | ---: | --- | --- |
+| analysis: `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/pb_ownership_6afe669f1166421bbd0e20f66fff3d07/analysis.db` | 912,384,000 | 2026-10-29 08:55:06.996485361 +0200 | `b1fef5fd8eb651e0337c9f6128b1e068df2999873da158c653b45fff42223327` |
+| canonical: `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/pb_ownership_6afe669f1166421bbd0e20f66fff3d07/canonical.db` | 749,371,392 | 2026-10-29 08:55:05.332490676 +0200 | `ad90e9827575609403663b7a98a747dcaf3b68d4f185131d01e0e2a7b16ac152` |
+| provider: `/home/kalle/projects/rawcandle/backups/fundamentals_admin_production/pb_ownership_6afe669f1166421bbd0e20f66fff3d07/provider.db` | 968,331,264 | 2026-10-29 08:55:03.368496928 +0200 | `0f23acbd064d1859fa1d9f71996d1eb4979a9cdbac2db1d805a774d4215770f1` |
+
+The public locked cleanup eligibility inspector selected **exactly 3 files / 2,630,086,656 bytes**. The normal FundamentalsAdminUIService cleanup entry acquired its UI guard and invoked the existing public cleanup mechanism with default native Production/scheduler locking. No live lock-factory override, manual unlink/rm, glob selection or parallel cleanup implementation was used. Cleanup completed at **2026-10-29T08:56:25+02:00**, deleted exactly those **3** files, freed **2,630,086,656 bytes** and left **0 selected backups**. No exception, partial cleanup, rollback or manual completion occurred.
+
+Durable native cleanup receipt: `/home/kalle/projects/rawcandle/fundamental_reports/admin_runs/pb_ownership_publications/pb_ownership_6afe669f1166421bbd0e20f66fff3d07/backup_cleanup.json`. Receipt SHA-256: `0dae35dcc84119100d0dacff9cdbcb29ec46357600db3f6f0cab0eb80a97e507`. It records the exact deleted paths, pre-delete verified hashes/sizes/integrity, OLD/NEW lineage and native preview/completed-receipt identities. The terminal journal is retained with its historical backup provenance; it was not rewritten after deletion.
+
+The bounded Fundamentals backup inventory contained **56 files** immediately before cleanup and **53** afterward. The only removed paths are the three exact selected role backups. Every retained file has identical size, inode, mtime, ctime and symlink status. The final retained-file inventory also equals the pre-publication inventory exactly. All unrelated backups and metadata are preserved. Only the now-empty owned backup directory was removed by the native cleanup owner; OLD/current generations, source-repair backups and publication evidence remain.
+
+#### Final state and excluded scope
+
+| Protected result | Verification |
+| --- | --- |
+| Provider/canonical/analysis health and manifest binding | PASS; quick_check ok, zero FK errors, exact NEW role hashes |
+| Journal / postflight / recovery | COMPLETED / PASSED / NOT_REQUIRED |
+| Six automatic ownership decisions and Current P/B | PUBLISHED / OK / AUTO_CONTINUED_QUARTER |
+| TMUS and every nonselected ownership row/history | Unchanged; TMUS remains OPEN and unpublished |
+| GE/RTX/T published ownership and full current reports | Unchanged from the fresh Stage 1 baseline; no duplicate decision |
+| Source-repair decisions and other Review Queue tables | Unchanged |
+| WFRD and publication-authority financial/provenance state | Unchanged |
+| Actual provider source history / watermark | Unchanged; watermark 2026-10-28 |
+| Scheduler configuration / source policy/resolver code | Unchanged |
+| Future unattended scheduler/Full Workflow auto-continuation | NOT ENABLED |
+
+| Final live role | SHA-256 |
+| --- | --- |
+| analysis | `b1fef5fd8eb651e0337c9f6128b1e068df2999873da158c653b45fff42223327` |
+| canonical | `7568f70b89441b46bb97879cc534394e91c5dc250c3f10b0a43a31e8a9530273` |
+| provider | `0f23acbd064d1859fa1d9f71996d1eb4979a9cdbac2db1d805a774d4215770f1` |
+
+No repository pytest or full suite was run in Stage 2 because source was unchanged. Runtime validation covered all exact reconciliation, inactive candidate/source bindings, controlled publication postflight, P/B reconstruction, backup integrity/eligibility/deletion and complete final live/queue/collateral invariance. Existing implementation regressions and the fresh 13 exceptional controls remain the applicable policy evidence; no factor/null/incomplete/ADS/source-history/accounting-boundary hold was cleared by this rollout.
+
+Working evidence: `/tmp/pb_auto_rollout_20261029/stage2_065337` (`before.json`, `authorization_confirmation.json`, `pending.json`, `publication_preview.json`, `publication_returned.json`, `postflight.json`, `cleanup_returned.json`, `result.json`). Final result SHA-256: `1966eb285da86cb9acf18ac1047b13a7d7c6f8f80af55ffd7b572380aa0031aa`. Durable evidence and checksum manifest: `/home/kalle/projects/rawcandle/fundamental_reports/admin_runs/pb_ownership_publications/pb_ownership_6afe669f1166421bbd0e20f66fff3d07/rollout_evidence`. The original pre-YES pending gate is preserved alongside an explicit YES authorization confirmation and the executed generation. All runtime DBs, queue files, manifests, journals, backups, logs and machine reports are excluded from Git.
+
+#### Future continuation recommendation
+
+**READY_TO_ENABLE_FUTURE_AUTO_CONTINUATION — recommendation only.** This controlled batch demonstrated the real automatic-decision, immutable-generation publication, distinctive P/B reporting, fail-closed exceptional controls and native rollback-cleanup lifecycle without collateral change. It supports a separately reviewed future scheduler/Full Workflow reconciliation rollout under the same policy. **No future-default flag or scheduler call was enabled here.** A later authorization must explicitly define the future scope (including newly eligible cases such as TMUS), use fresh source/binding validation and preserve the controlled publication boundary. This recommendation does not authorize unattended ownership publication, source repair or broader cleanup.
+
+**Next Fundamentals phase:** separately authorize and implement guarded future automatic reconciliation in scheduler/Full Workflow, with the existing policy exclusions and controlled ownership-publication lifecycle retained. This six-case rollout and its exact backup cleanup are complete.
