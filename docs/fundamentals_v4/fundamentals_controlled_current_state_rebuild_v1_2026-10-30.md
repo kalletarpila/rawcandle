@@ -221,55 +221,105 @@ baseline remained unchanged throughout the clone lifecycle. Generic failure
 fixtures independently passed native preactivation/postflight rollback and
 completed-queue recovery without republication.
 
-### Live operation — automatic approval review blocked launch
+### Explicit authorization and successful live publication
 
-The task attachment explicitly authorizes live BMRA/NEOV publication after the
-acceptance gates and says not to ask another YES. All implementation, focused
-regression, current-state Test and disposable-copy lifecycle gates have passed.
-The exact proposed live generation is
-`current_rebuild_2a684ef130c6a540de4adc560ab171ada`.
+The user supplied an explicit visible-chat YES for the exact Preview/Test pair
+above, including native parent-equity acceptance, immutable activation and cleanup
+of only this operation's three rollback backups. The earlier attachment-only
+approval-review rejection was superseded by that exact chat authorization.
+No approval gate was bypassed.
 
-However, automatic approval review rejected launching the prepared live command:
+The unchanged baseline and source-review scopes were freshly revalidated before
+launch. Under native UI, production/shared-scheduler and taxonomy locks the
+publisher reacquired authoritative full ARQ/MRQ histories and schema, required
+exact source/schema equality with the approved acquisitions, and revalidated the
+exact Test and baseline. No selected source, financial, identity, fiscal,
+review-scope or eligibility delta was accepted. Acquisition timestamps alone may
+differ; installed provenance retains the actual Test acquisition timestamp.
 
-> The visible trusted user message only references an attachment and does not itself authorize this exact BMRA/NEOV side effect.
+Native verified backups, immutable generation preparation, final baseline/review
+and candidate-byte gates, atomic activation and postflight all passed.
 
-The rejection occurred before process creation. It was not bypassed. A plain-chat
-confirmation for the exact Preview/Test pair was requested because the approval
-review explicitly requires that additional evidence. No live acquisition,
-publication, generation preparation, new rollback backup, disposition write or
-cleanup was executed by that command. The existing active generation remains
-`payload_repair_c76f86e26cbc7735_99b4b068a24f`, with its existing COMPLETED journal,
-PASSED postflight and NOT_REQUIRED recovery. All live financial role hashes,
-inputs, configuration and every queue row are rechecked against the exact Test
-baseline. There is no runtime collateral mutation.
+- New active generation: `current_rebuild_2a684ef130c6a540de4adc560ab171ad`.
+- Journal: COMPLETED.
+- Postflight: PASSED, measured against the exact approved Test.
+- Recovery: NOT_REQUIRED; production writes are not blocked.
+- Watermark: `2026-10-28`, unchanged.
+- Native cleanup: COMPLETED; exactly 3 owned rollback backups deleted,
+  **2,630,086,656 bytes** freed. No unrelated backup was deleted.
+- Old generation: `payload_repair_c76f86e26cbc7735_99b4b068a24f`, all three role hashes preserved.
 
-Live BMRA and NEOV therefore still have the original 29-key accepted current
-sources and UNRESOLVED dispositions. The copied results do not claim live
-eligibility. Live NEOV's 13 frozen conflicts remain OPEN. Market/global analysis
-inputs, operational universe, ownership (including GE/RTX/T terminal decisions),
-WFRD and publication-authority semantics are unchanged. No historical evidence
-was deleted, no financial value guessed, no factor defaulted, and completeness
-V1 was not enabled.
+Durable native receipts are under
+`fundamental_reports/admin_runs/current_rebuild_2a684ef130c6a540de4adc560ab171ad/`:
+`result.json`, `completed_journal.json` and `backup_cleanup.json`. They bind the
+actual native publication, full Test/Preview, old/new lineage, review proof and
+cleanup ownership. Temporary driver/copy evidence is excluded from the source commit.
 
-### Concrete completeness-hardening handoff
+| Ticker | Live disposition | Current payload keys | Current binding complete | Native current P/B reason |
+|---|---|---:|---|---|
+| BMRA | ELIGIBLE | 112 | YES | `OK` |
+| NEOV | ELIGIBLE | 112 | YES | `OWNERSHIP_BASIS_UNVERIFIED` |
 
-Current live active incomplete accepted-source tickers: **2 (BMRA, NEOV)**.
-Latest incomplete accepted bindings: **2**. Unresolved current-source dispositions:
-**2**. These remain the concrete data blocker until the exact tested rebuild is
-allowed to publish; no new source or financial mismatch was found.
+Both current dispositions are exact-bound and nonstale. Their new observation IDs,
+source-version stamps and parent-equity values match the tested table above.
+Ownership decisions and the generation ownership artifact are unchanged; current
+P/B remains governed by the native ownership/valuation rules. Source completeness
+does not synthesize an ownership approval.
 
-Separately, a uniform faithful-capture contract is still absent from general
-ingestion. The focused read-only fixture proves `validate_complete_history`
-continues to accept a normalized 29-key dictionary as COMPLETE. Refresh's native
-inserter retains its existing normalized-only fallback for existing callers;
-bulk/local-cache dictionary reuse likewise does not attest original full capture.
-The new rebuild rejects that incomplete capture against the authoritative field
-manifest, but does not turn this into a global ingestion rollout. Hardening must
-cover these entry points and distinguish local field loss from true provider
-revision before freeze/ownership comparisons, while preserving the 12,942 legacy
-historical observations and all existing frozen evidence. No abstract readiness
-label or silent historical purge is used.
+NEOV's **13 frozen conflicts remain OPEN**, with its complete review fingerprint
+identical to the prepublication snapshot. No frozen repair authority was consumed.
+Every unselected provider/canonical row, historical TTM row, WFRD source and
+canonical interpretation, active-universe record and all ownership/GE/RTX/T terminal
+decisions remain unchanged. Every preexisting queue table except the selected
+disposition ledger/audit is identical to the saved logical snapshot. The other
+179 disposition rows and all prior disposition audit rows are identical; exactly
+two new disposition audit rows and the typed completed rebuild record were added.
 
-Source/test/docs only are committed; runtime DBs, queues, journal, generations,
-configuration, copies, backups, temporary evidence and unrelated worktree files
-are excluded. No push is performed.
+Market/global-analysis inputs and scheduler configuration hashes are unchanged.
+The new Fundamentals analysis role is the exact tested native full V2/RP/RV rebuild,
+including native calculation-date/current-price refresh. Historical provider,
+canonical and audit evidence remains in the immutable old generation. No old
+financial evidence was deleted, no financial value guessed, no factor defaulted,
+and no publication-authority semantics changed. Runtime collateral mutation: NO.
+`PROVIDER_PAYLOAD_COMPLETENESS_V1` remains disabled.
+
+### Post-rebuild completeness health and concrete handoff
+
+The fresh read-only audit covers all **2,455 active accepted latest bindings**
+in the unchanged **2,468-member universe**.
+
+- Active incomplete current-source tickers: **0**.
+- Latest incomplete accepted bindings: **0**.
+- Unresolved current-source dispositions in the legacy cohort: **0**.
+- Ticker ledger: **173 ELIGIBLE, 8 HISTORICAL_ONLY**, 0 REPAIRABLE,
+  0 INELIGIBLE_SOURCE_DATA and 0 UNRESOLVED.
+
+Observation evidence remains separately countable:
+
+| Evidence category | Count |
+|---|---:|
+| Legacy 29-key observations in active provider history | 12,940 |
+| Frozen accepted legacy observations | 5,231 |
+| Retained provider observations, all tickers | 867 |
+| Retained observations in the 181-ticker ledger cohort | 342 |
+| Newly rebuilt accepted current observations | 2 |
+
+These categories overlap and must not be summed as ticker dispositions. The two
+old current projections remain preserved in the prior generation; their
+replacement removes two incomplete current bindings from the new active view.
+No historical legacy population was purged to obtain zero current incompleteness.
+
+**Remaining active-source data blocker: none.** The concrete remaining ingestion
+contract gap is uniform faithful-capture enforcement: `validate_complete_history`
+still accepts a normalized 29-key dictionary as COMPLETE, Refresh's native
+inserter retains its normalized-only fallback for existing callers, and bulk/local
+reuse does not attest original full capture. The focused fixture proves the gap
+and proves the new rebuild rejects it against the authoritative schema manifest.
+Completeness hardening must cover those entry points and distinguish local field
+loss from genuine provider revision before freeze/ownership comparisons while
+preserving all legacy historical evidence. This task does not enable that rollout
+or return an abstract readiness label.
+
+Only task-owned source, tests and documentation are committed. Runtime databases,
+queues, journal, generations, configuration, copies, backups, temporary evidence
+and unrelated worktree files are excluded. No push is performed.

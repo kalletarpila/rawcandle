@@ -1,37 +1,46 @@
 # Legacy payload remediation and Fundamentals eligibility — 2026-10-30
 
-## Controlled current-state rebuild follow-up — implementation/rehearsal passed, live launch blocked
+## Controlled current-state rebuild follow-up — successful live closeout
 
-The subsequent `FUNDAMENTALS-CONTROLLED-CURRENT-STATE-REBUILD-V1` task implements
-`FUNDAMENTALS_CONTROLLED_CURRENT_STATE_REBUILD_V1` as a separate guarded current
-source-version advancement. Strict exact repair remains unchanged and still
-rejects BMRA/NEOV metadata-version drift. Current/frozen scopes remain separate.
+`FUNDAMENTALS_CONTROLLED_CURRENT_STATE_REBUILD_V1` is implemented as a separate,
+receipt-bound current source-version advancement. Strict exact repair remains
+unchanged and still rejects metadata-version drift. All 536 distinct focused tests,
+final current-state native Test and full-population copy publication/cleanup passed;
+no full suite was run. The user's subsequent explicit chat YES authorized the exact
+Preview/Test pair after the initial attachment-only approval-review rejection.
 
-Both real cases passed final current-state native Test and full-population
-copy publication, postflight and native cleanup/idempotency. On the disposable
-copy their current payloads are full 112-key sources, their normalized financial
-values are unchanged, native parent equity is filled from fresh source facts,
-and both dispositions become ELIGIBLE. NEOV's 13 frozen OPEN conflicts and all
-historical/ownership evidence remain unchanged. Focused verification passed 536
-distinct tests; no full suite was run.
+Fresh live source, baseline, identity, fiscal, financial and review-scope gates
+passed. Native immutable generation `current_rebuild_2a684ef130c6a540de4adc560ab171ad`
+is active. Journal COMPLETED, postflight PASSED, recovery NOT_REQUIRED. Native
+cleanup removed exactly three owned rollback backups (2,630,086,656 bytes),
+with old generation and unrelated backups preserved.
 
-Live publication did **not** start. Although the attachment explicitly provides
-conditional live authorization, automatic approval review rejected the launch
-because it requires the exact side effect to be authorized in a visible chat
-message rather than only the attachment. The exact Preview/Test pair was presented
-for that confirmation; the rejection was not bypassed. No live runtime/queue,
-source, generation, ownership or historical state was changed by this follow-up.
+**BMRA and NEOV are now ELIGIBLE with complete 112-key accepted current sources.**
+New source-version metadata is recorded faithfully; normalized financial values
+are unchanged, and native acceptance filled missing parent equity from fresh
+source facts. Both latest incomplete bindings are cleared. NEOV's 13 frozen OPEN
+conflicts and their fingerprint remain unchanged. Historical source/canonical,
+ownership/GE/RTX/T, WFRD, publication authority, operational universe,
+market/global-analysis inputs and scheduler configuration are preserved.
+No financial guessing, factor defaulting or collateral runtime mutation occurred.
 
-Consequently the current live partition is still **171 ELIGIBLE, 8 HISTORICAL_ONLY,
-2 UNRESOLVED**, and the two latest incomplete bindings are BMRA and NEOV. The
-original active generation and its COMPLETED / PASSED / NOT_REQUIRED state remain
-in force. Copy success is not presented as live remediation.
+The live ledger is now **173 ELIGIBLE, 8 HISTORICAL_ONLY**, with 0 REPAIRABLE,
+0 INELIGIBLE_SOURCE_DATA and 0 UNRESOLVED. Global current accepted-source audit:
+0 incomplete tickers and 0 latest incomplete bindings across 2,455
+active accepted latest bindings. Historical evidence remains separately countable:
+12,940 legacy observations,
+5,231 frozen accepted legacy observations,
+and 342 retained observations within the 181-ticker ledger cohort. These are
+overlapping evidence counts, not additive ticker dispositions.
 
-Full contract, exact tested bindings, receipts, preservation evidence and the
-concrete hardening handoff are in
-[the controlled current-state rebuild report](fundamentals_controlled_current_state_rebuild_v1_2026-10-30.md).
-The earlier investigation below is retained as historical evidence.
+No active-source data blocker remains. General ingestion still accepts projected
+29-key dictionaries without uniform full-capture attestation; that concrete gap
+and local-loss/provider-revision separation remain the hardening handoff.
+`PROVIDER_PAYLOAD_COMPLETENESS_V1` stays disabled.
 
+Full contract, exact bindings, native receipts, preservation and health evidence:
+[controlled current-state rebuild report](fundamentals_controlled_current_state_rebuild_v1_2026-10-30.md).
+The earlier investigations below are retained as historical evidence.
 
 ## BMRA/NEOV targeted investigation — STOP, no runtime mutation
 
