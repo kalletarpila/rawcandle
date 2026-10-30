@@ -549,6 +549,10 @@ def _load_acceptance_result(*, directory, run_id, journal_path, backup_root, liv
 
 
 def _acceptance_result(result, *, directory, run_id, journal_path, backup_root, live_paths):
+    if result.get("operation") == "REPAIR_PROVIDER_PAYLOAD_COMPLETENESS":
+        from .provider_payload_acceptance import for_cleanup
+        return for_cleanup(result,directory=directory,run_id=run_id,journal_path=journal_path,
+                           backup_root=backup_root,live_paths=live_paths)
     if result.get("operation") == "RESULT_PUBLICATION_BACKLOG_DRAIN":
         return _publication_drain_result(result, run_id=run_id, journal_path=journal_path,
                                          backup_root=backup_root, live_paths=live_paths, directory=directory)
@@ -769,6 +773,12 @@ def _accept_run_and_cleanup_backups_locked(
                         source_generation_id=current["journal"]["old_generation"]["generation_id"],
                         ownership_preview_hash=current["ownership_preview_hash"],
                         ownership_receipt_hash=current["ownership_receipt_hash"])
+    if current.get("acceptance_run_kind") == "PROVIDER_PAYLOAD_REPAIR":
+        evidence.update(run_id=run_id,run_kind="PROVIDER_PAYLOAD_REPAIR",
+                        published_generation_id=current['journal']['new_generation_id'],
+                        source_generation_id=current['journal']['old_generation']['generation_id'],
+                        batch_fingerprint=current['batch_fingerprint'],
+                        payload_receipt_fingerprint=current['payload_receipt_fingerprint'])
     write_text_atomic(
         directory / CLEANUP_EVIDENCE_NAME,
         json.dumps(evidence, indent=2, sort_keys=True, allow_nan=False) + "\n",

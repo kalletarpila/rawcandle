@@ -41,6 +41,7 @@ _PREFLIGHT = ContextVar('provider_payload_repair_preflight', default=None)
 CODE = tuple(Path(__file__).with_name(name) for name in (
     'provider_payload_workflow.py', 'provider_payload.py', 'refresh_fundamentals.py',
     'publication_journal.py', 'production_transaction.py', 'pb_ownership_review.py',
+    'provider_payload_review_scope.py', 'provider_payload_acceptance.py', 'run_acceptance_cleanup.py',
 )) + tuple(Path(__file__).parents[1] / name for name in (
     'book_value.py', 'ownership_basis.py', 'pb_reporting_contract.py',
     'schema/parent_equity.py', 'generations.py', 'ownership_reviews_v1.json', 'ownership_reviews_v2.json',
@@ -628,7 +629,7 @@ def synchronize_completed(project_root: Path, queue_path: Path):
 def publish_batch(project_root: Path, queue_path: Path, repair_ids, *,
                   authorized_batch_fingerprint: str, confirmed: bool = False,
                   production_intent: bool = False, rehearsal: bool = False,
-                  client=None, inject_failure_at=None):
+                  client=None, inject_failure_at=None, expected_review_fingerprint=None):
     """Stage two only: explicit YES -> fresh gates -> journalled generation.
 
     This is a dedicated source-repair operation, not Refresh Preview/Test/
@@ -642,6 +643,7 @@ def publish_batch(project_root: Path, queue_path: Path, repair_ids, *,
     from rawcandle.fundamentals.generations import prepare_generation_from_candidates
     from rawcandle.datacenter_taxonomy_operation_log import taxonomy_operation_lock_context
     from rawcandle.scheduler.config import read_scheduler_config
+    from .provider_payload_review_scope import prove as prove_review_scope
     root = project_root.resolve()
     if confirmed is not True or not authorized_batch_fingerprint:
         raise PermissionError('PAYLOAD_WORKFLOW_EXPLICIT_BATCH_YES_REQUIRED')
@@ -681,6 +683,9 @@ def publish_batch(project_root: Path, queue_path: Path, repair_ids, *,
         histories = fetch_for_proposals(proposals, client=client)
         for item in proposals:
             revalidate(root, item, histories[tuple(item['source_key'][:2])], source_baseline=source)
+        review_scope=prove_review_scope(proposals,queue_path,source['roles']['canonical'],source['roles']['provider'])
+        if expected_review_fingerprint is not None and review_scope['fingerprint']!=expected_review_fingerprint:
+            raise ValueError('PAYLOAD_WORKFLOW_REVIEW_SCOPE_STALE')
         verify_receipts(proposals, receipts)
         candidates = {k: Path(v) for k, v in receipts[0]['candidates'].items()}
         # Queue ownership rows are protected by the queue transaction throughout
@@ -709,6 +714,7 @@ def publish_batch(project_root: Path, queue_path: Path, repair_ids, *,
                                         immutable_generation=True)
             roles = _candidate_manifest(candidates, backups)
             scope = {'batch': group, 'candidate_hashes': receipts[0]['result']['candidate_hashes'],
+                     'source_review_guard': review_scope,
                      'selected': [{'repair_id': item['repair_id'], 'binding': link,
                                    'decision': _authorized_decision(item, link, group, run_id)}
                                   for item, _, link, _, _ in saved]}
@@ -728,6 +734,8 @@ def publish_batch(project_root: Path, queue_path: Path, repair_ids, *,
                     new_generation_dir=prepared['generation_dir'])
                 if baseline(root) != source or [_read(q, rid) for rid in repair_ids] != saved:
                     raise ValueError('PAYLOAD_WORKFLOW_FINAL_GATE_DRIFT')
+                if prove_review_scope(proposals,queue_path,source['roles']['canonical'],source['roles']['provider'])!=review_scope:
+                    raise ValueError('PAYLOAD_WORKFLOW_REVIEW_SCOPE_STALE')
                 ready = {k: Path(v) for k, v in prepared['roles'].items()}
                 if any(journal.sha256_file(path) != scope['candidate_hashes'][role] for role, path in ready.items()):
                     raise ValueError('PAYLOAD_WORKFLOW_FINAL_CANDIDATE_DRIFT')
