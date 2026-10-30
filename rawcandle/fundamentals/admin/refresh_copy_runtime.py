@@ -406,6 +406,49 @@ def _observation_id(record_key: str, content_hash: str) -> str:
     return hashlib.sha256(f"SHARADAR|fundamentals|{record_key}|{content_hash}".encode()).hexdigest()
 
 
+def insert_provider_source_row(connection, row, identity, *, run_id, applied_at,
+                               source_provenance=None, full_payload_hash=False,
+                               expected_ticker=None, expected_dimension=None):
+    """Native source normalization/insertion shared by Refresh and controlled rebuild.
+
+    The caller owns the inactive-copy transaction and explicit source selection.
+    Refresh retains its existing observation hashing and retention contract.
+    """
+    ticker = expected_ticker or str(row['ticker']).strip().upper()
+    dimension = expected_dimension or str(row['dimension']).strip().upper()
+    item = normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension)
+    key = source_key(item)
+    record_key = "|".join(key)
+    from .provider_payload import payload_fingerprint
+    content_hash = payload_fingerprint(row["_acquisition_payload"]) if full_payload_hash else fingerprint(_raw_row(item))
+    observation_id = _observation_id(record_key, content_hash)
+    payload = dict(row.get("_acquisition_payload") or item)
+    retention_status = row.get("_history_retention_status")
+    provenance = dict(source_provenance or {})
+    if retention_status == RETAINED_OUTSIDE_SOURCE_WINDOW:
+        provenance = {
+            "history_retention_status": RETAINED_OUTSIDE_SOURCE_WINDOW,
+            "history_retention_evidence": row.get("_history_retention_evidence"),
+        }
+    connection.execute(
+        "INSERT INTO provider_observation(observation_id,run_id,provider,provider_record_key,company_id,security_id,"
+        "provider_ticker,provider_security_id,native_table,dimension,calendardate,reportperiod,fiscalperiod,"
+        "source_availability_date,observed_at_utc,fetched_at_utc,content_hash,provider_status,payload_json,provenance_json) "
+        "VALUES(?,?,'SHARADAR',?,?,?,?,?,'fundamentals',?,?,?,?,?,?,?,?,'SUCCESS',?,?)",
+        (observation_id, run_id, record_key, identity["company_id"], identity["security_id"], ticker,
+         identity["provider_security_id"], dimension, item["calendardate"], item["reportperiod"],
+         item["fiscalperiod"], item["date"], item["lastupdated"], applied_at, content_hash,
+         json.dumps(payload, sort_keys=True), json.dumps(provenance, sort_keys=True)),
+    )
+    columns = ("observation_id", "ticker", "permaticker", *REFRESH_REQUEST_FIELDS[1:])
+    values = (observation_id, ticker, identity["provider_security_id"], *[item[field] for field in REFRESH_REQUEST_FIELDS[1:]])
+    connection.execute(
+        f"INSERT INTO sharadar_fundamental_observation({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+        values,
+    )
+    return observation_id
+
+
 def replace_provider_histories(
     provider_db: Path, histories: Mapping[str, Mapping[str, HistoryTrust]],
     identities: Mapping[str, Mapping[str, Any]], *, applied_at: str,
@@ -455,35 +498,8 @@ def replace_provider_histories(
                     if merge_plans is not None else trust.rows
                 )
                 for row in rows:
-                    item = normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension)
-                    key = source_key(item)
-                    record_key = "|".join(key)
-                    content_hash = fingerprint(_raw_row(item))
-                    observation_id = _observation_id(record_key, content_hash)
-                    payload = dict(row.get("_acquisition_payload") or item)
-                    retention_status = row.get("_history_retention_status")
-                    provenance = {}
-                    if retention_status == RETAINED_OUTSIDE_SOURCE_WINDOW:
-                        provenance = {
-                            "history_retention_status": RETAINED_OUTSIDE_SOURCE_WINDOW,
-                            "history_retention_evidence": row.get("_history_retention_evidence"),
-                        }
-                    connection.execute(
-                        "INSERT INTO provider_observation(observation_id,run_id,provider,provider_record_key,company_id,security_id,"
-                        "provider_ticker,provider_security_id,native_table,dimension,calendardate,reportperiod,fiscalperiod,"
-                        "source_availability_date,observed_at_utc,fetched_at_utc,content_hash,provider_status,payload_json,provenance_json) "
-                        "VALUES(?,?,'SHARADAR',?,?,?,?,?,'fundamentals',?,?,?,?,?,?,?,?,'SUCCESS',?,?)",
-                        (observation_id, run_id, record_key, identity["company_id"], identity["security_id"], ticker,
-                         identity["provider_security_id"], dimension, item["calendardate"], item["reportperiod"],
-                         item["fiscalperiod"], item["date"], item["lastupdated"], applied_at, content_hash,
-                         json.dumps(payload, sort_keys=True), json.dumps(provenance, sort_keys=True)),
-                    )
-                    columns = ("observation_id", "ticker", "permaticker", *REFRESH_REQUEST_FIELDS[1:])
-                    values = (observation_id, ticker, identity["provider_security_id"], *[item[field] for field in REFRESH_REQUEST_FIELDS[1:]])
-                    connection.execute(
-                        f"INSERT INTO sharadar_fundamental_observation({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
-                        values,
-                    )
+                    insert_provider_source_row(connection, row, identity, run_id=run_id, applied_at=applied_at,
+                                               expected_ticker=ticker, expected_dimension=dimension)
                     inserted[dimension] += 1
             replaced.append({
                 "ticker": ticker, "before_counts": before_counts,

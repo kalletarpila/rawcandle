@@ -549,6 +549,10 @@ def _load_acceptance_result(*, directory, run_id, journal_path, backup_root, liv
 
 
 def _acceptance_result(result, *, directory, run_id, journal_path, backup_root, live_paths):
+    if result.get("operation") == "CONTROLLED_CURRENT_STATE_REBUILD":
+        from .current_state_rebuild_acceptance import for_cleanup
+        return for_cleanup(result,directory=directory,run_id=run_id,journal_path=journal_path,
+                           backup_root=backup_root,live_paths=live_paths)
     if result.get("operation") == "REPAIR_PROVIDER_PAYLOAD_COMPLETENESS":
         from .provider_payload_acceptance import for_cleanup
         return for_cleanup(result,directory=directory,run_id=run_id,journal_path=journal_path,
@@ -773,8 +777,8 @@ def _accept_run_and_cleanup_backups_locked(
                         source_generation_id=current["journal"]["old_generation"]["generation_id"],
                         ownership_preview_hash=current["ownership_preview_hash"],
                         ownership_receipt_hash=current["ownership_receipt_hash"])
-    if current.get("acceptance_run_kind") == "PROVIDER_PAYLOAD_REPAIR":
-        evidence.update(run_id=run_id,run_kind="PROVIDER_PAYLOAD_REPAIR",
+    if current.get("acceptance_run_kind") in ("PROVIDER_PAYLOAD_REPAIR", "CURRENT_STATE_REBUILD"):
+        evidence.update(run_id=run_id,run_kind=current["acceptance_run_kind"],
                         published_generation_id=current['journal']['new_generation_id'],
                         source_generation_id=current['journal']['old_generation']['generation_id'],
                         batch_fingerprint=current['batch_fingerprint'],

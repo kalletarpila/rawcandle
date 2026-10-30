@@ -39,6 +39,15 @@ def decide(evidence):
                 and e.get('repair_evidence_fingerprint') and e.get('financial_drift') is False):
             return 'REPAIRABLE'
         return 'UNRESOLVED'
+    rebuilt = e.get('current_state_rebuild')
+    if rebuilt:
+        from .current_state_rebuild import VERSION
+        if (rebuilt.get('policy') != VERSION or rebuilt.get('postflight') != 'PASSED'
+                or not all(rebuilt.get(k) for k in ('observation_id','payload_fingerprint',
+                    'generation_id','test_fingerprint','preview_fingerprint'))
+                or rebuilt.get('proof_fingerprint') != digest({k:v for k,v in rebuilt.items() if k!='proof_fingerprint'})):
+            return 'UNRESOLVED'
+        return 'ELIGIBLE'
     if e.get('historical_only_count', 0) > 0:
         return 'HISTORICAL_ONLY' if e.get('historical_no_current_effect_proven') is True else 'UNRESOLVED'
     return 'ELIGIBLE'
@@ -47,6 +56,9 @@ def decide(evidence):
 def item(ticker, company_id, security_id, evidence, *, counts, reason, source_binding):
     if not ticker or not company_id or not security_id:
         raise ValueError('DISPOSITION_EXACT_IDENTITY_REQUIRED')
+    rebuilt = evidence.get('current_state_rebuild')
+    if rebuilt and any(rebuilt.get(k) != source_binding.get(k) for k in ('observation_id','payload_fingerprint')):
+        raise ValueError('DISPOSITION_REBUILD_BINDING_MISMATCH')
     result = dict(ticker=ticker.upper(), company_id=company_id, security_id=security_id,
         disposition=decide(evidence), reason_code=reason, evidence=evidence,
         observation_counts=counts, source_binding=source_binding)
@@ -186,12 +198,20 @@ def presentation(row):
         'UNRESOLVED':('Source-data disposition unresolved','Inspect source/version evidence before repair or exclusion.'),
     }[status]
     counts=row.get('observation_counts') or {}
+    rebuilt = row.get('evidence',{}).get('current_state_rebuild')
+    extra = ()
+    if status=='ELIGIBLE' and rebuilt:
+        label='Current provider state rebuilt from fresh authoritative source'
+        action='Normal processing allowed by the existing universe and native policies.'
+        extra=('Historical accepted data was preserved',)
+        if rebuilt.get('frozen_conflict_count',0)>0:
+            extra+=('Frozen historical review remains separate',)
     return dict(label=label,next_action=action,needs_action=status in ('REPAIRABLE','UNRESOLVED'),
         lines=(f"{row['ticker']} · {label}",
             'Classification: '+('Insufficient reliable source data' if status=='INELIGIBLE_SOURCE_DATA' else status.replace('_',' ').capitalize()),
             f"Reason: {'CURRENT_BINDING_CHANGED_REEVALUATE' if row.get('stale') else row['reason_code']}",
             f"Legacy observations: {counts.get('legacy',0)} · frozen accepted rows: {counts.get('frozen',0)} · retained: {counts.get('retained',0)}",
-            f"Next action: {action}",f"Evidence: {row.get('artifact_fingerprint') or row.get('item_fingerprint')}"))
+            *extra, f"Next action: {action}",f"Evidence: {row.get('artifact_fingerprint') or row.get('item_fingerprint')}"))
 
 
 def current_views(rows, canonical_db, provider_db):

@@ -480,6 +480,7 @@ def reconcile_canonical(
     applied_at: str,
     inject_failure: bool = False,
     ownership_review_queue_path: Path | None = None,
+    quarter_keys: set[tuple[int, int, str]] | None = None,
 ) -> dict[str, Any]:
     from rawcandle.fundamentals.schema.parent_equity import assert_inactive_copy, accept_parent_equity
 
@@ -494,8 +495,15 @@ def reconcile_canonical(
         ensure_provenance_schema(connection)
         existing = _canonical_rows(connection)
         connection.execute("BEGIN IMMEDIATE")
+        selected_ids = []
         for winner in winners:
             key = (int(winner["company_id"]), int(winner["fiscal_year"]), str(winner["fiscal_quarter"]))
+            if quarter_keys is not None and key not in quarter_keys:
+                continue
+            if quarter_keys is not None:
+                if key not in existing:
+                    raise ValueError("SCOPED_CANONICAL_EXISTING_QUARTER_REQUIRED")
+                selected_ids.append(int(existing[key]['quarter_id']))
             current = existing.get(key)
             values = {field: winner[native] for field, native in SHARADAR_ARQ_FIELD_MAPPING.items()}
             metadata = (
@@ -578,7 +586,8 @@ def reconcile_canonical(
                 })
         with sqlite3.connect(f"file:{provider_db.resolve()}?mode=ro", uri=True) as parent_provider:
             parent_provider.row_factory = sqlite3.Row
-            accept_parent_equity(connection, parent_provider, accepted_at=applied_at)
+            accept_parent_equity(connection, parent_provider, accepted_at=applied_at,
+                                 quarter_ids=selected_ids if quarter_keys is not None else None)
         if inject_failure:
             raise RuntimeError("INJECTED_PHASE12D_CANONICAL_FAILURE")
         connection.commit()

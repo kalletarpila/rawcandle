@@ -1034,6 +1034,19 @@ class FundamentalsAdminUIService:
                 ),
             )
 
+    def preview_current_source_remediation(self, source_key, acquisition):
+        """Explicit read-only administration assessment, never an automatic Refresh.
+
+        Returns strict repair first; the separate rebuild path requires its own
+        Preview/Test/publication evidence. Rendering does not acquire or publish.
+        """
+        from . import current_state_rebuild as rebuild
+        from .artifacts import ROOT
+        root=ROOT
+        queue=root/'fundamental_reports/fundamentals_refresh_review_queue.db'
+        return rebuild.assess(root,tuple(source_key),acquisition,
+                              source_baseline=rebuild.baseline(root,queue))
+
     def list_source_dispositions(self) -> list[Mapping[str, Any]]:
         from .legacy_payload_disposition import list_items, current_views
         from .refresh_review_queue import queue_path_for_run_root

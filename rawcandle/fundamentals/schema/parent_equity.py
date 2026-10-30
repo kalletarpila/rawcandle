@@ -73,7 +73,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     )""")
 
 
-def accept_parent_equity(conn: sqlite3.Connection, provider: sqlite3.Connection, *, accepted_at: str) -> dict[str, int]:
+def accept_parent_equity(conn: sqlite3.Connection, provider: sqlite3.Connection, *, accepted_at: str, quarter_ids=None) -> dict[str, int]:
     """Caller owns the inactive-copy transaction; unrelated financial fields untouched."""
     ensure_schema(conn)
     metrics = {"bound_quarters": 0, "values_present": 0}
@@ -84,15 +84,21 @@ def accept_parent_equity(conn: sqlite3.Connection, provider: sqlite3.Connection,
         metadata = {r['ticker']: r['category'] for r in provider.execute(
             f"SELECT ticker,category FROM sharadar_ticker_metadata {restriction} ORDER BY fetched_at_utc"
         )}
+    # A scoped native rebuild must never clear another quarter's evidence.
+    ids = None if quarter_ids is None else tuple(sorted(set(quarter_ids)))
+    if ids == ():
+        return metrics
+    restriction = '' if ids is None else ' WHERE quarter_id IN (' + ','.join('?' for _ in ids) + ')'
+    args = ids or ()
     # Rebuild the accepted projection, also clearing stale/missing bindings.
-    conn.execute(f"DELETE FROM {SOURCE_TABLE}")
-    conn.execute(f"DELETE FROM {PROVENANCE_TABLE}")
-    conn.execute("UPDATE v4_quarter_financials SET parent_equity=NULL,parent_equity_usd=NULL WHERE parent_equity IS NOT NULL OR parent_equity_usd IS NOT NULL")
+    conn.execute(f"DELETE FROM {SOURCE_TABLE}" + restriction, args)
+    conn.execute(f"DELETE FROM {PROVENANCE_TABLE}" + restriction, args)
+    conn.execute("UPDATE v4_quarter_financials SET parent_equity=NULL,parent_equity_usd=NULL" + (restriction + " AND " if restriction else " WHERE ") + "(parent_equity IS NOT NULL OR parent_equity_usd IS NOT NULL)", args)
     for q in conn.execute("""SELECT q.*,f.shares_outstanding,p.provider_observation_id,
         p.accepted_at_utc AS shares_accepted_at FROM v4_quarter q
         JOIN v4_quarter_financials f USING(quarter_id)
         JOIN v4_field_provenance p ON p.quarter_id=q.quarter_id AND p.canonical_field='shares_outstanding'
-        WHERE q.identity_status='ACCEPTED' AND p.provider='SHARADAR'""").fetchall():
+        WHERE q.identity_status='ACCEPTED' AND p.provider='SHARADAR'""" + (" AND q.quarter_id IN (" + ",".join("?" for _ in ids) + ")" if ids is not None else ""), args).fetchall():
         observations = provider.execute("SELECT * FROM provider_observation WHERE observation_id=?", (q['provider_observation_id'],)).fetchone()
         if observations is None:
             raise ValueError("PARENT_EQUITY_OBSERVATION_MISSING")

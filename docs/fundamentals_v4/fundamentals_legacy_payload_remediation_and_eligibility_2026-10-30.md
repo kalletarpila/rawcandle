@@ -1,5 +1,38 @@
 # Legacy payload remediation and Fundamentals eligibility — 2026-10-30
 
+## Controlled current-state rebuild follow-up — implementation/rehearsal passed, live launch blocked
+
+The subsequent `FUNDAMENTALS-CONTROLLED-CURRENT-STATE-REBUILD-V1` task implements
+`FUNDAMENTALS_CONTROLLED_CURRENT_STATE_REBUILD_V1` as a separate guarded current
+source-version advancement. Strict exact repair remains unchanged and still
+rejects BMRA/NEOV metadata-version drift. Current/frozen scopes remain separate.
+
+Both real cases passed final current-state native Test and full-population
+copy publication, postflight and native cleanup/idempotency. On the disposable
+copy their current payloads are full 112-key sources, their normalized financial
+values are unchanged, native parent equity is filled from fresh source facts,
+and both dispositions become ELIGIBLE. NEOV's 13 frozen OPEN conflicts and all
+historical/ownership evidence remain unchanged. Focused verification passed 536
+distinct tests; no full suite was run.
+
+Live publication did **not** start. Although the attachment explicitly provides
+conditional live authorization, automatic approval review rejected the launch
+because it requires the exact side effect to be authorized in a visible chat
+message rather than only the attachment. The exact Preview/Test pair was presented
+for that confirmation; the rejection was not bypassed. No live runtime/queue,
+source, generation, ownership or historical state was changed by this follow-up.
+
+Consequently the current live partition is still **171 ELIGIBLE, 8 HISTORICAL_ONLY,
+2 UNRESOLVED**, and the two latest incomplete bindings are BMRA and NEOV. The
+original active generation and its COMPLETED / PASSED / NOT_REQUIRED state remain
+in force. Copy success is not presented as live remediation.
+
+Full contract, exact tested bindings, receipts, preservation evidence and the
+concrete hardening handoff are in
+[the controlled current-state rebuild report](fundamentals_controlled_current_state_rebuild_v1_2026-10-30.md).
+The earlier investigation below is retained as historical evidence.
+
+
 ## BMRA/NEOV targeted investigation — STOP, no runtime mutation
 
 The subsequent `FUNDAMENTALS-BMRA-NEOV-TARGETED-REMEDIATION` task investigated
