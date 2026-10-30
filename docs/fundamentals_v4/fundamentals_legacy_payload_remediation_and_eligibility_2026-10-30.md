@@ -1,5 +1,152 @@
 # Legacy payload remediation and Fundamentals eligibility — 2026-10-30
 
+## BMRA/NEOV targeted investigation — STOP, no runtime mutation
+
+The subsequent `FUNDAMENTALS-BMRA-NEOV-TARGETED-REMEDIATION` task investigated
+only these two unresolved current bindings. Conditional repair/exclusion was
+authorized without another YES, but the exact native repair gates do not pass.
+Both remain UNRESOLVED. No repair, exclusion, disposition-ledger update or new
+publication was performed. The wider 181-ticker cohort was not reopened.
+
+### Fresh baseline and exact current evidence
+
+Active generation: `payload_repair_c76f86e26cbc7735_99b4b068a24f`. Manifest SHA-256:
+`aa0cc808d1d0975a4918286b3a41314ad57aa9b24b3c6a8b0054b25ec7766627`. Watermark: `2026-10-28`.
+All three role hashes, market/global analysis inputs, configuration, complete
+review/audit state, current disposition rows and source-repair code were freshly
+bound. Existing admin/production/scheduler locks were available. Journal remains
+COMPLETED, postflight PASSED, recovery NOT_REQUIRED. Previous publication cleanup
+remains COMPLETED; this investigation created no new rollback backups.
+
+Four new authoritative complete histories were acquired: BMRA ARQ/MRQ 40/40 rows;
+NEOV ARQ/MRQ 20/23 rows. Each current ARQ key has one accepted stored observation
+and one exact fresh provider match. Company/security/provider identity, fiscal
+identity, source key and accepted normalized financial projection agree.
+
+| Ticker | Accepted fiscal quarter | Exact ARQ date / reportperiod | Stored lastupdated | Fresh lastupdated | Payload keys | Final disposition |
+|---|---|---|---|---|---|---|
+| BMRA | 2027-Q1 | 2026-10-15 / 2026-08-31 | 2026-10-16 | 2026-10-19 | 29 → 112 | UNRESOLVED |
+| NEOV | 2026-Q4 | 2026-09-23 / 2026-06-30 | 2026-09-23 | 2026-10-29 | 29 → 112 | UNRESOLVED |
+
+Exact bindings and raw fingerprints:
+
+- BMRA: company/security `343/343`, provider security `123744`, canonical quarter `12153`.
+  Accepted observation: `44a45a3a04732d633ef77492f6388ee01e54b9da5ab878cebe5bbbbad615e80d`.
+  Stored payload: `77f86a86123f39be79288d40c18f761b585e406f1d9ad61fe58e13860b3a4d72`.
+  Fresh full payload: `8972820c61de338cce0fdf6fb42f44c19ef7922a3d4d449f5b3f11fc498e4b25`.
+- NEOV: company/security `1530/1539`, provider security `638745`, canonical quarter `54755`.
+  Accepted observation: `d188c5c24ccf8d6e4ecc324f51f4578bee4c4ec7ca51e5dbb5b6d6a4aefbc42a`.
+  Stored payload: `175447b7ff39c08a718e468fcb4bdcbff289942c7dca9884bb211e733b8e5a45`.
+  Fresh full payload: `0c35628ba66fcf48fcda6f0b7c5491c7205bd1af2e45150f72f6c520b8da1067`.
+
+### Exact cause and safety boundary
+
+For both tickers the **only changed normalized projection field is `lastupdated`**.
+The current source also supplies 83 previously absent raw fields. Existing shared
+normalized financial values do not differ; this is not an identity revision,
+source-key replacement or duplicate-current-key problem. Raw integer/string
+representation differences are normalized by the existing contract.
+
+However, completeness plus a different source metadata version is explicitly
+`SOURCE_PAYLOAD_VALUE_REVISION`, not `SOURCE_PAYLOAD_COMPLETENESS_REPAIR`.
+`fields_changed` is empty because it excludes projection fields; the changed
+raw projection fingerprint plus added fields triggers the value-revision guard.
+The native proposal rejects both with `PAYLOAD_WORKFLOW_NOT_COMPLETENESS_REPAIR`.
+The inactive-copy primitive independently rejects both with
+`PAYLOAD_REPAIR_NOT_COMPATIBLE` before mutation.
+
+The primitive preserves native observation fields including `lastupdated` and
+provider headers including the old observed-at date. Accepting a new stamped
+payload while retaining those old version fields would violate that contract.
+No timestamp was backdated, ignored or edited to manufacture compatibility.
+No financial/source-repair policy was relaxed.
+
+Fresh provider `sharefactor` is explicitly 1 for both; fresh `equityusd` is
+3,648,000 for BMRA and 39,567,340 for NEOV. These are **unused audit facts**, not
+defaults or values authorized for the older accepted source version. All 83 new
+fields were absent in the old projection, so their old-version values are not
+known. Equality of the shared normalized financial fields cannot prove equality
+of previously absent fields across source versions. Current canonical parent
+equity remains missing, and the native current P/B reports `MISSING_EQUITY` with
+no value for both. Existing holds remain; no ownership approval was created.
+
+### Supported archive/retained evidence and NEOV frozen separation
+
+The exact known authoritative archive at `phase12c_20260910` was checksum-verified
+against its earlier audit. Its retained exact-key catalog contains no match for
+BMRA's 2026-10-15 or NEOV's 2026-09-23 current source key. The exact preceding
+immutable provider generation also
+contains only the same 29-key observations. The originating provider-run records
+bind projected acquisitions but provide no retained full-payload locator:
+BMRA was fetched 2026-10-18 with stamp 2026-10-16; NEOV was fetched 2026-09-26
+with stamp 2026-09-23. No directory-wide generation/artifact search was performed.
+This is not proof that all possible upstream old versions are unavailable.
+
+Fresh full current sources exist and are complete. Thus a proven inability to
+use the strict old-version repair contract is **not** sufficient evidence for
+INELIGIBLE_SOURCE_DATA. Neither ticker was excluded. Historical incompleteness
+also cannot override the unresolved current binding to produce HISTORICAL_ONLY.
+
+NEOV’s OPEN `FROZEN_HISTORICAL_PROVIDER_CONFLICT` has 13 exact frozen conflicts.
+Their accepted financial/source states and evidence fingerprints match current
+canonical/provider evidence; every conflicting key is at/before 2024-12-31.
+They do not overlap current quarter 54755, source date 2026-09-23 or reportperiod
+2026-06-30. Current/frozen scope separation is proven. That review is not the
+reason the current repair fails; source-version incompatibility is. No frozen
+authority was consumed and the review remains OPEN unchanged. BMRA has no current
+provider-history review. Observation evidence is separate from each ticker’s one
+active UNRESOLVED operating disposition.
+
+### Actual-case copy validation, tests and final state
+
+The actual unresolved-preservation case was rehearsed on disposable copies of
+current provider/canonical/analysis roles and the queue. Both native proposal
+and inactive-candidate repair paths reject the metadata-plus-completeness change.
+All active-copy roles, the inactive provider candidate, review/ownership/disposition
+queue and real runtime remain byte/logically unchanged; SQLite quick/FK checks pass.
+No artificial live exclusion or repair case was manufactured. No new repair Test
+receipt was created because no proposal qualifies. No publication/recovery/cleanup
+lifecycle was invoked; the existing healthy generation/journal remain intact.
+
+An initial raw primitive check addressed the clone’s active generation and was
+correctly stopped by `PARENT_EQUITY_INACTIVE_COPY_REQUIRED` before writing.
+The harness was corrected to a separate inactive candidate without weakening the
+guard, discarding the clone or touching active files. The final preservation
+rehearsal passed; both original and final logs are retained.
+
+Focused tests: **172 passed**; WFRD/publication-authority/shared and ownership
+cleanup regressions: **238 passed**; **410 distinct cases**, full suite NOT RUN.
+Four new synthetic regressions reproduce the exact BMRA/NEOV version/date shapes
+and native no-write rejection. Existing tests cover exact repair/receipt/staleness,
+current/frozen coexistence and collision, historical-only/ineligible/unresolved
+precedence, native universe/analysis/P/B selection and immutable journal/recovery/
+cleanup. Production source code is unchanged in this targeted task.
+
+Final read-only health query over latest active accepted bindings confirms exactly
+BMRA and NEOV remain incomplete. The disposition aggregate remains 171 ELIGIBLE,
+8 HISTORICAL_ONLY, 2 UNRESOLVED, 0 REPAIRABLE and 0 INELIGIBLE_SOURCE_DATA.
+The active universe remains 2,468 members. These are aggregate health reads, not
+a reclassification of other tickers. No ticker/provider/canonical/audit history,
+frozen state, ownership decisions (including GE/RTX/T), WFRD, publication authority,
+market/global analysis inputs, scheduler configuration or backup was changed.
+All runtime role/manifest/input and complete queue digests match the fresh baseline.
+No disposition row or source-repair row was added/changed for BMRA/NEOV.
+
+Completeness V1 remains disabled; readiness remains **NOT_READY** for these exact
+current bindings. The next required work is either authoritative full old-version
+recovery matching the stored stamps, or a separately reviewed source-version
+advancement path with exact metadata/header/native-row/provenance alignment,
+unchanged normalized financial values and explicit current/frozen authority
+separation. Simply bypassing the current comparison or running a broad Refresh
+is not a demonstrated resolution and was not attempted.
+
+Durable exact evidence: `fundamental_reports/bmra_neov_targeted_evidence/bcde70cf97313dd746c7d0affbede17fc96aa0d666bae0426e3b3e780e03ffd7/manifest.json`.
+Working evidence: `temp/fundamentals_bmra_neov_targeted_20261030/`.
+No separate YES was requested; the task’s conditional mutation authority never
+became applicable because native exact-repair compatibility failed.
+
+---
+
 ## Fresh rebaseline and authorized live remediation
 
 The subsequent `FUNDAMENTALS-LEGACY-PAYLOAD-REBASELINE-AND-LIVE-REMEDIATION`
