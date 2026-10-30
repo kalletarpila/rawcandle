@@ -67,20 +67,136 @@ Durable source evidence manifest:
 `fundamental_reports/legacy_payload_disposition_evidence/ba135471cdffd20645041d6f2bce9385e3c3095873918caa8dad0e9a9080713f/manifest.json`.
 
 
-## Completion record
+## Current-state revalidation after the scoped YES — STOP
 
-Live source publication has **not run**. The automatic approval reviewer
-rejected the attempted execution before launch because it required separate
-authorization for this exact 171-member production batch. An explicit approval
-request is pending. Do not infer publication approval from this report.
-Only authorized disposition metadata, native OPEN repair registrations and
-durable audit evidence have been written. Financial runtime is unchanged.
-Current readiness: **NOT_READY**; 173 latest bindings remain incomplete
-(171 exact repairable, BMRA/NEOV unresolved). No exclusion was performed.
+The user approved only the exact batch and disposition artifact identified above,
+then explicitly required revalidation after the overnight scheduler execution and
+STOP if any member/binding/gate was stale or newly conflicting. That approval is
+recorded; it does not authorize a replacement batch or waive native baseline gates.
 
-## Ticker partition and observation evidence
+**Live publication did not start. No source repairs or exclusions were applied.**
+The wrapper stopped on its initial baseline check, before invoking the native
+publisher. Independent read-only revalidation also produced the existing native
+`PAYLOAD_WORKFLOW_STALE_BASELINE` rejection. No new proposal, batch, disposition
+artifact, rehearsal receipt or OPEN repair registration was generated. The original
+171 OPEN items and their exact stored receipt evidence remain intact.
 
-This table groups observations by their owner ticker's single current status.
+Fresh audit acquired complete authoritative ARQ and MRQ histories for all 181
+tickers (362 acquisitions). Results for the approved 171 members:
+
+| Check against the approved evidence | Result |
+|---|---|
+| Exact accepted observation IDs, source keys and period bindings | 171/171 unchanged |
+| Full fresh source payload fingerprints | 171/171 unchanged |
+| Native payload comparison evidence | 171/171 unchanged |
+| Selected parent-equity targets | 171/171 unchanged |
+| Company/security identities and existing canonical targets | Byte-identical provider/canonical databases |
+| Selected source-payload deltas | 0 |
+| Stored batch/artifact fingerprints | Integrity verified; unchanged |
+| Valid against the current native baseline | **FAIL — stale market hash** |
+| New selected-member review | **ASX — frozen historical provider conflict** |
+
+The only change inside the native repair baseline is `data/osakedata.db`:
+
+- Approved SHA-256: `1e00094ca1813455e630b4deb183d9dfdf56efcc9a28de5c82f29a5821058722`.
+- Current SHA-256: `6c51162f03755aaae5002ab77964af56f96822ad793d67458f60d3722cf225a6`.
+
+The existing contract requires complete baseline equality; there is no market-only
+exception. Every approved proposal binds the old baseline. Reproducing the stored
+hashes verifies evidence integrity, not current publication validity. They cannot
+be carried to the new baseline under the existing exact-binding contract. No
+baseline, fingerprint, market data or source evidence was overwritten to make a
+gate pass.
+
+The broader input snapshot also records an external change to the global
+`data/analysis.db` (distinct from the unchanged Fundamentals analysis generation
+role). Its SHA-256 changed from
+`764e90e83f60c04d54a706fb032ea99d1f4f31a1542c00996787a3d7218174b0` to
+`9a691a46d4bca6da7fb33703371e1bce7ad47c9b2e2920206ba480a745c1b044`;
+its formerly empty WAL is now absent. These are observed external input changes,
+not changes caused or reversed by this validation. The input snapshot is preserved;
+no sector/industry data was edited. This global analysis input is not part of the
+native repair baseline, so the native stale-baseline reason remains the market
+hash difference above.
+
+The operational provider-review queue and its audit table also changed legitimately
+overnight. ASX, which is in the approved batch, acquired an OPEN
+`FROZEN_HISTORICAL_PROVIDER_CONFLICT` review at `2026-10-30T05:33:56Z`.
+Its queue item is
+`32dd979f040d8c3f342c21451caa2b883d89045947ec42a37cbf26cb49e28a7d`;
+source evidence fingerprint is
+`4ed6356db81764949040cf3ed0d851cce42cd143a017925acca51703998d1b91`.
+The 29 affected source keys concern frozen history, not the selected current ARQ
+source. Exact current payload recovery alone does not authorize ignoring this new
+ticker-level review. The review was preserved; it was not resolved or bypassed.
+
+BMRA and NEOV retain unchanged current source payloads and the same
+`SOURCE_PAYLOAD_VALUE_REVISION` ambiguity; their recorded disposition remains
+UNRESOLVED. NEOV additionally appears in the overnight frozen-history review
+population. Neither ticker was repaired or excluded.
+
+### Latest scheduler execution
+
+The latest terminal scheduled Full Workflow is
+`20261030T052848Z_refresh_fundamentals_d00eb7239fed_full_workflow_1b15f1a8`,
+running `2026-10-30T05:28:48Z` to `05:34:55Z` (07:28–07:34 Europe/Helsinki).
+It ended **STOPPED at Preview**, rather than completing a financial publication.
+`production_completed=false`; `ownership_production_completed=false`; ownership
+auto-continuation was skipped for the unsafe financial workflow.
+
+Its two global blockers are outside the approved 171-member batch:
+
+- BBAI: `REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION`.
+- MIR: `BOUNDARY_CHRONOLOGY_INCONSISTENT`, `INTERIOR_SOURCE_KEY_REMOVAL`,
+  `SAME_FISCAL_SOURCE_KEY_REPLACEMENT`.
+
+This investigation read the existing bounded history service and the exact latest
+parent/Preview result references. It did not scan all historical artifacts or
+change provider-history/freeze semantics to clear the workflow.
+
+### Preserved state and resulting scope
+
+Active generation remains `pb_ownership_719201a6f6f4497bb6a3e1ada35b81b6`,
+with unchanged manifest and provider/canonical/analysis role hashes. Source
+watermark remains `2026-10-28`. Journal is COMPLETED, postflight PASSED,
+recovery NOT_REQUIRED. Provider and canonical byte identity proves preservation
+of all frozen history, retained evidence, identities, accepted financial targets
+and canonical ownership artifacts. The ownership-review table, terminal decisions
+(including GE/RTX/T), typed repair rows, disposition ledger and configuration are
+unchanged. Only the existing provider-review queue and audit digests differ from
+the pre-scheduler review-queue snapshot. Those changes, the market update and the
+global analysis input update are external state and were preserved.
+
+Beginning/end snapshots during this fresh validation match. No runtime DB, queue,
+generation, journal, configuration, review status or financial value was mutated
+by this validation. Only read-only audit evidence files were written. No cleanup,
+rollback, backup deletion, batch shrinking/expansion or substitute publication ran.
+
+Readiness remains **NOT_READY**. There are still 13,113 active legacy observations
+and 173 latest incomplete accepted bindings. The old 171-member copy rehearsal
+remains historical PASS evidence, **not a valid current-baseline publication
+receipt**. It was not rerun into a replacement batch under this scoped YES.
+The original 553 distinct focused tests remain recorded below; this continuation
+changed documentation only and performed live read-only assertions rather than
+rerunning unrelated tests. No full suite was run.
+
+Next work must review ASX's new conflict and establish separately authorized
+current evidence/receipts before any new publication proposal. BMRA/NEOV and the
+latest scheduler blockers remain explicit pending work, not automatic exclusions.
+
+Revalidation evidence: `temp/fundamentals_legacy_remediation_20261030/revalidation_20261030_0740/`.
+`approved_batch_stop.json` records exact deltas, all 362 source proofs, selected
+hold keys, native rejection and unchanged runtime checks. Durable manifest and
+fresh source acquisitions are retained outside Git at
+`fundamental_reports/legacy_payload_disposition_revalidation/2131287864a74359a0b324af3aae879fdf5114471869af8f274f8906129d4e57/manifest.json`.
+Supplementary external-input delta and a final unchanged-runtime check:
+`fundamental_reports/legacy_payload_disposition_revalidation/c22b435f85cb3cda8c5dc03647d87c4f4cf681b87949f314fd4758fe8167f1f2.json`.
+
+## Approved audit snapshot: ticker partition and observation evidence
+
+This table preserves the approved pre-scheduler audit; it is not a regenerated
+post-scheduler disposition artifact or permission to publish over the ASX hold.
+It groups observations by their owner ticker's single recorded disposition.
 The evidence columns are not additional ticker statuses. Frozen and retained
 evidence can overlap. Every ticker appears exactly once.
 
@@ -190,7 +306,7 @@ Original active generation:
 `pb_ownership_719201a6f6f4497bb6a3e1ada35b81b6`.
 Watermark: `2026-10-28` (source repair does not advance it).
 
-## Complete ticker classification
+## Complete ticker classification — approved audit snapshot
 
 Counts refer to remaining active legacy observations and preserved original
 frozen/retained evidence. Repair counts are completed live source replacements,
