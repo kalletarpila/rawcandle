@@ -1,4 +1,6 @@
 from __future__ import annotations
+from tests.provider_capture_fixtures import full_row
+from rawcandle.fundamentals import source_capture as capture
 
 import csv
 import io
@@ -147,17 +149,20 @@ def _row(ticker: str, permaticker: str, dimension: str, reportperiod: str, fisca
 
 
 def _write_bulk_csv(path: Path, rows: list[dict[str, str]] | None = None) -> None:
-    rows = rows or _fundamental_rows()
+    rows = [full_row(r) for r in (rows or _fundamental_rows())]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+    (path.parent/'sharadar_fundamentals_bulk_manifest.json').write_text(json.dumps(dict(
+        endpoint='/data/fundamentals',extraction_sha256=capture._sha(path),
+        downloaded_at_utc='2026-10-30T00:00:00Z')))
 
 
 def _zip_bytes(rows: list[dict[str, str]] | None = None) -> bytes:
     handle = io.StringIO()
-    rows = rows or _fundamental_rows()
+    rows = [full_row(r) for r in (rows or _fundamental_rows())]
     writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
     writer.writeheader()
     writer.writerows(rows)

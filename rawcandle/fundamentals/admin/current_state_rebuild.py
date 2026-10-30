@@ -61,7 +61,8 @@ def acquire(ticker, *, client=None):
     for dimension in ('ARQ','MRQ'):
         result = client.fundamentals(ticker=ticker, dimension=dimension, limit=source.DISCOVERY_LIMIT)
         require(result.ok, 'AUTHORITATIVE_ACQUISITION_FAILED')
-        histories[dimension] = result.records
+        from rawcandle.fundamentals import source_capture as capture
+        histories[dimension] = [capture.wire(r) for r in result.records]
     value = dict(schema=VERSION + '_ACQUISITION', provider='SHARADAR', table='fundamentals',
         endpoint=source.SOURCE_ENDPOINT, ticker=ticker, acquired_at=utc_now(), fields=fields, histories=histories)
     return seal(value, 'acquisition_fingerprint')
@@ -84,6 +85,9 @@ def trusted(acquisition, ticker, *, dimensions=('ARQ','MRQ'), full_capture=True)
             response_reached_limit=len(raw)>=source.DISCOVERY_LIMIT)
         require(trust.status=='COMPLETE', 'AMBIGUOUS_OR_INCOMPLETE_HISTORY')
         if full_capture:
+            from rawcandle.fundamentals import source_capture as capture
+            if capture.ACTIVE:
+                for row in trust.rows:capture.require(row,capture.REPAIR)
             require(all(fields.issubset(row['_acquisition_payload']) for row in trust.rows), 'INCOMPLETE_PAYLOAD')
         result[dimension] = trust
     return result
@@ -159,9 +163,13 @@ def assess(root, key, acquisition, *, source_baseline):
         header = p.execute('SELECT * FROM provider_observation WHERE observation_id=?',(oid,)).fetchone()
         require(header is not None and header['provider_status']=='SUCCESS' and
             header['provider']=='SHARADAR' and header['native_table']=='fundamentals' and
-            not json.loads(header['provenance_json'] or '{}'), 'REVIEWED_OR_RETAINED_SOURCE')
+            not (set(json.loads(header['provenance_json'] or '{}'))-{'source_capture'}), 'REVIEWED_OR_RETAINED_SOURCE')
         require(p.execute('SELECT COUNT(*) FROM sharadar_fundamental_observation WHERE ticker=? AND dimension=? AND date=? AND reportperiod=?',key).fetchone()[0]==1,
             'DUPLICATE_CURRENT_KEY')
+        from rawcandle.fundamentals import source_capture as capture
+        stored_capture=json.loads(header['provenance_json'] or '{}').get('source_capture')
+        if stored_capture is not None:
+            require(capture.profile_report(json.loads(header['payload_json']),capture.BASE,capture=stored_capture)['eligible_authoritative_full_source'],'STORED_CAPTURE_INVALID')
         from . import accounting_boundary_review as boundary
         native = dict(p.execute('SELECT * FROM sharadar_fundamental_observation WHERE observation_id=?',(oid,)).fetchone())
         require(not boundary.interpretation(p,native)['resolution_id'] and not boundary.current_context(Path(source_baseline['roles']['provider']),native), 'BOUNDARY_SOURCE_UNSUPPORTED')
@@ -212,8 +220,11 @@ def revalidate(root, queue, plan, *, acquisitions=None):
         # match exactly, then use the original timestamp for receipt identity.
         trusted(a,p['ticker'])
         old=p['acquisition']
-        require({k:v for k,v in a.items() if k not in ('acquired_at','acquisition_fingerprint')}==
-            {k:v for k,v in old.items() if k not in ('acquired_at','acquisition_fingerprint')}, 'STALE_SOURCE')
+        from rawcandle.fundamentals.source_capture import raw_payload
+        def content(value):
+            return {**{k:v for k,v in value.items() if k not in ('acquired_at','acquisition_fingerprint','histories')},
+                'histories':{d:[raw_payload(r) for r in rows] for d,rows in value['histories'].items()}}
+        require(content(a)==content(old), 'STALE_SOURCE')
         selections.append((p['source_key'],old))
     require(preview(root,queue,selections,source_baseline=base)==plan, 'STALE_ELIGIBILITY')
 
@@ -275,9 +286,16 @@ def measure(plan,candidates):
             old=dict(op.execute('SELECT * FROM provider_observation WHERE observation_id=?',(proof['previous_observation_id'],)).fetchone())
             new=dict(np.execute('SELECT * FROM provider_observation WHERE observation_id=?',(proof['new_observation_id'],)).fetchone())
             require(old['content_hash']==proof['previous_content_hash'] and
-                payload.completeness(json.loads(new['payload_json']))==p['comparison']['new'] and
+                payload.matches_completeness(p['comparison']['new'],json.loads(new['payload_json'])) and
                 new['content_hash']==proof['new_content_hash'] and
-                json.loads(new['provenance_json'])=={'current_state_rebuild':proof},'SOURCE_PROVENANCE_MISMATCH')
+                {k:v for k,v in json.loads(new['provenance_json']).items() if k!='source_capture'}=={'current_state_rebuild':proof},'SOURCE_PROVENANCE_MISMATCH')
+            from rawcandle.fundamentals import source_capture as capture
+            selected=next(row for row in p['acquisition']['histories']['ARQ'] if source.source_key(row)==tuple(p['source_key']))
+            expected_capture=capture.envelope(selected)
+            stored_capture=json.loads(new['provenance_json']).get('source_capture')
+            require(stored_capture==expected_capture,'SOURCE_CAPTURE_BINDING_MISMATCH')
+            if expected_capture is not None:
+                require(capture.profile_report(json.loads(new['payload_json']),capture.REPAIR,capture=stored_capture)['eligible_authoritative_full_source'],'SOURCE_CAPTURE_INVALID')
             mutable={'observation_id','run_id','provider_record_key','content_hash','payload_json','provenance_json','fetched_at_utc','observed_at_utc'}
             require({k:v for k,v in old.items() if k not in mutable}=={k:v for k,v in new.items() if k not in mutable}
                 and new['observed_at_utc']==p['new_lastupdated'] and new['fetched_at_utc']==p['acquisition']['acquired_at']

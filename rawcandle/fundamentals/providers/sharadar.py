@@ -380,6 +380,11 @@ class SharadarClient:
                     records=[],
                     error=redact_secret(f"{type(exc).__name__}:{exc}", [self._api_key]),
                 )
+            from rawcandle.fundamentals.source_capture import _http_records
+            from datetime import datetime, timezone
+            captured = _http_records(payload_records(payload), endpoint=path, parameters=params,
+                                     acquired_at=datetime.now(timezone.utc).isoformat(),base_url=self._base_url,
+                                     response_sha256=hashlib.sha256(body.encode('utf-8')).hexdigest())
             return SharadarResult(
                 status=STATUS_SUCCESS,
                 auth_status=auth_status,
@@ -387,7 +392,7 @@ class SharadarClient:
                 endpoint=path,
                 url=safe_url,
                 request_count=self.request_count,
-                records=payload_records(payload),
+                records=captured,
                 payload=payload,
             )
 

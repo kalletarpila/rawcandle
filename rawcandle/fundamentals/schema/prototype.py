@@ -81,7 +81,8 @@ def nullable_text(value: Any) -> str | None:
 
 
 def int_or_none(value: Any) -> int | None:
-    text = nullable_text(value)
+    # Numeric zero is a source value; the generic text helper uses truthiness.
+    text = nullable_text(str(value) if isinstance(value,(int,float)) and not isinstance(value,bool) else value)
     if text is None:
         return None
     try:

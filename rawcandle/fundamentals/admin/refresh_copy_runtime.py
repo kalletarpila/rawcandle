@@ -414,17 +414,22 @@ def insert_provider_source_row(connection, row, identity, *, run_id, applied_at,
     The caller owns the inactive-copy transaction and explicit source selection.
     Refresh retains its existing observation hashing and retention contract.
     """
+    from rawcandle.fundamentals import source_capture as capture
+    proof = capture.guard(row)
     ticker = expected_ticker or str(row['ticker']).strip().upper()
     dimension = expected_dimension or str(row['dimension']).strip().upper()
-    item = normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension)
+    raw = capture.raw_payload(row)
+    item = normalize_source_row(raw, expected_ticker=ticker, expected_dimension=dimension)
     key = source_key(item)
     record_key = "|".join(key)
     from .provider_payload import payload_fingerprint
     content_hash = payload_fingerprint(row["_acquisition_payload"]) if full_payload_hash else fingerprint(_raw_row(item))
     observation_id = _observation_id(record_key, content_hash)
-    payload = dict(row.get("_acquisition_payload") or item)
+    payload = raw
     retention_status = row.get("_history_retention_status")
     provenance = dict(source_provenance or {})
+    if capture.ACTIVE:
+        provenance["source_capture"] = proof
     if retention_status == RETAINED_OUTSIDE_SOURCE_WINDOW:
         provenance = {
             "history_retention_status": RETAINED_OUTSIDE_SOURCE_WINDOW,
@@ -456,6 +461,34 @@ def replace_provider_histories(
     boundary_applications: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     from . import accounting_boundary_review as boundary
+    from rawcandle.fundamentals import source_capture as capture
+    retained_ids = set()
+    if capture.ACTIVE:
+        with sqlite3.connect(f"file:{provider_db.resolve()}?mode=ro",uri=True) as original:
+            original.row_factory=sqlite3.Row
+            for ticker, dimensions in histories.items():
+                for dimension, trust in dimensions.items():
+                    if trust.status != 'COMPLETE':
+                        if trust.capture_failures:
+                            failure=trust.capture_failures[0]
+                            raise capture.CaptureError(failure['reason'],failure)
+                        raise ValueError(f'COMPLETE_HISTORY_NOT_TRUSTED:{ticker}:{dimension}')
+                    rows=merge_plans[ticker]['dimensions'][dimension]['merged_rows'] if merge_plans is not None else trust.rows
+                    for row in rows:
+                        if row.get('_history_retention_status')==RETAINED_OUTSIDE_SOURCE_WINDOW:
+                            oid=row.get('_provider_observation_id')
+                            old=original.execute('SELECT * FROM provider_observation WHERE observation_id=?',(oid,)).fetchone()
+                            if (old is None or old['provider_ticker']!=ticker or old['dimension']!=dimension
+                                    or old['provider']!='SHARADAR' or old['native_table']!='fundamentals'
+                                    or old['company_id']!=identities[ticker]['company_id']
+                                    or old['security_id']!=identities[ticker]['security_id']
+                                    or old['content_hash']!=row.get('_provider_content_hash')
+                                    or json.loads(old['payload_json'])!=capture.raw_payload(row)
+                                    or json.loads(old['provenance_json'] or '{}')!=row.get('_provider_provenance')):
+                                raise capture.CaptureError(capture.UNVERIFIED,{'reason':'RETAINED_EXACT_SOURCE_REQUIRED','ticker':ticker})
+                            retained_ids.add(oid)
+                        else:
+                            capture.require(row)
     for ticker, application in (boundary_applications or {}).items():
         if ticker not in histories:
             raise boundary.BoundaryReviewError("BOUNDARY_APPLICATION_TICKER_MISMATCH")
@@ -487,7 +520,7 @@ def replace_provider_histories(
                 )]
                 before_counts[dimension] = len(ids)
                 removed_ids.extend(ids)
-            connection.executemany("DELETE FROM provider_observation WHERE observation_id=?", ((item,) for item in removed_ids))
+            connection.executemany("DELETE FROM provider_observation WHERE observation_id=?", ((item,) for item in removed_ids if item not in retained_ids))
             inserted = Counter()
             for dimension in REFRESH_DIMENSIONS:
                 trust = histories[ticker][dimension]
@@ -498,12 +531,22 @@ def replace_provider_histories(
                     if merge_plans is not None else trust.rows
                 )
                 for row in rows:
+                    if capture.ACTIVE and row.get('_provider_observation_id') in retained_ids:
+                        # Retention changes membership, not acquisition origin or
+                        # raw identity. Keep every original header and capture.
+                        provenance={**row['_provider_provenance'],
+                            'history_retention_status':RETAINED_OUTSIDE_SOURCE_WINDOW,
+                            'history_retention_evidence':row['_history_retention_evidence']}
+                        connection.execute('UPDATE provider_observation SET provenance_json=? WHERE observation_id=?',
+                            (json.dumps(provenance,sort_keys=True),row['_provider_observation_id']))
+                        inserted[dimension]+=1
+                        continue
                     insert_provider_source_row(connection, row, identity, run_id=run_id, applied_at=applied_at,
                                                expected_ticker=ticker, expected_dimension=dimension)
                     inserted[dimension] += 1
             replaced.append({
                 "ticker": ticker, "before_counts": before_counts,
-                "after_counts": dict(inserted), "removed_physical_rows": len(removed_ids),
+                "after_counts": dict(inserted), "removed_physical_rows": sum(oid not in retained_ids for oid in removed_ids),
                 "source_history_action": (merge_plans or {}).get(ticker, {}).get("action", {}),
             })
         connection.commit()

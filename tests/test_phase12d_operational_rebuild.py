@@ -64,11 +64,22 @@ def _row(quarter: int, *, revision: int = 1, operating_income: int = 10) -> dict
 
 
 def _insert(provider: Path, row: dict[str, object]) -> None:
+    from tests.provider_capture_fixtures import acquired
+    row=acquired([row])[0]
     with sqlite3.connect(provider) as connection:
         connection.row_factory = sqlite3.Row
         assert insert_production_sharadar_observation(
             connection, row, "run", "accepted", company_id=1, security_id=1
         )
+
+
+def _insert_legacy_invalid_date(provider: Path, row: dict[str, object]) -> None:
+    """Seed pre-V1 bad-date evidence, never a new authoritative acquisition."""
+    from rawcandle.fundamentals.schema.prototype import insert_sharadar_observation
+    assert str(row['date']) < str(row['reportperiod'])
+    with sqlite3.connect(provider) as connection:
+        oid=insert_sharadar_observation(connection,row,'run','legacy-fixture')
+        connection.execute('UPDATE provider_observation SET company_id=1,security_id=1 WHERE observation_id=?',(oid,))
 
 
 def _logical_guard_db(path: Path) -> None:
@@ -141,7 +152,7 @@ def test_invalid_date_disqualifies_whole_financial_winner_and_initializes_new_hi
     valid["lastupdated"] = "2026-04-29"
     invalid = dict(valid, date="2023-05-20", lastupdated="2026-09-08", opinc=99)
     _insert(provider, valid)
-    _insert(provider, invalid)
+    _insert_legacy_invalid_date(provider, invalid)
 
     result = phase12d.reconcile_canonical(provider, canonical, applied_at="fixed")
 
@@ -177,7 +188,7 @@ def test_all_invalid_publication_candidates_fail_closed(tmp_path: Path) -> None:
     provider, canonical, _ = _databases(tmp_path)
     invalid = _row(4)
     invalid["date"] = "2023-05-20"
-    _insert(provider, invalid)
+    _insert_legacy_invalid_date(provider, invalid)
 
     with pytest.raises(
         phase12d.PublicationDateAuthorityError,

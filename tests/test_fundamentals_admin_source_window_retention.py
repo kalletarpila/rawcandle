@@ -18,6 +18,8 @@ from rawcandle.fundamentals.admin.refresh_fundamentals import (
     validate_complete_history,
 )
 
+from tests.provider_capture_fixtures import trusted_history as validate_complete_history
+
 # Preserve strict pre-horizon classifier coverage; the new policy has its own tests.
 build_source_history_merge = partial(build_source_history_merge, historical_source_window_review_years=0)
 compare_ticker_histories = partial(compare_ticker_histories, historical_source_window_review_years=0)

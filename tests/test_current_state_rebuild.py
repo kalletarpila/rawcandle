@@ -1,5 +1,7 @@
 """Generic current-version rebuild, strict ordering and fail-closed lifecycle."""
 from contextlib import nullcontext
+from tests.provider_capture_fixtures import acquired,full_row
+from rawcandle.fundamentals.source_capture import raw_payload,wire
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,9 +25,14 @@ from tests.test_provider_payload_workflow import setup,base_factory
 
 
 def acquisition(full):
+    from tests.provider_capture_fixtures import acquired,full_row
+    from rawcandle.fundamentals.source_capture import wire
+    full=full_row(full)
+    arq=wire(acquired([full],full=False)[0])
+    mrq=wire(acquired([{**full,'dimension':'MRQ'}],full=False)[0])
     return r.seal(dict(schema=r.VERSION+'_ACQUISITION',provider='SHARADAR',table='fundamentals',
         endpoint=source.SOURCE_ENDPOINT,ticker='AAA',acquired_at=datetime.now(timezone.utc).isoformat(),
-        fields=sorted(full),histories=dict(ARQ=[full],MRQ=[{**full,'dimension':'MRQ'}])), 'acquisition_fingerprint')
+        fields=sorted(full),histories=dict(ARQ=[arq],MRQ=[mrq])), 'acquisition_fingerprint')
 
 
 @pytest.fixture
@@ -77,7 +84,7 @@ def test_version_preview_is_readonly_and_strict_still_rejects(case):
     'removed_old_field','existing_extra_revision','bad_mrq','schema','payload_contradiction',
 ])
 def test_unsafe_fallback_rejected_without_writes(case,mutation):
-    c=case;a=deepcopy(c.a);raw=a['histories']['ARQ'][0]
+    c=case;a=deepcopy(c.a);raw=a['histories']['ARQ'][0]['_acquisition_payload']
     if mutation in ('revenue','company_id','security_id','permaticker'):raw[mutation]=999
     elif mutation=='reportperiod':raw[mutation]='2026-09-29'
     elif mutation=='fiscalperiod':raw[mutation]='2027-Q3'
@@ -91,20 +98,18 @@ def test_unsafe_fallback_rejected_without_writes(case,mutation):
     elif mutation=='same_stamp':raw['lastupdated']=c.s.history.rows[0]['lastupdated']
     elif mutation=='backwards':raw['lastupdated']='2020-01-01'
     elif mutation=='removed_old_field':raw.pop('sharesbas')
-    elif mutation=='existing_extra_revision':raw['currency']='OTHER'
+    elif mutation=='existing_extra_revision':raw.update(currency='OTHER',revenue=999)
     elif mutation=='bad_mrq':a['histories']['MRQ']=[]
     elif mutation=='schema':a['fields']=list(source.REFRESH_REQUEST_FIELDS)
     elif mutation=='payload_contradiction':raw['dimension']='MRQ'
+    if mutation not in ('duplicate','competing','bad_mrq'):
+        a['histories']['ARQ']=[wire(acquired([raw],full=False)[0])]
     if mutation=='same_stamp':
         # This is safe ONLY through strict repair, never through rebuild.
         a=r.seal({k:v for k,v in a.items() if k!='acquisition_fingerprint'},'acquisition_fingerprint')
         with pytest.raises(ValueError,match='EXACT_REPAIR_MUST_BE_USED'):
             r.preview(c.s.root,c.s.queue,[(c.key,a)],source_baseline=c.base)
         return
-    if mutation=='existing_extra_revision':
-        # The legacy fixture has no currency field to compare. Demonstrate an
-        # existing financial payload revision instead of inventing old evidence.
-        raw['revenue']=999
     a=r.seal({k:v for k,v in a.items() if k!='acquisition_fingerprint'},'acquisition_fingerprint')
     before=c.s.queue.read_bytes()
     with pytest.raises((ValueError,KeyError)):
@@ -114,7 +119,8 @@ def test_unsafe_fallback_rejected_without_writes(case,mutation):
 
 def test_stale_source_and_baseline_are_rejected(case):
     c=case
-    changed=deepcopy(c.a);changed['histories']['ARQ'][0]['equity']=999
+    changed=deepcopy(c.a);raw=deepcopy(raw_payload(changed['histories']['ARQ'][0]));raw['equity']=999
+    changed['histories']['ARQ']=[wire(acquired([raw],full=False)[0])]
     changed=r.seal({k:v for k,v in changed.items() if k!='acquisition_fingerprint'},'acquisition_fingerprint')
     with pytest.raises(ValueError,match='STALE_SOURCE'):
         r.revalidate(c.s.root,c.s.queue,c.plan,acquisitions={'AAA':changed})
@@ -145,9 +151,9 @@ def test_native_current_rebuild_preserves_history_ownership_and_old_generation(c
         assert old.execute('SELECT payload_json FROM provider_observation WHERE observation_id=?',(proof['previous_observation_id'],)).fetchone()
     with strict._ro(Path(receipt['candidates']['provider'])) as new:
         row=new.execute('SELECT * FROM provider_observation WHERE observation_id=?',(proof['new_observation_id'],)).fetchone()
-        assert json.loads(row['payload_json'])==c.a['histories']['ARQ'][0]
+        assert json.loads(row['payload_json'])==raw_payload(c.a['histories']['ARQ'][0])
         assert row['observed_at_utc']=='2026-10-29'
-        assert json.loads(row['provenance_json'])=={'current_state_rebuild':proof}
+        assert json.loads(row['provenance_json'])=={'current_state_rebuild':proof,'source_capture':r.trusted(c.a,'AAA')['ARQ'].rows[0]['_capture_envelope']}
 
 
 def publish(c,receipt,**kw):
@@ -269,7 +275,12 @@ def test_generic_separated_frozen_review_can_preview_rebuild_without_consuming_a
     paths,queue,selected,scope=reviewed
     old=next(x for x in source.load_current_history(paths.provider_db,'AAA','ARQ')['rows']
         if x['_provider_observation_id']==selected['comparison']['old_observation_id'])
-    full={**old['_acquisition_payload'],'lastupdated':'2026-10-29','equity':120,'equityusd':100,'sharefactor':1}
+    legacy=source.normalize_source_row(old['_acquisition_payload'])
+    with sqlite3.connect(paths.provider_db) as conn:
+        from rawcandle.fundamentals.admin.contracts import fingerprint
+        conn.execute("UPDATE provider_observation SET payload_json=?,content_hash=?,provenance_json='{}' WHERE observation_id=?",
+            (json.dumps(legacy),fingerprint(source._raw_row(legacy)),old['_provider_observation_id']))
+    full={**legacy,'lastupdated':'2026-10-29','equity':120,'equityusd':100,'sharefactor':1}
     a=acquisition(full)
     base=dict(roles={'provider':str(paths.provider_db),'canonical':str(paths.canonical_db)})
     before={p:p.read_bytes() for p in (queue,paths.provider_db,paths.canonical_db)}
@@ -314,10 +325,10 @@ def test_remaining_uniform_capture_gap_is_explicit_and_rebuild_rejects_it(case):
     reduced={k:c.a['histories']['ARQ'][0].get(k) for k in source.REFRESH_REQUEST_FIELDS}
     # Existing general HistoryTrust is a normalized-history contract, not a full
     # capture contract. The separate rebuild gate must not inherit that weakness.
-    assert source.validate_complete_history([reduced],ticker='AAA',dimension='ARQ').status=='COMPLETE'
+    assert source.validate_complete_history([reduced],ticker='AAA',dimension='ARQ').status=='INCOMPLETE'
     a=deepcopy(c.a);a['histories']['ARQ']=[reduced]
     a=r.seal({k:v for k,v in a.items() if k!='acquisition_fingerprint'},'acquisition_fingerprint')
-    with pytest.raises(ValueError,match='INCOMPLETE_PAYLOAD'):
+    with pytest.raises(ValueError,match='AMBIGUOUS_OR_INCOMPLETE_HISTORY'):
         r.preview(c.s.root,c.s.queue,[(c.key,a)],source_baseline=c.base)
 
 

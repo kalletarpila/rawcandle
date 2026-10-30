@@ -27,6 +27,8 @@ SUPPORTED_ACTIONS = (
 )
 BLOCKED_ACTIONS: tuple[str, ...] = ()
 REASON_EXPLANATIONS = {
+    'SOURCE_PAYLOAD_CAPTURE_UNVERIFIED': 'This record was not captured from a verified full provider payload.',
+    'SOURCE_PAYLOAD_INCOMPLETE': 'Provider source evidence is incomplete for this operation.',
     "BOUNDARY_FISCAL_WINDOW_TOO_SHORT": (
         "Provider history is shorter than the required 41-quarter boundary."
     ),
@@ -126,6 +128,7 @@ def _queue_evidence_binding(item: Mapping[str, Any]) -> dict[str, Any]:
         "published_binding": item.get("last_published_binding"),
         "identity_binding": dict(context.get("identity_binding") or {}),
         "locality_proof": dict(context.get("locality_proof") or {}),
+        **({"capture_integrity":context["capture_integrity"]} if context.get("capture_integrity") else {}),
         **({"historical_freeze": context["historical_freeze"]} if context.get("historical_freeze") else {}),
     }
 
@@ -170,6 +173,7 @@ def _review_evidence(change: Mapping[str, Any]) -> dict[str, Any]:
         "ticker": str(change.get("ticker") or "").upper(),
         "review_reason": change.get("review_reason"),
         "source_completeness": change.get("source_completeness"),
+        **({"capture_integrity":change["capture_integrity"]} if change.get("capture_integrity") else {}),
         "source_history_action": change.get("source_history_action"),
         "events": events,
         "identity": change.get("identity"),
@@ -372,7 +376,16 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
                 and (e.get("historical_freeze_evidence") or {}).get("identity", [None])[0] == identity.get("company_id")
                 for e in frozen_events)
     )
-    local = source_window_local or fiscal_revision_local or true_removal_local or frozen_local
+    capture_proof=change.get('capture_integrity') or {}
+    failures=capture_proof.get('failures') or []
+    capture_local=(change.get('classification')=='REVIEW_REQUIRED'
+        and change.get('review_reason') in {'SOURCE_PAYLOAD_CAPTURE_UNVERIFIED','SOURCE_PAYLOAD_INCOMPLETE'}
+        and identity.get('status')=='KNOWN' and identity.get('company_id') and identity.get('security_id')
+        and capture_proof.get('current_history_valid') is True and bool(failures)
+        and all(f.get('ticker')==ticker and f.get('profile') in {'BASE_FINANCIAL_SOURCE','HISTORICAL_FREEZE_SOURCE'}
+            and f.get('reason') in {'SOURCE_PAYLOAD_CAPTURE_UNVERIFIED','SOURCE_PAYLOAD_INCOMPLETE'}
+            and f.get('raw_payload_fingerprint') for f in failures))
+    local = source_window_local or fiscal_revision_local or true_removal_local or frozen_local or capture_local
     affected_source_keys = [
         item.get("source_identity") for item in events if item.get("source_identity")
     ]
@@ -403,6 +416,7 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
         "source_evidence_fingerprint": fingerprint(evidence),
         "identity_binding": _identity_binding(identity),
         **({"historical_freeze": freeze} if freeze else {}),
+        **({"capture_integrity":capture_proof} if capture_proof else {}),
         "locality_proof": {
             "known_unique_identity": identity.get("status") == "KNOWN",
             "complete_arq_mrq": complete_arq_mrq,
@@ -469,6 +483,7 @@ def _review_context(item: Mapping[str, Any]) -> dict[str, Any]:
         "reason_codes": sorted(str(value) for value in item.get("reason_codes") or []),
         "identity_binding": dict(item.get("identity_binding") or {}),
         "locality_proof": dict(item.get("locality_proof") or {}),
+        **({"capture_integrity":item["capture_integrity"]} if item.get("capture_integrity") else {}),
         **({"historical_freeze": item["historical_freeze"]} if item.get("historical_freeze") else {}),
     }
 

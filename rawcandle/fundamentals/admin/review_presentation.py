@@ -26,6 +26,8 @@ class ReviewPresentation:
 
 
 LABELS = {
+    'SOURCE_PAYLOAD_CAPTURE_UNVERIFIED':'Provider capture is unverified',
+    'SOURCE_PAYLOAD_INCOMPLETE':'Provider source evidence is incomplete',
     'TRUE_SOURCE_REMOVAL': 'Published source observation missing',
     'PROVIDER_ANOMALY_SUSPECTED': 'Provider history anomaly',
     'REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION': 'Fiscal identity change requires review',
@@ -42,7 +44,8 @@ REASONS = {
     'BOUNDARY_FISCAL_WINDOW_TOO_SHORT': 'Provider history is shorter than the required rolling-history window.',
     'OLDEST_PREFIX_EXPECTED_FISCAL_WINDOW': 'The oldest source observation reached the rolling-history boundary.',
     'RETAINED_OUTSIDE_HISTORICAL_REVIEW_HORIZON': 'Historical source evidence is retained outside the current review horizon.',
-    'SOURCE_PAYLOAD_INCOMPLETE': 'Source payload is incomplete; automatic continuation is blocked.',
+    'SOURCE_PAYLOAD_INCOMPLETE': 'Provider source evidence is incomplete for this operation.',
+    'SOURCE_PAYLOAD_CAPTURE_UNVERIFIED': 'This record was not captured from a verified full provider payload.',
     'EXPLICIT_POLICY_HOLD': 'An explicit hold blocks automatic continuation.',
 }
 
@@ -113,6 +116,10 @@ def provider_review(item: Mapping[str, Any]) -> ReviewPresentation:
                 stages.append('If still unresolved: Investigate source history manually.')
             stages.append('Guidance only; no automatic escalation. Wait/Retry does not grant approval.')
             explanation = '\n'.join(stages)
+    if not terminal and {'SOURCE_PAYLOAD_INCOMPLETE','SOURCE_PAYLOAD_CAPTURE_UNVERIFIED'}.intersection(codes):
+        next_action='Reacquire provider source, then Retry reevaluation.'
+        explanation='Use controlled source repair or current-state rebuild where appropriate; no financial or historical approval is granted.'
+        reason=REASONS[next(c for c in codes if c in ('SOURCE_PAYLOAD_INCOMPLETE','SOURCE_PAYLOAD_CAPTURE_UNVERIFIED'))]
     from .historical_freeze import HELD, REVIEW_REASON
     frozen = any(d.get('decision') == HELD for d in
                  ((item.get('review_context') or {}).get('historical_freeze') or {}).get('conflicts', []))

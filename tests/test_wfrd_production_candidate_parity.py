@@ -10,6 +10,8 @@ from rawcandle.fundamentals.admin.contracts import fingerprint
 from rawcandle.fundamentals.admin.refresh_fundamentals import validate_complete_history
 from rawcandle.fundamentals.phase13b_foundation import online_backup
 from tests.test_wfrd_accounting_boundary_review import case, row, NOW
+from tests.provider_capture_fixtures import acquired
+from rawcandle.fundamentals import source_capture as capture
 
 
 def application(case):
@@ -105,15 +107,31 @@ def test_invalid_candidate_application_fails_before_installation(case,mutation):
     elif mutation=='proposal_link':app['proposal_fingerprint']='0'*64
     elif mutation=='ticker':ticker='OTHER'
     elif mutation=='missing_key':
-        histories['ARQ']=validate_complete_history([r['_acquisition_payload'] for r in histories['ARQ'].rows if b._key(r)!=b.ARQ_KEY],ticker='WFRD',dimension='ARQ')
+        raw=[deepcopy(r['_acquisition_payload']) for r in histories['ARQ'].rows]
+        captured=acquired(raw,full=False)
+        assert [dict(r) for r in captured]==raw
+        # Omit the reviewed key from the candidate after full acquisition.
+        histories['ARQ']=validate_complete_history([r for r in captured if b._key(r)!=b.ARQ_KEY],ticker='WFRD',dimension='ARQ')
     elif mutation=='conflict':
-        rows=[r['_acquisition_payload'] for r in histories['MRQ'].rows]
-        rows.append(row(('WFRD','MRQ','2019-12-14','2019-12-13'),'2019-Q4',ncfo=1))
-        histories['MRQ']=validate_complete_history(rows,ticker='WFRD',dimension='MRQ')
+        raw=[deepcopy(r['_acquisition_payload']) for r in histories['MRQ'].rows]
+        # Retain the full synthetic provider shape and every original conflict
+        # value. The extra metrics already declared by the fixture stay NULL.
+        conflict=row(('WFRD','MRQ','2019-12-14','2019-12-13'),'2019-Q4',ncfo=1)
+        conflict_raw={**raw[0],**conflict}
+        assert {k:conflict_raw[k] for k in conflict}==conflict
+        captured=acquired(raw,full=False)
+        extra=acquired([conflict_raw],full=False)
+        assert [dict(r) for r in captured]==raw and dict(extra[0])==conflict_raw
+        histories['MRQ']=validate_complete_history([*captured,*extra],ticker='WFRD',dimension='MRQ')
     else:app['decision']['copy_only']=True
+    if mutation in ('missing_key','conflict'):
+        assert all(h.status=='COMPLETE' and not h.capture_failures for h in histories.values())
+        assert all(capture.require(r) for h in histories.values() for r in h.rows)
     provider=case['tmp']/'invalid_provider.db';online_backup(case['p'],provider)
     before=b.file_fingerprint(provider)
-    with pytest.raises((b.BoundaryReviewError,KeyError)):
+    reason={'missing_key':'BOUNDARY_CURRENT_KEY_MISSING_OR_DUPLICATED',
+            'conflict':'BOUNDARY_NEW_ACCOUNTING_CONFLICT'}.get(mutation)
+    with pytest.raises((b.BoundaryReviewError,KeyError),match=reason):
         production.build_provider_candidate(provider,{ticker:histories},{ticker:case['identity']},
             changes=[{'ticker':ticker,'accounting_boundary_resolution':app}],applied_at=NOW)
     assert b.installed_decisions(provider)==[] and b.file_fingerprint(provider)==before

@@ -6,6 +6,8 @@ import json
 import sqlite3
 
 import pytest
+from tests.provider_capture_fixtures import acquired
+from rawcandle.fundamentals.source_capture import SF1_FIELDS
 
 from rawcandle.fundamentals.admin import provider_payload as p
 from rawcandle.fundamentals.admin.contracts import fingerprint
@@ -23,8 +25,9 @@ def fixture(tmp_path, old_extras=None, new_extras=None, ticker='TEST'):
     db = tmp_path / 'provider.db'
     create_provider(db)
     raw = source_row(ticker=ticker)
-    old = {**raw, **(old_extras or {})}
-    new = {**raw, **(EXTRAS if new_extras is None else new_extras)}
+    common={**dict.fromkeys(SF1_FIELDS-set(EXTRAS)),**raw}
+    old = raw if old_extras is None else {**common,**old_extras}
+    new = {**common, **(EXTRAS if new_extras is None else new_extras)}
     with sqlite3.connect(db) as c:
         for dimension in f.REFRESH_DIMENSIONS:
             r = {**old, 'dimension': dimension}
@@ -33,7 +36,7 @@ def fixture(tmp_path, old_extras=None, new_extras=None, ticker='TEST'):
                       (ticker, '|'.join(f.source_key(r)), json.dumps(r), fingerprint(f._raw_row(r)), 'old_' + dimension))
             c.execute('UPDATE sharadar_fundamental_observation SET ticker=? WHERE observation_id=?', (ticker, 'old_' + dimension))
     current = {d: f.load_current_history(db, ticker, d) for d in f.REFRESH_DIMENSIONS}
-    histories = {d: f.validate_complete_history([{**new, 'dimension': d}], ticker=ticker, dimension=d) for d in f.REFRESH_DIMENSIONS}
+    histories = {d: f.validate_complete_history(acquired([{**new, 'dimension': d}],full=False), ticker=ticker, dimension=d) for d in f.REFRESH_DIMENSIONS}
     return db, current, histories
 
 
@@ -111,8 +114,8 @@ def test_exact_focus_shape_and_new_immutable_payload_identity(tmp_path, ticker, 
     # as GE/RTX/T. This case also checks their source-key/count shape directly.
     raw = source_row(ticker=ticker, date=date, reportperiod='2026-09-30', fiscalperiod='2026-Q3')
     raw['sharesbas'] = shares
-    old = {**f.normalize_source_row(raw), '_acquisition_payload': raw}
-    new = {**f.normalize_source_row(raw), '_acquisition_payload': {**raw, **EXTRAS}}
+    old = {**f.normalize_source_row(raw), '_acquisition_payload': raw, '_provider_observation_id':'comparison-only'}
+    new = {**f.normalize_source_row(raw), '_acquisition_payload': {**raw, **EXTRAS}, '_provider_observation_id':'comparison-only'}
     assert len(raw) == 29 and p.compare_payload(old, new)['reason'] == p.REPAIR
     mrq_before = None
     with sqlite3.connect(db) as c:
@@ -143,9 +146,9 @@ def test_ordinary_ads_and_zero_factor_are_source_evidence_not_inferred(tmp_path,
 
 
 def test_absent_to_null_records_information_without_value_recovery(tmp_path):
-    db, current, histories = fixture(tmp_path, new_extras={'sharefactor': None})
+    db, current, histories = fixture(tmp_path, new_extras=dict.fromkeys(EXTRAS))
     result = repair(db, current, histories)
-    assert result['repairs'][0]['fields_restored_with_null'] == ['sharefactor']
+    assert 'sharefactor' in result['repairs'][0]['fields_restored_with_null']
     assert result['repairs'][0]['fields_restored_with_value'] == []
 
 
@@ -168,7 +171,7 @@ def test_identity_and_financial_contradictions_do_not_repair(tmp_path, drift):
     assert comparison['reason'] != p.REPAIR
     altered = {**histories, 'ARQ': replace(histories['ARQ'], rows=(new,))}
     before = hashlib.sha256(db.read_bytes()).hexdigest()
-    with pytest.raises(ValueError, match='PAYLOAD_REPAIR_'):
+    with pytest.raises(ValueError, match='PAYLOAD_REPAIR_|SOURCE_PAYLOAD_'):
         repair(db, current, altered, [candidate(current, histories)])
     assert hashlib.sha256(db.read_bytes()).hexdigest() == before
 
@@ -199,7 +202,7 @@ def test_repair_fails_closed_and_preserves_copy_on_invalid_selection(tmp_path, p
             c.execute("UPDATE provider_observation SET provenance_json=? WHERE observation_id='old_ARQ'",
                       (json.dumps({"reviewed": True}),))
     before = hashlib.sha256(db.read_bytes()).hexdigest()
-    with pytest.raises(ValueError, match='PAYLOAD_REPAIR_'):
+    with pytest.raises(ValueError, match='PAYLOAD_REPAIR_|SOURCE_PAYLOAD_'):
         repair(db, current, histories, candidates)
     assert hashlib.sha256(db.read_bytes()).hexdigest() == before
 
@@ -251,5 +254,5 @@ def test_source_company_security_identity_cannot_drift(tmp_path, field):
     row['_acquisition_payload'][field] = 'different'
     histories['ARQ'] = replace(histories['ARQ'], rows=(row,))
     assert p.compare_payload(current['ARQ']['rows'][0], row)['reason'] == 'SOURCE_PAYLOAD_IDENTITY_MISMATCH'
-    with pytest.raises(ValueError, match='PAYLOAD_REPAIR_NOT_COMPATIBLE'):
+    with pytest.raises(ValueError, match='PAYLOAD_REPAIR_NOT_COMPATIBLE|SOURCE_PAYLOAD_CAPTURE_UNVERIFIED'):
         repair(db, current, histories)

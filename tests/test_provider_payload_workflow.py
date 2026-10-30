@@ -1,4 +1,5 @@
 """Controlled repair receipts and journalled publication, on isolated projects."""
+from tests.provider_capture_fixtures import acquired
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -27,7 +28,7 @@ def setup(base_factory, tmp_path):
         old = f.normalize_source_row(full)
         from rawcandle.fundamentals.admin.contracts import fingerprint
         content_hash = fingerprint(f._raw_row(old))
-        c.execute('UPDATE provider_observation SET payload_json=?,content_hash=?,company_id=1,security_id=1,provider_security_id=\'1\',provider_ticker=\'AAA\' WHERE observation_id=?',
+        c.execute("UPDATE provider_observation SET provenance_json='{}',payload_json=?,content_hash=?,company_id=1,security_id=1,provider_security_id='1',provider_ticker='AAA' WHERE observation_id=?",
                   (json.dumps(old), content_hash, row['observation_id']))
     with sqlite3.connect(sample['cp']) as c:
         c.execute("INSERT OR IGNORE INTO provider_security_identity VALUES('SHARADAR','1',1,'AAA','TEST',?)", (ASOF,))
@@ -47,7 +48,7 @@ def setup(base_factory, tmp_path):
         'enabled_markets': ['usa'], 'run_time': '04:30',
         'analysis_db_path': str(root / 'data/analysis.db'), 'osakedata_db_path': str(root / 'data/osakedata.db')}))
     queue = root / 'queue.db'; shutil.copyfile(sample['queue'], queue)
-    history = f.validate_complete_history([full], ticker='AAA', dimension='ARQ')
+    history = f.validate_complete_history(acquired([full]), ticker='AAA', dimension='ARQ')
     proposal = w.proposal(root, f.source_key(full), history, fetched_at_utc=ASOF + 'T12:00:00Z')
     receipts = w.rehearse(root, [proposal], {('AAA', 'ARQ'): history}, root / 'candidate', as_of=ASOF)
     return SimpleNamespace(root=root, queue=queue, history=history, histories={('AAA', 'ARQ'): history},
@@ -64,7 +65,7 @@ def fake_client(s, mutation=None):
             row = deepcopy(s.full)
             if mutation:
                 row.update(mutation)
-            return SimpleNamespace(ok=True, records=[row])
+            return SimpleNamespace(ok=True, records=acquired([row]))
     return Client()
 
 

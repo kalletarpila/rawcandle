@@ -44,7 +44,7 @@ CODE = tuple(Path(__file__).with_name(name) for name in (
     'provider_payload_review_scope.py', 'provider_payload_acceptance.py', 'run_acceptance_cleanup.py',
 )) + tuple(Path(__file__).parents[1] / name for name in (
     'book_value.py', 'ownership_basis.py', 'pb_reporting_contract.py',
-    'schema/parent_equity.py', 'generations.py', 'ownership_reviews_v1.json', 'ownership_reviews_v2.json',
+    'schema/parent_equity.py', 'generations.py', 'source_capture.py', 'ownership_reviews_v1.json', 'ownership_reviews_v2.json',
 ))
 ASSERTIONS = (
     'exact_replacement', 'full_payload_matches', 'financial_values_unchanged',
@@ -143,6 +143,8 @@ def proposal(project_root: Path, key: tuple[str, str, str, str], history, *, fet
         or any(not stored.get(k) or identity.get(k) != stored[k]
                for k in ('company_id', 'security_id', 'provider_security_id'))):
         raise ValueError('PAYLOAD_WORKFLOW_IDENTITY_MISMATCH')
+    from rawcandle.fundamentals import source_capture as capture
+    capture.guard(new,capture.REPAIR)
     comparison = payload.compare_payload(old, new)
     if not comparison or comparison['reason'] != payload.REPAIR:
         raise ValueError('PAYLOAD_WORKFLOW_NOT_COMPLETENESS_REPAIR')
@@ -154,7 +156,8 @@ def proposal(project_root: Path, key: tuple[str, str, str, str], history, *, fet
              'fresh_factor': new['_acquisition_payload'].get('sharefactor'),
              'source_fetch_timestamp': fetched_at_utc, 'baseline': base,
              'status': 'PROPOSED', 'stale': False, 'live_repair_authorized': False,
-             'ownership_authorized': False, 'pb_authorized': False}
+             'ownership_authorized': False, 'pb_authorized': False,
+             **({'source_capture':capture.envelope(new)} if capture.ACTIVE else {})}
     value = _seal(value, 'proposal_fingerprint')
     return {'repair_id': 'ppr_' + value['proposal_fingerprint'], **value}
 
@@ -177,6 +180,17 @@ def revalidate(project_root: Path, item: dict, history, *, source_baseline: dict
         raise ValueError('PAYLOAD_WORKFLOW_STALE_BASELINE')
     rebuilt = proposal(project_root, tuple(item['source_key']), history,
                        fetched_at_utc=item['source_fetch_timestamp'], source_baseline=base)
+    if 'source_capture' in item:
+        from rawcandle.fundamentals import source_capture as capture
+        fresh=next(r for r in history.rows if source_key(r)==tuple(item['source_key']))
+        capture.require(fresh,capture.REPAIR)
+        if not capture.profile_report(capture.raw_payload(fresh),capture.REPAIR,capture=item['source_capture'])['eligible_authoritative_full_source']:
+            raise ValueError('PAYLOAD_WORKFLOW_STALE_CAPTURE')
+        # New authoritative fetch time can differ; retain the exact capture
+        # installed by this Test, after independently verifying the fresh fetch.
+        value={k:v for k,v in rebuilt.items() if k not in ('repair_id','proposal_fingerprint')}
+        value['source_capture']=item['source_capture'];value=_seal(value,'proposal_fingerprint')
+        rebuilt={'repair_id':'ppr_'+value['proposal_fingerprint'],**value}
     if rebuilt != item:
         raise ValueError('PAYLOAD_WORKFLOW_STALE_SOURCE')
 
@@ -306,13 +320,19 @@ def measure(proposals, candidates, repairs, *, as_of):
             if row is None or row['content_hash'] != item['comparison']['new']['payload_fingerprint']:
                 raise ValueError('PAYLOAD_WORKFLOW_CANDIDATE_SOURCE_MISMATCH')
             full = json.loads(row['payload_json'])
-            if payload.completeness(full) != item['comparison']['new']:
+            if not payload.matches_completeness(item['comparison']['new'],full):
                 raise ValueError('PAYLOAD_WORKFLOW_CANDIDATE_COMPLETENESS_MISMATCH')
             old_header = dict(original.execute('SELECT * FROM provider_observation WHERE observation_id=?', (repair['old_observation_id'],)).fetchone())
             mutable = {'observation_id', 'content_hash', 'payload_json', 'provenance_json', 'fetched_at_utc'}
             if {k: v for k, v in old_header.items() if k not in mutable} != {k: row[k] for k in old_header if k not in mutable}:
                 raise ValueError('PAYLOAD_WORKFLOW_PROVIDER_IDENTITY_CHANGED')
-            if json.loads(row['provenance_json']) != {'source_payload_repair': repair} or row['fetched_at_utc'] != repair['source_fetch_timestamp']:
+            expected_provenance={'source_payload_repair':repair}
+            if item.get('source_capture'):
+                from rawcandle.fundamentals import source_capture as capture
+                if not capture.profile_report(full,capture.REPAIR,capture=item['source_capture'])['eligible_authoritative_full_source']:
+                    raise ValueError('PAYLOAD_WORKFLOW_CAPTURE_PROOF_INVALID')
+                expected_provenance['source_capture']=item['source_capture']
+            if json.loads(row['provenance_json']) != expected_provenance or row['fetched_at_utc'] != repair['source_fetch_timestamp']:
                 raise ValueError('PAYLOAD_WORKFLOW_REPAIR_PROVENANCE_CHANGED')
             old_native = dict(original.execute('SELECT * FROM sharadar_fundamental_observation WHERE observation_id=?', (repair['old_observation_id'],)).fetchone())
             new_native = dict(c.execute('SELECT * FROM sharadar_fundamental_observation WHERE observation_id=?', (repair['new_observation_id'],)).fetchone())
@@ -398,6 +418,7 @@ def rehearse(project_root: Path, proposals, histories, output_dir: Path, *, as_o
         'old_content_hash': p['comparison']['old_content_hash'],
         'comparison_fingerprint': digest(p['comparison']),
         'source_fetch_timestamp': p['source_fetch_timestamp'],
+        **({'source_capture':p['source_capture']} if p.get('source_capture') else {}),
     } for p in proposals]
     # The primitive uses the existing administrative comparison hash; source
     # payload fingerprints inside that comparison still bind every source key.

@@ -260,6 +260,7 @@ def _save_response(response: Any, paths: ProductionPaths) -> tuple[Path, str, in
 
 
 def extract_bulk_csv(downloaded_path: Path, extracted_csv_path: Path) -> dict[str, Any]:
+    from rawcandle.fundamentals.source_capture import _sha
     if zipfile.is_zipfile(downloaded_path):
         with zipfile.ZipFile(downloaded_path) as archive:
             csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
@@ -276,6 +277,7 @@ def extract_bulk_csv(downloaded_path: Path, extracted_csv_path: Path) -> dict[st
         "extracted_path": str(extracted_csv_path),
         "extracted_name": extracted_name,
         "extraction_size": extracted_csv_path.stat().st_size,
+        "extraction_sha256": _sha(extracted_csv_path),
         "extracted_rows": row_count,
         "extracted_columns": column_count,
         "dimensions_present": sorted(dimensions),
@@ -382,9 +384,16 @@ def ingest_bulk_provider_rows(
                 }, sort_keys=True),
             ),
         )
-        with paths.extracted_csv_path.open(newline="", encoding="utf-8-sig") as handle:
-            reader = csv.DictReader(handle)
-            bulk_permaticker_field_present = "permaticker" in (reader.fieldnames or [])
+        from rawcandle.fundamentals import source_capture as capture
+        from contextlib import nullcontext
+        manifest=next((p for p in (paths.artifact_root/'sharadar_fundamentals_bulk_manifest.json',paths.artifact_root/'sharadar_bulk_manifest.json') if p.exists()),paths.artifact_root/'sharadar_fundamentals_bulk_manifest.json')
+        with (nullcontext(None) if capture.ACTIVE else paths.extracted_csv_path.open(newline="",encoding="utf-8-sig")) as handle:
+            reader=(capture.archive_records(paths.extracted_csv_path,manifest) if capture.ACTIVE else csv.DictReader(handle))
+            if capture.ACTIVE:
+                with paths.extracted_csv_path.open(newline='',encoding='utf-8-sig') as header:
+                    bulk_permaticker_field_present='permaticker' in (csv.DictReader(header).fieldnames or [])
+            else:
+                bulk_permaticker_field_present='permaticker' in (reader.fieldnames or [])
             for row in reader:
                 rows_read += 1
                 ticker = str(row.get("ticker") or "").strip().upper()
@@ -515,13 +524,18 @@ def insert_production_sharadar_observation(
     *,
     company_id: int,
     security_id: int,
+    provider_security_id: str | None = None,
 ) -> bool:
+    from rawcandle.fundamentals import source_capture as capture
+    proof = capture.guard(row)
+    row = capture.raw_payload(row)
     ticker = str(row.get("ticker") or "").upper()
     dimension = str(row.get("dimension") or "").upper()
-    permaticker = nullable_text(row.get("permaticker"))
+    raw_permaticker = nullable_text(row.get("permaticker"))
+    permaticker = raw_permaticker or provider_security_id
     provider_record_key = "|".join(
         [
-            permaticker or "",
+            raw_permaticker or "",
             ticker,
             dimension,
             str(row.get("reportperiod") or ""),
@@ -538,7 +552,7 @@ def insert_production_sharadar_observation(
             observation_id, run_id, provider, provider_record_key, company_id, security_id, provider_ticker,
             provider_security_id, native_table, dimension, calendardate, reportperiod, fiscalperiod,
             source_availability_date, fetched_at_utc, content_hash, provider_status, payload_json, provenance_json
-        ) VALUES (?, ?, 'SHARADAR', ?, ?, ?, ?, ?, 'fundamentals', ?, ?, ?, ?, ?, ?, ?, 'SUCCESS', ?, '{}')
+        ) VALUES (?, ?, 'SHARADAR', ?, ?, ?, ?, ?, 'fundamentals', ?, ?, ?, ?, ?, ?, ?, 'SUCCESS', ?, ?)
         """,
         (
             observation_id,
@@ -556,6 +570,7 @@ def insert_production_sharadar_observation(
             now,
             content_hash,
             json.dumps(dict(row), sort_keys=True, default=str),
+            json.dumps({"source_capture":proof} if capture.ACTIVE else {},sort_keys=True),
         ),
     )
     inserted = conn.total_changes > before

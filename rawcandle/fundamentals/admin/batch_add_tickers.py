@@ -264,7 +264,10 @@ class GenericBatchPlan:
             "ticker_reporting": [dict(item) for item in self.ticker_reporting],
         }
         core["accepted_tickers"] = list(self.accepted_tickers)
-        core["plan_fingerprint"] = stable_hash(core)
+        from rawcandle.fundamentals.source_capture import binding_row
+        bound={**core,"items":[{**item,**({"rows":[binding_row(row) for row in item["rows"]]} if "rows" in item else {})}
+            for item in core["items"]]}
+        core["plan_fingerprint"] = stable_hash(bound)
         return core
 
 
@@ -668,31 +671,57 @@ def _classification(paths: BatchAddTickerPaths, ticker: str) -> dict[str, Any]:
     }
 
 
-def _local_provider_rows(paths: BatchAddTickerPaths, ticker: str) -> tuple[dict[str, Any], ...]:
+def _local_provider_rows(paths: BatchAddTickerPaths, ticker: str, *, capture_failures=None) -> tuple[dict[str, Any], ...]:
+    from rawcandle.fundamentals import source_capture as capture
+    from .refresh_fundamentals import REFRESH_REQUEST_FIELDS
     with _readonly(paths.provider_db) as conn:
         if not _table_exists(conn, "sharadar_fundamental_observation"):
             return ()
-        return tuple(dict(row) for row in conn.execute(
-            "SELECT * FROM sharadar_fundamental_observation WHERE UPPER(ticker)=UPPER(?) ORDER BY ticker,dimension,reportperiod,fiscalperiod,date",
-            (ticker,),
-        ))
+        rows=conn.execute("SELECT s.*,p.payload_json,p.provenance_json,p.content_hash FROM sharadar_fundamental_observation s JOIN provider_observation p USING(observation_id) WHERE UPPER(s.ticker)=UPPER(?) ORDER BY s.ticker,s.dimension,s.reportperiod,s.fiscalperiod,s.date",(ticker,)).fetchall()
+        result=[];invalid=[]
+        for row in rows:
+            native=dict(row);raw=json.loads(native.pop('payload_json'));prov=json.loads(native.pop('provenance_json') or '{}')
+            if not capture.ACTIVE:
+                result.append({k:v for k,v in native.items() if k!='content_hash'});continue
+            # Retain exact captured origin. Local relational rows never attest
+            # a new capture. Unattested cache rows require archive/network fetch.
+            wire={**{k:raw.get(k) for k in (*REFRESH_REQUEST_FIELDS,'permaticker') if k in raw},
+                '_acquisition_payload':raw,'_capture_envelope':prov.get('source_capture'),'_capture_transport':capture.VERSION,
+                '_local_observation_id':native['observation_id'],'_local_content_hash':native['content_hash'],
+                '_local_provenance':prov}
+            report=capture.profile_report(wire,capture.BASE)
+            if report['eligible_authoritative_full_source']:
+                result.append(wire)
+            else:
+                invalid.append(capture.review_report(report))
+        if invalid:
+            if capture_failures is not None:capture_failures[ticker]=invalid
+            return ()  # Never silently reuse a truncated subset of cached history.
+        return tuple(result)
 
 
 def _archive_rows(archive: Path, tickers: set[str]) -> dict[str, tuple[dict[str, Any], ...]]:
-    if not archive.exists():
-        return {ticker: () for ticker in tickers}
-    rows: dict[str, list[dict[str, Any]]] = {ticker: [] for ticker in tickers}
-    with ZipFile(archive) as zf:
-        name = next((item for item in zf.namelist() if item.lower().endswith(".csv")), None)
-        if name is None:
+    from rawcandle.fundamentals import source_capture as capture
+    if not archive.exists():return {ticker: () for ticker in tickers}
+    rows={ticker:[] for ticker in tickers}
+    if capture.ACTIVE:
+        try:
+            for row in capture.archive_records(archive,tickers=tickers):
+                ticker=str(row.get('ticker') or '').upper()
+                if ticker in rows:rows[ticker].append(capture.wire(row))
+        except capture.CaptureError:
+            # An unverified optional archive is not promoted. The existing
+            # acquisition planner can request network evidence instead.
             return {ticker: () for ticker in tickers}
-        with zf.open(name) as raw:
-            text = io.TextIOWrapper(raw, encoding="utf-8-sig", newline="")
-            for row in csv.DictReader(text):
-                ticker = str(row.get("ticker") or "").upper()
-                if ticker in rows:
-                    rows[ticker].append(dict(row))
-    return {ticker: tuple(items) for ticker, items in rows.items()}
+    else:
+        with ZipFile(archive) as zf:
+            name=next((n for n in zf.namelist() if n.lower().endswith('.csv')),None)
+            if name is None:return {ticker:() for ticker in tickers}
+            with zf.open(name) as raw:
+                for row in csv.DictReader(io.TextIOWrapper(raw,encoding='utf-8-sig',newline='')):
+                    ticker=str(row.get('ticker') or '').upper()
+                    if ticker in rows:rows[ticker].append(dict(row))
+    return {ticker:tuple(items) for ticker,items in rows.items()}
 
 
 def _payload_shape_valid(payload: Any) -> bool:
@@ -711,6 +740,12 @@ def _successful_acquisition_state(rows: Sequence[Mapping[str, Any]]) -> tuple[st
     quarterly = [row for row in rows if str(row.get("dimension") or "").upper() in {"ARQ", "MRQ"}]
     if not quarterly:
         return "SUCCESS_NO_USABLE_QUARTERLY_HISTORY", None
+    from rawcandle.fundamentals import source_capture as capture
+    if capture.ACTIVE:
+        for row in quarterly:
+            report=capture.profile_report(row,capture.BASE)
+            if not report['eligible_authoritative_full_source']:
+                return report['reason'],report['reason']
     if incomplete_fiscal_identity_rows(quarterly):
         return "INCOMPLETE_FISCAL_IDENTITY", "INCOMPLETE_FISCAL_IDENTITY"
     required_except_fiscalperiod = set(FUNDAMENTALS_REQUIRED_FIELDS) - {"fiscalperiod"}
@@ -740,7 +775,8 @@ def _network_rows(tickers: Sequence[str], *, network_allowed: bool, client: Shar
         # projection has previously returned successful but incomplete rows.
         result = client.fundamentals(ticker=ticker, limit=10000)
         provider_status = str(result.status)
-        rows = tuple(dict(row) for row in result.records) if result.ok else ()
+        from rawcandle.fundamentals import source_capture as capture
+        rows = tuple(capture.wire(row) for row in result.records) if result.ok else ()
         payload_valid = not hasattr(result, "payload") or result.payload is None or _payload_shape_valid(result.payload)
         if result.ok and not payload_valid:
             acquisition_status, reason_code = "RESPONSE_SCHEMA_INVALID", "RESPONSE_SCHEMA_INVALID"
@@ -828,8 +864,9 @@ def build_generic_batch_plan(
     archive_rows = _archive_rows(effective_archive, set(tickers)) if effective_archive else {ticker: () for ticker in tickers}
     network_needed: list[str] = []
     local_rows_by_ticker: dict[str, tuple[dict[str, Any], ...]] = {}
+    local_capture_failures = {}
     for ticker in tickers:
-        local_rows = _local_provider_rows(paths, ticker)
+        local_rows = _local_provider_rows(paths, ticker,capture_failures=local_capture_failures)
         local_rows_by_ticker[ticker] = local_rows
         if not local_rows and not archive_rows.get(ticker):
             network_needed.append(ticker)
@@ -900,7 +937,7 @@ def build_generic_batch_plan(
                 }
             else:
                 acquisition_status = "NETWORK_NOT_REQUESTED"
-                acquisition_reason = "NETWORK_REQUIRED"
+                acquisition_reason = (local_capture_failures.get(ticker) or [{}])[0].get("reason") or "NETWORK_REQUIRED"
                 source_category = "network_required"
                 acquisition = {
                     "status": acquisition_status,
@@ -909,6 +946,8 @@ def build_generic_batch_plan(
                     "network_used": False,
                     "authoritative": False,
                 }
+        if local_capture_failures.get(ticker) and not acquisition.get('authoritative'):
+            acquisition['capture_integrity']={'failures':local_capture_failures[ticker]}
         blockers: list[str] = []
         if identity_resolution["resolution_class"] == "IDENTITY_REVIEW_REQUIRED":
             blockers.extend(identity_resolution["reason_codes"])
@@ -942,12 +981,13 @@ def build_generic_batch_plan(
             status = "REVIEW_REQUIRED"
             reason = "IDENTITY_MUTATION_NOT_AUTHORIZED"
         elif blockers:
-            status = "REVIEW_REQUIRED" if any("REVIEW" in blocker or "AMBIGUOUS" in blocker or blocker in {"PROVIDER_METADATA_MISSING", "NO_USABLE_QUARTERLY_HISTORY", "INCOMPLETE_FISCAL_IDENTITY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN", "NETWORK_REQUIRED", "NETWORK_TRANSIENT_FAILURE", "NETWORK_PERMANENT_FAILURE", "RESPONSE_SCHEMA_INVALID"} for blocker in blockers) else "REJECTED"
+            status = "REVIEW_REQUIRED" if any("REVIEW" in blocker or "AMBIGUOUS" in blocker or blocker in {"SOURCE_PAYLOAD_CAPTURE_UNVERIFIED", "SOURCE_PAYLOAD_INCOMPLETE", "PROVIDER_METADATA_MISSING", "NO_USABLE_QUARTERLY_HISTORY", "INCOMPLETE_FISCAL_IDENTITY", "CONTRADICTORY_FISCAL_SEQUENCE", "CIK_IDENTITY_CONFLICT", "PROVIDER_IDENTITY_CONFLICT", "CURRENT_TICKER_PROVIDER_CONFLICT", "PERMATICKER_CIK_CONFLICT", "TICKER_REUSE_RISK", "TICKER_REUSE_PROVIDER_CONFLICT", "EXCHANGE_UNKNOWN", "NETWORK_REQUIRED", "NETWORK_TRANSIENT_FAILURE", "NETWORK_PERMANENT_FAILURE", "RESPONSE_SCHEMA_INVALID"} for blocker in blockers) else "REJECTED"
             reason = ",".join(blockers)
         else:
             status = "ELIGIBLE"
             reason = "Eligible from provider identity, price, classification and fundamentals evidence."
-        safe_rows = tuple(dict(row) for row in rows) if include_rows else ()
+        from rawcandle.fundamentals import source_capture as capture
+        safe_rows = tuple(capture.wire(row) for row in rows) if include_rows else ()
         items.append(GenericBatchItemPlan(
             requested_ticker=ticker,
             ticker=ticker,
@@ -962,7 +1002,7 @@ def build_generic_batch_plan(
             identity_resolution=identity_resolution,
             provider_row_count=len(rows),
             provider_arq_row_count=len(arq_rows),
-            source_fingerprint=stable_hash({"ticker": ticker, "source_category": source_category, "rows": rows}),
+            source_fingerprint=stable_hash({"ticker": ticker, "source_category": source_category, "rows": [capture.binding_row(row) for row in rows]}),
             rows=safe_rows,
         ))
     plan = GenericBatchPlan(
@@ -1462,17 +1502,26 @@ def _stage_generic_provider_rows(paths: BatchAddTickerPaths, items: Sequence[Map
                     continue
                 company_id, security_id = identity
                 for row in item.get("rows") or ():
-                    staged = dict(row)
-                    staged["ticker"] = ticker
-                    if not staged.get("permaticker"):
-                        metadata = item.get("provider_metadata", {}).get("identity", {})
-                        staged["permaticker"] = metadata.get("permaticker")
+                    from rawcandle.fundamentals import source_capture as capture
+                    staged = capture.wire(row)
+                    metadata = item.get("provider_metadata", {}).get("identity", {})
+                    if str(capture.raw_payload(staged).get('ticker') or '').upper()!=ticker:
+                        raise capture.CaptureError(capture.UNVERIFIED,{'reason':'TICKER_IDENTITY_MISMATCH'})
+                    if capture.ACTIVE and row.get('_local_observation_id'):
+                        capture.require(staged)
+                        original=conn.execute('SELECT company_id,security_id,content_hash,payload_json,provenance_json FROM provider_observation WHERE observation_id=?',(row['_local_observation_id'],)).fetchone()
+                        if (original is None or tuple(original[:3])!=(company_id,security_id,row['_local_content_hash'])
+                            or json.loads(original[3])!=capture.raw_payload(row) or json.loads(original[4] or '{}')!=row['_local_provenance']):
+                            raise capture.CaptureError(capture.UNVERIFIED,{'reason':'LOCAL_EXACT_SOURCE_MISMATCH'})
+                        # Existing evidence keeps ID/run/time/provenance; no new
+                        # observation or fresh acquisition claim is synthesized.
+                        continue
                     dimension = str(staged.get("dimension") or "").upper()
                     if dimension not in {"ARQ", "MRQ", "ART", "MRT", "ARY", "MRY"}:
                         skipped["unsupported_dimension"] += 1
                         continue
                     matched[dimension] += 1
-                    if insert_production_sharadar_observation(conn, staged, run_id, applied_at, company_id=company_id, security_id=security_id):
+                    if insert_production_sharadar_observation(conn, staged, run_id, applied_at, company_id=company_id, security_id=security_id, provider_security_id=metadata.get("permaticker")):
                         inserted[dimension] += 1
                     seen += 1
                     if inject_failure and seen >= 3:

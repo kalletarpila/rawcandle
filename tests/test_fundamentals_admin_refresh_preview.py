@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.provider_capture_fixtures import acquired, trusted_history
 
 import json
 import sqlite3
@@ -119,7 +120,7 @@ class PreviewClient:
     def fundamentals(self, **kwargs):
         dimension = kwargs.get("dimension")
         if kwargs.get("ticker"):
-            return result(self.source_arq if dimension == "ARQ" else self.source_mrq)
+            return result(acquired(self.source_arq if dimension == "ARQ" else self.source_mrq))
         updated = max(str(item["lastupdated"]) for item in self.source_arq + self.source_mrq)
         ticker = str((self.source_arq or self.source_mrq)[0]["ticker"])
         return result([{"ticker": ticker, "dimension": dimension, "lastupdated": updated}])
@@ -148,20 +149,20 @@ def test_semantic_hashes_are_order_independent_and_separate_metadata() -> None:
 
 
 def test_complete_history_validation_is_structural_not_row_count_based() -> None:
-    trusted = validate_complete_history([row()], ticker="TEST", dimension="ARQ")
+    trusted = trusted_history([row()], ticker="TEST", dimension="ARQ")
     assert trusted.status == "COMPLETE"
     assert trusted.row_count == 1
-    empty = validate_complete_history([], ticker="TEST", dimension="ARQ")
+    empty = trusted_history([], ticker="TEST", dimension="ARQ")
     assert empty.status == "INCOMPLETE"
     assert "EMPTY_HISTORY_RESPONSE" in empty.errors
-    duplicate = validate_complete_history([row(), row(revenue=200)], ticker="TEST", dimension="ARQ")
+    duplicate = trusted_history([row(), row(revenue=200)], ticker="TEST", dimension="ARQ")
     assert duplicate.status == "INCOMPLETE"
     assert "DUPLICATE_SOURCE_PRIMARY_KEY" in duplicate.errors
-    wrong = validate_complete_history([row(ticker="OTHER")], ticker="TEST", dimension="ARQ")
+    wrong = trusted_history([row(ticker="OTHER")], ticker="TEST", dimension="ARQ")
     assert wrong.status == "INCOMPLETE"
-    malformed = validate_complete_history([dict(row(), date="not-a-date")], ticker="TEST", dimension="ARQ")
+    malformed = trusted_history([dict(row(), date="not-a-date")], ticker="TEST", dimension="ARQ")
     assert malformed.status == "INCOMPLETE"
-    exact_limit = validate_complete_history([row()], ticker="TEST", dimension="ARQ", response_reached_limit=True)
+    exact_limit = trusted_history([row()], ticker="TEST", dimension="ARQ", response_reached_limit=True)
     assert exact_limit.status == "INCOMPLETE"
 
 
@@ -172,7 +173,7 @@ def test_complete_history_authority_does_not_use_lossy_fields_projection() -> No
 
         def fundamentals(self, **kwargs):
             self.calls.append(kwargs)
-            return result([row(ticker=str(kwargs["ticker"]), dimension=str(kwargs["dimension"]))])
+            return result(acquired([row(ticker=str(kwargs["ticker"]), dimension=str(kwargs["dimension"]))]))
 
     client = ContractClient()
     trust = fetch_complete_history(client, "TEST", "ARQ")
@@ -239,8 +240,8 @@ def histories(old_arq: dict[str, object], new_arq: dict[str, object], *, old_mrq
         "MRQ": {"rows": (normalize_source_row(old_mrq),), "current_row_count": 1, "legacy_versions_collapsed": 0, "invalid_rows": [], **history_fingerprints([old_mrq])},
     }
     source = {
-        "ARQ": validate_complete_history([new_arq], ticker="TEST", dimension="ARQ"),
-        "MRQ": validate_complete_history([new_mrq], ticker="TEST", dimension="MRQ"),
+        "ARQ": trusted_history([new_arq], ticker="TEST", dimension="ARQ"),
+        "MRQ": trusted_history([new_mrq], ticker="TEST", dimension="MRQ"),
     }
     return current, source
 
@@ -301,7 +302,7 @@ def test_fiscal_revision_reports_duplicate_target_but_still_reviews_coherent_cas
     target = row(filing_date="2026-05-20", reportperiod="2026-04-30", fiscalperiod="2026-Q4")
     revised = dict(old, fiscalperiod="2026-Q4", lastupdated="2026-09-15")
     current, source = histories(old, revised)
-    source["ARQ"] = validate_complete_history([target, revised], ticker="TEST", dimension="ARQ")
+    source["ARQ"] = trusted_history([target, revised], ticker="TEST", dimension="ARQ")
     result = compare_ticker_histories("TEST", current, source)
     assert result["fiscal_identity_revisions"][0]["target_fiscal_identity_already_exists"] is True
     assert result["classification"] == "REVIEW_REQUIRED"
@@ -377,7 +378,7 @@ def test_yyai_style_exact_approval_retains_23_rows_without_weakening_boundary(
             "invalid_rows": [],
             **history_fingerprints(existing),
         }
-        source[dimension] = validate_complete_history(
+        source[dimension] = trusted_history(
             source_rows[dimension], ticker="YYAI", dimension=dimension,
         )
 

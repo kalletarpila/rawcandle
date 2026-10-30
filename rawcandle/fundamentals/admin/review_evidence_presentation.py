@@ -79,9 +79,18 @@ def evidence_summary(kind: str, item: Mapping[str, Any], *, view: ReviewPresenta
                   for field,values in (d.get('value_changes') or {}).items()],
                 f"Evidence fingerprint: {d.get('evidence_fingerprint')}",
                 'Repair eligibility: existing exact reviewed evidence required; ordinary provider evidence grants no repair.'))
+        capture_rows=[]
+        for failure in ((item.get('review_context') or {}).get('capture_integrity') or {}).get('failures',[]):
+            capture_rows.extend((f"Source profile: {failure.get('profile')}",
+                f"Missing keys: {', '.join(failure.get('missing_keys') or []) or 'None'}",
+                f"Explicit-null keys: {', '.join(failure.get('explicit_null_keys') or []) or 'None'}",
+                f"Unusable fields: {', '.join(failure.get('unusable_fields') or []) or 'None'}",
+                f"Capture provenance: {failure.get('capture_provenance') or 'Unverified'}",
+                f"Raw fingerprint: {failure.get('raw_payload_fingerprint')}",
+                f"Normalized fingerprint: {failure.get('normalized_projection_fingerprint')}"))
         return (f"Ticker: {item.get('ticker','Not recorded')}",f"Review status: {item.get('status','Not recorded')}",
                 'Classification: '+classification_label(view.classification),*provider_card_fields(item,view),
-                'Approval availability: '+(view.blocked_action_reason or 'See permitted actions and exact evidence.'), *freeze_rows)
+                'Approval availability: '+(view.blocked_action_reason or 'See permitted actions and exact evidence.'), *freeze_rows,*capture_rows)
     if kind == 'boundary':
         proposal = item.get('proposal') or {};evidence=proposal.get('evidence') or {}
         arq,mrq=evidence.get('arq') or {},evidence.get('mrq') or {}

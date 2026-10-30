@@ -26,7 +26,8 @@ def payload_fingerprint(value: Any) -> str:
 
 
 def field_state(payload: Mapping[str, Any], key: str) -> str:
-    return 'ABSENT' if key not in payload else 'NULL' if payload[key] is None else 'VALUE'
+    from rawcandle.fundamentals.source_capture import field_state as canonical_state
+    return canonical_state(payload,key)
 
 
 def acquisition_payload(row: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -40,6 +41,16 @@ def completeness(payload: Mapping[str, Any]) -> dict[str, Any]:
             'completeness_fingerprint': payload_fingerprint(states),
             'payload_fingerprint': payload_fingerprint(dict(payload))}
 
+
+
+def matches_completeness(proof, raw):
+    """Read both legacy NULL-label receipts and canonical field-state receipts."""
+    if proof == completeness(raw):
+        return True
+    states={key:'NULL' if raw[key] is None else 'VALUE' for key in sorted(raw)}
+    legacy={'key_states':states,'key_count':len(states),
+        'completeness_fingerprint':payload_fingerprint(states),'payload_fingerprint':payload_fingerprint(dict(raw))}
+    return proof == legacy
 
 def compare_payload(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str, Any] | None:
     from .refresh_fundamentals import (
@@ -82,8 +93,8 @@ def compare_payload(old: Mapping[str, Any], new: Mapping[str, Any]) -> dict[str,
     changed = sorted(key for key in set(before) & set(after) - projection
                      if payload_fingerprint(before[key]) != payload_fingerprint(after[key]))
     evidence.update(fields_restored=added, fields_removed=removed, fields_changed=changed,
-                    fields_restored_with_null=[key for key in added if after[key] is None],
-                    fields_restored_with_value=[key for key in added if after[key] is not None],
+                    fields_restored_with_null=[key for key in added if field_state(after,key)=='EXPLICIT_NULL'],
+                    fields_restored_with_value=[key for key in added if field_state(after,key)=='VALUE'],
                     financial_fields_changed=False,
                     legacy_financial_projection=set(before) == projection)
     if removed:
@@ -155,7 +166,16 @@ def repair_payloads_on_copy(provider_db: Path, candidates: Sequence[Mapping[str,
             if len(matches) != 1:
                 raise ValueError('PAYLOAD_REPAIR_AMBIGUOUS_OR_MISSING_SOURCE')
             new = matches[0]
-            if (new.get('_history_retention_status') or json.loads(old['provenance_json'] or '{}')):
+            from rawcandle.fundamentals import source_capture as capture
+            capture.guard(new,capture.REPAIR)
+            old_provenance=json.loads(old['provenance_json'] or '{}')
+            if old_provenance.get('source_capture') is not None:
+                # Reload original capture explicitly; previous is a native
+                # projection with separate raw evidence, not a fresh acquisition.
+                stored_report=capture.profile_report(acquisition_payload(previous),capture.BASE,capture=old_provenance['source_capture'])
+                if not stored_report['eligible_authoritative_full_source']:
+                    raise ValueError('PAYLOAD_REPAIR_STORED_CAPTURE_INVALID')
+            if (new.get('_history_retention_status') or set(old_provenance)-{'source_capture'}):
                 raise ValueError('PAYLOAD_REPAIR_REVIEWED_OR_RETAINED_SOURCE')
             comparison = compare_payload(previous, new)
             if not comparison or comparison['reason'] != REPAIR:
@@ -182,13 +202,16 @@ def repair_payloads_on_copy(provider_db: Path, candidates: Sequence[Mapping[str,
                                   'source_key': key, 'payload_hash': content_hash})
             binding = {**comparison, 'source_fetch_timestamp': source_fetch,
                        'new_observation_id': new_id, 'new_content_hash': content_hash}
-            prepared.append((dict(old), dict(native), payload, binding))
+            capture_proof=candidate.get('source_capture') or capture.envelope(new)
+            if capture.ACTIVE and not capture.profile_report(payload,capture.REPAIR,capture=capture_proof)['eligible_authoritative_full_source']:
+                raise ValueError('PAYLOAD_REPAIR_CAPTURE_BINDING_INVALID')
+            prepared.append((dict(old), dict(native), payload, binding, capture_proof if capture.ACTIVE else None))
         # Validation of the entire selection precedes the first write.
-        for old, native, payload, binding in prepared:
+        for old, native, payload, binding, capture_proof in prepared:
             record = {**old, 'observation_id': binding['new_observation_id'],
                       'content_hash': binding['new_content_hash'], 'payload_json': json.dumps(payload, sort_keys=True),
                       'fetched_at_utc': binding['source_fetch_timestamp'],
-                      'provenance_json': json.dumps({'source_payload_repair': binding}, sort_keys=True)}
+                      'provenance_json': json.dumps({'source_payload_repair': binding, **({'source_capture':capture_proof} if capture_proof else {})}, sort_keys=True)}
             columns = tuple(record)
             native['observation_id'] = record['observation_id']
             conn.execute('DELETE FROM provider_observation WHERE observation_id=?', (old['observation_id'],))

@@ -185,6 +185,7 @@ class HistoryTrust:
     effective_fingerprint: str | None
     rows: tuple[Mapping[str, Any], ...]
     errors: tuple[str, ...] = ()
+    capture_failures: tuple[Mapping[str, Any], ...] = ()
 
     def evidence(self) -> dict[str, Any]:
         return {
@@ -195,6 +196,7 @@ class HistoryTrust:
             "raw_fingerprint": self.raw_fingerprint,
             "effective_fingerprint": self.effective_fingerprint,
             "errors": list(self.errors),
+            **({"source_capture_failures":list(self.capture_failures)} if self.capture_failures else {}),
         }
 
 
@@ -220,7 +222,8 @@ def source_key_evidence(row: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _normalize_number(value: Any, field: str) -> int | str | None:
-    if value is None or str(value).strip() == "":
+    from rawcandle.fundamentals.source_capture import numeric_null
+    if numeric_null(value):
         return None
     if isinstance(value, float) and not math.isfinite(value):
         raise HistoryValidationError(f"NON_FINITE_FINANCIAL_FIELD:{field}")
@@ -323,15 +326,26 @@ def validate_complete_history(
 ) -> HistoryTrust:
     errors: list[str] = []
     normalized: list[dict[str, Any]] = []
+    capture_failures = []
     if not rows:
         errors.append("EMPTY_HISTORY_RESPONSE")
     if response_reached_limit:
         errors.append("EXACT_LIMIT_RESPONSE_NOT_PROVEN_COMPLETE")
     for index, row in enumerate(rows):
         try:
-            item = normalize_source_row(row, expected_ticker=ticker, expected_dimension=dimension)
-            item["_acquisition_payload"] = dict(row.get("_acquisition_payload") or {k: v for k, v in row.items() if not str(k).startswith("_")})
+            from rawcandle.fundamentals import source_capture as capture
+            capture.guard(row)
+            raw = capture.raw_payload(row)
+            item = normalize_source_row(raw, expected_ticker=ticker, expected_dimension=dimension)
+            item["_acquisition_payload"] = raw
+            if capture.envelope(row) is not None:
+                item['_capture_envelope'] = capture.envelope(row)
+                item['_capture_transport'] = capture.VERSION
             normalized.append(item)
+        except capture.CaptureError as exc:
+            errors.append(f"ROW_{index}:{exc.reason}")
+            capture_failures.append({**capture.review_report(exc.details),'reason':exc.reason,'ticker':ticker,
+                'dimension':dimension,'source_identity':{k:capture.raw_payload(row).get(k) for k in SOURCE_PRIMARY_KEY}})
         except HistoryValidationError as exc:
             errors.append(f"ROW_{index}:{exc}")
     keys = [source_key(row) for row in normalized]
@@ -351,6 +365,7 @@ def validate_complete_history(
         effective_fingerprint=hashes["effective_content_fingerprint"],
         rows=ordered,
         errors=tuple(errors),
+        capture_failures=tuple(capture_failures),
     )
 
 
@@ -633,6 +648,9 @@ def load_current_history(provider_db: Path, ticker: str, dimension: str) -> dict
                 "provider", "native_table", "company_id", "security_id", "provider_security_id",
             )}
             item["_provider_provenance"] = parsed
+            if parsed.get("source_capture") is not None:
+                item["_capture_envelope"] = parsed["source_capture"]
+                item["_capture_transport"] = "PROVIDER_PAYLOAD_COMPLETENESS_V1"
             item["_history_retention_status"] = parsed.get("history_retention_status")
             item["_history_retention_evidence"] = parsed.get("history_retention_evidence")
         except HistoryValidationError as exc:
@@ -1161,10 +1179,14 @@ def compare_ticker_histories(
     historical_source_window_review_years: int = HISTORICAL_SOURCE_WINDOW_REVIEW_YEARS,
 ) -> dict[str, Any]:
     if any(source[dimension].status != "COMPLETE" for dimension in REFRESH_DIMENSIONS):
+        failures=[f for d in REFRESH_DIMENSIONS for f in source[d].capture_failures]
+        capture_reason=('SOURCE_PAYLOAD_CAPTURE_UNVERIFIED' if any(f['reason']=='SOURCE_PAYLOAD_CAPTURE_UNVERIFIED' for f in failures)
+                        else 'SOURCE_PAYLOAD_INCOMPLETE' if failures else None)
         return {
             "ticker": ticker,
             "classification": "REVIEW_REQUIRED",
-            "review_reason": "COMPLETE_HISTORY_NOT_TRUSTED",
+            "review_reason": capture_reason or "COMPLETE_HISTORY_NOT_TRUSTED",
+            **({'capture_integrity':{'failures':failures,'current_history_valid':not any(current[d].get('invalid_rows') or current[d].get('legacy_source_version_ambiguities') for d in REFRESH_DIMENSIONS)}} if failures else {}),
             "source_completeness": {dimension: source[dimension].evidence() for dimension in REFRESH_DIMENSIONS},
         }
     if any(current[dimension].get("invalid_rows") for dimension in REFRESH_DIMENSIONS):

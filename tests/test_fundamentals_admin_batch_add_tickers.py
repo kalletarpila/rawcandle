@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.provider_capture_fixtures import acquired
 
 import json
 import sqlite3
@@ -213,8 +214,16 @@ def _archive(path: Path, tickers: tuple[str, ...] = ("NEWC",)) -> Path:
             "100", "60", "20", "20", "22", "10", "10", "15", "-5", "10", "50", "20", "5", "15",
             "1000", "1000", "1000", "10", "5", "4", "3", "200", permaticker,
         ]))
+    from tests.provider_capture_fixtures import full_row
+    from rawcandle.fundamentals.source_capture import _sha
+    import csv, io
+    rows=[full_row(r) for r in csv.DictReader(io.StringIO("\n".join(lines)))]
+    output=io.StringIO();writer=csv.DictWriter(output,fieldnames=sorted(rows[0]))
+    writer.writeheader();writer.writerows(rows)
     with ZipFile(path, "w") as zf:
-        zf.writestr("fundamentals-10Y.csv", "\n".join(lines) + "\n")
+        zf.writestr("fundamentals-10Y.csv", output.getvalue())
+    (path.parent/'archive_manifest.json').write_text(json.dumps(dict(sha256=_sha(path),
+        acquired_at_utc='2026-09-10T00:00:00Z',upstream_request_scope='/data/fundamentals?years=10')))
     return path
 
 
@@ -946,7 +955,7 @@ def test_generic_plan_network_requires_flag_and_redacts_url(tmp_path: Path) -> N
                 endpoint="/data/fundamentals",
                 url="https://api.example.test/data/fundamentals?ticker=NEWC&api_key=SECRET",
                 request_count=self.request_count,
-                records=[dict(_archive_row("NEWC"))],
+                records=acquired([_archive_row("NEWC")]),
             )
 
     enabled = build_generic_batch_plan(
@@ -1013,7 +1022,7 @@ def test_complete_network_history_is_unprojected_and_missing_fiscalperiod_fails_
                 http_status=200,
                 endpoint="/data/fundamentals",
                 url="https://api.example.test/data/fundamentals?ticker=NEWC",
-                records=[row],
+                records=acquired([row]),
             )
 
     client = ProjectionSensitiveClient()
@@ -1043,7 +1052,7 @@ def test_complete_network_history_is_unprojected_and_missing_fiscalperiod_fails_
         network_client=IncompleteClient(),
     )
     assert incomplete.items[0].status == "REVIEW_REQUIRED"
-    assert incomplete.items[0].reason == "INCOMPLETE_FISCAL_IDENTITY"
+    assert "SOURCE_PAYLOAD_CAPTURE_UNVERIFIED" in incomplete.items[0].reason.split(",")
 
 
 def test_one_provider_not_found_is_per_ticker_result_and_batch_continues(tmp_path: Path) -> None:
@@ -1063,7 +1072,7 @@ def test_one_provider_not_found_is_per_ticker_result_and_batch_continues(tmp_pat
                 http_status=200,
                 endpoint="/data/fundamentals",
                 url=f"https://api.example.test/data/fundamentals?ticker={ticker}",
-                records=[dict(_archive_row(ticker))] if ok else [],
+                records=acquired([_archive_row(ticker)]) if ok else [],
             )
 
     plan = build_generic_batch_plan(

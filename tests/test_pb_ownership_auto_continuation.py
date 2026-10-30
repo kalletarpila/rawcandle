@@ -1,4 +1,5 @@
 """Ordinary policy gates and inactive decisions; live data is never a fixture."""
+from tests.provider_capture_fixtures import acquired
 from copy import deepcopy
 import json
 import hashlib
@@ -55,6 +56,8 @@ def test_cohort_delta_is_diagnostic_not_an_arbitrary_threshold(ordinary,ticker,d
     with sqlite3.connect(f['pp']) as c:
         raw=json.loads(c.execute('SELECT payload_json FROM provider_observation WHERE observation_id=?',(oid,)).fetchone()[0])
         raw.update(sharesbas=shares,marketcap=shares*10,pb=shares*10/2000)
+        capture=acquired([raw],full=False)[0].capture
+        c.execute("UPDATE provider_observation SET provenance_json=? WHERE observation_id=?",(json.dumps({'source_capture':capture}),oid))
         c.execute('UPDATE provider_observation SET payload_json=?,content_hash=? WHERE observation_id=?',(json.dumps(raw),stable_hash(raw),oid))
         c.execute('UPDATE sharadar_fundamental_observation SET sharesbas=? WHERE observation_id=?',(shares,oid))
     with sqlite3.connect(f['cp']) as c:
@@ -180,7 +183,7 @@ def test_complete_repaired_factor_one_is_eligible(ordinary,ticker):
         raw=json.loads(c.execute('SELECT payload_json FROM provider_observation WHERE observation_id=?',(oid,)).fetchone()[0])
         binding={'new_observation_id':oid,'new_content_hash':payload_fingerprint(raw),'new':completeness(raw)}
         c.execute('UPDATE provider_observation SET content_hash=?,provenance_json=? WHERE observation_id=?',
-                  (binding['new_content_hash'],json.dumps({'source_payload_repair':binding}),oid))
+                  (binding['new_content_hash'],json.dumps({'source_payload_repair':binding,'source_capture':acquired([raw],full=False)[0].capture}),oid))
     with sqlite3.connect(f['cp']) as c:c.execute('UPDATE v4_parent_equity_source SET content_hash=? WHERE observation_id=?',(binding['new_content_hash'],oid))
     review.sync(f['queue'],f['cp'],as_of=ASOF,run_id='repaired_'+ticker);f['case']=review.list_cases(f['queue'])[0]
     assert evaluate(f)['partition']=='AUTO_CONTINUE'

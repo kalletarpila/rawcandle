@@ -25,6 +25,8 @@ from tests import test_fundamentals_admin_refresh_full_workflow_production_parit
 
 POLICY = {'as_of_date': date(2026, 9, 22), 'historical_source_window_review_years': 0}
 
+from tests.provider_capture_fixtures import trusted_history as validate_complete_history
+
 
 def trusted(histories):
     return {d: validate_complete_history(rows, ticker=rows[0]['ticker'], dimension=d)
@@ -71,6 +73,44 @@ def change(history, case):
 
 def file_hashes(p):
     return {r:hashlib.sha256(Path(x).read_bytes()).hexdigest() for r,x in p.as_dict().items() if Path(x).exists()}
+
+
+@pytest.mark.parametrize('loss',['unverified_projection','absent_factor'])
+def test_local_capture_loss_protects_frozen_values_without_financial_conflict(sources,loss):
+    from tests.provider_capture_fixtures import acquired
+    from rawcandle.fundamentals import source_capture as capture
+    from rawcandle.fundamentals.admin.refresh_fundamentals import validate_complete_history as native_validate
+    p,h,_=sources
+    before=file_hashes(p)
+    accepted=freeze.accepted_history(p.canonical_db,p.provider_db,1)[0]
+    raw=capture.raw_payload(accepted['_accepted_source'])
+    if loss=='unverified_projection':
+        incoming={k:v for k,v in accepted['_accepted_source'].items() if not k.startswith('_')}
+    else:
+        raw.pop('sharefactor')
+        incoming=native_validate(acquired([raw],full=False),ticker='AAA',dimension='ARQ').rows[0]
+    decision=freeze.historical_financial_freeze_decision(accepted,incoming)
+    assert decision['decision']==freeze.HELD
+    assert decision['reason_codes']==[capture.UNVERIFIED if loss=='unverified_projection' else capture.INCOMPLETE]
+    assert decision['value_changes']=={}
+    assert 'FINANCIAL_PAYLOAD_CHANGED' not in decision['reason_codes']
+    assert file_hashes(p)==before
+
+
+def test_verified_provider_null_is_real_frozen_source_evidence(sources):
+    from tests.provider_capture_fixtures import acquired
+    from rawcandle.fundamentals import source_capture as capture
+    from rawcandle.fundamentals.admin.refresh_fundamentals import validate_complete_history as native_validate
+    p,h,_=sources
+    accepted=freeze.accepted_history(p.canonical_db,p.provider_db,1)[0]
+    # Pure decision fixture: the accepted economic factor was explicitly 1.
+    accepted['_accepted_source']['_acquisition_payload']['sharefactor']=1
+    raw=capture.raw_payload(accepted['_accepted_source']);raw['sharefactor']=None
+    incoming=native_validate(acquired([raw],full=False),ticker='AAA',dimension='ARQ').rows[0]
+    decision=freeze.historical_financial_freeze_decision(accepted,incoming)
+    assert decision['reason_codes']==['ECONOMIC_SOURCE_FACTOR_CHANGED']
+    assert decision['value_changes']['provider_sharefactor']=={'accepted':1.0,'incoming':None}
+    assert 'capture_integrity' not in decision
 
 
 @pytest.mark.parametrize('period,expected',[('2024-12-31','FROZEN_NO_CONFLICT'),('2025-01-01','NOT_FROZEN')])
@@ -317,7 +357,7 @@ def test_native_disposable_generation_publication_and_cleanup(tmp_path,monkeypat
         service.resolve_refresh_review('AAA',CONFIRM_TRUE_SOURCE_REMOVAL,
             evidence={'source':'copy-only fixture','comment':'reviewed exact replacement and financial payload'})
     result = service.full_workflow(operation_type='REFRESH_FUNDAMENTALS',raw_inputs='')
-    assert result.outcome == 'COMPLETED'
+    assert result.outcome == 'COMPLETED', result
     workflow = native._workflow_payload(result)
     production = native._stage_payload(workflow,'Production update')
     assert production['analysis_candidate']['invocation_counts']['full_v2_rebuild'] == 1

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.provider_capture_fixtures import acquired, trusted_history
 
 import json
 import sqlite3
@@ -33,7 +34,7 @@ def row(key,label,**values):
 
 
 def trusts(arq,mrq):
-    return {d:validate_complete_history(rows,ticker='WFRD',dimension=d)
+    return {d:trusted_history(rows,ticker='WFRD',dimension=d)
             for d,rows in (('ARQ',arq),('MRQ',mrq))}
 
 
@@ -70,7 +71,7 @@ def case(tmp_path,monkeypatch):
              ncfo=-68000000,capex=-73000000,fcf=-141000000,shareswa=1004000000)
     initial=trusts([arq,genuine],[old])
     other=row(('OTHER','ARQ','2021-02-19','2020-12-31'),'2020-Q4',revenue=99,sharesbas=10)
-    otherhist={d:validate_complete_history([dict(other,dimension=d)],ticker='OTHER',dimension=d) for d in ('ARQ','MRQ')}
+    otherhist={d:trusted_history([dict(other,dimension=d)],ticker='OTHER',dimension=d) for d in ('ARQ','MRQ')}
     runtime.replace_provider_histories(provider,{'WFRD':initial,'OTHER':otherhist},
         {'WFRD':identity,'OTHER':dict(identity,ticker='OTHER',company_id=2,security_id=2,provider_security_id='200')},applied_at=NOW)
     runtime.fresh_rebuild_canonical(provider,canonical,applied_at=NOW)
@@ -147,7 +148,7 @@ def test_source_drift_fails_closed(case,dimension,field,value):
     h=case['h'].copy();rows=[deepcopy(r.get('_acquisition_payload',r)) for r in h[dimension].rows]
     index=next(i for i,r in enumerate(rows) if r['reportperiod']==('2019-12-31' if dimension=='ARQ' else '2019-12-13'))
     rows[index][field]=value
-    h[dimension]=validate_complete_history(rows,ticker='WFRD',dimension=dimension)
+    h[dimension]=trusted_history(rows,ticker='WFRD',dimension=dimension)
     a=b.evaluate(case['p'],case['c'],h,case['identity'],decision=case['decision'])
     assert a['stale'] and not a['applied']
 
@@ -172,7 +173,7 @@ def test_accepted_evidence_and_baseline_drift_rejects(case,table,sql):
 def test_mrq_reappearance_and_incomplete_response_reject(case):
     old=case['proposal']['evidence']['mrq']['accepted']['normalized']
     rows=[r['_acquisition_payload'] for r in case['h']['MRQ'].rows]+[old]
-    h={**case['h'],'MRQ':validate_complete_history(rows,ticker='WFRD',dimension='MRQ')}
+    h={**case['h'],'MRQ':trusted_history(rows,ticker='WFRD',dimension='MRQ')}
     assert b.evaluate(case['p'],case['c'],h,case['identity'],decision=case['decision'])['stale']
     h['MRQ']=validate_complete_history(rows[:1],ticker='WFRD',dimension='MRQ',response_reached_limit=True)
     assert b.evaluate(case['p'],case['c'],h,case['identity'],decision=case['decision'])['stale']
@@ -238,7 +239,7 @@ def test_published_lifecycle_allows_unrelated_quarter_and_rejects_reappearance(c
     apply(case)
     rows=[r['_acquisition_payload'] for r in case['h']['ARQ'].rows]
     rows.append(row(('WFRD','ARQ','2021-05-01','2021-03-31'),'2021-Q1',revenue=1))
-    h={**case['h'],'ARQ':validate_complete_history(rows,ticker='WFRD',dimension='ARQ')}
+    h={**case['h'],'ARQ':trusted_history(rows,ticker='WFRD',dimension='ARQ')}
     a=b.evaluate(case['p'],case['c'],h,case['identity'])
     assert a['applied'] and a['phase']=='PUBLISHED'
     current={d:load_current_history(case['p'],'WFRD',d) for d in ('ARQ','MRQ')}
@@ -246,7 +247,7 @@ def test_published_lifecycle_allows_unrelated_quarter_and_rejects_reappearance(c
     assert result['classification']!='REVIEW_REQUIRED'
     assert not any(e['event']=='TRUE_SOURCE_REMOVAL' for e in result['source_history_events'])
     old=case['proposal']['evidence']['mrq']['accepted']['normalized']
-    h['MRQ']=validate_complete_history([r['_acquisition_payload'] for r in h['MRQ'].rows]+[old],ticker='WFRD',dimension='MRQ')
+    h['MRQ']=trusted_history([r['_acquisition_payload'] for r in h['MRQ'].rows]+[old],ticker='WFRD',dimension='MRQ')
     a=b.evaluate(case['p'],case['c'],h,case['identity'])
     assert a['stale']
     result=b.comparison('WFRD',current,h,a);result['identity']=case['identity']
@@ -284,12 +285,19 @@ def test_new_synthetic_preview_required_and_revalidates_approved_combined_artifa
             d=kwargs['dimension']
             records=([deepcopy(x['_acquisition_payload']) for x in case['h'][d].rows] if kwargs.get('ticker') else
                      [{'ticker':'WFRD','dimension':d,'lastupdated':'2026-10-22'}])
+            if kwargs.get('ticker'):
+                # Model a full HTTP acquisition without filling or changing any
+                # source field. Discovery remains intentionally projected.
+                captured=acquired(records,full=False)
+                assert [dict(row) for row in captured]==records
+                records=captured
             return SimpleNamespace(ok=True,records=records)
     runs=case['tmp']/'runs';q=queue_path_for_run_root(runs)
     b.save_item(q,case['proposal'],rehearsal=case['receipt'])
     first=r.run_preview(source_paths=paths,run_root=runs,client=Client(),as_of_date=date(2026,10,25))
     old=json.loads(Path(first['artifacts']['refresh_preview']).read_text())
     assert old['future_test_authorized'] is False and len(old['review_partition']['global_blockers'])==1
+    assert b.read_items(q)[0]['status']=='OPEN'
     approve_queue(case,q)
     with pytest.raises(ValueError,match='NOT_AUTHORIZED'):
         runtime._load_bound_preview(Path(first['artifacts']['refresh_preview']),first['preview_fingerprint'],runs)
@@ -323,7 +331,7 @@ def test_archive_does_not_supply_watermark_or_source_completeness(case):
     from rawcandle.fundamentals.admin.refresh_fundamentals import resolve_refresh_state
     apply(case)
     assert resolve_refresh_state(case['p']).derived_watermark=='2026-10-22'
-    trust=validate_complete_history([x['observation'] for x in b.current_provider_history(case['p'],'WFRD','MRQ')],ticker='WFRD',dimension='MRQ')
+    trust=trusted_history([x['observation'] for x in b.current_provider_history(case['p'],'WFRD','MRQ')],ticker='WFRD',dimension='MRQ')
     assert trust.row_count==1 and trust.status=='COMPLETE'
     assert b.historical_evidence(case['p'])[0]['original']['normalized']['date']=='2019-12-31'
     with b._ro(case['c']) as c:
@@ -374,7 +382,7 @@ def test_new_same_period_conflict_is_not_ignored_after_publication(case,period):
     apply(case)
     rows=[r['_acquisition_payload'] for r in case['h']['MRQ'].rows]
     rows.append(row(('WFRD','MRQ','2019-12-14',period),'2019-Q4',ncfo=1))
-    h={**case['h'],'MRQ':validate_complete_history(rows,ticker='WFRD',dimension='MRQ')}
+    h={**case['h'],'MRQ':trusted_history(rows,ticker='WFRD',dimension='MRQ')}
     assert b.evaluate(case['p'],case['c'],h,case['identity'])['stale']
 
 
@@ -557,7 +565,7 @@ def test_registered_approval_rejects_fresh_evidence_drift_and_preserves_binding(
         elif drift=='old_key':rows.append(case['proposal']['evidence']['mrq']['accepted']['normalized'])
         elif drift=='new_boundary':rows.append(row(('WFRD','MRQ','2019-12-14','2019-12-13'),'2019-Q4',ncfo=1))
         else:rows.append(row(('WFRD','ARQ','2021-05-01','2021-03-31'),'2021-Q1',revenue=1))
-        h[d]=validate_complete_history(rows,ticker='WFRD',dimension=d);args['histories']=h
+        h[d]=trusted_history(rows,ticker='WFRD',dimension=d);args['histories']=h
     with pytest.raises(b.BoundaryReviewError):approve_queue(case,q,**args)
     assert b.read_items(q)==[item] and len(queue_audit(q))==1
     b.save_item(q,case['proposal'],stale_reason=drift)
@@ -617,7 +625,8 @@ def test_service_fetches_complete_source_again_for_registration_and_approval(cas
     class Client:
         def fundamentals(self,**kwargs):
             calls.append(kwargs)
-            return SimpleNamespace(ok=True,records=[deepcopy(r['_acquisition_payload']) for r in case['h'][kwargs['dimension']].rows])
+            rows=[deepcopy(r['_acquisition_payload']) for r in case['h'][kwargs['dimension']].rows]
+            return SimpleNamespace(ok=True,records=acquired(rows,full=False))
     monkeypatch.setattr(refresh,'resolve_identity',lambda *_:case['identity'])
     monkeypatch.setattr('rawcandle.fundamentals.admin.publication_journal.safety_status',lambda:{'production_writes_blocked':False})
     svc=FundamentalsAdminUIService(run_root=case['tmp']/'runs',recover_publication_on_startup=False,
@@ -649,7 +658,7 @@ def test_post_approval_complete_source_drift_requires_fresh_review(case):
     q=case['tmp']/'queue.db';b.save_item(q,case['proposal'],rehearsal=case['receipt']);approve_queue(case,q)
     rows=[deepcopy(r['_acquisition_payload']) for r in case['h']['ARQ'].rows]
     rows.append(row(('WFRD','ARQ','2021-05-01','2021-03-31'),'2021-Q1',revenue=1))
-    h={**case['h'],'ARQ':validate_complete_history(rows,ticker='WFRD',dimension='ARQ')}
+    h={**case['h'],'ARQ':trusted_history(rows,ticker='WFRD',dimension='ARQ')}
     result=b.evaluate_for_refresh(case['p'],case['c'],h,case['identity'],q)
     assert result['stale'] and not result['applied']
 

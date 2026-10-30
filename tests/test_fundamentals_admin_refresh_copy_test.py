@@ -46,6 +46,8 @@ from rawcandle.fundamentals.schema.migrations import (
 
 NOW = "2026-09-19T12:00:00Z"
 
+from tests.provider_capture_fixtures import trusted_history as validate_complete_history
+
 
 def source_row(
     *, ticker: str = "TEST", dimension: str = "ARQ", date: str = "2026-09-15",
@@ -100,6 +102,7 @@ def _insert_legacy_version(connection: sqlite3.Connection, row: dict[str, object
         "content_hash,provider_status,payload_json,provenance_json) VALUES(?,'legacy','SHARADAR',?,1,1,'TEST','100','fundamentals',?,?,?,?,?,?,?,'SUCCESS','{}','{}')",
         (observation_id, observation_id, row["dimension"], row["calendardate"], row["reportperiod"], row["fiscalperiod"], row["date"], NOW, observation_id),
     )
+    connection.execute('UPDATE provider_observation SET payload_json=? WHERE observation_id=?', (json.dumps(row),observation_id))
     columns = ("observation_id", *REFRESH_REQUEST_FIELDS)
     connection.execute(
         f"INSERT INTO sharadar_fundamental_observation({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",

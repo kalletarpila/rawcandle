@@ -120,6 +120,22 @@ def historical_financial_freeze_decision(accepted, incoming):
     if date.fromisoformat(accepted['period_end']) > date.fromisoformat(CUTOFF):
         return {'decision': 'NOT_FROZEN'}
     old = accepted['_accepted_source']
+    from rawcandle.fundamentals import source_capture as capture
+    if capture.ACTIVE and incoming is not None:
+        exact_retained=(incoming.get('_provider_observation_id') and
+            incoming.get('_provider_observation_id')==old.get('_provider_observation_id') and
+            capture.raw_payload(incoming)==capture.raw_payload(old))
+        if not exact_retained:
+            report=capture.profile_report(incoming,capture.FREEZE)
+            if not report['eligible_authoritative_full_source']:
+                # Missing local evidence is not a provider financial revision.
+                evidence={'policy':VERSION,'cutoff':CUTOFF,
+                    'identity':[accepted['company_id'],accepted['fiscal_year'],accepted['fiscal_quarter']],
+                    'period_end':accepted['period_end'],'accepted':financial_state(accepted),
+                    'accepted_source':old,'incoming_source':capture.review_row(incoming),
+                    'reason_codes':[report['reason']],'value_changes':{},'decision':HELD,
+                    'capture_integrity':capture.review_report(report)}
+                return {**evidence,'evidence_fingerprint':fingerprint(evidence)}
     changed = []
     if incoming is None:
         changed.append('SOURCE_DISAPPEARED')
@@ -155,7 +171,7 @@ def historical_financial_freeze_decision(accepted, incoming):
     evidence = {'policy': VERSION, 'cutoff': CUTOFF,
         'identity': [accepted['company_id'], accepted['fiscal_year'], accepted['fiscal_quarter']],
         'period_end': accepted['period_end'], 'accepted': financial_state(accepted),
-        'accepted_source': old, 'incoming_source': dict(incoming) if incoming else None,
+        'accepted_source': old, 'incoming_source': capture.review_row(incoming),
         'reason_codes': sorted(set(changed)), 'value_changes': values, 'decision': HELD}
     return {**evidence, 'evidence_fingerprint': fingerprint(evidence)}
 
@@ -193,7 +209,8 @@ def apply_to_comparison(change, *, canonical_db, provider_db, current, histories
         winner = select_valid_publication_winner(candidates) if candidates else None
         decision = historical_financial_freeze_decision(row, winner)
         if decision['decision'] == HELD:
-            decision['incoming_candidates'] = [dict(r) for r in candidates]
+            from rawcandle.fundamentals.source_capture import review_row
+            decision['incoming_candidates'] = [review_row(r) for r in candidates]
             conflicts.append(decision)
     if not conflicts:
         return change
@@ -229,10 +246,16 @@ def apply_to_comparison(change, *, canonical_db, provider_db, current, histories
     result = {**change, 'historical_freeze': {'policy': VERSION, 'cutoff': CUTOFF, 'conflicts': conflicts}}
     held = [d for d in conflicts if d['decision'] == HELD]
     if held and change.get('classification') != 'REVIEW_REQUIRED':
-        result.update(classification='REVIEW_REQUIRED', review_reason=REVIEW_REASON)
+        capture_holds=[d for d in held if d.get('capture_integrity')]
+        reason=(capture_holds[0]['reason_codes'][0] if capture_holds else REVIEW_REASON)
+        result.update(classification='REVIEW_REQUIRED', review_reason=reason)
+        if capture_holds:
+            result['capture_integrity']={'current_history_valid':True,'failures':[
+                {**d['capture_integrity'],'ticker':change['ticker'],
+                 'source_identity':{k:d['incoming_source'][k] for k in KEY}} for d in capture_holds]}
         result['source_history_events'] = [*change.get('source_history_events', []), *[
-            {'ticker': change['ticker'], 'dimension': 'ARQ', 'event': REVIEW_REASON,
-             'classification_reason': REVIEW_REASON,
+            {'ticker': change['ticker'], 'dimension': 'ARQ', 'event': (d['reason_codes'][0] if d.get('capture_integrity') else REVIEW_REASON),
+             'classification_reason': (d['reason_codes'][0] if d.get('capture_integrity') else REVIEW_REASON),
              'source_identity': {k:d['accepted_source'][k] for k in KEY},
              'fiscal_identity': dict(zip(('fiscal_year','fiscal_quarter'), d['identity'][1:])),
              'historical_freeze_evidence': d} for d in held]]

@@ -57,6 +57,8 @@ from rawcandle.fundamentals.generations import (
 AS_OF = "2026-09-22"
 NOW = "2026-09-22T12:00:00Z"
 
+from tests.provider_capture_fixtures import trusted_history as validate_complete_history, acquired
+
 
 def _source_row(
     ticker: str, dimension: str, fiscal_year: int, quarter: int, *,
@@ -212,7 +214,7 @@ class FakeSharadarClient:
         if fields:
             selected = set(fields)
             records = [{key: value for key, value in row.items() if key in selected} for row in records]
-        return self._result(records)
+        return self._result(acquired(records) if not fields else records)
 
 
 def _insert_identities(

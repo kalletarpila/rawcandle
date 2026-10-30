@@ -11,12 +11,12 @@ from types import SimpleNamespace
 
 from . import pb_ownership_review as review
 from .contracts import fingerprint
-from .provider_payload import completeness, payload_fingerprint
+from .provider_payload import completeness, payload_fingerprint, matches_completeness
 
 POLICY = 'PB_ORDINARY_AUTO_CONTINUATION_V1'
 # Versioned full SF1 acquisition shape observed in the current/recent cohort.
 # Nullable metrics remain nullable; removing any field is a completeness gap.
-SF1_FIELDS = frozenset('''accoci assets assetsavg assetsc assetsnc assetturnover bvps calendardate capex cashneq cashnequsd consolinc cor currentratio date de debt debtc debtnc debtusd deferredrev depamor deposits dimension divyield dps ebit ebitda ebitdamargin ebitdausd ebitusd ebt eps epsdil epsusd equity equityavg equityusd ev evebit evebitda fcf fcfps fiscalperiod fxusd gp grossmargin intangibles intexp invcap invcapavg inventory investments investmentsc investmentsnc lastupdated liabilities liabilitiesc liabilitiesnc marketcap ncf ncfbus ncfcommon ncfdebt ncfdiv ncff ncfi ncfinv ncfo ncfx netinc netinccmn netinccmnusd netincdis netincnci netmargin opex opinc payables payoutratio pb pe pe1 ppnenet prefdivis price ps ps1 receivables reportperiod retearn revenue revenueusd rnd roa roe roic ros sbcomp sgna sharefactor sharesbas shareswa shareswadil sps tangibles taxassets taxexp taxliabilities tbvps ticker workingcapital'''.split())
+from rawcandle.fundamentals.source_capture import SF1_FIELDS
 
 
 def evaluate(case: dict, *, canonical_db: Path, provider_db: Path, market_db: Path,
@@ -70,6 +70,12 @@ def evaluate(case: dict, *, canonical_db: Path, provider_db: Path, market_db: Pa
                 block('SOURCE_OBSERVATION_MISSING')
             else:
                 obs = dict(obs); raw = json.loads(obs['payload_json']); evidence['source_completeness'] = completeness(raw)
+                from rawcandle.fundamentals import source_capture as capture
+                provenance=json.loads(obs['provenance_json'] or '{}')
+                if capture.ACTIVE:
+                    captured=capture.profile_report(raw,capture.PB,capture=provenance.get('source_capture'))
+                    evidence['source_capture']=captured
+                    if not captured['eligible_authoritative_full_source']:block(captured['reason'])
                 if not SF1_FIELDS.issubset(raw) or any(raw.get(k) is None for k in ('sharefactor','sharesbas','equity','equityusd','price','marketcap','pb')):
                     block('SOURCE_PAYLOAD_INCOMPLETE')
                 normal = normalize_source_row(raw)
@@ -102,11 +108,11 @@ def evaluate(case: dict, *, canonical_db: Path, provider_db: Path, market_db: Pa
                     or (previous is not None and any(previous[k] != obs[k] for k in ('provider','native_table','company_id','security_id','provider_security_id')))):
                     block('PROVIDER_STABLE_IDENTITY_CHANGE')
                 provenance = json.loads(obs['provenance_json'] or '{}')
-                if set(provenance) - {'source_payload_repair'}: block('SOURCE_HISTORY_OR_PROVENANCE_ANOMALY')
+                if set(provenance) - {'source_payload_repair','source_capture'}: block('SOURCE_HISTORY_OR_PROVENANCE_ANOMALY')
                 if 'source_payload_repair' in provenance:
                     repair=provenance['source_payload_repair']
                     if (repair.get('new_observation_id')!=obs['observation_id']
-                        or repair.get('new_content_hash')!=obs['content_hash'] or repair.get('new')!=completeness(raw)):
+                        or repair.get('new_content_hash')!=obs['content_hash'] or not matches_completeness(repair.get('new'),raw)):
                         block('SOURCE_REPAIR_BINDING_MISMATCH')
                 history = load_current_history(provider_db, case['ticker'], 'ARQ')
                 evidence['history'] = {k: v for k,v in history.items() if k != 'rows'}

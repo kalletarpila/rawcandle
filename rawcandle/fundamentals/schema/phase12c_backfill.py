@@ -278,8 +278,13 @@ def import_staged(paths: Phase12CPaths, validation: Mapping[str, Any], *, fail_a
                  "source_sha256": validation["source_sha256"],
              }, sort_keys=True)),
         )
-        with paths.staged_csv.open(newline="", encoding="utf-8-sig") as handle:
-            for row in csv.DictReader(handle):
+        from rawcandle.fundamentals import source_capture as capture
+        from contextlib import nullcontext
+        manifests=(paths.output/'sharadar_bulk_manifest.json',paths.output/'sharadar_fundamentals_bulk_manifest.json')
+        manifest=next((p for p in manifests if p.exists()),manifests[0])
+        with (nullcontext(None) if capture.ACTIVE else paths.staged_csv.open(newline="", encoding="utf-8-sig")) as handle:
+            records=capture.archive_records(paths.staged_csv,manifest,tickers=target) if capture.ACTIVE else csv.DictReader(handle)
+            for row in records:
                 ticker = str(row.get("ticker") or "").strip().upper()
                 dimension = str(row.get("dimension") or "").strip().upper()
                 if dimension not in ALLOWED_DIMENSIONS or ticker not in target:

@@ -8,6 +8,8 @@ from argparse import Namespace
 from pathlib import Path
 
 import pytest
+import json
+from rawcandle.fundamentals import source_capture as capture
 
 from rawcandle.fundamentals.schema.migrations import bootstrap_all
 from rawcandle.fundamentals.schema.phase12c_backfill import (
@@ -20,7 +22,8 @@ from rawcandle.fundamentals.schema.production_bootstrap import (
 from rawcandle.cli import run_phase12c_sharadar_backfill as cli
 
 
-FIELDS = [
+FIELDS = sorted(capture.SF1_FIELDS)
+LEGACY_FIELDS = [
     "ticker", "dimension", "calendardate", "reportperiod", "fiscalperiod", "date",
     "lastupdated", "revenue", "opinc", "ebit", "fcf", "cashneq", "debt", "sharesbas",
 ]
@@ -46,6 +49,12 @@ class Response:
 
     def geturl(self) -> str:
         return self.url
+
+
+def _manifest(source):
+    (source.parent/'sharadar_bulk_manifest.json').write_text(json.dumps(dict(
+        extraction_sha256=capture._sha(source),endpoint='/data/fundamentals',
+        downloaded_at_utc='2026-10-30T00:00:00Z')))
 
 
 def write_source(path: Path) -> None:
@@ -75,6 +84,7 @@ def fixture_paths(tmp_path: Path) -> Phase12CPaths:
     output.mkdir()
     source = output / "sharadar_fundamentals_10y.csv"
     write_source(source)
+    _manifest(source)
     market = tmp_path / "market.db"; market.touch()
     taxonomy = tmp_path / "taxonomy.db"; taxonomy.touch()
     return Phase12CPaths(tmp_path, output, provider, canonical, analysis, market, taxonomy,
@@ -134,6 +144,7 @@ def test_revision_is_preserved_as_a_new_provider_observation(tmp_path: Path) -> 
         writer = csv.DictWriter(handle, fieldnames=FIELDS)
         writer.writeheader()
         writer.writerows(rows)
+    _manifest(paths.staged_csv)
     revised = validate_staged_source(paths.staged_csv, target={"AAA"}, old_oldest_arq="2020-09-30")
     assert staged_provider_reconciliation(
         paths.staged_csv, paths.provider_db, target={"AAA"}

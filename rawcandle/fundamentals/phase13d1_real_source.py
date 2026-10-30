@@ -331,6 +331,12 @@ def archive_rows_for_ticker(ticker: str, *, limit: int | None = None) -> list[di
     if not ARCHIVE_PATH.exists() or sha256(ARCHIVE_PATH) != ARCHIVE_EXPECTED_SHA256:
         raise FileNotFoundError("PHASE13D1_VERIFIED_ARCHIVE_NOT_AVAILABLE")
     rows: list[dict[str, str]] = []
+    from rawcandle.fundamentals import source_capture as capture
+    if capture.ACTIVE:
+        for row in capture.archive_records(ARCHIVE_PATH,tickers={ticker.upper()}):
+            rows.append(capture.wire(row))
+            if limit is not None and len(rows)>=limit:break
+        return rows
     with zipfile.ZipFile(ARCHIVE_PATH) as archive:
         with archive.open("fundamentals-10Y.csv") as raw:
             text = (line.decode("utf-8") for line in raw)
@@ -391,9 +397,9 @@ def stage_sndk_archive_rows(provider_db: Path, rows: Sequence[Mapping[str, Any]]
             (run_id, now, now, json.dumps({"archive": str(ARCHIVE_PATH), "ticker": "SNDK", "network_request_performed": False}, sort_keys=True)),
         )
         for source_row in rows:
-            row = dict(source_row)
-            row["permaticker"] = SNDK_PERMATICKER
-            if insert_production_sharadar_observation(conn, row, run_id, now, company_id=company_id, security_id=security_id):
+            from rawcandle.fundamentals import source_capture as capture
+            row = capture.wire(source_row)
+            if insert_production_sharadar_observation(conn, row, run_id, now, company_id=company_id, security_id=security_id,provider_security_id=SNDK_PERMATICKER):
                 inserted += 1
         conn.commit()
     arq_rows = sum(1 for row in rows if str(row.get("dimension")).upper() == "ARQ")
