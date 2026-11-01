@@ -802,6 +802,32 @@ def get_systemd_user_timer_path() -> Path:
     return _TIMER_PATH
 
 
+def set_systemd_timer_enabled(*, enabled: bool, command_runner=None,
+                              handoff_marker=Path('/home/kalle/projects/stockcore/runtime/evidence/daily_yahoo/rawcandle-handoff-config.json')) -> str:
+    """Explicit UI action only: manage the timer, never mask/stop its service."""
+    if type(enabled) is not bool:
+        raise ValueError('Explicit timer enablement required')
+    if enabled and Path(handoff_marker).exists():
+        marker = json.loads(Path(handoff_marker).read_text(encoding='utf-8'))
+        if marker.get('enabled') is not False:
+            raise ValueError('Disable StockCore handoff before restoring the independent timer')
+    run = command_runner or subprocess.run
+    unit = 'stock-update-scheduler.timer'
+    result = run(['systemctl', '--user', 'enable' if enabled else 'disable', '--now', unit],
+                 capture_output=True, text=True, check=False, timeout=10)
+    if result.returncode:
+        raise RuntimeError('Timer change failed: ' + result.stderr[-500:])
+    result = run(['systemctl', '--user', 'show', unit,
+                  '--property=LoadState,UnitFileState,ActiveState'],
+                 capture_output=True, text=True, check=False, timeout=5)
+    state = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
+    expected = ('enabled', 'active') if enabled else ('disabled', 'inactive')
+    if result.returncode or state.get('LoadState') != 'loaded' or (state.get('UnitFileState'), state.get('ActiveState')) != expected:
+        raise RuntimeError('Timer state could not be verified; inspect Timer status before cutover')
+    return ('Automatic schedule restored.' if enabled else
+            'Automatic schedule disabled. The scheduler service remains available on demand.')
+
+
 def format_systemd_on_calendar(*, run_time: str) -> str:
     validate_run_time(run_time)
     return f"*-*-* {run_time}:00"
@@ -1439,6 +1465,15 @@ def run_app(
         if hasattr(page, "update"):
             page.update()
 
+    def on_timer_change(enabled: bool) -> None:
+        try:
+            status_field.value = set_systemd_timer_enabled(enabled=enabled)
+        except Exception as exc:
+            status_field.value = str(exc)
+        refresh_timer_status()
+        if hasattr(page, 'update'):
+            page.update()
+
     def on_skip_next_run(_e: Any) -> None:
         next_config = apply_skip_next_run_to_config(config_path)
         update_ui_from_config(next_config)
@@ -1461,6 +1496,8 @@ def run_app(
     save_config_button = ft.ElevatedButton("Save config", on_click=on_save_config)
     reload_config_button = ft.ElevatedButton("Reload config", on_click=on_reload_config)
     run_now_button = ft.ElevatedButton("Run now", on_click=on_run_now)
+    disable_timer_button = ft.ElevatedButton('Disable automatic schedule', on_click=lambda _e: on_timer_change(False))
+    restore_timer_button = ft.ElevatedButton('Restore automatic schedule', on_click=lambda _e: on_timer_change(True))
     skip_next_run_button = ft.ElevatedButton("Skip next run", on_click=on_skip_next_run)
     cancel_skip_next_run_button = ft.ElevatedButton(
         "Cancel skip", on_click=on_cancel_skip_next_run
@@ -2101,6 +2138,7 @@ def run_app(
             status_field,
             summary_field,
             timer_status_field,
+            ft.Row([disable_timer_button, restore_timer_button]),
             logs_column,
             scheduler_show_more_button,
         ],
@@ -2176,6 +2214,8 @@ def run_app(
     page.save_config_button = save_config_button
     page.reload_config_button = reload_config_button
     page.run_now_button = run_now_button
+    page.disable_timer_button = disable_timer_button
+    page.restore_timer_button = restore_timer_button
     page.skip_next_run_button = skip_next_run_button
     page.cancel_skip_next_run_button = cancel_skip_next_run_button
     page.refresh_logs_button = refresh_logs_button

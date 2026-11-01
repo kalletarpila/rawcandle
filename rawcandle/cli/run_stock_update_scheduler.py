@@ -15,13 +15,19 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run stock update scheduler config sequentially."
     )
     parser.add_argument("--config", required=True)
+    parser.add_argument("--stockcore-prices", action="store_true",
+                        help="Opt in to the temporary scheduled-USA Source bridge; default remains Yahoo.")
     return parser
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        result = run_scheduler_config(config_path=args.config)
+        options = {}
+        if args.stockcore_prices:
+            from services.stockcore_price_provider import scheduled_adapters
+            options['price_adapter_factory'] = scheduled_adapters
+        result = run_scheduler_config(config_path=args.config, **options)
     except SchedulerAlreadyRunningError as exc:
         print("SUMMARY scheduler_status=FAILED")
         print("SUMMARY scheduler_skipped=0")

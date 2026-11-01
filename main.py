@@ -356,8 +356,9 @@ class RawCandleApp:
         start_override: Optional[str] = None,
         today: str,
         fetch_until_exclusive: str,
+        service_adapters: Optional[dict] = None,
     ) -> StockUpdateResult:
-        adapters = self._build_stock_update_service_adapters()
+        adapters = service_adapters if service_adapters is not None else self._build_stock_update_service_adapters()
         return run_stock_data_update(
             osakedata_db_path=self.osakedata_db_path,
             analysis_db_path=self.analysis_db_path,

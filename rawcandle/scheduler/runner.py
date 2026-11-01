@@ -2303,6 +2303,7 @@ def _run_one_market(
     run_started_at_utc: str,
     effective_today: str,
     effective_fetch_until_exclusive: str,
+    price_adapter_factory=None,
 ) -> ScheduledMarketRunResult:
     market_started_at = _utc_now()
     started_at_utc = _format_utc_timestamp(market_started_at)
@@ -2314,13 +2315,20 @@ def _run_one_market(
     app = _build_app(config)
     error: Optional[str] = None
     ui_summary = ""
+    bridge = None
 
     try:
+        adapter_options = {}
+        if price_adapter_factory is not None:
+            adapter_options['service_adapters'], bridge = price_adapter_factory(
+                app, market=market, fetch_until_exclusive=effective_fetch_until_exclusive,
+            )
         result = app._run_stock_update_via_service(
             market=market,
             start_override=None,
             today=effective_today,
             fetch_until_exclusive=effective_fetch_until_exclusive,
+            **adapter_options,
         )
         summary_lines = format_stock_update_summary_lines(result)
         summary_status = result.status
@@ -2335,6 +2343,9 @@ def _run_one_market(
         summary_status = STATUS_FAILED
         exit_code = 1
         ui_summary = error
+
+    if bridge is not None:
+        summary_lines.extend(bridge.summary_lines())
 
     market_finished_at = _utc_now()
     finished_at_utc = _format_utc_timestamp(market_finished_at)
@@ -2378,6 +2389,7 @@ def _run_fundamentals_refresh_preview_post_step(
 def run_scheduler_config(
     *,
     config_path: str,
+    price_adapter_factory=None,
 ) -> ScheduledStockUpdateRunResult:
     run_started_at = _utc_now()
     started_at_utc = _format_utc_timestamp(run_started_at)
@@ -2506,6 +2518,7 @@ def run_scheduler_config(
                         run_started_at_utc=started_at_utc,
                         effective_today=effective_today,
                         effective_fetch_until_exclusive=effective_fetch_until_exclusive,
+                        **({'price_adapter_factory': price_adapter_factory} if price_adapter_factory is not None else {}),
                     )
                 )
 
