@@ -1,4 +1,4 @@
-"""Explicit storage closeout for the two disposable P/B rehearsal owners.
+"""Explicit storage closeout for the bounded P/B and Fundamentals rehearsal owners.
 
 This is an operator/harness helper, never a scheduler or production publisher.
 ``begin`` records necessity before copying; ``close`` records the final decision.
@@ -17,8 +17,55 @@ from typing import Callable
 OWNERS = {
     "future": "P/B-OWNERSHIP-FUTURE-AUTO-RECONCILIATION-1",
     "no-safe-changes": "P/B-FUTURE-NO-SAFE-CHANGES-INTEGRATION-FIX",
+    "legacy-rebaseline": "FUNDAMENTALS-LEGACY-PAYLOAD-REBASELINE-AND-LIVE-REMEDIATION",
+    "bmra-neov-targeted": "FUNDAMENTALS-BMRA-NEOV-TARGETED-REMEDIATION",
+    "current-state-rebuild": "FUNDAMENTALS-CONTROLLED-CURRENT-STATE-REBUILD-V1",
 }
 SIDECARS = ("-wal", "-shm", "-journal")
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def rebuild_test_requirements(project_root: Path) -> dict[str, dict]:
+    """Read the current rebuild's exact Test-candidate obligations; never mutate.
+
+    This is a narrow storage hold extractor, not a replacement native validator.
+    The caller must pin the live journal, verify candidate hashes and preserve
+    operational generation/recovery dependencies separately.
+    """
+    root = project_root.absolute()
+    journal = json.loads((root / "data/.fundamentals_admin_publication_journal.json").read_text())
+    if (journal.get("operation_type") != "CONTROLLED_CURRENT_STATE_REBUILD"
+            or (journal.get("state"), journal.get("postflight_state"), journal.get("rollback_recovery_state"))
+            != ("COMPLETED", "PASSED", "NOT_REQUIRED")):
+        raise ValueError("CURRENT_REBUILD_OWNER_NOT_TERMINAL")
+    test = journal["scope_evidence"]["test"]
+    candidates = test["candidates"]
+    hashes = test["result"]["candidate_hashes"]
+    if (test.get("passed") is not True or set(candidates) != {"provider", "canonical", "analysis"}
+            or set(hashes) != set(candidates) or test.get("test_fingerprint") != journal.get("test_run_id")):
+        raise ValueError("CURRENT_TEST_BINDING_INVALID")
+    obligations = {}
+    for role, name in candidates.items():
+        path = Path(name)
+        if not path.is_absolute() or path.resolve() != path or not path.is_relative_to(root):
+            raise ValueError("CURRENT_TEST_PATH_INVALID")
+        obligations[str(path)] = dict(owner=OWNERS["current-state-rebuild"], role=role,
+            reason="Current sealed publication Test candidate; verify_test/measure opens and hashes these exact bytes",
+            end_event="Qualified successor publication or separately approved owner contract ends this current Test dependency; no historical receipt rewrite",
+            expected_sha256=hashes[role])
+    analysis = Path(test["native_analysis"]["candidate_analysis_db"])
+    if not analysis.is_absolute():
+        analysis = root / analysis
+    if str(analysis) != candidates["analysis"]:
+        raise ValueError("CURRENT_ANALYSIS_REFERENCE_CONFLICT")
+    return obligations
 
 
 def durable_json(path: Path, value: dict) -> None:
@@ -96,13 +143,13 @@ def close(root: Path, owner: str, record: Path, *, outcome: str,
             raise ValueError("CLOSEOUT_IDENTITY_CHANGED")
         if previous.get("requirements", {}) != (requirements or {}):
             raise ValueError("CLOSEOUT_REQUIREMENTS_CHANGED")
-        if any(hashlib.sha256(Path(p).read_bytes()).hexdigest() != digest
+        if any(file_sha256(Path(p)) != digest
                for p, digest in previous["evidence_sha256"].items()):
             raise ValueError("HISTORICAL_EVIDENCE_CHANGED")
         return previous  # Never regenerate approvals from an already retired tree.
     if not evidence or not capability_loss.strip():
         raise ValueError("COMPACT_EVIDENCE_AND_REPLAY_DISPOSITION_REQUIRED")
-    seals = {str(p.resolve()): hashlib.sha256(p.read_bytes()).hexdigest() for p in evidence}
+    seals = {str(p.resolve()): file_sha256(p) for p in evidence}
     requirements = requirements or {}
     rows = database_files(root)
     known = {r["path"] for r in rows}
@@ -186,7 +233,7 @@ def retire_exact(row: dict, ledger: Path, *, check_live: Callable[[], None],
 
 def run_harness(root: Path, owner: str, record: Path, harness: Callable[[], dict], *,
                 purpose: str, end_event: str, expected_allocated_bytes: int) -> dict:
-    """Both owners' prospective harness entry point; always report on exit.
+    """Named owners' prospective harness entry point; always report on exit.
 
     The harness returns outcome, compact evidence, concrete requirements and the
     accepted capability loss. An exception leaves an explicit unresolved hold.
