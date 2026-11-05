@@ -137,6 +137,38 @@ def test_revision_outside_reviewed_window_does_not_gain_exception(native):
     assert witness is None and reason=='REVISION_OUTSIDE_SIX_COMPLETED_SESSIONS'
 
 
+def test_mixed_daily_receipt_does_not_make_new_session_a_revision(native):
+    native['publish']({'2026-11-03': {'Volume': 2000}})
+    lib = bridge.source_contract(str(bridge.SOURCE_ROOT))
+    from services.price_revision_policy import revision_witness
+    with bridge.readonly(native['config'].db) as c:
+        receipt = c.execute('SELECT receipt_id FROM source_heads WHERE security_id=102').fetchone()[0]
+        witness, reason = revision_witness(
+            c, lib, security_id=102, session='2026-11-04', calendar=native['cal'],
+            now=datetime.fromisoformat('2026-11-05T04:00:00+00:00'), anchor_receipt=receipt)
+        assert witness is None
+        assert reason == 'REVISION_SESSION_PREVIOUS_ACCEPTANCE_REQUIRED'
+        witness, reason = revision_witness(
+            c, lib, security_id=102, session='2026-11-03', calendar=native['cal'],
+            now=datetime.fromisoformat('2026-11-05T04:00:00+00:00'), anchor_receipt=receipt)
+        assert reason is None and witness['changed_fields'] == ['Volume']
+
+
+@pytest.mark.parametrize('missing_proof', ['held', 'other_session', 'wrong_change_id'])
+def test_prior_acceptance_proof_must_be_native_and_session_specific(native, missing_proof):
+    native['publish']({'2026-11-03': {'Volume': 2000}})
+    with sqlite3.connect(native['config'].db) as c:
+        if missing_proof == 'held':
+            c.execute("UPDATE source_receipts SET status='HELD' WHERE mode='repair'")
+        elif missing_proof == 'other_session':
+            c.execute("UPDATE source_changes SET scope=json_set(scope,'$.changes',json('[]')) WHERE revision=1")
+        else:
+            c.execute("UPDATE source_changes SET change_id='not-a-native-key' WHERE revision=1")
+    obj = native['factory']()('BETA')
+    assert obj.hold == 'MATERIAL_VOLUME_BOUNDARY'
+    assert not query(native['rc'], "SELECT 1 FROM osakedata WHERE pvm='2026-11-04'")
+
+
 def test_diagnostics_deduplicate_values_and_keep_bounded_sessions(tmp_path):
     log=RevisionDiagnostics(tmp_path/'bounded')
     item=dict(security_id=1,session='2026-11-03',original_rc={'Volume':100},accepted_source={'Volume':200},classification='NON_BLOCKING_HISTORICAL_REVISION')

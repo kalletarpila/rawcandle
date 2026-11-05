@@ -71,6 +71,29 @@ def revision_witness(c, lib, *, security_id, session, calendar, now, anchor_rece
     item = next((r for r in scope.get('changes', []) if r.get('session') == session), None)
     if not item or not item.get('fields'):
         return None, 'REVISION_SESSION_NOT_CHANGED'
+    # A daily receipt can revise an old bar AND insert another one. Its aggregate
+    # counts do not prove that this particular session was an overlap revision.
+    # Require a native earlier accepted change for the same session; initial
+    # insertion in a mixed receipt must never qualify as revision provenance.
+    previous = c.execute('''
+        SELECT prior.change_id, prior.revision, prior.receipt_id
+        FROM source_changes AS prior
+        JOIN source_receipts AS receipt
+          ON receipt.receipt_id=prior.receipt_id
+         AND receipt.security_id=prior.security_id
+        WHERE prior.security_id=? AND prior.revision<?
+          AND receipt.status='COMPLETE'
+          AND json_extract(receipt.summary,'$.revision')=prior.revision
+          AND json_extract(receipt.summary,'$.accepted_sessions')>0
+          AND EXISTS (
+              SELECT 1 FROM json_each(prior.scope,'$.changes') AS bar
+              WHERE json_extract(bar.value,'$.session')=?
+                AND json_array_length(bar.value,'$.fields')>0
+          )
+    ''', (security_id, revision, session))
+    if not any(row['change_id'] == lib.fingerprint([security_id, row['revision'], row['receipt_id']])
+               for row in previous):
+        return None, 'REVISION_SESSION_PREVIOUS_ACCEPTANCE_REQUIRED'
     head = c.execute('SELECT dependency FROM source_heads WHERE security_id=?', (security_id,)).fetchone()
     dep = json.loads(head[0])
     old_dep = authoritative['source_dependency']
