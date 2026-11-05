@@ -3559,7 +3559,10 @@ class RawCandleApp:
                     return
 
             today = datetime.now().strftime("%Y-%m-%d")
-            fetch_until_exclusive = _today_exclusive_end_date()
+            from services.market_sessions import completed_fetch_until
+            fetch_until_exclusive = completed_fetch_until(
+                selected_market, _today_exclusive_end_date()
+            )
             total_stocks = len(stocks)
             updated_count = 0
             skipped_count = 0
@@ -3602,7 +3605,8 @@ class RawCandleApp:
                     effective_start = update_start
                     if start_override:
                         effective_start = max(update_start, start_override)
-                    date_ranges.append((effective_start, fetch_until_exclusive))
+                    if effective_start < fetch_until_exclusive:
+                        date_ranges.append((effective_start, fetch_until_exclusive))
 
                 if not date_ranges:
                     skipped_count += 1

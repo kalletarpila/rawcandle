@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import math
 import sqlite3
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -221,6 +223,7 @@ class StockUpdateResult:
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     status: str = STATUS_OK
+    completed_session_cutoff: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.status not in VALID_STOCK_UPDATE_STATUSES:
@@ -710,11 +713,16 @@ def execute_ticker_ohlcv_update_plan(
     )
     all_rows = list(converted_rows)
     all_rows.extend(fallback_rows)
-    insert_result = insert_missing_ohlcv_rows(
-        osakedata_db_path=osakedata_db_path,
-        ticker=plan.candidate.ticker,
-        rows=all_rows,
-    )
+    publication = getattr(stock, '_stockcore_publication_context', nullcontext)
+    with publication():
+        insert_result = insert_missing_ohlcv_rows(
+            osakedata_db_path=osakedata_db_path,
+            ticker=plan.candidate.ticker,
+            rows=all_rows,
+        )
+    committed = getattr(stock, '_stockcore_price_rows_committed', None)
+    if committed is not None:
+        committed(insert_result.inserted_dates)
     fallback_inserted_dates = set(insert_result.inserted_dates) & {
         row.date for row in fallback_rows
     }
@@ -1044,7 +1052,7 @@ def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
     dow_structures_updated = (
         "" if result.dow_structures_updated is None else result.dow_structures_updated
     )
-    return [
+    lines = [
         f"SUMMARY market={result.market}",
         f"SUMMARY tickers_checked={result.tickers_checked}",
         f"SUMMARY tickers_updated={result.tickers_updated}",
@@ -1063,6 +1071,9 @@ def format_stock_update_summary_lines(result: StockUpdateResult) -> List[str]:
         f"SUMMARY errors={len(result.errors)}",
         f"SUMMARY status={result.status}",
     ]
+    if result.completed_session_cutoff is not None:
+        lines.append(f'SUMMARY completed_session_cutoff={result.completed_session_cutoff}')
+    return lines
 
 
 def run_stock_data_update(
@@ -1090,6 +1101,9 @@ def run_stock_data_update(
     recover_missing_ohlcv_rows: Optional[MissingOhlcvRecoveryCallable] = None,
 ) -> StockUpdateResult:
     selected_market = resolve_stock_update_market(market)
+    from services.market_sessions import completed_fetch_until, last_completed_helsinki_session
+    market_clock = datetime.now(timezone.utc)
+    fetch_until_exclusive = completed_fetch_until(selected_market, fetch_until_exclusive, now=market_clock)
     candidates = load_grouped_stock_update_candidates(osakedata_db_path)
     filtered_candidates = filter_stock_update_candidates_by_market(
         candidates,
@@ -1161,4 +1175,5 @@ def run_stock_data_update(
         warnings=warnings,
         errors=errors,
         status=status,
+        completed_session_cutoff=last_completed_helsinki_session(market_clock) if selected_market == 'omxh' else None,
     )

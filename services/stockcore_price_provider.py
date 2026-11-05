@@ -20,12 +20,17 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+from services.price_revision_policy import (RevisionDiagnostics, difference,
+                                           ordinary_revision, revision_witness)
+
 SOURCE_ROOT = Path('/home/kalle/projects/stockcore')
 PRICE_FIELDS = ('Open', 'High', 'Low', 'Close')
 COLUMNS = [*PRICE_FIELDS, 'Volume']
 COUNTERS = ('usa_stockcore', 'usa_yahoo_fallback', 'omxh_yahoo', 'stockcore_no_new',
             'action_split_holds', 'source_quality_coverage_holds',
-            'currency_unit_holds', 'anchor_materiality_holds', 'reader_failures')
+            'currency_unit_holds', 'anchor_materiality_holds', 'reader_failures',
+            'historical_revision_differences', 'historical_revision_warnings_new',
+            'historical_revision_safety_holds')
 
 
 class SourceHold(Exception):
@@ -56,6 +61,10 @@ def source_contract(root: str):
     from stockcore.source import identity_token
     from stockcore.source_references import calendar_dependency
     from stockcore.actions import operating_security
+    from stockcore.contracts import fingerprint, ContractError
+    from stockcore.source_receipt_contract import acceptance_receipt
+    from stockcore.config import Config
+    from stockcore.storage import acceptance_lock
     return SimpleNamespace(**locals())
 
 
@@ -143,10 +152,41 @@ def rc_state(path, ticker):
 
 
 class StockCoreTicker:
-    def __init__(self, owner, ticker, rows=(), splits=(), zone='America/New_York', hold=None, anchor=None, rc_splits=()):
+    def __init__(self, owner, ticker, rows=(), splits=(), zone='America/New_York', hold=None, anchor=None, rc_splits=(), source_pin=None):
         self.owner, self.ticker = owner, ticker
         self.rows, self.events, self.zone = rows, splits, zone
         self.hold, self.anchor, self.rc_splits = hold, anchor, rc_splits
+        self.source_pin = source_pin
+        self.revision_diagnostics = []
+
+    @contextmanager
+    def _stockcore_publication_context(self):
+        """Hold the native Source acceptance lock through the RC price commit."""
+        lib = source_contract(str(self.owner.source_root))
+        config = lib.Config(self.owner.source_path.parent.parent, mode='projection')
+        if config.db != self.owner.source_path or not self.source_pin:
+            raise RuntimeError('PINNED_SOURCE_PUBLICATION_REQUIRED')
+        with lib.acceptance_lock(config):
+            self.guard(anchor=True)
+            with readonly(self.owner.source_path) as c:
+                sid = self.source_pin['security_id']
+                head = c.execute('SELECT * FROM source_heads WHERE security_id=?', (sid,)).fetchone()
+                dep = json.loads(head['dependency']) if head else None
+                if not head or dep != self.source_pin['dependency'] or head['receipt_id'] != self.source_pin['receipt_id']:
+                    raise RuntimeError('SOURCE_CHANGED_AFTER_PREFLIGHT')
+                cal = lib.Calendar(lib.binding(c, sid, expanded=True)['calendar'])
+                if dep['identity_version'] != lib.identity_token(c, sid) or dep['calendar_version'] != lib.calendar_dependency(c, sid, cal):
+                    raise RuntimeError('SOURCE_REFERENCE_CHANGED_AFTER_PREFLIGHT')
+                self.owner._route_holds(c, [sid])
+                actions = [dict(r, payload=json.loads(r['payload'])) for r in bounded(c.execute('SELECT * FROM corporate_actions WHERE security_id=?', (sid,)))]
+                if lib.fingerprint(actions) != self.source_pin['actions']:
+                    raise RuntimeError('SOURCE_ACTION_CHANGED_AFTER_PREFLIGHT')
+            yield
+
+    def _stockcore_price_rows_committed(self, dates):
+        for item in self.revision_diagnostics:
+            item.update(new_sessions_appended=list(dates), publication_status='COMMITTED' if dates else 'NO_NEW_ROWS')
+            self.owner.diagnostics.record(item, update=True)
 
     def guard(self, *, anchor=False):
         if self.hold:
@@ -172,13 +212,28 @@ class StockCoreTicker:
 
 
 class ScheduledPriceFactory:
-    def __init__(self, *, rc_path, market, until, yahoo_factory, source_path=None, source_root=SOURCE_ROOT, now=None):
+    def __init__(self, *, rc_path, market, until, yahoo_factory, source_path=None, source_root=SOURCE_ROOT, now=None,
+                 diagnostic_dir=None):
         self.rc_path, self.market, self.until = Path(rc_path), market, until
         self.yahoo_factory = yahoo_factory
         self.source_root = Path(source_root)
         self.source_path = Path(source_path) if source_path else self.source_root / 'runtime/osakedata_ng.db'
         self.now = now or datetime.now(timezone.utc)
         self.counts, self.reasons, self.examples, self.selected = Counter(), Counter(), [], {}
+        self.diagnostics = RevisionDiagnostics(diagnostic_dir or self.rc_path.parent / 'price_bridge_revisions')
+        self.pending_diagnostics = []
+
+    def _flush_diagnostics(self, *, held=None, sessions=()):
+        for item in self.pending_diagnostics:
+            item.update(classification='SAFETY_HOLD' if held else 'NON_BLOCKING_HISTORICAL_REVISION',
+                        new_sessions_eligible=list(sessions), skipped_reason=held)
+            self.counts['historical_revision_differences'] += 1
+            self.counts['historical_revision_safety_holds'] += bool(held)
+            if self.diagnostics.record(item):
+                self.counts['historical_revision_warnings_new'] += 1
+                if len(self.examples) < 20:
+                    self.examples.append(item)
+        self.pending_diagnostics = []
 
     def record(self, category, ticker, reason, **evidence):
         self.counts[category] += 1
@@ -206,6 +261,7 @@ class ScheduledPriceFactory:
         if self.market != 'usa':
             self.counts['omxh_yahoo'] += 1
             return self.yahoo_factory(ticker)
+        self.pending_diagnostics = []
         try:
             lib = source_contract(str(self.source_root))
             with readonly(self.source_path) as c:
@@ -216,6 +272,7 @@ class ScheduledPriceFactory:
                 c.execute('SELECT request FROM operation_schedules LIMIT 0')
                 decision = self._snapshot(c, lib, ticker)
         except SourceHold as exc:
+            self._flush_diagnostics(held=exc.reason)
             self.record(exc.category, ticker, exc.reason)
             result = StockCoreTicker(self, ticker, hold=exc.reason)
             self.selected[ticker] = result
@@ -228,6 +285,8 @@ class ScheduledPriceFactory:
             self.record('usa_yahoo_fallback', ticker, decision)
             return self.yahoo_factory(ticker)
         self.counts['usa_stockcore'] += 1
+        decision.revision_diagnostics = list(self.pending_diagnostics)
+        self._flush_diagnostics(sessions=[r['session'] for r in decision.rows])
         self.selected[ticker] = decision
         return decision
 
@@ -289,6 +348,7 @@ class ScheduledPriceFactory:
         if schedule and str(sid) in json.loads(schedule[0]).get('held', {}):
             raise SourceHold('source_quality_coverage_holds', 'SOURCE_OPERATOR_HOLD')
         actions = [dict(r, payload=json.loads(r['payload'])) for r in bounded(c.execute('SELECT * FROM corporate_actions WHERE security_id=?', (sid,)))]
+        source_pin = dict(security_id=sid, dependency=dependency, receipt_id=head['receipt_id'], actions=lib.fingerprint(actions))
         if any(a['status'] == 'HELD' and a['kind'] != 'DIVIDEND' for a in actions):
             raise SourceHold('action_split_holds', 'SOURCE_ACTION_HELD')
         self._currency(c, lib, security, actions, ticker)
@@ -326,10 +386,31 @@ class ScheduledPriceFactory:
             materialized[day] = self._convert(raw[day])
         if no_new:
             self.record('stockcore_no_new', ticker, 'NO_NEW_ACCEPTED_SOURCE_SESSION', source_dependency=dependency)
-            return StockCoreTicker(self, ticker, anchor=anchor, rc_splits=rc_splits, splits=events, zone=cal.payload['timezone'])
+            return StockCoreTicker(self, ticker, anchor=anchor, rc_splits=rc_splits, splits=events, zone=cal.payload['timezone'], source_pin=source_pin)
         if anchor['pvm'] not in materialized:
             raise SourceHold('anchor_materiality_holds', 'SOURCE_ANCHOR_UNAVAILABLE')
         self._factors(materialized, actions)
+        raw_anchor = raw[anchor['pvm']]
+        diagnostic = difference(ticker=ticker, security_id=sid, anchor=anchor, raw=raw_anchor,
+                                adjusted=materialized[anchor['pvm']]['adjusted'], dependency=dependency)
+        if diagnostic:
+            observation = c.execute('SELECT receipt_id FROM source_observations WHERE security_id=? AND session=?',
+                                    (sid, anchor['pvm'])).fetchone()
+            witness, reason = revision_witness(c, lib, security_id=sid, session=anchor['pvm'],
+                                               calendar=cal, now=self.now, anchor_receipt=observation[0])
+            diagnostic.update(source_receipt=observation[0], revision_witness=witness,
+                              qualification_reason=reason)
+            self.pending_diagnostics.append(diagnostic)
+        else:
+            witness = None
+        context = []
+        for peer in rc_rows[1:]:
+            if peer['pvm'] in raw and qualified[peer['pvm']]['status'] == 'AVAILABLE':
+                q = qualified[peer['pvm']]['quality']
+                if q.get('adjusted_usable') and q.get('price_units') == 'YAHOO_SPLIT_ADJUSTED' and q.get('volume_units') == 'PROVIDER_REPORTED':
+                    context.append((self._convert(raw[peer['pvm']])['adjusted'],
+                                    [peer[k] for k in ('open', 'high', 'low', 'close', 'volume')]))
+        self._anchor_revision = (diagnostic, witness, context)
         self._anchor(anchor, materialized[anchor['pvm']], actions, last, kind['value'])
         # Context is diagnostic: hold persistent unexplained scaling, not ordinary old revisions.
         self._scaling(rc_rows, {d: p for d, p in raw.items() if qualified[d]['status'] == 'AVAILABLE'}, actions, last)
@@ -339,7 +420,7 @@ class ScheduledPriceFactory:
         if len(self.examples) < 20:
             self.examples.append(dict(ticker=ticker, reason='SOURCE_SNAPSHOT', source_dependency=dependency,
                                       anchor=anchor['pvm'], through=last, observations=len(rows)))
-        return StockCoreTicker(self, ticker, rows, events, cal.payload['timezone'], anchor=anchor, rc_splits=rc_splits)
+        return StockCoreTicker(self, ticker, rows, events, cal.payload['timezone'], anchor=anchor, rc_splits=rc_splits, source_pin=source_pin)
 
     @staticmethod
     def _route_holds(c, ids):
@@ -425,17 +506,24 @@ class ScheduledPriceFactory:
             previous = day, row
 
     def _anchor(self, rc, source, actions, end, kind):
+        diagnostic, witness, context = getattr(self, '_anchor_revision', (None, None, ()))
         prices = [rc[k] for k in ('open', 'high', 'low', 'close')]
         if not valid_prices(prices) or not valid_volume(rc['volume']):
             raise SourceHold('anchor_materiality_holds', 'INVALID_RC_ANCHOR')
+        ordinary = False
+        if diagnostic:
+            ordinary, reason = ordinary_revision(diagnostic=diagnostic, witness=witness, context=context,
+                                                 prices_match=prices_match, volumes_match=volumes_match)
+            diagnostic['qualification_reason'] = reason if witness else diagnostic['qualification_reason']
         if not prices_match(source['adjusted'][:4], prices):
             dividends = [a for a in actions if a['kind'] == 'DIVIDEND' and rc['pvm'] < a['payload'].get('effective_date', '') <= end]
             explained = (dividends and all(a['status'] == 'RECORDED' and float(a['payload'].get('amount', 0)) > 0 for a in dividends)
                          and 0 < source['factor'] < 1 and prices_match(source['ordinary'], prices))
-            if not explained:
+            if not explained and not ordinary:
                 raise SourceHold('anchor_materiality_holds', 'UNEXPLAINED_PRICE_OR_FACTOR_BOUNDARY')
-            self.record('dividend_vintage_confirmed', '', 'LEGACY_DIVIDEND_VINTAGE_CONFIRMED')
-        if not volumes_match(source['adjusted'][4], rc['volume'], counted=kind not in {'CRYPTO', 'INDEX'}):
+            if explained:
+                self.record('dividend_vintage_confirmed', '', 'LEGACY_DIVIDEND_VINTAGE_CONFIRMED')
+        if not ordinary and not volumes_match(source['adjusted'][4], rc['volume'], counted=kind not in {'CRYPTO', 'INDEX'}):
             raise SourceHold('anchor_materiality_holds', 'MATERIAL_VOLUME_BOUNDARY')
 
     @staticmethod
