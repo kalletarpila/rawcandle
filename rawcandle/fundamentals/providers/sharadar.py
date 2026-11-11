@@ -7,7 +7,9 @@ import json
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from contextlib import contextmanager, nullcontext
+from uuid import uuid4
 from typing import Any, Callable, Iterable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
@@ -15,6 +17,7 @@ from urllib.request import Request, urlopen
 
 from rawcandle.config.env import get_env
 from rawcandle.fundamentals.providers.base import ProviderObservation
+from .sharadar_limiter import CredentialRequestLimiter, SharadarCooldown, retry_after_seconds, utc_timestamp
 
 
 SHARADAR_DIRECT_BASE_URL = "https://api.sharadar.com/v1.0"
@@ -114,6 +117,12 @@ class SharadarResult:
     records: list[dict[str, Any]]
     payload: Any = None
     error: str = ""
+    response_body: bytes | None = None
+    response_headers: Mapping[str, str] | None = None
+    parameters: Mapping[str, str] | None = None
+    acquired_at_utc: str | None = None
+    not_before: float | None = None
+    attempt_id: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -198,9 +207,20 @@ class SharadarClient:
         opener: Callable[[Request, float], Any] | None = None,
         sleeper: Callable[[float], None] = time.sleep,
         request_limiter: SharadarRequestLimiter | None = None,
+        credential_limiter: CredentialRequestLimiter | None = None,
+        wait_budget_seconds: float = 30.0,
+        wall_clock: Callable[[], float] = time.time,
         env: Mapping[str, str] | None = None,
     ) -> None:
-        self._api_key = api_key if api_key is not None else (env.get(SHARADAR_API_KEY_ENV) if env is not None else get_env(SHARADAR_API_KEY_ENV))
+        self._api_key = (
+            api_key
+            if api_key is not None
+            else (
+                env.get(SHARADAR_API_KEY_ENV)
+                if env is not None
+                else get_env(SHARADAR_API_KEY_ENV)
+            )
+        )
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
@@ -209,10 +229,44 @@ class SharadarClient:
         self._sleeper = sleeper
         # Custom transports are fixture boundaries and should never incur real
         # wall-clock delays unless a test explicitly injects a limiter.
-        self._request_limiter = request_limiter if request_limiter is not None else (
-            _PROCESS_REQUEST_LIMITER if opener is None else None
+        self._request_limiter = (
+            request_limiter
+            if request_limiter is not None
+            else (_PROCESS_REQUEST_LIMITER if opener is None else None)
         )
         self.request_count = 0
+        # Every real native transport participates, even when a legacy pacing
+        # limiter was injected. Fake openers can inject disposable coordination.
+        self._credential_limiter = credential_limiter or (
+            CredentialRequestLimiter(self._api_key) if opener is None else None
+        )
+        self._wait_budget_seconds = wait_budget_seconds
+        self._wall_clock = wall_clock
+        self._attempt_observer = None
+        self._response_limit = None
+
+    @contextmanager
+    def observe_attempts(self, observer, *, response_limit=None):
+        """Acquisition-only ledger hook. Errors fail before unrecorded transport."""
+        if self._attempt_observer is not None:
+            raise ValueError("SHARADAR_ATTEMPT_OBSERVER_ALREADY_OWNED")
+        self._attempt_observer = observer
+        self._response_limit = response_limit
+        try:
+            yield
+        finally:
+            self._attempt_observer = None
+            self._response_limit = None
+
+    def _read_response(self, response):
+        body = (
+            response.read()
+            if self._response_limit is None
+            else response.read(self._response_limit + 1)
+        )
+        if self._response_limit is not None and len(body) > self._response_limit:
+            raise ValueError("SHARADAR_RESPONSE_BUDGET_EXCEEDED")
+        return body
 
     @property
     def provider_name(self) -> str:
@@ -282,26 +336,20 @@ class SharadarClient:
         if result.ok and dimension:
             wanted = dimension.strip().upper()
             filtered = [row for row in result.records if str(row.get("dimension", "")).upper() == wanted]
-            result = SharadarResult(
-                status=result.status,
-                auth_status=result.auth_status,
-                http_status=result.http_status,
-                endpoint=result.endpoint,
-                url=result.url,
-                request_count=result.request_count,
-                records=filtered,
-                payload=result.payload,
-                error=result.error,
-            )
+            result = replace(result, records=filtered)
         return result
 
     def raw_records(self, table: str, records: Iterable[Mapping[str, Any]]) -> list[SharadarRawRecord]:
         return [SharadarRawRecord(provider="SHARADAR", table=table, fields=dict(row)) for row in records]
 
-    def raw_observations(self, native_table: str, records: Iterable[Mapping[str, Any]]) -> list[ProviderObservation]:
+    def raw_observations(
+        self, native_table: str, records: Iterable[Mapping[str, Any]]
+    ) -> list[ProviderObservation]:
         return [_provider_observation(native_table, row) for row in records]
 
-    def _request(self, method: str, path: str, params: Mapping[str, str], *, auth: bool) -> SharadarResult:
+    def _request(
+        self, method: str, path: str, params: Mapping[str, str], *, auth: bool
+    ) -> SharadarResult:
         if auth and not self._api_key:
             return SharadarResult(
                 status=STATUS_AUTH_NOT_CONFIGURED,
@@ -320,95 +368,212 @@ class SharadarClient:
             headers["x-api-key"] = self._api_key
         request = Request(url, headers=headers, method=method)
 
-        attempts = self._max_retries + 1
         last_error = ""
-        for attempt in range(attempts):
+        for attempt in range(self._max_retries + 1):
+            attempt_id = uuid4().hex
+            event = {
+                "attempt_id": attempt_id,
+                "endpoint": path,
+                "parameters": {
+                    k: redact_secret(str(v), [self._api_key])
+                    for k, v in params.items()
+                    if k.lower() not in {"api_key", "key", "apikey"}
+                },
+                "attempt_number": attempt + 1,
+            }
+            dispatched = False
             try:
-                if self._request_limiter is not None:
-                    self._request_limiter.wait()
-                self.request_count += 1
-                response = self._opener(request, self._timeout_seconds)
-                status = int(getattr(response, "status", response.getcode()))
-                body = response.read().decode("utf-8", errors="replace")
-                headers_map = dict(getattr(response, "headers", {}).items())
-            except HTTPError as exc:
-                status = int(exc.code)
-                body = exc.read().decode("utf-8", errors="replace")
-                headers_map = dict(exc.headers.items()) if exc.headers else {}
+                coordination = (
+                    self._credential_limiter.request(
+                        wait_budget=self._wait_budget_seconds
+                    )
+                    if self._credential_limiter
+                    else nullcontext()
+                )
+                with coordination:
+                    if self._request_limiter is not None:
+                        self._request_limiter.wait()
+                    if self._attempt_observer:
+                        self._attempt_observer(
+                            {
+                                **event,
+                                "event": "STARTED",
+                                "at_utc": utc_timestamp(self._wall_clock()),
+                            }
+                        )
+                    self.request_count += 1
+                    dispatched = True
+                    response = None
+                    try:
+                        response = self._opener(request, self._timeout_seconds)
+                        status = int(
+                            response.status
+                            if hasattr(response, "status")
+                            else response.getcode()
+                        )
+                        raw_body = self._read_response(response)
+                        headers_map = dict(getattr(response, "headers", {}).items())
+                    except HTTPError as exc:
+                        response = exc
+                        status = int(exc.code)
+                        raw_body = self._read_response(exc)
+                        headers_map = dict(exc.headers.items()) if exc.headers else {}
+                    finally:
+                        if response is not None and hasattr(response, "close"):
+                            response.close()
+                    acquired_at = utc_timestamp(self._wall_clock())
+                    not_before = None
+                    if status == 429 and self._credential_limiter:
+                        not_before = self._credential_limiter.record_429(headers_map)
+                    if self._attempt_observer:
+                        self._attempt_observer(
+                            {
+                                **event,
+                                "event": "FINISHED",
+                                "http_status": status,
+                                "at_utc": acquired_at,
+                                "response_bytes": len(raw_body),
+                                "response_sha256": hashlib.sha256(raw_body).hexdigest(),
+                            }
+                        )
+            except SharadarCooldown as exc:
+                return SharadarResult(
+                    STATUS_RATE_LIMITED,
+                    REQUEST_FAILED,
+                    0,
+                    path,
+                    safe_url,
+                    self.request_count,
+                    [],
+                    error="SHARADAR_SHARED_COOLDOWN",
+                    not_before=exc.not_before,
+                )
             except (TimeoutError, URLError, OSError) as exc:
-                last_error = redact_secret(f"{type(exc).__name__}:{exc}", [self._api_key])
-                if attempt < self._max_retries:
+                last_error = redact_secret(
+                    f"{type(exc).__name__}:{exc}", [self._api_key]
+                )
+                if self._attempt_observer and dispatched:
+                    self._attempt_observer(
+                        {
+                            **event,
+                            "event": "FAILED",
+                            "http_status": 0,
+                            "at_utc": utc_timestamp(self._wall_clock()),
+                            "error_type": type(exc).__name__,
+                        }
+                    )
+                if dispatched and attempt < self._max_retries:
                     self._sleeper(self._retry_sleep_seconds)
                     continue
                 return SharadarResult(
-                    status=STATUS_TRANSIENT_FAILURE,
-                    auth_status=REQUEST_FAILED,
-                    http_status=0,
-                    endpoint=path,
-                    url=safe_url,
-                    request_count=self.request_count,
-                    records=[],
+                    STATUS_TRANSIENT_FAILURE,
+                    REQUEST_FAILED,
+                    0,
+                    path,
+                    safe_url,
+                    self.request_count,
+                    [],
                     error=last_error,
                 )
+            except BaseException as exc:
+                if self._attempt_observer and dispatched:
+                    self._attempt_observer(
+                        {
+                            **event,
+                            "event": (
+                                "INTERRUPTED"
+                                if isinstance(exc, (KeyboardInterrupt, SystemExit))
+                                else "FAILED"
+                            ),
+                            "http_status": 0,
+                            "at_utc": utc_timestamp(self._wall_clock()),
+                            "error_type": type(exc).__name__,
+                        }
+                    )
+                raise
 
+            body = raw_body.decode("utf-8", errors="replace")
             status_name, auth_status = classify_http_status(status, body)
-            if status_name in {STATUS_RATE_LIMITED, STATUS_TRANSIENT_FAILURE} and attempt < self._max_retries:
-                retry_after = _retry_after_seconds(headers_map) or self._retry_sleep_seconds
-                self._sleeper(retry_after)
+            safe_headers = {
+                k.lower(): redact_secret(str(v), [self._api_key])
+                for k, v in headers_map.items()
+                if k.lower()
+                in {"content-type", "content-length", "retry-after", "date"}
+            }
+            if status_name == STATUS_TRANSIENT_FAILURE and attempt < self._max_retries:
+                delay = _retry_after_seconds(headers_map)
+                self._sleeper(self._retry_sleep_seconds if delay is None else delay)
                 continue
             if status_name != STATUS_SUCCESS:
+                # 429 always returns promptly. Shared cooldown governs any later
+                # native caller; FETCH persists its pause instead of looping.
                 return SharadarResult(
-                    status=status_name,
-                    auth_status=auth_status,
-                    http_status=status,
-                    endpoint=path,
-                    url=safe_url,
-                    request_count=self.request_count,
-                    records=[],
+                    status_name,
+                    auth_status,
+                    status,
+                    path,
+                    safe_url,
+                    self.request_count,
+                    [],
                     error=redact_secret(body[:500], [self._api_key]),
+                    response_headers=safe_headers,
+                    not_before=not_before,
                 )
             try:
-                payload = parse_payload(body, headers_map.get("Content-Type", ""))
-            except (csv.Error, json.JSONDecodeError, ValueError) as exc:
+                body = raw_body.decode("utf-8", errors="strict")
+                if self._api_key and self._api_key in body:
+                    raise ValueError("SHARADAR_SECRET_IN_RESPONSE")
+                content_length = safe_headers.get("content-length")
+                if content_length is not None and int(content_length) != len(raw_body):
+                    raise ValueError("SHARADAR_TRUNCATED_RESPONSE")
+                payload = parse_payload(body, safe_headers.get("content-type", ""))
+            except (
+                csv.Error,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                ValueError,
+            ) as exc:
                 return SharadarResult(
-                    status=STATUS_INVALID_RESPONSE,
-                    auth_status=auth_status,
-                    http_status=status,
-                    endpoint=path,
-                    url=safe_url,
-                    request_count=self.request_count,
-                    records=[],
+                    STATUS_INVALID_RESPONSE,
+                    auth_status,
+                    status,
+                    path,
+                    safe_url,
+                    self.request_count,
+                    [],
                     error=redact_secret(f"{type(exc).__name__}:{exc}", [self._api_key]),
                 )
             from rawcandle.fundamentals.source_capture import _http_records
-            from datetime import datetime, timezone
-            captured = _http_records(payload_records(payload), endpoint=path, parameters=params,
-                                     acquired_at=datetime.now(timezone.utc).isoformat(),base_url=self._base_url,
-                                     response_sha256=hashlib.sha256(body.encode('utf-8')).hexdigest())
-            return SharadarResult(
-                status=STATUS_SUCCESS,
-                auth_status=auth_status,
-                http_status=status,
-                endpoint=path,
-                url=safe_url,
-                request_count=self.request_count,
-                records=captured,
-                payload=payload,
-            )
 
-        return SharadarResult(
-            status=STATUS_TRANSIENT_FAILURE,
-            auth_status=REQUEST_FAILED,
-            http_status=0,
-            endpoint=path,
-            url=safe_url,
-            request_count=self.request_count,
-            records=[],
-            error=last_error,
-        )
+            captured = _http_records(
+                payload_records(payload),
+                endpoint=path,
+                parameters=params,
+                acquired_at=acquired_at,
+                base_url=self._base_url,
+                response_sha256=hashlib.sha256(raw_body).hexdigest(),
+            )
+            return SharadarResult(
+                STATUS_SUCCESS,
+                auth_status,
+                status,
+                path,
+                safe_url,
+                self.request_count,
+                captured,
+                payload=payload,
+                response_body=raw_body,
+                response_headers=safe_headers,
+                parameters=dict(params),
+                acquired_at_utc=acquired_at,
+                attempt_id=attempt_id,
+            )
+        raise AssertionError("unreachable Sharadar retry state")
 
     def _url(self, path: str, params: Mapping[str, str]) -> str:
-        query = urlencode({key: value for key, value in params.items() if value not in ("", None)})
+        query = urlencode(
+            {key: value for key, value in params.items() if value not in ("", None)}
+        )
         return f"{self._base_url}{path}" + (f"?{query}" if query else "")
 
     def _safe_url(self, path: str, params: Mapping[str, str]) -> str:
@@ -420,21 +585,21 @@ class SharadarClient:
 
 
 def _retry_after_seconds(headers: Mapping[str, str]) -> float | None:
-    for key, value in headers.items():
-        if key.lower() == "retry-after":
-            try:
-                return max(0.0, min(float(value), 60.0))
-            except ValueError:
-                return None
-    return None
+    return retry_after_seconds(headers)
 
 
-def filter_dimension(records: Iterable[Mapping[str, Any]], dimension: str) -> list[dict[str, Any]]:
+def filter_dimension(
+    records: Iterable[Mapping[str, Any]], dimension: str
+) -> list[dict[str, Any]]:
     wanted = dimension.upper()
-    return [dict(row) for row in records if str(row.get("dimension", "")).upper() == wanted]
+    return [
+        dict(row) for row in records if str(row.get("dimension", "")).upper() == wanted
+    ]
 
 
-def _provider_observation(native_table: str, row: Mapping[str, Any]) -> ProviderObservation:
+def _provider_observation(
+    native_table: str, row: Mapping[str, Any]
+) -> ProviderObservation:
     fields = dict(row)
     ticker = str(fields.get("ticker") or "").upper()
     dimension = str(fields.get("dimension") or "")
@@ -442,7 +607,14 @@ def _provider_observation(native_table: str, row: Mapping[str, Any]) -> Provider
     fiscalperiod = _nullable_str(fields.get("fiscalperiod"))
     date = _nullable_str(fields.get("date") or fields.get("lastupdated"))
     provider_security_id = _nullable_str(fields.get("permaticker"))
-    record_id_parts = [ticker, native_table, dimension, reportperiod or "", fiscalperiod or "", date or ""]
+    record_id_parts = [
+        ticker,
+        native_table,
+        dimension,
+        reportperiod or "",
+        fiscalperiod or "",
+        date or "",
+    ]
     provider_record_id = "|".join(record_id_parts)
     return ProviderObservation(
         provider="SHARADAR",

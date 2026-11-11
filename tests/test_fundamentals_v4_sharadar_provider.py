@@ -179,11 +179,12 @@ def test_403_exceeds_free_tier_classified() -> None:
     assert result.auth_status == FREE_TIER_ACCESS_LIMIT
 
 
-def test_429_retry_policy() -> None:
+def test_429_returns_promptly_without_internal_retry() -> None:
     opener = FakeOpener([http_error(429, "rate limit"), FakeResponse(200, [{"ticker": "AAPL"}])])
     result = SharadarClient(api_key="key", opener=opener, retry_sleep_seconds=0, sleeper=lambda _: None).fundamentals(ticker="AAPL")
-    assert result.status == STATUS_SUCCESS
-    assert len(opener.requests) == 2
+    assert result.status == STATUS_RATE_LIMITED
+    assert len(opener.requests) == 1
+    assert result.request_count == 1
 
 
 def test_transient_5xx_retry() -> None:
