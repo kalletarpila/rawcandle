@@ -446,6 +446,23 @@ def _candidate_manifest(paths: Mapping[str, Path], backups: Mapping[str, Any]) -
     return roles
 
 
+def _validate_generation_backup_binding(generation: Any, backups: Mapping[str, Any]) -> None:
+    """Bind rollback receipts to the exact immutable OLD role files, before intent.
+
+    SQLite online backup is appropriate for legacy mutable authorities but can
+    rewrite file-header counters. Pointer recovery reactivates the original
+    immutable files, so its backup receipts must describe those exact bytes.
+    """
+    if set(backups) != set(PUBLICATION_ROLES):
+        raise RuntimeError('IMMUTABLE_GENERATION_BACKUP_ROLE_SET_MISMATCH')
+    for role in PUBLICATION_ROLES:
+        record = backups[role]
+        expected = str((generation.manifest.get('role_verification', {}).get(role) or {}).get('sha256') or '')
+        if (not expected or Path(record['source']).resolve() != generation.role_paths()[role].resolve()
+                or record['source_sha256'] != expected or record['verification']['sha256'] != expected):
+            raise RuntimeError('IMMUTABLE_GENERATION_OLD_BACKUP_BINDING_MISMATCH:' + role)
+
+
 def _replace_role(
     role: str, journal: Mapping[str, Any], *, journal_path: Path,
 ) -> dict[str, Any]:
@@ -1129,7 +1146,9 @@ def run_production_apply(
         stage = "BACKUP"
         progress(stage, "RUNNING", "Creating and verifying the old complete generation backup set.")
         with _durable_heartbeat(writer, stage, "Verified backup creation is still running."):
-            backups = _verified_backups(source_paths, backup_dir)
+            backups = _verified_backups(source_paths, backup_dir, immutable_generation=active_generation is not None)
+            if active_generation is not None:
+                _validate_generation_backup_binding(active_generation, backups)
         result["backups"] = backups
         progress(stage, "COMPLETED", "All three old-generation backups are verified and durable.")
         crash("AFTER_BACKUPS_BEFORE_PREPARED")
