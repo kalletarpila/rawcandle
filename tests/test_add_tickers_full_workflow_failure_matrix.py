@@ -9,6 +9,7 @@ import pytest
 from rawcandle.fundamentals.admin import batch_add_tickers
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 from tests.test_fundamentals_admin_batch_add_tickers import _archive_row, _generic_paths
+from tests.provider_capture_fixtures import captured_result
 
 
 @pytest.mark.parametrize(
@@ -43,6 +44,8 @@ def test_real_preview_acquisition_failure_stops_full_workflow_before_test(
 
         def fundamentals(self, **_kwargs: object) -> SimpleNamespace:
             self.request_count += 1
+            if provider_status == "SUCCESS" and rows:
+                return captured_result(rows)
             return SimpleNamespace(
                 ok=provider_status == "SUCCESS",
                 status=provider_status,
@@ -89,12 +92,15 @@ def test_real_preview_acquisition_failure_stops_full_workflow_before_test(
     preview_run = durable["stages"][0]["run_id"]
     preview_result = service.history_result_summary(preview_run)
     assert preview_result
-    child = service._load_json_file(service.run_root / preview_run / "result.json")
+    child = json.loads((service.run_root / preview_run / "result.json").read_text())
     assert child is not None
     acquisition = child["ticker_reporting"][0]["acquisition"]
+    # The current BASE capture gate rejects unusable fiscal identity before
+    # normalization; the exact fiscal cause must still reach the parent above.
     assert acquisition["status"] == (
         "SUCCESS_NO_USABLE_QUARTERLY_HISTORY"
-        if reason == "NO_USABLE_QUARTERLY_HISTORY" else reason
+        if reason == "NO_USABLE_QUARTERLY_HISTORY" else
+        "SOURCE_PAYLOAD_CAPTURE_UNVERIFIED" if reason == "INCOMPLETE_FISCAL_IDENTITY" else reason
     )
     assert bool(acquisition.get("retryable")) is retryable
     assert acquisition["authoritative"] is (reason == "NO_USABLE_QUARTERLY_HISTORY")

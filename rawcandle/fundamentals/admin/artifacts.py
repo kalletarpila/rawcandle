@@ -68,6 +68,22 @@ class AdminRunWriter:
     def write_json(self, name: str, value: Any) -> Path:
         path = self.run_dir / name
         write_text_atomic(path, json.dumps(self._safe(value), indent=2, sort_keys=True, allow_nan=False, default=str) + "\n")
+        if name == "result.json" and isinstance(value, Mapping):
+            from .workflow_evidence import OPERATIONS, MODES, SUMMARY, VERSION, child_summary, reference, noop_scope
+            if value.get("operation_type") in OPERATIONS and value.get("mode") in MODES:
+                summary = child_summary(value)
+                result_ref = reference(self.root, self.run_id, "RESULT", operation=value["operation_type"])
+                scope = noop_scope(value)
+                if scope is not None:
+                    self.write_json("workflow_noop_scope.json", scope | {
+                        "format": VERSION, "run_id": self.run_id, "result_reference": result_ref})
+                    summary['noop_scope_reference'] = reference(self.root, self.run_id, 'NOOP_SCOPE', operation=value['operation_type'])
+                self.write_json(SUMMARY, {
+                    "format": VERSION, "run_id": self.run_id,
+                    "result_reference": result_ref,
+                    "summary": summary,
+                })
+                self._result_for_report = value
         return path
 
     def write_text(self, name: str, text: str) -> Path:
@@ -168,7 +184,9 @@ class AdminRunWriter:
         if (self.run_dir / "result.json").is_file() and not report_path.exists():
             from rawcandle.fundamentals.admin.operation_report import write_operation_report
 
-            write_operation_report(self.run_id, root=self.root)
+            write_operation_report(self.run_id, root=self.root,
+                                   result_payload=getattr(self, "_result_for_report", None))
+        self._result_for_report = None
         artifacts = []
         for path in sorted(self.run_dir.iterdir()):
             if not path.is_file() or path.name == "artifact_manifest.json":

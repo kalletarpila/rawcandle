@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.provider_capture_fixtures import captured_result
+
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,8 +11,6 @@ from rawcandle.ec_datacenter_taxonomy_loader import load_datacenter_taxonomy_to_
 from rawcandle.ec_sidecar_migration import apply_ec_sidecar_migration
 from rawcandle.fundamentals.admin.batch_add_tickers import BatchAddTickerPaths
 from rawcandle.fundamentals.providers.sharadar import (
-    AUTH_OK,
-    STATUS_SUCCESS,
     SharadarResult,
 )
 from rawcandle.fundamentals.schema.migrations import (
@@ -43,16 +43,8 @@ class FixtureSharadarClient:
         self.calls.append(dict(kwargs))
         ticker = str(kwargs["ticker"]).upper()
         rows = [dict(row) for row in self.rows_by_ticker.get(ticker, ())]
-        return SharadarResult(
-            status=STATUS_SUCCESS,
-            auth_status=AUTH_OK,
-            http_status=200,
-            endpoint="fundamentals",
-            url=f"fixture://sharadar/fundamentals/{ticker}",
-            request_count=self.request_count,
-            records=rows,
-            payload=rows,
-        )
+        return captured_result(rows,ticker=ticker)
+
 
 
 def _quarter_rows(ticker: str, *, start_year: int, start_quarter: int, count: int) -> list[dict[str, Any]]:

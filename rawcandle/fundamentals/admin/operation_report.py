@@ -774,9 +774,10 @@ def render_operation_report(
     return redact_text("\n".join(lines).rstrip() + "\n")
 
 
-def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT) -> OperationReportSummary:
+def write_operation_report(run_id: str, *, root: Path = ADMIN_RUN_ROOT,
+                           result_payload: Mapping[str, Any] | None = None) -> OperationReportSummary:
     run_dir = _safe_run_dir(run_id, root)
-    result = _load_json(run_dir / "result.json") or {}
+    result = result_payload if result_payload is not None else (_load_json(run_dir / "result.json") or {})
     request = _load_json(run_dir / "request.json")
     progress = _load_json(run_dir / "progress_status.json") or _load_json(run_dir / "status.json")
     if result.get("operation_type") == "REFRESH_FUNDAMENTALS" and result.get("mode") in {"PRODUCTION_APPLY", "TRANSACTION_REHEARSAL"}:

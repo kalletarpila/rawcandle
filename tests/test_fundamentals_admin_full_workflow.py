@@ -36,6 +36,9 @@ def _stage_result(
         **(extra or {}),
     }
     (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+    if mode == "PREVIEW":
+        filename = "remove_tickers_preview.json" if operation_type == "REMOVE_TICKERS" else "phase13d_preview_payload.json"
+        (run_dir / filename).write_text(json.dumps(payload))
     (run_dir / "operation_report.md").write_text(
         report_content if report_content is not None else f"# {mode}\n", encoding="utf-8",
     )
@@ -44,7 +47,7 @@ def _stage_result(
         outcome=outcome,
         run_id=run_id,
         artifact_dir=str(run_dir),
-        preview_payload_path=str(run_dir / "preview_payload.json") if mode == "PREVIEW" else None,
+        preview_payload_path=str(run_dir / ("remove_tickers_preview.json" if operation_type == "REMOVE_TICKERS" else "phase13d_preview_payload.json")) if mode == "PREVIEW" else None,
         preview_fingerprint="preview-fp",
         message=f"{mode} {outcome}",
     )

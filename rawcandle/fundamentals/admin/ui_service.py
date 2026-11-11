@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from typing import Any, Callable, Mapping
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, sha256_file
+from rawcandle.fundamentals.admin.workflow_evidence import compact_decision, ownership_eligibility_view
 from rawcandle.fundamentals.admin.history import AdminRunHistory, RunProgressSummary
 from rawcandle.fundamentals.admin.operation_report import (
     OPERATION_REPORT_NAME,
@@ -721,7 +722,8 @@ class FundamentalsAdminUIService:
                 from .pb_ownership_future import configured, summary, FutureOwnershipWorkflow, financial_result_allows_ownership_reconciliation
                 enabled=configured() if ownership_auto_enabled is None else ownership_auto_enabled
                 state=summary(enabled,status='SKIPPED_UNSAFE_FINANCIAL_WORKFLOW')
-                allowed = financial_result_allows_ownership_reconciliation(result)
+                allowed = financial_result_allows_ownership_reconciliation(
+                    ownership_eligibility_view(result, self.run_root))
                 financial_outcome = result.get('outcome')
                 precondition = ('SAFE_FINANCIAL_NO_OP' if financial_outcome == 'STOPPED' else 'SAFE_FINANCIAL_RESULT') if allowed else 'UNSAFE_FINANCIAL_RESULT'
                 if allowed:
@@ -1154,7 +1156,7 @@ class FundamentalsAdminUIService:
             result = projection.result
         if result is None:
             raise ValueError("invalid admin result")
-        return build_operation_summary(result)
+        return tuple(result.get("_workflow_ui_rows") or build_operation_summary(result))
 
     @staticmethod
     def _cached_projection(
@@ -1355,7 +1357,8 @@ class FundamentalsAdminUIService:
         if path.is_symlink():
             return None
         try:
-            parsed = json.loads(path.read_text(encoding="utf-8"))
+            from .workflow_evidence import read_metadata
+            parsed = read_metadata(path)
             return parsed if isinstance(parsed, Mapping) else None
         except Exception:
             return None
@@ -1394,6 +1397,8 @@ class FundamentalsAdminUIService:
                         return int(counts[key])
                     except Exception:
                         return None
+        if type(payload.get("requested_input_count")) is int:
+            return payload["requested_input_count"]
         request = payload.get("request") or payload.get("requested_change")
         requested = request.get("requested_inputs") if isinstance(request, Mapping) else payload.get("requested_inputs")
         if isinstance(requested, (list, tuple)):
@@ -1449,7 +1454,15 @@ class FundamentalsAdminUIService:
                     report_sha256=sha256_file(report_path),
                 )
         elif run_id:
-            report = write_operation_report(run_id, root=self.run_root)
+            report_path = self.run_root / run_id / OPERATION_REPORT_NAME
+            if report_path.is_file() and not report_path.is_symlink():
+                report = OperationReportSummary(
+                    run_id=run_id, operation_type=str(result.get('operation_type')),
+                    outcome=str(result.get('outcome')), mode=str(result.get('mode')),
+                    summary_rows=build_operation_summary(result), report_path=str(report_path),
+                    report_sha256=sha256_file(report_path))
+            else:
+                report = write_operation_report(run_id, root=self.run_root, result_payload=result)
         payload_path = (
             result.get("phase13d_preview_payload_path")
             or result.get("identity_preview_path")
@@ -1475,7 +1488,7 @@ class FundamentalsAdminUIService:
             report_filename=(WORKFLOW_REPORT_NAME if workflow_mode else OPERATION_REPORT_NAME) if report else None,
             report_sha256=report.report_sha256 if report else None,
             summary_rows=report.summary_rows if report else (),
-            operational_decision=result.get("operational_decision"),
+            operational_decision=compact_decision(result.get("operational_decision")),
             business_outcome=taxonomy["business_outcome"] if taxonomy else None,
             preview_domain=taxonomy["domain"] if taxonomy else None,
             copy_actionable=(

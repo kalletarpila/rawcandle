@@ -17,6 +17,7 @@ from rawcandle.fundamentals.admin.refresh_review_queue import RefreshReviewQueue
 from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
 from tests.test_fundamentals_admin_refresh_preview import _create_preview_databases, row, result
 from tests.test_fundamentals_admin_refresh_full_workflow import _stage
+from tests.provider_capture_fixtures import captured_result
 
 
 def _hash(path):
@@ -66,7 +67,7 @@ def _fixture(root, safe_count, review):
                        revenue=100 if ticker == "HELD" else 120)
             if ticker == "HELD" and review == "human":
                 item["fiscalperiod"] = "2026-Q4"  # Unapproved ARQ/MRQ identity revision: global.
-            return result([item])
+            return captured_result([item],ticker=ticker,dimension=kw["dimension"])
 
     return paths, Client()
 

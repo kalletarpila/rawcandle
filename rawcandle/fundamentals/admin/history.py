@@ -59,7 +59,8 @@ class AdminRunHistory:
         if path.is_symlink():
             return None
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            from .workflow_evidence import read_metadata
+            payload = read_metadata(path)
             return payload if isinstance(payload, Mapping) else None
         except Exception:
             return None

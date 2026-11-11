@@ -30,3 +30,14 @@ import pytest
 def provider_capture_enabled_for_rollout_checks(monkeypatch):
     from rawcandle.fundamentals import source_capture
     monkeypatch.setattr(source_capture,'ACTIVE',True)
+
+
+def captured_result(rows, *, full=True, fields=None, **filters):
+    """A complete native HTTP result, including its acquisition attestation."""
+    payload=[full_row(r) if full else dict(r) for r in rows]
+    class Response(io.BytesIO):
+        status=200
+        headers={'Content-Type':'application/json'}
+        def getcode(self):return 200
+    client=SharadarClient(api_key='fixture-key',opener=lambda request,timeout:Response(json.dumps(payload).encode()))
+    return client.fundamentals(fields=fields,**filters)

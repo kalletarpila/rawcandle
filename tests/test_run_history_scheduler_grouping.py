@@ -126,7 +126,11 @@ def test_full_workflow_forwards_scheduler_origin_to_copy_test(tmp_path,monkeypat
         return dict(mode='COPY_ONLY_APPLY',outcome='COMPLETED')
     def orchestrator(**kwargs):
         kwargs['test_stage'](SimpleNamespace(preview_payload_path='preview.json',preview_fingerprint='fp'),lambda _e:None)
-        return {}
+        return dict(run_id='20261111T120000Z_refresh_fundamentals_parent',
+                    operation_type='REFRESH_FUNDAMENTALS',mode='FULL_WORKFLOW',
+                    outcome='STOPPED',workflow_status='STOPPED',current_stage='Test on copies',
+                    artifact_dir=str(tmp_path/'20261111T120000Z_refresh_fundamentals_parent'),
+                    production_completed=False,stages=[],warnings=[])
     monkeypatch.setattr(full_workflow,'run_refresh_full_workflow',orchestrator)
     service=FundamentalsAdminUIService(run_root=tmp_path,refresh_apply=copy_backend,recover_publication_on_startup=False)
     service.full_workflow(operation_type='REFRESH_FUNDAMENTALS',raw_inputs='',trigger_source='SCHEDULER')

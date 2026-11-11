@@ -38,6 +38,8 @@ def _stage(
         **({"refresh_preview": refresh_preview} if mode == "PREVIEW" else {}),
     }
     (run_dir / "result.json").write_text(json.dumps(payload), encoding="utf-8")
+    if mode == "PREVIEW":
+        (run_dir / "refresh_preview.json").write_text(json.dumps(refresh_preview))
     (run_dir / "operation_report.md").write_text(f"# {mode}\n", encoding="utf-8")
     return SimpleNamespace(
         status="COMPLETED" if outcome in {"COMPLETED", "NO_CHANGE", "REVIEW_REQUIRED"} else (

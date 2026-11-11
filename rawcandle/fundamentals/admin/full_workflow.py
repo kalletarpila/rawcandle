@@ -11,7 +11,10 @@ from typing import Any, Callable, Mapping
 
 from rawcandle.fundamentals.admin.artifacts import ADMIN_RUN_ROOT, AdminRunWriter, stable_run_id
 from rawcandle.fundamentals.admin.batch_add_tickers import parse_batch_tickers
-from rawcandle.fundamentals.admin.refresh_operational_decision import advance_refresh_decision, operational_decision_rows, operational_decision_section
+from rawcandle.fundamentals.admin.refresh_operational_decision import operational_decision_rows, operational_decision_section
+from .workflow_evidence import (VERSION, MAX_ITEMS, compact_decision,
+    advance_refresh_decision, load_child, reference, verify_reference)
+from threading import RLock
 from rawcandle.fundamentals.admin.contracts import (
     AdminOperationType,
     build_batch_request,
@@ -58,17 +61,6 @@ def _duration(started: str | None, completed: str | None) -> float | None:
         return None
 
 
-def _load_result(run_root: Path, run_id: str | None) -> Mapping[str, Any]:
-    if not run_id or Path(run_id).name != run_id:
-        return {}
-    path = run_root / run_id / "result.json"
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, Mapping) else {}
-    except (OSError, ValueError, json.JSONDecodeError):
-        return {}
-
-
 def _stage_record(
     name: str, result: Any, started: str, completed: str,
     *, child_summary: Mapping[str, Any] | None = None,
@@ -80,8 +72,10 @@ def _stage_record(
         "status": _value(result, "status") or "UNKNOWN",
         "run_id": run_id,
         "duration_seconds": _duration(started, completed),
+        "started_at_utc": started,
+        "completed_at_utc": completed,
         "report": str(Path(_value(result, "artifact_dir") or "") / "operation_report.md") if run_id else None,
-        "message": _value(result, "message"),
+        "message": str(_value(result, "message") or '')[:2048],
         "child_summary": dict(child_summary or {}),
     }
 
@@ -281,6 +275,8 @@ def _project_problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    if '_workflow_problem_items' in payload:
+        return payload['_workflow_problem_items']
     try:
         return _project_problem_items(payload)
     except (AttributeError, KeyError, TypeError, ValueError):
@@ -288,6 +284,8 @@ def _problem_items(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _has_structured_items(payload: Mapping[str, Any]) -> bool:
+    if '_workflow_has_structured_items' in payload:
+        return payload['_workflow_has_structured_items']
     if payload.get("ticker_reporting") or payload.get("ticker_results") or payload.get("removal_plan"):
         return True
     preview = payload.get("refresh_preview")
@@ -298,6 +296,8 @@ def _has_structured_items(payload: Mapping[str, Any]) -> bool:
 
 
 def _batch_outcome(payload: Mapping[str, Any], *, production_published: bool = False) -> dict[str, int]:
+    if '_workflow_batch_outcomes' in payload:
+        return dict(payload['_workflow_batch_outcomes'][str(production_published)])
     reports = [item for item in (payload.get("ticker_reporting") or []) if isinstance(item, Mapping)]
     actions = [str(item.get("final_action") or "") for item in reports]
     analysis = analysis_reporting_counts(reports)
@@ -386,19 +386,23 @@ def _terminal_summary(
     problems = _problem_items(evidence)
     review_count = sum(item["review_required"] for item in problems)
     integrity_count = sum(item["reporting_integrity_error"] for item in problems)
+    problem_counts = evidence.get('_workflow_problem_counts') or {}
+    problem_count = problem_counts.get('total', len(problems))
+    review_count = problem_counts.get('review', review_count)
+    integrity_count = problem_counts.get('integrity', integrity_count)
     child_outcome = str(_value(child, "outcome") or payload.get("outcome") or "UNKNOWN")
     controlled_review = (
-        bool(problems)
+        problem_count > 0
         and stage != "Production update"
         and child_outcome in {"COMPLETED", "PARTIALLY_COMPLETED", "REVIEW_REQUIRED"}
     )
     if controlled_review and workflow_outcome != "COMPLETED":
         stop_kind = "REVIEW_REQUIRED"
-        noun = "ticker" if len(problems) == 1 else "tickers"
-        verb = "requires" if len(problems) == 1 else "require"
+        noun = "ticker" if problem_count == 1 else "tickers"
+        verb = "requires" if problem_count == 1 else "require"
         integrity_note = "; reporting integrity requires attention" if integrity_count else ""
         headline = (
-            f"Workflow stopped after {stage} because {len(problems)} {noun} {verb} review"
+            f"Workflow stopped after {stage} because {problem_count} {noun} {verb} review"
             f"{integrity_note}."
         )
         next_action = str(payload.get("recommended_next_action") or "Review the listed tickers and rerun the intended batch after resolving their issues.")
@@ -429,7 +433,7 @@ def _terminal_summary(
         "stop_kind": stop_kind,
         "headline": headline,
         "reason": headline,
-        "affected_item_count": len(problems),
+        "affected_item_count": problem_count,
         "review_required_count": review_count,
         "reporting_integrity_error_count": integrity_count,
         "problem_items": problems,
@@ -533,6 +537,18 @@ def _read_appendix_source(result: Mapping[str, Any]) -> tuple[str | None, str]:
     if not report_value:
         return None, "No authoritative child operation report was recorded."
     report_path = Path(str(report_value))
+    if result.get('evidence_format') == VERSION:
+        stage = _stage_for_name(result, appendix.get('stage')) or {}
+        ref = stage.get('report_reference')
+        if not ref:
+            return None, 'The authoritative child operation report could not be read: FileNotFoundError.'
+        try:
+            report_path = verify_reference(Path(str(result['artifact_dir'])).parent, ref,
+                                           kind='REPORT', run_id=appendix.get('run_id'))
+            if report_path.stat().st_size > 512*1024:
+                return None, 'Large authoritative child report is available through its native report link.'
+        except (OSError, ValueError):
+            return None, 'Authoritative child report integrity verification failed.'
     workflow_path = Path(str(result.get("artifact_dir") or "")) / WORKFLOW_REPORT_NAME
     try:
         if report_path.resolve() == workflow_path.resolve():
@@ -692,6 +708,8 @@ def render_workflow_report(result: Mapping[str, Any]) -> str:
                 "- No structured item-level review/failure details were available "
                 "from the authoritative child."
             )
+        if terminal.get('affected_item_count',len(problems)) > len(problems):
+            lines.append(f"- Showing {len(problems)} of {terminal['affected_item_count']} items; complete details remain in the referenced native child artifacts.")
         for item in problems:
             lines.extend([
                 "",
@@ -823,6 +841,7 @@ def run_operation_workflow(
     writer = AdminRunWriter(run_id, adapter.operation_type, root=run_root)
     started = utc_now()
     result: dict[str, Any] = {
+        "evidence_format": VERSION,
         "run_id": run_id,
         "artifact_dir": str(writer.run_dir),
         "operation_type": adapter.operation_type.value,
@@ -841,6 +860,10 @@ def run_operation_workflow(
         "warnings": [],
         "stop_reason": None,
     }
+    result['requested_input_count'] = len(adapter.requested_inputs)
+    result['requested_inputs'] = list(adapter.requested_inputs[:MAX_ITEMS])
+    state_lock = RLock()
+    event_sequence = 0
     writer.write_json("request.json", {
         "operation_type": adapter.operation_type.value,
         "mode": "FULL_WORKFLOW",
@@ -861,10 +884,18 @@ def run_operation_workflow(
             "stage_state": result["workflow_status"],
             "message": result.get("stop_reason") or f"Full workflow {result['workflow_status'].lower()}.",
             "pid": __import__("os").getpid(),
+            "sequence": event_sequence,
         })
 
     def emit(stage: str, number: int, state: str, message: str, child: Mapping[str, Any] | None = None) -> None:
+        with state_lock:
+            _emit(stage, number, state, message, child)
+
+    def _emit(stage: str, number: int, state: str, message: str, child: Mapping[str, Any] | None = None) -> None:
+        nonlocal event_sequence
+        event_sequence += 1
         result["current_stage"] = stage
+        message = str(message)[:2048]
         event = {
             "run_id": run_id,
             "operation_type": adapter.operation_type.value,
@@ -876,6 +907,7 @@ def run_operation_workflow(
             "child_run_id": (child or {}).get("run_id"),
             "child_stage_id": (child or {}).get("current_stage_id"),
             "timestamp_utc": utc_now(),
+            "sequence": event_sequence,
         }
         writer.append_jsonl("progress_events.jsonl", event)
         writer.append_heartbeat(event)
@@ -892,7 +924,7 @@ def run_operation_workflow(
         result["workflow_status"] = "FAILED" if failed else "STOPPED"
         result["outcome"] = result["workflow_status"]
         result["current_stage"] = stage
-        result["stop_reason"] = reason
+        result["stop_reason"] = str(reason)[:2048]
 
     persist()
     preview_payload: Mapping[str, Any] = {}
@@ -912,17 +944,42 @@ def run_operation_workflow(
                 )
         elif stage != "Preview" and not payload.get("operational_decision"):
             decision = advance_refresh_decision(decision, stage=stage)
-        result["operational_decision"] = dict(decision)
+        result["operational_decision"] = compact_decision(decision)
         return dict(payload) | {"operational_decision": decision}
+
+    def record_child(stage, child, payload, start, end):
+        record = _stage_record(stage, child, start, end)
+        record['evidence_reference'] = payload['evidence_reference']
+        if payload.get('summary_reference'):
+            record['summary_reference'] = payload['summary_reference']
+        if payload.get('noop_scope_reference'):
+            record['noop_scope_reference'] = payload['noop_scope_reference']
+        record['report'] = str(Path(run_root)/child.run_id/'operation_report.md')
+        try:
+            report_ref = reference(run_root, child.run_id, 'REPORT', operation=adapter.operation_type.value)
+            record['report_reference'] = report_ref
+            record['report'] = str(Path(run_root)/report_ref['relative_path'])
+        except (OSError, ValueError):
+            pass
+        if stage == 'Preview' and getattr(child, 'preview_payload_path', None):
+            preview_ref = reference(run_root, child.run_id, 'PREVIEW', operation=adapter.operation_type.value)
+            if Path(child.preview_payload_path).resolve() != (Path(run_root)/preview_ref['relative_path']).resolve():
+                raise ValueError('PREVIEW_HANDOFF_PATH_MISMATCH')
+            if ((payload.get('summary_reference') and payload.get('preview_fingerprint') != child.preview_fingerprint)
+                    or payload.get('preview_fingerprint') not in (None, child.preview_fingerprint)):
+                raise ValueError('PREVIEW_HANDOFF_FINGERPRINT_MISMATCH')
+            preview_ref['semantic_fingerprint'] = child.preview_fingerprint
+            record['preview_reference'] = preview_ref
+        return record
 
     try:
         emit("Preview", 1, "RUNNING", "Preview - Running")
         stage_started = utc_now()
         preview = adapter.preview_stage(child_progress("Preview", 1))
         stage_completed = utc_now()
-        preview_payload = _load_result(run_root, _value(preview, "run_id"))
+        preview_payload = load_child(run_root, preview, adapter.operation_type.value, 'Preview')
         preview_payload = stage_decision(preview_payload, preview, "Preview")
-        preview_record = _stage_record("Preview", preview, stage_started, stage_completed)
+        preview_record = record_child("Preview", preview, preview_payload, stage_started, stage_completed)
         result["stages"].append(preview_record)
         if adapter.operation_type == AdminOperationType.REFRESH_FUNDAMENTALS:
             result["source_summary"] = _refresh_source_summary(preview_payload)
@@ -1001,13 +1058,17 @@ def run_operation_workflow(
             emit("Preview", 1, "COMPLETED", "Preview - Completed")
 
         if result["workflow_status"] == "RUNNING":
+            verify_reference(run_root, preview_record['evidence_reference'], kind='RESULT', run_id=preview.run_id)
+            if preview_record.get('summary_reference'):
+                verify_reference(run_root, preview_record['summary_reference'], kind='SUMMARY', run_id=preview.run_id)
+            verify_reference(run_root, preview_record['preview_reference'], kind='PREVIEW', run_id=preview.run_id)
             emit("Test on copies", 2, "RUNNING", "Test on copies - Running")
             stage_started = utc_now()
             test = adapter.test_stage(preview, child_progress("Test on copies", 2))
             stage_completed = utc_now()
-            test_payload = _load_result(run_root, _value(test, "run_id"))
+            test_payload = load_child(run_root, test, adapter.operation_type.value, 'Test on copies')
             test_payload = stage_decision(test_payload, test, "Test on copies")
-            test_record = _stage_record("Test on copies", test, stage_started, stage_completed)
+            test_record = record_child("Test on copies", test, test_payload, stage_started, stage_completed)
             result["stages"].append(test_record)
             test_batch = _batch_outcome(test_payload)
             test_problems = _problem_items(test_payload)
@@ -1042,7 +1103,7 @@ def run_operation_workflow(
             else:
                 result["test_run_id"] = _value(test, "run_id")
                 result["manual_production_available"] = True
-                integrity = analysis_reporting_counts(list(test_payload.get("ticker_reporting") or []))
+                integrity = test_payload.get('_workflow_reporting_integrity') or analysis_reporting_counts(list(test_payload.get("ticker_reporting") or []))
                 result["final_completed_stage"] = "Test on copies"
                 emit("Test on copies", 2, "COMPLETED", "Test on copies - Completed")
                 if integrity["reporting_integrity_errors"]:
@@ -1067,13 +1128,19 @@ def run_operation_workflow(
                     test_record["child_summary"] = terminal
 
         if result["workflow_status"] == "RUNNING":
+            verify_reference(run_root, preview_record['preview_reference'], kind='PREVIEW', run_id=preview.run_id)
+            verify_reference(run_root, preview_record['evidence_reference'], kind='RESULT', run_id=preview.run_id)
+            verify_reference(run_root, test_record['evidence_reference'], kind='RESULT', run_id=test.run_id)
+            for record in (preview_record,test_record):
+                if record.get('summary_reference'):
+                    verify_reference(run_root,record['summary_reference'],kind='SUMMARY',run_id=record['run_id'])
             emit("Production update", 3, "RUNNING", "Production update - Running")
             stage_started = utc_now()
             production = adapter.production_stage(preview, test, child_progress("Production update", 3))
             stage_completed = utc_now()
-            production_payload = _load_result(run_root, _value(production, "run_id"))
+            production_payload = load_child(run_root, production, adapter.operation_type.value, 'Production update')
             production_payload = stage_decision(production_payload, production, "Production update")
-            production_record = _stage_record("Production update", production, stage_started, stage_completed)
+            production_record = record_child("Production update", production, production_payload, stage_started, stage_completed)
             result["stages"].append(production_record)
             if adapter.operation_type == AdminOperationType.REFRESH_FUNDAMENTALS:
                 result["publication_outcome"] = _refresh_publication_outcome(production_payload)
@@ -1148,6 +1215,10 @@ def run_operation_workflow(
                 result["terminal_summary"] = terminal
                 result["stop_reason"] = terminal["headline"]
                 production_record["child_summary"] = terminal
+    except (KeyboardInterrupt, SystemExit):
+        stop(result["current_stage"], "Workflow interrupted; completed child evidence retained.")
+        result["interrupted"] = True
+        raise
     except Exception as exc:
         stop(result["current_stage"], f"Workflow orchestration failed: {type(exc).__name__}: {exc}", failed=True)
         result["terminal_summary"] = _terminal_summary(
@@ -1162,7 +1233,7 @@ def run_operation_workflow(
         if result["workflow_status"] == "RUNNING":
             stop(result["current_stage"], "Workflow ended without a terminal stage.", failed=True)
         if result.get("operational_decision"):
-            if result["workflow_status"] == "FAILED":
+            if result["workflow_status"] == "FAILED" or result.get("interrupted"):
                 result["operational_decision"] = advance_refresh_decision(
                     result["operational_decision"], stage=result["current_stage"],
                     technical_failure=result["stop_reason"],
@@ -1174,6 +1245,8 @@ def run_operation_workflow(
                 reason=decision["decision_text"], recommended_next_action=decision["recommended_action_text"],
                 stop_kind=decision["decision_code"],
             )
+            if result.get("interrupted"):
+                terminal["stop_kind"] = "INTERRUPTED"
             if result["outcome"] != "COMPLETED":
                 result["stop_reason"] = decision["decision_text"]
         item_authority, appendix_source = _select_report_authorities(result)

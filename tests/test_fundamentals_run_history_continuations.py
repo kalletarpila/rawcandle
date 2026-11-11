@@ -118,7 +118,9 @@ def test_explicit_history_refresh_discovers_late_test_and_production(tmp_path, d
     _drain(page)
     assert _row_ids(controls) == [s[0] for s in reversed(CHAIN)]
     for row_control, spec in zip(controls.history_column.controls, reversed(CHAIN)):
-        assert [c.value for c in row_control.controls[:6]] == [spec[3], "Refresh Fundamentals", spec[4], "Completed", "17 changed tickers", "Administration run"]
+        values = [c.value for c in row_control.controls[:6]]
+        assert values[:3] + [values[3].splitlines()[0]] + values[4:] == [spec[3], "Refresh Fundamentals", spec[4], "Completed", "17 changed tickers", "Administration run"]
+        assert "Action:" in values[3]
         row_control.controls[7].on_click(None)
         assert spec[0] in controls.history_detail_field.value
         assert "Operation report: available" in controls.history_detail_field.value
