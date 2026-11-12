@@ -196,7 +196,7 @@ class _Run:
         self.request = _read(self.directory / "request.json")
         if (
             self.request.get("operation_id") != operation_id
-            or self.request.get("mode") != "ACQUISITION_ONLY"
+            or self.request.get("mode") not in {"ACQUISITION_ONLY", "UPDATE_FETCH"}
             or self.request.get("format") != FORMAT
             or self.request.get("policy") not in (LEGACY_POLICY, POLICY)
             or self.request.get("max_age_seconds") != MAX_AGE_SECONDS
@@ -204,6 +204,8 @@ class _Run:
             or self.request.get("normalization_version") != NORMALIZATION
         ):
             raise SnapshotError("OPERATION_OR_POLICY_MISMATCH")
+        if self.request["mode"] == "UPDATE_FETCH":
+            _validate_update_binding(self.request.get("update_binding"))
 
     def path(self, relative):
         if not isinstance(relative, str) or "\\" in relative:
@@ -272,7 +274,7 @@ class _Run:
         value = {
             "format": FORMAT,
             "operation_id": self.operation_id,
-            "mode": "ACQUISITION_ONLY",
+            "mode": self.request["mode"],
             "status": status,
             "complete_verified_slots": complete,
             "diagnostic_slots": diagnostic,
@@ -283,6 +285,12 @@ class _Run:
             **extra,
         }
         _write(self.path("result.json"), value)
+        callback = getattr(self,"progress_callback",None)
+        if callback:
+            callback({"current_stage_id":"FETCH","stage_state":status,
+                      "processed_items":complete+diagnostic,"total_items":total,
+                      "actual_http_attempts":extra.get("actual_http_attempts",0),
+                      "message":extra.get("reason",status)})
         if status != "FETCHING":
             # Native top-level artifact manifest covers the bounded reference;
             # that reference recursively binds the large source children.
@@ -291,7 +299,7 @@ class _Run:
                     self.path("acquisition_snapshot_reference.json"),
                     {
                         "operation_id": self.operation_id,
-                        "mode": "ACQUISITION_ONLY",
+                        "mode": self.request["mode"],
                         "publication_authorized": False,
                         "manifest": extra["snapshot_reference"],
                     },
@@ -576,7 +584,8 @@ def _checkpoints(run, control):
         run.verify(control["index_reference"], "INDEX")
     result = {}
     events = _transport_events(run)
-    times = []
+    times = ([_time(run.request["created_at_utc"])]
+             if run.request["total_slots"] == 0 and run.request["mode"] == "UPDATE_FETCH" else [])
     planned = 0
     previous_ticker = None
     for slot in _lines(run.verify(control["plan_reference"], "PLAN")):
@@ -610,6 +619,18 @@ def _checkpoints(run, control):
     return result, times
 
 
+def _validate_update_binding(value):
+    from .contracts import fingerprint
+    if (not isinstance(value, dict)
+            or value.get("contract") != "FUNDAMENTALS_SNAPSHOT_UPDATE_V1"
+            or value.get("intent") != "UPDATE"
+            or value.get("mode") != "FULL_WORKFLOW"
+            or value.get("trigger_source") not in {"MANUAL", "SCHEDULER"}
+            or not value.get("update_run_id") or not value.get("old_authority")
+            or value.get("fingerprint") != fingerprint({k:v for k,v in value.items() if k != "fingerprint"})):
+        raise SnapshotError("UPDATE_FETCH_BINDING_INVALID")
+
+
 def start_fetch(
     tickers,
     *,
@@ -619,6 +640,8 @@ def start_fetch(
     operation_id=None,
     client=None,
     now=_now,
+    update_binding=None,
+    progress_callback=None,
 ):
     """Explicit acquisition-only API; never called by scheduler/Refresh routes.
 
@@ -626,7 +649,7 @@ def start_fetch(
     Live use requires separate operator authorization; this API grants none.
     """
     tickers = list(tickers)
-    if not tickers or len(tickers) > 10000 or len(set(tickers)) != len(tickers):
+    if (not tickers and update_binding is None) or len(tickers) > 10000 or len(set(tickers)) != len(tickers):
         raise SnapshotError("TICKER_PLAN_INVALID")
     if any(
         not isinstance(t, str) or not re.fullmatch(r"[A-Z0-9][A-Z0-9.\-]{0,31}", t)
@@ -650,6 +673,10 @@ def start_fetch(
         raise SnapshotError("OPERATION_ALREADY_EXISTS")
     # Pin before creating a potentially resumable operation. All reads are RO.
     old = pin_old_authority(project_root)
+    if update_binding is not None:
+        _validate_update_binding(update_binding)
+        if update_binding["old_authority"] != old:
+            raise SnapshotError("OLD_BINDING_DRIFT")
     root.mkdir(parents=True, exist_ok=True)
     try:
         (root / operation_id).mkdir()  # exclusive ownership even for concurrent starts
@@ -660,7 +687,7 @@ def start_fetch(
     )
     request = {
         "format": FORMAT,
-        "mode": "ACQUISITION_ONLY",
+        "mode": "UPDATE_FETCH" if update_binding is not None else "ACQUISITION_ONLY",
         "operation_id": operation_id,
         "policy": POLICY,
         "max_age_seconds": MAX_AGE_SECONDS,
@@ -674,9 +701,12 @@ def start_fetch(
         "transport_mode": "SEQUENTIAL_TICKER_ARQ_THEN_MRQ",
         "publication_authorized": False,
     }
+    if update_binding is not None:
+        request["update_binding"] = update_binding
     writer.write_json("request.json", request)
     _sync(writer.run_dir)
     run = _Run(root, operation_id)
+    run.progress_callback = progress_callback
     for directory in ("responses", "captures", "checkpoints", "anchors"):
         run.path("fetch/" + directory).mkdir(parents=True)
     active = resolve_active_generation(Path(project_root), require_generation=True)
@@ -718,7 +748,8 @@ def start_fetch(
         },
     )
     return resume_fetch(
-        operation_id, project_root=project_root, root=root, client=client, now=now
+        operation_id, project_root=project_root, root=root, client=client, now=now,
+        progress_callback=progress_callback
     )
 
 
@@ -765,9 +796,11 @@ def _verify_schema(run, schema):
 
 
 def resume_fetch(
-    operation_id, *, project_root, root=ADMIN_RUN_ROOT, client=None, now=_now
+    operation_id, *, project_root, root=ADMIN_RUN_ROOT, client=None, now=_now,
+    progress_callback=None,
 ):
     run = _Run(root, operation_id)
+    run.progress_callback = progress_callback
     with run.lock():
         try:
             return _resume(run, project_root=project_root, client=client, now=now)
@@ -1011,7 +1044,7 @@ def _seal(run, control, checkpoints, times, now):
         "format": FORMAT,
         "operation_id": run.operation_id,
         "snapshot_id": run.operation_id + "_source",
-        "mode": "ACQUISITION_ONLY",
+        "mode": run.request["mode"],
         "publication_authorized": False,
         "max_age_seconds": MAX_AGE_SECONDS,
         "old_authority": run.request["old_authority"],
@@ -1268,7 +1301,7 @@ def _verify_snapshot(run, manifest, reference):
     if (
         manifest.get("format") != FORMAT
         or manifest.get("operation_id") != run.operation_id
-        or manifest.get("mode") != "ACQUISITION_ONLY"
+        or manifest.get("mode") != run.request["mode"]
         or manifest.get("publication_authorized") is not False
         or manifest.get("max_age_seconds") != MAX_AGE_SECONDS
         or manifest.get("policy") != run.request["policy"]

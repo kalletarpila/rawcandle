@@ -212,7 +212,14 @@ def _code_binding():
     diff = subprocess.check_output(
         ["git", "diff", "HEAD", "--", "rawcandle/fundamentals"], cwd=ROOT
     )
-    names = ("refresh_update.py", "review_locality.py", "baseline_carry_forward.py")
+    names = (
+        "refresh_update.py",
+        "review_locality.py",
+        "baseline_carry_forward.py",
+        "snapshot_environment.py",
+        "snapshot_workflow.py",
+        "sec_snapshot.py",
+    )
     return fingerprint(
         {
             "head": head.decode().strip(),
@@ -238,18 +245,23 @@ def _queue_binding(env):
         ]
     for row in rows:
         reviews._decode_row(row)
-    return fingerprint(rows)
+    return fingerprint(rows) if rows else None
 
 
 def _inputs(env, paths):
-    return {
+    value = {
         "old": acquisition.pin_old_authority(env.project),
         "queue": _queue_binding(env),
-        "dependencies": {
-            r: sha256_file(paths.as_dict()[r]) for r in ("market", "taxonomy")
-        },
+        "dependencies": (
+            env.dependency_binding(paths)
+            if hasattr(env, "dependency_binding")
+            else {r: sha256_file(paths.as_dict()[r]) for r in ("market", "taxonomy")}
+        ),
         "code": _code_binding(),
     }
+    if hasattr(env, "update_inputs"):
+        value["update"] = env.update_inputs()
+    return value
 
 
 def _operation(env, validation_id):
@@ -297,6 +309,8 @@ def _assert_inputs(env, receipt, paths, now):
         now=now,
         expected_reference=receipt["snapshot_reference"],
     )
+    if hasattr(env, "require_update_snapshot"):
+        env.require_update_snapshot(snapshot)
     return snapshot
 
 
@@ -309,7 +323,7 @@ def _report(directory, receipt, decisions, *, build=None, publication=None):
         f"Snapshot: `{receipt['snapshot_operation_id']}`; root SHA: `{snapshot['sha256']}`.",
         f"Age at validation: {receipt['snapshot_source_age_seconds'] / 3600:.6f} hours; maximum 168 hours, original timestamps.",
         f"OLD generation: `{receipt['inputs']['old']['generation_id']}`; OLD watermark: `{receipt['old_refresh_state']['published_watermark']}`.",
-        "Production authorization/mutation: **NO**. Publication requires separate explicit disposable confirmation.",
+        f"Production mutation: **{bool((publication or {}).get('production_mutation', False))}**. Publication requires separate explicit confirmation.",
         "",
         f"Safe/local-held/global: {receipt['counts']['safe']}/{receipt['counts']['local_holds']}/{receipt['counts']['global']}.",
         "Queue rows are evidence; this table reflects actual validated dispositions.",
@@ -359,7 +373,9 @@ def _report(directory, receipt, decisions, *, build=None, publication=None):
             "counts": receipt["counts"],
             "snapshot_reference": snapshot,
             "candidate_generation_id": receipt.get("candidate_generation_id"),
-            "production_mutation": False,
+            "production_mutation": bool(
+                (publication or {}).get("production_mutation", False)
+            ),
             "details": "operation_report.md",
         },
     )
@@ -513,10 +529,14 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
         if safety.get("production_writes_blocked"):
             raise Phase2Error("PHASE2_RECOVERY_REQUIRED")
         paths = env.paths()
+        if hasattr(env, "validate_baseline"):
+            env.validate_baseline(paths)
         snapshot = acquisition.open_snapshot(snapshot_operation_id, root=env.runs)
         snapshot.validate_preflight(
             old_authority=acquisition.pin_old_authority(env.project), now=now()
         )
+        if hasattr(env, "require_update_snapshot"):
+            env.require_update_snapshot(snapshot)
         date.fromisoformat(as_of_date)
         validation_id = "local_" + uuid4().hex
         writer = AdminRunWriter(
@@ -803,14 +823,19 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
         held = locality.verify_held(paths, provider, canonical, decisions["held"])
         # Isolated fixture sources use the existing FULL_SQLITE_BACKUP authority
         # mode. No production-scale dependency copies or global taxonomy locks.
-        if any(
+        if not hasattr(env, "prepare_sources") and any(
             paths.as_dict()[r].stat().st_size > 64 * 1024**2
             for r in ("market", "taxonomy")
         ):
             raise Phase2Error("PHASE2_DISPOSABLE_DEPENDENCY_TOO_LARGE")
-        read_sources, dependency_copies = builders.prepare_full_v2_read_only_copies(
-            paths, lane_dir=lane
-        )
+        if hasattr(env, "prepare_sources"):
+            read_sources, dependency_copies = env.prepare_sources(
+                paths, lane, canonical, receipt["as_of_date"]
+            )
+        else:
+            read_sources, dependency_copies = builders.prepare_full_v2_read_only_copies(
+                paths, lane_dir=lane
+            )
         analysis = native.run_refresh_production_full_v2_downstream(
             provider_candidate=provider,
             canonical_candidate=canonical,
@@ -829,8 +854,10 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             canonical,
             canonical_result["new_quarter_identities"],
             as_of_date=receipt["as_of_date"],
-            client=_OfflineSec(),
+            client=env.sec_reader() if hasattr(env, "sec_reader") else _OfflineSec(),
         )
+        if hasattr(env, "verify_sec_scope"):
+            env.verify_sec_scope(canonical, publication_dates)
         roles = {
             "provider": provider,
             "canonical": canonical,
@@ -851,7 +878,11 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
         # approval material. Any unexpected change remains a failed build.
         if _queue_binding(env) != receipt["inputs"]["queue"]:
             raise Phase2Error("PHASE2_APPROVAL_DRIFT_DURING_BUILD")
-        generation_id = "snapshot_" + uuid4().hex
+        generation_id = (
+            f"snapshot_{env.operation_id}_{validation_id[6:14]}"
+            if hasattr(env, "operation_id")
+            else "snapshot_" + uuid4().hex
+        )
         prepared = prepare_generation_from_candidates(
             roles,
             generation_id=generation_id,
@@ -868,7 +899,9 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             "refresh_state": refresh_state,
             "read_only_sources": {k: str(v) for k, v in read_sources.items()},
             "read_only_source_fingerprints": {
-                k: sha256_file(v) for k, v in read_sources.items()
+                k: sha256_file(v)
+                for k, v in read_sources.items()
+                if k != "taxonomy" or not hasattr(env, "check_build_dependencies")
             },
             "dependency_copies": dependency_copies,
             "held_preservation": held,
@@ -913,12 +946,17 @@ def _load_build(env, directory, receipt):
             raise Phase2Error("PHASE2_CANDIDATE_TAMPERED")
     for role, path in build["read_only_sources"].items():
         source = _trusted(path, env.root)
-        if sha256_file(source) != build["read_only_source_fingerprints"][role]:
+        expected = build["read_only_source_fingerprints"].get(role)
+        if expected is not None and sha256_file(source) != expected:
             raise Phase2Error("PHASE2_READ_ONLY_SOURCE_TAMPERED")
+        if expected is None and not hasattr(env, "check_build_dependencies"):
+            raise Phase2Error("PHASE2_READ_ONLY_SOURCE_UNBOUND")
+    if hasattr(env, "check_build_dependencies"):
+        env.check_build_dependencies(build)
     return build, roles
 
 
-def publish_disposable(
+def _publish_candidate(
     env,
     validation_id,
     *,
@@ -927,8 +965,9 @@ def publish_disposable(
     now=_now,
     inject_failure=None,
     inject_crash=None,
+    phase_callback=None,
 ):
-    if confirmation != CONFIRM:
+    if confirmation != getattr(env, "publication_confirmation", CONFIRM):
         raise PermissionError("PHASE2_DISPOSABLE_PUBLICATION_CONFIRMATION_REQUIRED")
     with env.writer_lock():
         # Recovery first, independent of lost/corrupt source snapshots.
@@ -945,6 +984,17 @@ def publish_disposable(
         paths = env.paths()
         snapshot = _assert_inputs(env, receipt, paths, now())
         build, roles = _load_build(env, directory, receipt)
+        authority = (
+            env.publication_authority(receipt)
+            if hasattr(env, "publication_authority")
+            else {
+                "contract": CONTRACT,
+                "snapshot_reference": snapshot.reference,
+                "validation_fingerprint": receipt["fingerprint"],
+                "scope": "DISPOSABLE_ONLY",
+                "explicit_confirmation": confirmation,
+            }
+        )
         current = resolve_active_generation(env.project, require_generation=True)
         journal = None
         committed = False
@@ -990,13 +1040,7 @@ def publish_disposable(
                 | {"manifest": dict(current.manifest)},
                 new_generation_id=receipt["candidate_generation_id"],
                 active_generation_manifest_path=active_manifest_path(env.project),
-                snapshot_authorization={
-                    "contract": CONTRACT,
-                    "snapshot_reference": snapshot.reference,
-                    "validation_fingerprint": receipt["fingerprint"],
-                    "scope": "DISPOSABLE_ONLY",
-                    "explicit_confirmation": confirmation,
-                },
+                snapshot_authorization=authority,
             )
             journal = journals.update_journal(
                 env.journal,
@@ -1006,12 +1050,16 @@ def publish_disposable(
                 generation_activation_state="READY",
             )
             boundary("AFTER_PREPARE")
+            if phase_callback:
+                phase_callback("PUBLISH")
             journal = journals.activate_prepared_generation(
                 journal,
                 new_manifest=receipt["candidate_manifest"],
                 journal_path=env.journal,
             )
             boundary("AFTER_ACTIVATION")
+            if phase_callback:
+                phase_callback("VERIFY")
             active = env.paths()
             sources = {}
             plans = {}
@@ -1067,7 +1115,7 @@ def publish_disposable(
                 "generation_id": receipt["candidate_generation_id"],
                 "postflight": postflight,
                 "held_preservation": held,
-                "production_mutation": False,
+                "production_mutation": bool(getattr(env, "is_live", False)),
                 "disposable_mutation": True,
                 "journal_state": journal["state"],
             }
@@ -1080,7 +1128,7 @@ def publish_disposable(
                 result = {
                     "status": "PUBLISHED_WITH_REVIEW_SYNC_PENDING",
                     "error": str(error),
-                    "production_mutation": False,
+                    "production_mutation": bool(getattr(env, "is_live", False)),
                     "journal_state": "COMPLETED",
                 }
                 _report(directory, receipt, decisions, build=build, publication=result)
@@ -1099,7 +1147,7 @@ def publish_disposable(
                 result = {
                     "status": "ROLLED_BACK",
                     "error": str(error),
-                    "production_mutation": False,
+                    "production_mutation": bool(getattr(env, "is_live", False)),
                     "disposable_mutation": True,
                 }
             else:
@@ -1184,3 +1232,9 @@ def finalize_disposable_reviews(env, validation_id):
 def recover_disposable(env):
     with env.writer_lock():
         return journals.guard_production_writes(env.journal)
+
+
+def publish_disposable(env, validation_id, **kwargs):
+    if not isinstance(env, DisposableEnvironment):
+        raise Phase2Error("PHASE2_DISPOSABLE_ENVIRONMENT_REQUIRED")
+    return _publish_candidate(env, validation_id, **kwargs)

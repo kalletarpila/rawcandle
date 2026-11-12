@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager, redirect_stdout
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import IO, Iterator, List, Optional
@@ -434,12 +435,21 @@ def release_scheduler_lock(lock_handle: IO[str]) -> None:
         lock_handle.close()
 
 
+_OWNED_SCHEDULER_LOCK = ContextVar("owned_scheduler_lock", default=None)
+
+
+def owns_scheduler_lock(log_dir: str) -> bool:
+    return _OWNED_SCHEDULER_LOCK.get() == str(Path(log_dir).resolve())
+
+
 @contextmanager
 def acquire_scheduler_lock_context(log_dir: str) -> Iterator[IO[str]]:
     lock_handle = acquire_scheduler_lock(log_dir)
+    token = _OWNED_SCHEDULER_LOCK.set(str(Path(log_dir).resolve()))
     try:
         yield lock_handle
     finally:
+        _OWNED_SCHEDULER_LOCK.reset(token)
         release_scheduler_lock(lock_handle)
 
 
@@ -2377,12 +2387,14 @@ def _run_fundamentals_refresh_preview_post_step(
     mode: str = "PREVIEW_ONLY",
     scheduler_log_dir: str | None = None,
     ownership_auto_enabled: bool | None = None,
+    refresh_route: str | None = None,
 ) -> dict[str, object]:
     from rawcandle.fundamentals.admin.refresh_scheduler import run_scheduler_refresh_discovery
 
     return run_scheduler_refresh_discovery(
         scheduler_mode=mode, scheduler_log_dir=scheduler_log_dir,
         ownership_auto_enabled=ownership_auto_enabled,
+        **({"refresh_route": refresh_route} if refresh_route is not None else {}),
     )
 
 
@@ -2400,6 +2412,7 @@ def run_scheduler_config(
     if (
         config.fundamentals_refresh_preview_enabled
         and config.fundamentals_refresh_mode == "FULL_WORKFLOW"
+        and config.fundamentals_refresh_route == "LEGACY"
     ):
         from rawcandle.fundamentals.admin.production_transaction import production_lock
 
@@ -2570,6 +2583,8 @@ def run_scheduler_config(
                     config.fundamentals_refresh_mode,
                     config.log_dir,
                     config.pb_ownership_auto_continuation_enabled,
+                    **({"refresh_route": config.fundamentals_refresh_route}
+                       if config.fundamentals_refresh_route != "LEGACY" else {}),
                 )
             overall_status = (
                 STATUS_FAILED

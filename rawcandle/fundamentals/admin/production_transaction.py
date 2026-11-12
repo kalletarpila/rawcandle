@@ -41,7 +41,7 @@ from rawcandle.fundamentals.generations import (
 )
 from rawcandle.fundamentals.phase13b_foundation import database_fingerprint
 from rawcandle.scheduler.config import read_scheduler_config
-from rawcandle.scheduler.runner import acquire_scheduler_lock, release_scheduler_lock
+from rawcandle.scheduler.runner import acquire_scheduler_lock, release_scheduler_lock, owns_scheduler_lock
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -163,7 +163,11 @@ def production_lock(
         handle.flush()
         os.fsync(handle.fileno())
         try:
-            scheduler_handle = acquire_scheduler_lock(scheduler_log_dir)
+            # Snapshot FETCH retains the scheduler's existing kernel lease, but
+            # only local financial stages need the financial writer lock. This
+            # process context is set solely by the real scheduler lock owner.
+            scheduler_handle = (None if allow_reentrant and owns_scheduler_lock(scheduler_log_dir)
+                                else acquire_scheduler_lock(scheduler_log_dir))
             token = _ACTIVE_PRODUCTION_LOCK.set({
                 "lock_path": str(lock_path.resolve()),
                 "scheduler_log_dir": scheduler_log_dir,
@@ -173,7 +177,8 @@ def production_lock(
                 yield owner
             finally:
                 _ACTIVE_PRODUCTION_LOCK.reset(token)
-                release_scheduler_lock(scheduler_handle)
+                if scheduler_handle is not None:
+                    release_scheduler_lock(scheduler_handle)
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 

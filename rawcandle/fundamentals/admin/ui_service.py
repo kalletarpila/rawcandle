@@ -75,6 +75,7 @@ class AdminUIRunResult:
     test_run_id: str | None = None
     direct_test_retry_available: bool = False
     operational_summary: Mapping[str, Any] | None = None
+    snapshot_update_run_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -246,6 +247,8 @@ class FundamentalsAdminUIService:
         refresh_preview: Callable[..., dict[str, Any]] | None = None,
         refresh_apply: Callable[..., dict[str, Any]] | None = None,
         refresh_production_apply: Callable[..., dict[str, Any]] | None = None,
+        refresh_route: str | None = None,
+        snapshot_workflow: Any | None = None,
         sector_preview: Callable[..., dict[str, Any]] | None = None,
         sector_apply: Callable[..., dict[str, Any]] | None = None,
         sector_production_apply: Callable[..., dict[str, Any]] | None = None,
@@ -269,6 +272,12 @@ class FundamentalsAdminUIService:
         recover_publication_on_startup: bool = True,
     ) -> None:
         self.run_root = run_root.resolve()
+        if refresh_route is not None and refresh_route not in {"LEGACY", "SNAPSHOT_V1"}:
+            raise ValueError("FUNDAMENTALS_REFRESH_ROUTE_INVALID")
+        self._refresh_route = refresh_route
+        self._snapshot_workflow = snapshot_workflow
+        if snapshot_workflow is not None and snapshot_workflow.env.runs.resolve() != self.run_root:
+            raise ValueError("SNAPSHOT_SERVICE_RUN_ROOT_MISMATCH")
         self.history = history or AdminRunHistory(self.run_root)
         self._add_preview = add_preview or _admin_callable("batch_add_tickers", "run_preview")
         self._add_apply = add_apply or _admin_callable("batch_add_tickers", "run_apply")
@@ -306,6 +315,50 @@ class FundamentalsAdminUIService:
         self._publication_safety_initialized = False
         if recover_publication_on_startup and self.run_root == ADMIN_RUN_ROOT.resolve():
             self.initialize_publication_safety()
+
+    def selected_refresh_route(self) -> str:
+        if self._refresh_route is not None:
+            return self._refresh_route
+        from rawcandle.scheduler.config import read_scheduler_config
+        path=ADMIN_RUN_ROOT.parents[1] / "scheduler_config.json"
+        return read_scheduler_config(str(path)).fundamentals_refresh_route if path.exists() else "LEGACY"
+
+    def _snapshot_engine(self, *, scheduler_log_dir=None, scheduler_managed_locks=False, progress_callback=None):
+        if self._snapshot_workflow is not None:
+            self._snapshot_workflow.env.reentrant = scheduler_managed_locks
+            self._snapshot_workflow.callback = progress_callback
+            return self._snapshot_workflow
+        from .snapshot_environment import SnapshotEnvironment
+        from .snapshot_workflow import SnapshotWorkflow
+        if self.run_root != ADMIN_RUN_ROOT.resolve():
+            raise PermissionError("SNAPSHOT_ISOLATED_ENVIRONMENT_REQUIRED")
+        return SnapshotWorkflow(SnapshotEnvironment(scheduler_log_dir=scheduler_log_dir,
+                                                    scheduler_managed_locks=scheduler_managed_locks),
+                                progress_callback=progress_callback)
+
+    def _snapshot_phase(self, phase, payload_path, expected, *, confirmed=False, progress_callback=None,test_run_id=None):
+        engine = self._snapshot_engine(progress_callback=progress_callback)
+        path = Path(payload_path)
+        if path.name != "update_request.json" or path.is_symlink() or path.parent.parent.resolve() != self.run_root:
+            raise ValueError("SNAPSHOT_UPDATE_REQUEST_PATH_REQUIRED")
+        engine.env.operation_id = path.parent.name
+        request = engine.env.request()
+        if request["fingerprint"] != expected:
+            raise ValueError("SNAPSHOT_UPDATE_REQUEST_FINGERPRINT_MISMATCH")
+        if not (engine.env.directory()/"update_sources.json").is_file():
+            raise ValueError("SNAPSHOT_LOCAL_STAGE_REQUIRES_SEALED_FETCH")
+        if phase == "publish":
+            current=json.loads((engine.env.directory()/"result.json").read_text())
+            if not test_run_id or current.get("validation_id") != test_run_id or current.get("outcome") != "CANDIDATE_READY":
+                raise ValueError("SNAPSHOT_EXACT_CANDIDATE_TEST_REFERENCE_REQUIRED")
+        return self._finalize(engine.advance(path.parent.name,stop_after=phase,confirm_publish=confirmed,
+                                             retry_local=phase == "validate"),default_message="Snapshot UPDATE")
+
+    def finalize_snapshot_reviews(self, run_id: str) -> AdminUIRunResult:
+        if self.selected_refresh_route() != "SNAPSHOT_V1":
+            raise PermissionError("SNAPSHOT_UPDATE_ROUTE_NOT_SELECTED")
+        with self._operation_lock():
+            return self._finalize(self._snapshot_engine().finalize_reviews(run_id),default_message="Snapshot review finalization")
 
     def initialize_publication_safety(self) -> Mapping[str, Any]:
         if self._publication_safety_initialized:
@@ -420,6 +473,13 @@ class FundamentalsAdminUIService:
                 progress_callback=progress_callback,
             )
         elif operation == "REFRESH_FUNDAMENTALS":
+            if self.selected_refresh_route() == "SNAPSHOT_V1":
+                engine = self._snapshot_engine(progress_callback=progress_callback)
+                if not raw_inputs:
+                    raise ValueError("SNAPSHOT_PREVIEW_REQUIRES_EXISTING_UPDATE_ID")
+                engine.env.operation_id = raw_inputs
+                request = engine.env.request()
+                return self._snapshot_phase("validate",str(engine.env.directory()/"update_request.json"),request["fingerprint"],progress_callback=progress_callback)
             result = self._refresh_preview(
                 run_root=self.run_root,
                 trigger_source=trigger_source,
@@ -498,6 +558,8 @@ class FundamentalsAdminUIService:
                 progress_callback=progress_callback,
             )
         elif operation == "REFRESH_FUNDAMENTALS":
+            if self.selected_refresh_route() == "SNAPSHOT_V1":
+                return self._snapshot_phase("build",str(payload_path),preview_fingerprint,progress_callback=progress_callback)
             result = self._refresh_apply(
                 preview_payload_path=payload_path,
                 preview_fingerprint=preview_fingerprint,
@@ -578,6 +640,10 @@ class FundamentalsAdminUIService:
                 progress_callback=progress_callback,
             )
         elif operation == "REFRESH_FUNDAMENTALS":
+            if self.selected_refresh_route() == "SNAPSHOT_V1":
+                if confirmation != "CONFIRM_PRODUCTION_REFRESH_FUNDAMENTALS":
+                    raise PermissionError("REFRESH_PRODUCTION_CONFIRMATION_REQUIRED")
+                return self._snapshot_phase("publish",str(payload_path),preview_fingerprint,confirmed=True,progress_callback=progress_callback,test_run_id=test_run_id)
             result = self._refresh_production_apply(
                 preview_payload_path=payload_path,
                 preview_fingerprint=preview_fingerprint,
@@ -632,9 +698,23 @@ class FundamentalsAdminUIService:
         scheduler_managed_locks: bool = False,
         ownership_auto_enabled: bool | None = None,
         progress_callback: AdminProgressCallback | None = None,
+        snapshot_publish_confirmed: bool = False,
+        snapshot_update_run_id: str | None = None,
+        snapshot_retry_local: bool = False,
     ) -> AdminUIRunResult:
         with self._operation_lock():
             operation = operation_type.strip().upper()
+            if operation == "REFRESH_FUNDAMENTALS" and self.selected_refresh_route() == "SNAPSHOT_V1":
+                engine = self._snapshot_engine(scheduler_log_dir=scheduler_log_dir,
+                                               scheduler_managed_locks=scheduler_managed_locks,
+                                               progress_callback=progress_callback)
+                if snapshot_update_run_id:
+                    result = engine.advance(snapshot_update_run_id,confirm_publish=snapshot_publish_confirmed,
+                                             retry_local=snapshot_retry_local)
+                else:
+                    result = engine.start(trigger_source=trigger_source,publication_intent=snapshot_publish_confirmed,
+                                          ownership_intent=ownership_auto_enabled)
+                return self._finalize(result,default_message="Snapshot UPDATE")
             workflow_module = import_module(
                 "rawcandle.fundamentals.admin.full_workflow"
             )
@@ -1443,7 +1523,9 @@ class FundamentalsAdminUIService:
                 workflow_module = import_module(
                     "rawcandle.fundamentals.admin.full_workflow"
                 )
-                workflow_rows = workflow_module.workflow_ui_summary(result)
+                workflow_rows = (tuple(result.get("summary_rows") or ())
+                                 if result.get("contract") == "FUNDAMENTALS_SNAPSHOT_UPDATE_V1"
+                                 else workflow_module.workflow_ui_summary(result))
                 report = OperationReportSummary(
                     run_id=run_id,
                     operation_type=str(result.get("operation_type") or "ADD_TICKERS"),
@@ -1473,10 +1555,12 @@ class FundamentalsAdminUIService:
         errors = result.get("errors")
         first_error = errors[0] if isinstance(errors, (list, tuple)) and errors and isinstance(errors[0], Mapping) else {}
         return AdminUIRunResult(
-            status="RETRY_REQUIRED" if result.get("outcome") == "RETRY_REQUIRED" else ("FAILED" if result.get("outcome") in {"FAILED", "STOPPED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED", "STALE_PREVIEW_OR_TEST", "RECOVERY_FAILED"} else "COMPLETED"),
+            status=(str(result["outcome"]) if result.get("contract") == "FUNDAMENTALS_SNAPSHOT_UPDATE_V1" else
+                    "RETRY_REQUIRED" if result.get("outcome") == "RETRY_REQUIRED" else ("FAILED" if result.get("outcome") in {"FAILED", "STOPPED", "ERROR", "INTERRUPTED", "ROLLED_BACK", "FAILED_ROLLED_BACK", "CRITICAL_ROLLBACK_FAILED", "STALE_PREVIEW_OR_TEST", "RECOVERY_FAILED"} else "COMPLETED")),
             message=(
                 str((result.get("terminal_summary") or {}).get("headline"))
                 if workflow_mode and (result.get("terminal_summary") or {}).get("headline")
+                else str(result.get("message") or result.get("outcome")) if result.get("contract") == "FUNDAMENTALS_SNAPSHOT_UPDATE_V1"
                 else final_status_message(result) if result.get("mode") else default_message
             ),
             run_id=run_id or None,
@@ -1524,4 +1608,5 @@ class FundamentalsAdminUIService:
             direct_test_retry_available=bool(result.get("manual_test_retry_available")),
             operational_summary=(workflow_view(result) if workflow_mode else
                 dict(run_meaning(result),kind='preview',source_scan=source_scan(result)) if result.get('operation_type')=='REFRESH_FUNDAMENTALS' and result.get('mode')=='PREVIEW' else None),
+            snapshot_update_run_id=run_id if result.get("contract")=="FUNDAMENTALS_SNAPSHOT_UPDATE_V1" else None,
         )

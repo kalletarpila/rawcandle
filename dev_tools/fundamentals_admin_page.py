@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 
 import inspect
 import json
@@ -343,6 +344,7 @@ def build_fundamentals_admin_page(
     current_preview_payload_path: str | None = None
     current_preview_fingerprint: str | None = None
     current_test_run_id: str | None = None
+    current_snapshot_update_id: str | None = None
     current_report_run_id: str | None = None
     selected_history_run_id: str | None = None
     history_cursor: Any = None
@@ -1726,6 +1728,10 @@ def build_fundamentals_admin_page(
     def apply_result(result: AdminUIRunResult) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
         nonlocal current_preview_fingerprint, current_test_run_id, current_report_run_id, selected_history_run_id
+        nonlocal current_snapshot_update_id
+        current_snapshot_update_id=(result.snapshot_update_run_id if result.outcome in {"FETCH_PAUSED","FETCH_BLOCKED"} else None)
+        full_workflow_button.text="Resume snapshot UPDATE" if current_snapshot_update_id else "Run full workflow"
+        normal_workflow_button.text="Resume snapshot UPDATE" if current_snapshot_update_id else "Refresh Fundamentals — Full Workflow"
         is_preview = result.mode in {"PREVIEW", "CURRENT_STATE_AUDIT", "CANDIDATE_PREVIEW", "PROTECTED_PRODUCTION_PREVIEW", "ACTIVE_TAXONOMY_PREVIEW"}
         is_workflow = result.mode == "FULL_WORKFLOW"
         status_field.value = '\n'.join(result.operational_summary['rows']) if result.operational_summary else _result_text(result)
@@ -1961,6 +1967,9 @@ def build_fundamentals_admin_page(
 
     def on_preview(_event: Any) -> None:
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path, current_preview_fingerprint, current_test_run_id, last_progress_count
+        snapshot_preview=(Path(current_preview_payload_path).parent.name
+                          if operation_dropdown.value == "REFRESH_FUNDAMENTALS" and current_preview_payload_path
+                          and Path(current_preview_payload_path).name == "update_request.json" else None)
         current_preview_signature = None
         current_preview_result = None
         current_preview_payload_path = None
@@ -1973,7 +1982,7 @@ def build_fundamentals_admin_page(
             preview_button,
             lambda: admin_service.preview(
                 operation_dropdown.value or "ADD_TICKERS",
-                raw_inputs=tickers_field.value or "",
+                raw_inputs=snapshot_preview or tickers_field.value or "",
                 market=market_field.value or "usa",
                 taxonomy_domain=taxonomy_domain_dropdown.value or "dc_ecosystem",
                 candidate_path=None,
@@ -2072,6 +2081,7 @@ def build_fundamentals_admin_page(
         nonlocal current_preview_signature, current_preview_result, current_preview_payload_path
         nonlocal current_preview_fingerprint, current_test_run_id, last_progress_count
         nonlocal running_full_workflow
+        pending_snapshot=(current_snapshot_update_id if operation_dropdown.value == "REFRESH_FUNDAMENTALS" else None)
         current_preview_signature = None
         current_preview_result = None
         current_preview_payload_path = None
@@ -2089,6 +2099,7 @@ def build_fundamentals_admin_page(
                     raw_inputs=tickers_field.value or "",
                     market=market_field.value or "usa",
                     progress_callback=progress_callback,
+                    **({"snapshot_update_run_id":pending_snapshot} if pending_snapshot else {}),
                 ),
             )
         finally:

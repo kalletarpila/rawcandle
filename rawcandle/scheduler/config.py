@@ -29,7 +29,7 @@ _REQUIRED_CONFIG_KEYS = {
 }
 _OPTIONAL_CONFIG_KEYS = {
     "timezone", "skip_next_run", "technical_relevance_enabled",
-    "fundamentals_refresh_preview_enabled", "fundamentals_refresh_mode",
+    "fundamentals_refresh_preview_enabled", "fundamentals_refresh_mode", "fundamentals_refresh_route",
     "pb_ownership_auto_continuation_enabled",
 }
 _OPTIONAL_CONFIG_KEYS.update(
@@ -78,6 +78,7 @@ class StockUpdateSchedulerConfig:
     technical_relevance_enabled: bool = False
     fundamentals_refresh_preview_enabled: bool = False
     fundamentals_refresh_mode: str = "PREVIEW_ONLY"
+    fundamentals_refresh_route: str = "LEGACY"
     pb_ownership_auto_continuation_enabled: bool = False
     datacenter_dashboard_fallback_to_reports: bool = True
     datacenter_dashboard_reports_reference_db: str | None = None
@@ -157,6 +158,8 @@ def validate_scheduler_config(
         raise ValueError("fundamentals_refresh_preview_enabled must be a bool")
     if type(config.pb_ownership_auto_continuation_enabled) is not bool:
         raise ValueError("pb_ownership_auto_continuation_enabled must be a bool")
+    if config.fundamentals_refresh_route not in {"LEGACY", "SNAPSHOT_V1"}:
+        raise ValueError("fundamentals_refresh_route must be LEGACY or SNAPSHOT_V1")
     if config.fundamentals_refresh_mode not in SUPPORTED_FUNDAMENTALS_REFRESH_MODES:
         raise ValueError(
             "fundamentals_refresh_mode must be one of: "
@@ -233,6 +236,7 @@ def validate_scheduler_config(
         technical_relevance_enabled=config.technical_relevance_enabled,
         fundamentals_refresh_preview_enabled=config.fundamentals_refresh_preview_enabled,
         fundamentals_refresh_mode=config.fundamentals_refresh_mode,
+        fundamentals_refresh_route=config.fundamentals_refresh_route,
         pb_ownership_auto_continuation_enabled=config.pb_ownership_auto_continuation_enabled,
         datacenter_dashboard_fallback_to_reports=(
             config.datacenter_dashboard_fallback_to_reports
@@ -312,6 +316,7 @@ def scheduler_config_from_dict(data: Dict[str, Any]) -> StockUpdateSchedulerConf
         technical_relevance_enabled=data.get("technical_relevance_enabled", False),
         fundamentals_refresh_preview_enabled=data.get("fundamentals_refresh_preview_enabled", False),
         fundamentals_refresh_mode=data.get("fundamentals_refresh_mode", "PREVIEW_ONLY"),
+        fundamentals_refresh_route=data.get("fundamentals_refresh_route", "LEGACY"),
         pb_ownership_auto_continuation_enabled=data.get("pb_ownership_auto_continuation_enabled", False),
         datacenter_dashboard_fallback_to_reports=data.get(
             "datacenter_dashboard_fallback_to_reports", True

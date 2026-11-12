@@ -28,6 +28,26 @@ def _load_payload(run_root: Path, run_id: str | None) -> dict[str, Any]:
 def _full_workflow_summary(
     *, response: Any, payload: dict[str, Any], run_root: Path,
 ) -> dict[str, Any]:
+    if payload.get("contract") == "FUNDAMENTALS_SNAPSHOT_UPDATE_V1":
+        source = payload.get("source_summary") or {}
+        outcome = str(payload.get("outcome") or response.outcome or "FAILED")
+        financial = bool(payload.get("production_completed"))
+        return {"operation_type":"REFRESH_FUNDAMENTALS", "mode":"SCHEDULER_FULL_WORKFLOW",
+                "configured_mode":"FULL_WORKFLOW", "trigger_source":"SCHEDULER",
+                "refresh_route":"SNAPSHOT_V1", "outcome":outcome,"final_outcome":outcome,
+                "status":response.status,"scheduler_summary_result":outcome,
+                "run_id":response.run_id,"report":str(run_root/str(response.run_id)/"workflow_report.md"),
+                "held_review_tickers":[h["ticker"] for h in (payload.get("review_partition") or {}).get("held",[])],
+                "global_blockers":source.get("global_blockers",0),"review_required":bool(source.get("held_for_review")),
+                "pending_changes":bool(source.get("safe_changes")) and not financial,
+                "test_invoked":any(s["stage"]=="Test on copies" for s in payload.get("stages",[])),
+                "production_invoked":bool(payload.get("production_entered")),"production_completed":financial,
+                "full_workflow_invoked":True,"unattended_production_available":False,
+                "production_decision_reason":payload.get("message") or outcome,
+                "technical_failure":payload.get("message") if outcome in {"FAILED","RECOVERY_FAILED"} else None,
+                "published_watermark":(payload.get("publication_outcome") or {}).get("new_watermark"),
+                "pb_ownership_auto":{k:v for k,v in (payload.get("ownership_auto") or {}).items()
+                                     if k in {"enabled","status","evaluated","auto_continued","published","failed_stale","financial_precondition","financial_generation_id"}}}
     stages = list(payload.get("stages") or [])
     stage_names = [str(item.get("stage")) for item in stages]
     production_stage = next(
@@ -119,6 +139,8 @@ def run_scheduler_refresh_discovery(
     scheduler_log_dir: str | None = None,
     full_workflow_backend: Callable[..., Any] | None = None,
     ownership_auto_enabled: bool | None = None,
+    refresh_route: str | None = None,
+    snapshot_publish_confirmed: bool = False,
 ) -> dict[str, Any]:
     """Run configured Refresh mode without creating operator approvals."""
     if scheduler_mode not in SUPPORTED_FUNDAMENTALS_REFRESH_MODES:
@@ -159,10 +181,16 @@ def run_scheduler_refresh_discovery(
     }
     if preview_backend is not None:
         kwargs["refresh_preview"] = preview_backend
+    if refresh_route is not None:
+        kwargs["refresh_route"] = refresh_route
     service = FundamentalsAdminUIService(**kwargs)
+    if snapshot_publish_confirmed and service.selected_refresh_route() != "SNAPSHOT_V1":
+        raise PermissionError("SNAPSHOT_PUBLICATION_INTENT_REQUIRES_SELECTED_ROUTE")
     if scheduler_mode == "FULL_WORKFLOW":
         try:
             ownership_kwargs={} if ownership_auto_enabled is None else {'ownership_auto_enabled':ownership_auto_enabled}
+            if snapshot_publish_confirmed:
+                ownership_kwargs['snapshot_publish_confirmed']=True
             response = (
                 full_workflow_backend(
                     operation_type="REFRESH_FUNDAMENTALS",

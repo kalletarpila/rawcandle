@@ -118,3 +118,7 @@ After final acceptance, all eight task-owned `/tmp/fundamentals-phase2-{initial,
 ## Next operator decision
 
 Review this bounded disposable backend and the explicit unimplemented integration items before commissioning the remaining production-capable source/UI/P/B integration. A separately authorized controlled live UPDATE requires a fresh current baseline and proper update operation, not an ACQUIRE_ONLY snapshot relabeled as production permission. Scheduler reactivation requires separate explicit authorization after accepted live behavior. This task performs neither action and does not push.
+
+## Subsequent Phase 3B integration
+
+The [Phase 3B snapshot integration report](fundamentals_phase3b_snapshot_integration_2026-11-12.md) records the subsequent default-off production adapter, common service/scheduler routing, persistent SEC capture/replay, native production-source integration, reporting and separate ownership continuation. Its tests extend the shared kernels above; the original Phase 2 acceptance remains historical. Effective production selection remains LEGACY and nightly Fundamentals remains on HOLD. No live rollout is implied by either report.
