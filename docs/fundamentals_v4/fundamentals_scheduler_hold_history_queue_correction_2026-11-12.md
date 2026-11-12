@@ -144,3 +144,7 @@ The identified queue-reader defect is resolved without a data migration. Singlet
 The complete one-snapshot VALIDATE/PUBLISH/VERIFY coordinator, native candidate/publication integration and its disposable end-to-end acceptance remain future work. This task does not activate them, perform a controlled live update, or certify unknown live server/account retention behavior. Short or ambiguous effective windows conservatively remain ticker review; no guessed boundary is promoted to safe finance. Further live conformance or financial execution needs its separately authorized task.
 
 **Nightly Fundamentals stays disabled.** Re-enable only after accepted complete implementation, verified native publication/rollback/recovery/source/history/local-hold behavior, a separately authorized successful controlled live update, and explicit operator reactivation approval. No push is performed.
+
+### Subsequent bounded Phase 2 implementation
+
+The [Phase 2 local validation/publication report](fundamentals_phase2_local_validation_publication_2026-11-12.md) records the subsequent disposable-only backend, native generation/postflight/recovery acceptance and remaining production integration limits. It consumes the corrected snapshot and queue contracts above and includes full-domain degraded-baseline preservation. This historical correction report's original acceptance remains unchanged. The new backend does not activate a production route or re-enable the scheduler.

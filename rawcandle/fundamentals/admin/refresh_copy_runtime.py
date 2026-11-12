@@ -748,7 +748,11 @@ def fresh_rebuild_canonical(
     affected_company_ids: Sequence[int] = (),
     ownership_review_queue_path: Path | None = None,
     historical_freeze_changes: Sequence[Mapping[str, Any]] = (),
+    held_changes: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
+    # Snapshot workflow only; existing callers retain the original empty scope.
+    from . import baseline_carry_forward as carry
+    held_states = carry.capture(canonical_db, held_changes)
     identity_before = _identity_mapping(canonical_db)
     before = _quarter_rows(canonical_db)
     preserved_dates, bootstrap_summary = build_publication_date_preservation_map(before)
@@ -771,6 +775,7 @@ def fresh_rebuild_canonical(
         connection.commit()
     canonical = reconcile_canonical(provider_db, canonical_db, applied_at=applied_at,
                                     ownership_review_queue_path=ownership_review_queue_path)
+    carry_forward = carry.restore(canonical_db, held_states)
     with sqlite3.connect(canonical_db) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
         ensure_ttm_schema(connection)
@@ -878,6 +883,7 @@ def fresh_rebuild_canonical(
     } for key in removed]
     return {
         "canonical": canonical, "ttm": ttm, "structural": structural,
+        "held_canonical_carry_forward": carry_forward,
         "publication_date_bootstrap": {
             "canonical_quarters_inspected": len(before), **dict(bootstrap), "repair_required": 0,
             "bootstrapped_in_candidate": bootstrap["bootstrap_eligible"],

@@ -120,8 +120,8 @@ def prepare_journal(
     path: Path,
     operation_type: str,
     run_id: str,
-    preview_run_id: str,
-    test_run_id: str,
+    preview_run_id: str | None,
+    test_run_id: str | None,
     refresh_set_fingerprint: str,
     old_source_watermark: str | None,
     new_source_watermark: str,
@@ -132,12 +132,19 @@ def prepare_journal(
     new_generation_id: str | None = None,
     active_generation_manifest_path: Path | None = None,
     scope_evidence: Mapping[str, Any] | None = None,
+    snapshot_authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     prior = load_journal(path)
     if prior and prior["state"] in INCOMPLETE_STATES:
         raise PublicationRecoveryError("INCOMPLETE_PUBLICATION_RECOVERY_REQUIRED")
     if set(roles) != set(PUBLICATION_ROLES):
         raise ValueError("PUBLICATION_JOURNAL_ROLE_SET_INVALID")
+    if snapshot_authorization is not None:
+        if (snapshot_authorization.get("contract") != "FUNDAMENTALS_SIMPLIFICATION_V1"
+                or not snapshot_authorization.get("snapshot_reference")
+                or not snapshot_authorization.get("validation_fingerprint")
+                or preview_run_id is not None or test_run_id is not None):
+            raise ValueError("PUBLICATION_SNAPSHOT_AUTHORIZATION_INVALID")
     if publication_mode not in {"ROLE_REPLACEMENT", "GENERATION_POINTER"}:
         raise ValueError("PUBLICATION_JOURNAL_MODE_INVALID")
     if publication_mode == "GENERATION_POINTER" and (
@@ -175,6 +182,8 @@ def prepare_journal(
         })
     if scope_evidence is not None:
         payload["scope_evidence"] = dict(scope_evidence)
+    if snapshot_authorization is not None:
+        payload["snapshot_authorization"] = dict(snapshot_authorization)
     return write_journal(path, payload)
 
 
