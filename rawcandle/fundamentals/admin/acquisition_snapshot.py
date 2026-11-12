@@ -7,6 +7,7 @@ history or publication permission. OLD outside that window remains authoritative
 from __future__ import annotations
 
 from contextlib import contextmanager
+from itertools import islice
 from datetime import date, datetime, timedelta, timezone
 import fcntl
 import hashlib
@@ -29,6 +30,7 @@ from rawcandle.fundamentals.providers.sharadar import (
 )
 from .artifacts import ADMIN_RUN_ROOT, AdminRunWriter, sha256_file
 from .contracts import AdminOperationType
+from .redaction import redact_text
 from .refresh_fundamentals import (
     REFRESH_REQUEST_FIELDS,
     SOURCE_PRIMARY_KEY,
@@ -558,8 +560,124 @@ def _payload_shape(payload):
     return (
         isinstance(rows, list)
         and all(isinstance(row, dict) for row in rows)
-        and (not isinstance(payload, dict) or len(payload) == 1)
+        and (
+            not isinstance(payload, dict)
+            or len(payload) == 1
+            # Native Sharadar /data/fundamentals envelope, observed byte-for-
+            # byte in Phase 3D. Do not accept pagination or extra metadata.
+            or (
+                set(payload) == {"count", "data"}
+                and type(payload["count"]) is int
+                and payload["count"] == len(rows)
+            )
+        )
     )
+
+
+def _record_rejected_response(run, slot, response, predicate, checks, secrets=()):
+    """Compact, non-authoritative evidence; never retain or accept a raw body."""
+    def text(value):
+        return redact_text(str(value), configured_secrets=secrets)[:256]
+
+    def identities(rows):
+        sample = rows[:32]
+        return {
+            "row_count": len(rows),
+            "sampled_rows": len(sample),
+            "tickers": sorted({text(row.get("ticker")) for row in sample}),
+            "dimensions": sorted({text(row.get("dimension")) for row in sample}),
+        }
+
+    expected = _parameters(run.request, slot)
+    parameters = response.parameters or {}
+    payload = response.payload
+    raw = payload_records(payload)
+    captured = [capture.raw_payload(row) for row in response.records]
+    body = response.response_body
+    origins = [
+        (capture.envelope(row) or {}).get("acquisition_source") or {}
+        for row in response.records[:32]
+    ]
+    events = _transport_events(run)
+    transport = events.get(response.attempt_id, {})
+    if not transport and events:
+        latest = next(reversed(events.values()))
+        if latest.get("endpoint") == ENDPOINT and latest.get("parameters") == expected:
+            transport = latest
+    relative = "fetch/rejections/" + uuid4().hex + ".json"
+    _write(
+        run.path(relative),
+        {
+            "format": FORMAT + "_REJECTED_RESPONSE_V1",
+            "operation_id": run.operation_id,
+            "slot": slot["slot"],
+            "ticker": slot["ticker"],
+            "dimension": slot["dimension"],
+            "endpoint": ENDPOINT,
+            "transport_attempt_id": response.attempt_id,
+            "acquired_at_utc": response.acquired_at_utc,
+            "failed_predicate": text(predicate),
+            "checks": checks,
+            "expected_parameters": expected,
+            # Do not copy arbitrary parameters or any sensitive HTTP headers.
+            "observed_parameters": {
+                key: text(parameters[key]) if key in parameters else None
+                for key in expected
+            },
+            "extra_parameter_keys": [
+                text(key) for key in islice(
+                    (key for key in parameters if key not in expected), 16
+                )
+            ],
+            "client_status": response.status,
+            "http_status": response.http_status,
+            "transport_ledger": {
+                key: transport.get(key) for key in
+                ("attempt_id", "http_status", "response_bytes", "response_sha256")
+            },
+            "content_type": text((response.response_headers or {}).get("content-type", "")),
+            "response_body_type": type(body).__name__,
+            "response_bytes": len(body) if isinstance(body, bytes) else None,
+            "response_sha256": hashlib.sha256(body).hexdigest() if isinstance(body, bytes) else None,
+            "payload_type": type(payload).__name__,
+            "payload_top_level_keys": [text(key) for key in islice(payload, 16)] if isinstance(payload, dict) else [],
+            "payload_top_level_items": len(payload) if isinstance(payload, (list, dict)) else None,
+            "payload_count": text(payload["count"]) if isinstance(payload, dict) and "count" in payload else None,
+            "payload_count_type": type(payload["count"]).__name__ if isinstance(payload, dict) and "count" in payload else None,
+            "payload_rows": identities(raw),
+            "captured_rows": identities(captured),
+            "expected_request_fingerprint": capture.digest(expected),
+            "captured_request_fingerprints": sorted({text(x.get("request_fingerprint")) for x in origins}),
+            "captured_response_sha256s": sorted({text(x.get("response_sha256")) for x in origins}),
+            "raw_body_retained": False,
+            "accepted_snapshot_slot": False,
+            "publication_authorized": False,
+        },
+    )
+    return relative
+
+
+def _checked_history_response(run, slot, response, *, secrets=()):
+    # Keep the original four acceptance conditions, but identify each failure.
+    checks = {
+        "RESPONSE_BODY_PRESENT": response.response_body is not None,
+        "REQUEST_PARAMETERS_MATCH": response.parameters == _parameters(run.request, slot),
+        "PAYLOAD_SHAPE_VALID": _payload_shape(response.payload),
+        "PAYLOAD_CAPTURE_EQUAL": payload_records(response.payload)
+        == [capture.raw_payload(row) for row in response.records],
+    }
+    failed = next((name for name, passed in checks.items() if not passed), None)
+    try:
+        if failed:
+            raise SnapshotError("UNFILTERED_RESPONSE_OR_CAPTURE_MISMATCH:" + failed)
+        digest = hashlib.sha256(response.response_body).hexdigest()
+        coverage = _coverage(run, slot, response.records, digest, response.acquired_at_utc)
+        return digest, coverage
+    except SnapshotError as error:
+        error.rejected_response_diagnostic = _record_rejected_response(
+            run, slot, response, failed or str(error), checks, secrets
+        )
+        raise
 
 
 def _checkpoints(run, control):
@@ -830,8 +948,11 @@ def resume_fetch(
                 reason=(
                     "INTERRUPTED"
                     if isinstance(exc, (KeyboardInterrupt, SystemExit))
+                    else str(exc) if hasattr(exc, "rejected_response_diagnostic")
                     else type(exc).__name__
                 ),
+                **({"rejected_response_diagnostic": exc.rejected_response_diagnostic}
+                   if hasattr(exc, "rejected_response_diagnostic") else {}),
             )
             raise
 
@@ -933,6 +1054,13 @@ def _resume(run, *, project_root, client, now):
                 },
             )
             if not response.ok:
+                diagnostic = {}
+                if response.status != STATUS_RATE_LIMITED:
+                    diagnostic["rejected_response_diagnostic"] = _record_rejected_response(
+                        run, slot, response, "CLIENT_" + response.status,
+                        {"CLIENT_RESPONSE_SUCCESS": False},
+                        (getattr(client, "_api_key", None),),
+                    )
                 return run.progress(
                     (
                         "FETCH_PAUSED"
@@ -943,21 +1071,13 @@ def _resume(run, *, project_root, client, now):
                     total,
                     reason=response.status,
                     resume_not_before=response.not_before,
+                    **diagnostic,
                     **attempts,
                 )
             # fundamentals() filters its public records; full payload and
             # original captures must agree before any checkpoint can commit.
-            if (
-                response.response_body is None
-                or response.parameters != params
-                or not _payload_shape(response.payload)
-                or payload_records(response.payload)
-                != [capture.raw_payload(r) for r in response.records]
-            ):
-                raise SnapshotError("UNFILTERED_RESPONSE_OR_CAPTURE_MISMATCH")
-            digest = hashlib.sha256(response.response_body).hexdigest()
-            coverage = _coverage(
-                run, slot, response.records, digest, response.acquired_at_utc
+            digest, coverage = _checked_history_response(
+                run, slot, response, secrets=(getattr(client, "_api_key", None),)
             )
             _age(times + [_time(response.acquired_at_utc)], now())
             key = uuid4().hex
