@@ -2,6 +2,8 @@
 
 Phase 1 implements an **acquisition-only** API with durable singleton checkpoints, immutable captured source evidence, explicit seven-day freshness and credential-scoped native HTTP coordination. It does not connect that API to Refresh, Full Workflow, the scheduler or financial publication. FETCH success always reports `publication_authorized=false`; it creates no executable Preview/Test/Production authorization.
 
+**2026-11-12 correction:** the new `SINGLETON_ARQ_MRQ_WINDOW_V2` policy supersedes this report's original requirement that every OLD key inside the request window must reappear. It records absent keys for local history comparison, preserves OLD, and distinguishes verified rolling expiry from current-window discrepancies. Original V1 checkpoints keep their original verification contract. See [scheduler HOLD, rolling history and queue correction](fundamentals_scheduler_hold_history_queue_correction_2026-11-12.md) for the current contract and acceptance. Nightly Fundamentals is now disabled through the existing scheduler flag.
+
 Architecture baseline: `1926f78cb368d3374c302265dd27e61b131eafc5`. The operator overrides that document: **one ticker at a time, ARQ then MRQ as separate native requests; 168 hours instead of 24 hours; no batch, all-dimension, ZIP or batch-qualification implementation.** The accepted architecture document is preserved as historical evidence; this task's explicit overrides govern this implementation.
 
 ## Changed modules

@@ -435,7 +435,7 @@ def test_old_drift_and_cross_operation_cannot_reuse(old, tmp_path):
         fetch.open_snapshot(other, root=tmp_path / "runs")
 
 
-def test_old_anchor_prevents_default_one_year_or_omitted_old_rows(old, tmp_path):
+def test_old_anchor_absence_is_explicit_and_requires_local_comparison(old, tmp_path):
     from rawcandle.fundamentals.generations import resolve_active_generation
 
     provider = resolve_active_generation(old).role_paths()["provider"]
@@ -448,8 +448,13 @@ def test_old_anchor_prevents_default_one_year_or_omitted_old_rows(old, tmp_path)
     value = json.loads(manifest.read_text())
     value["role_verification"]["provider"]["sha256"] = sha256_file(provider)
     manifest.write_text(json.dumps(value))
-    with pytest.raises(fetch.SnapshotError, match="OLD_WINDOW_COVERAGE_MISSING"):
-        start(old, tmp_path)
+    result = start(old, tmp_path)
+    assert result["status"] == "FETCH_SEALED"
+    slot = fetch.open_snapshot(OP, root=tmp_path / "runs").read_slot(0)
+    assert slot["receipt"]["coverage"]["missing_old_source_key_count"] == 1
+    assert slot["source_history_comparison_required"]
+    assert not slot["incoming_financial_input_eligible"]
+    assert slot["receipt"]["coverage"]["absence_authorizes_deletion"] is False
 
 
 def test_429_pauses_promptly_retains_arq_and_counts_actual_attempts(old, tmp_path):

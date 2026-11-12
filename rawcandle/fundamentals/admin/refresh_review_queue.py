@@ -21,6 +21,9 @@ REVIEW_REQUIRED_FISCAL_IDENTITY_REVISION = "REVIEW_REQUIRED_FISCAL_IDENTITY_REVI
 CONFIRM_TRUE_SOURCE_REMOVAL = "CONFIRM_TRUE_SOURCE_REMOVAL"
 TRUE_REMOVAL_APPROVAL_VERSION = "REFRESH_TRUE_SOURCE_REMOVAL_APPROVAL_V1"
 TRUE_SOURCE_REMOVAL = "TRUE_SOURCE_REMOVAL"
+# Existing unversioned rows keep their original byte-level binding. An explicit
+# version, if supplied by a future writer, must be recognized and bound too.
+QUEUE_EVIDENCE_VERSION = "REFRESH_REVIEW_QUEUE_EVIDENCE_V1"
 SUPPORTED_ACTIONS = (
     "WAIT_FOR_PROVIDER", "RETRY_REEVALUATION", ACCEPT_RETAINED_HISTORY,
     ACCEPT_FISCAL_IDENTITY_REVISION, CONFIRM_TRUE_SOURCE_REMOVAL,
@@ -117,19 +120,45 @@ def _json(value: Any) -> str:
 
 def _queue_evidence_binding(item: Mapping[str, Any]) -> dict[str, Any]:
     context = dict(item.get("review_context") or {})
+    version = context.get("queue_evidence_version")
+    if version is not None and version != QUEUE_EVIDENCE_VERSION:
+        raise ValueError("REFRESH_REVIEW_QUEUE_EVIDENCE_VERSION_UNKNOWN")
     return {
         "ticker": str(item.get("ticker") or "").upper(),
         "queue_item_id": item.get("queue_item_id"),
         "review_type": item.get("review_type"),
         "reason_codes": sorted(str(value) for value in item.get("reason_codes") or []),
-        "affected_source_keys": _ordered_evidence(item.get("affected_source_keys") or []),
+        "affected_source_keys": _ordered_evidence(
+            item.get("affected_source_keys") or []
+        ),
         "fiscal_identities": _ordered_evidence(item.get("fiscal_identities") or []),
         "source_evidence_fingerprint": item.get("source_evidence_fingerprint"),
         "published_binding": item.get("last_published_binding"),
         "identity_binding": dict(context.get("identity_binding") or {}),
         "locality_proof": dict(context.get("locality_proof") or {}),
-        **({"capture_integrity":context["capture_integrity"]} if context.get("capture_integrity") else {}),
-        **({"historical_freeze": context["historical_freeze"]} if context.get("historical_freeze") else {}),
+        **(
+            {"capture_integrity": context["capture_integrity"]}
+            if context.get("capture_integrity")
+            else {}
+        ),
+        **(
+            {"historical_freeze": context["historical_freeze"]}
+            if context.get("historical_freeze")
+            else {}
+        ),
+        # Proven historical writer contract, archived during the unsuccessful
+        # baseline-hold rollout. Never drop these fields and rehash stored rows.
+        **(
+            {"quarantine_locality": context["quarantine_locality"]}
+            if context.get("quarantine_locality")
+            else {}
+        ),
+        **(
+            {"baseline_integrity_hold": context["baseline_integrity_hold"]}
+            if context.get("baseline_integrity_hold")
+            else {}
+        ),
+        **({"queue_evidence_version": version} if version is not None else {}),
     }
 
 
@@ -142,16 +171,32 @@ def _decode_row(row: sqlite3.Row) -> dict[str, Any]:
         "resolution_evidence_json",
         "review_context_json",
     ):
-        value[key.removesuffix("_json")] = json.loads(value.pop(key)) if value.get(key) else None
+        value[key.removesuffix("_json")] = (
+            json.loads(value.pop(key)) if value.get(key) else None
+        )
     context = value.get("review_context") or {}
+    # Validate the discriminator even for rows predating mandatory fingerprints.
+    binding = _queue_evidence_binding(value)
     expected = context.get("queue_evidence_fingerprint")
-    if expected and expected != fingerprint(_queue_evidence_binding(value)):
+    if not expected and any(
+        context.get(k)
+        for k in (
+            "quarantine_locality",
+            "baseline_integrity_hold",
+            "queue_evidence_version",
+        )
+    ):
+        raise ValueError("REFRESH_REVIEW_QUEUE_EVIDENCE_BINDING_MISSING")
+    if expected and expected != fingerprint(binding):
         raise ValueError("REFRESH_REVIEW_QUEUE_EVIDENCE_TAMPERED")
     return value
 
 
 def _ordered_evidence(values: Sequence[Any]) -> list[Any]:
-    return sorted((dict(value) if isinstance(value, Mapping) else value for value in values), key=_json)
+    return sorted(
+        (dict(value) if isinstance(value, Mapping) else value for value in values),
+        key=_json,
+    )
 
 
 def _identity_binding(identity: Mapping[str, Any]) -> dict[str, Any]:
@@ -410,48 +455,62 @@ def classify_review_scope(change: Mapping[str, Any]) -> dict[str, Any]:
             if source_window_local
             else str(change.get("review_reason") or "REVIEW_REQUIRED")
         ),
-        "reason_codes": reasons or [str(change.get("review_reason") or "REVIEW_REQUIRED")],
+        "reason_codes": reasons
+        or [str(change.get("review_reason") or "REVIEW_REQUIRED")],
         "affected_source_keys": affected_source_keys,
         "fiscal_identities": fiscal_identities,
         "source_evidence_fingerprint": fingerprint(evidence),
         "identity_binding": _identity_binding(identity),
         **({"historical_freeze": freeze} if freeze else {}),
-        **({"capture_integrity":capture_proof} if capture_proof else {}),
+        **({"capture_integrity": capture_proof} if capture_proof else {}),
         "locality_proof": {
             "known_unique_identity": identity.get("status") == "KNOWN",
             "complete_arq_mrq": complete_arq_mrq,
             "single_ticker_events": event_tickers == {ticker},
             "proven_local_shape": (
                 "MRQ_FISCAL_REVISION_WITH_ARQ_COMPANION"
-                if fiscal_revision_local else "OLDEST_PREFIX_SOURCE_WINDOW"
-                if source_window_local else "PROVEN_TRUE_SOURCE_REMOVAL"
-                if true_removal_local else "FROZEN_ACCEPTED_HISTORY"
-                if frozen_local else None
+                if fiscal_revision_local
+                else (
+                    "OLDEST_PREFIX_SOURCE_WINDOW"
+                    if source_window_local
+                    else (
+                        "PROVEN_TRUE_SOURCE_REMOVAL"
+                        if true_removal_local
+                        else "FROZEN_ACCEPTED_HISTORY" if frozen_local else None
+                    )
+                )
             ),
             "fiscal_identity_binding_complete": fiscal_identity_binding,
-            "mrq_fiscal_revisions_only": bool(fiscal_events) and len(fiscal_events) == len(events)
+            "mrq_fiscal_revisions_only": bool(fiscal_events)
+            and len(fiscal_events) == len(events)
             and all(item.get("dimension") == "MRQ" for item in fiscal_events),
             "stable_fiscal_source_keys": bool(fiscal_events)
             and all(item.get("stable_source_key") is True for item in fiscal_events),
             "arq_companion_identities_agree": bool(fiscal_events)
             and all(_arq_companion_agrees(item, ticker) for item in fiscal_events),
-            "oldest_prefix_only": bool(events) and all(item.get("was_oldest_prefix") is True for item in events),
-            "no_cross_ticker_or_companion_conflict": bool(events) and all(not item.get("companion_dimension_conflict") for item in events),
-            "no_same_fiscal_replacement_conflict": bool(events) and all(not item.get("same_fiscal_current_keys") for item in events),
-            "short_window_is_ticker_local": bool(events) and all(
+            "oldest_prefix_only": bool(events)
+            and all(item.get("was_oldest_prefix") is True for item in events),
+            "no_cross_ticker_or_companion_conflict": bool(events)
+            and all(not item.get("companion_dimension_conflict") for item in events),
+            "no_same_fiscal_replacement_conflict": bool(events)
+            and all(not item.get("same_fiscal_current_keys") for item in events),
+            "short_window_is_ticker_local": bool(events)
+            and all(
                 item.get("classification_reason") in allowed_reasons for item in events
             ),
             "true_removal_only": bool(true_removal_events)
-            and len(true_removal_events) == sum(
-                item.get("event") == TRUE_SOURCE_REMOVAL for item in events
-            ),
-            "provider_absence_proven": bool(true_removal_events) and all(
+            and len(true_removal_events)
+            == sum(item.get("event") == TRUE_SOURCE_REMOVAL for item in events),
+            "provider_absence_proven": bool(true_removal_events)
+            and all(
                 (item.get("provider_absence_proof") or {}).get(
                     "absent_from_complete_source"
-                ) is True
+                )
+                is True
                 and (item.get("provider_absence_proof") or {}).get(
                     "source_response_status"
-                ) == "COMPLETE"
+                )
+                == "COMPLETE"
                 for item in true_removal_events
             ),
             "provider_absence_evidence": [
@@ -483,13 +542,34 @@ def _review_context(item: Mapping[str, Any]) -> dict[str, Any]:
         "reason_codes": sorted(str(value) for value in item.get("reason_codes") or []),
         "identity_binding": dict(item.get("identity_binding") or {}),
         "locality_proof": dict(item.get("locality_proof") or {}),
-        **({"capture_integrity":item["capture_integrity"]} if item.get("capture_integrity") else {}),
-        **({"historical_freeze": item["historical_freeze"]} if item.get("historical_freeze") else {}),
+        **(
+            {"capture_integrity": item["capture_integrity"]}
+            if item.get("capture_integrity")
+            else {}
+        ),
+        **(
+            {"historical_freeze": item["historical_freeze"]}
+            if item.get("historical_freeze")
+            else {}
+        ),
+        **(
+            {"quarantine_locality": item["quarantine_locality"]}
+            if item.get("quarantine_locality")
+            else {}
+        ),
+        **(
+            {"baseline_integrity_hold": item["baseline_integrity_hold"]}
+            if item.get("baseline_integrity_hold")
+            else {}
+        ),
     }
 
 
 def _review_context_with_integrity(
-    item: Mapping[str, Any], *, queue_item_id: str, published_binding: str | None,
+    item: Mapping[str, Any],
+    *,
+    queue_item_id: str,
+    published_binding: str | None,
 ) -> dict[str, Any]:
     context = _review_context(item)
     context["queue_evidence_fingerprint"] = fingerprint(_queue_evidence_binding({

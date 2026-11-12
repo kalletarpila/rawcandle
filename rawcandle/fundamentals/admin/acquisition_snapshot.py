@@ -38,7 +38,8 @@ from .refresh_fundamentals import (
 from .workflow_evidence import trusted_path
 
 FORMAT = "FUNDAMENTALS_ACQUISITION_SNAPSHOT_V1"
-POLICY = "SINGLETON_ARQ_MRQ_WINDOW_V1"
+LEGACY_POLICY = "SINGLETON_ARQ_MRQ_WINDOW_V1"
+POLICY = "SINGLETON_ARQ_MRQ_WINDOW_V2"
 MAX_AGE_SECONDS = 168 * 3600
 LIMIT = 10000
 MAX_CONTROL = 64 * 1024
@@ -197,7 +198,7 @@ class _Run:
             self.request.get("operation_id") != operation_id
             or self.request.get("mode") != "ACQUISITION_ONLY"
             or self.request.get("format") != FORMAT
-            or self.request.get("policy") != POLICY
+            or self.request.get("policy") not in (LEGACY_POLICY, POLICY)
             or self.request.get("max_age_seconds") != MAX_AGE_SECONDS
             or self.request.get("capture_version") != capture.VERSION
             or self.request.get("normalization_version") != NORMALIZATION
@@ -370,7 +371,11 @@ def _coverage(run, slot, records, body_hash, acquired_at):
         if not request["horizon_from"] <= filing.isoformat() <= request["source_day"]:
             raise SnapshotError("SOURCE_WINDOW_MISMATCH")
         for profile in (capture.BASE, capture.FREEZE):
-            report = capture.profile_report(row, profile)
+            # The body/raw equality and original envelope are independently
+            # bound above/on replay. Validate that exact pair, including
+            # diagnostic rows whose normalized projection is itself invalid.
+            # Reconstructing a fresh acquisition envelope is never needed.
+            report = capture.profile_report(raw, profile, capture=envelope)
             if not report["eligible_authoritative_full_source"]:
                 # An original projected/defective native response is diagnostic,
                 # never safe finance. Identity/coverage failures above are global.
@@ -378,15 +383,18 @@ def _coverage(run, slot, records, body_hash, acquired_at):
     expected = {
         tuple(item) for item in _lines(run.verify(slot["old_window_keys"], "ANCHORS"))
     }
-    if not expected.issubset(keys):
+    missing = expected - keys
+    # V1 receipts retain their original verification contract. New V2 work
+    # separates response integrity from financial/source-history differences.
+    if request["policy"] == LEGACY_POLICY and missing:
         raise SnapshotError("OLD_WINDOW_COVERAGE_MISSING")
     trust = validate_complete_history(
         records, ticker=slot["ticker"], dimension=slot["dimension"]
     )
     if trust.status != "COMPLETE":
         diagnostics.add("NATIVE_HISTORY_VALIDATION_FAILED")
-    return {
-        "coverage_contract": POLICY,
+    evidence = {
+        "coverage_contract": request["policy"],
         "scope": "BOUNDED_SOURCE_WINDOW_NOT_LIFETIME",
         "from": request["horizon_from"],
         "to": request["source_day"],
@@ -400,6 +408,18 @@ def _coverage(run, slot, records, body_hash, acquired_at):
         "old_outside_window_action": "PRESERVE_OLD",
         "diagnostic_reasons": sorted(diagnostics),
     }
+    if request["policy"] != LEGACY_POLICY:
+        evidence.update(
+            {
+                "coverage_basis": "NATIVE_UNPROJECTED_COMPLETE_BOUNDED_RESPONSE",
+                "missing_old_source_key_count": len(missing),
+                "missing_old_source_keys_sha256": capture.digest(sorted(missing)),
+                "source_history_comparison_required": bool(missing),
+                "absence_authorizes_deletion": False,
+                "effective_provider_retention_boundary": "NOT_INFERRED_FROM_REQUEST_FROM",
+            }
+        )
+    return evidence
 
 
 def _transport_events(run):
@@ -995,7 +1015,7 @@ def _seal(run, control, checkpoints, times, now):
         "publication_authorized": False,
         "max_age_seconds": MAX_AGE_SECONDS,
         "old_authority": run.request["old_authority"],
-        "policy": POLICY,
+        "policy": run.request["policy"],
         "capture_version": capture.VERSION,
         "normalization_version": NORMALIZATION,
         "oldest_acquired_at_utc": min(times).isoformat(),
@@ -1070,10 +1090,156 @@ class AcquisitionSnapshot:
                 return {
                     "receipt": receipt,
                     "records": records,
+                    "source_history_comparison_required": receipt["coverage"].get(
+                        "source_history_comparison_required", False
+                    ),
                     "incoming_financial_input_eligible": receipt["state"]
-                    == "COMPLETE_VERIFIED",
+                    == "COMPLETE_VERIFIED"
+                    and not receipt["coverage"].get(
+                        "source_history_comparison_required", False
+                    ),
                 }
         raise SnapshotError("SLOT_NOT_IN_PLAN")
+
+    def compare_source_history(self, ticker, *, project_root):
+        """Local Phase 2 input, never a deletion/financial publication approval.
+
+        Observe actual report-period/fiscal coverage in both captured dimensions;
+        request filing-date bounds and canonical freeze dates are different axes.
+        Use native retention rules with the unrelated three-year shortcut OFF.
+        """
+        from .refresh_fundamentals import (
+            AGED_OUT_OF_SOURCE_WINDOW,
+            AMBIGUOUS_SOURCE_REMOVAL,
+            MINIMUM_QUARTER_BOUNDARY_SPAN,
+            _fiscal_quarter_index,
+            build_source_history_merge,
+            load_current_history,
+        )
+
+        # Phase entry/preflight owns full OLD role hashing. Per-ticker reads pin
+        # the native immutable manifest, avoiding a multi-GiB hash for each name.
+        binding = resolve_active_generation(Path(project_root), require_generation=True)
+        if (
+            binding.generation_id != self.manifest["old_authority"]["generation_id"]
+            or sha256_file(binding.manifest_path)
+            != self.manifest["old_authority"]["manifest_sha256"]
+        ):
+            raise SnapshotError("OLD_AUTHORITY_DRIFT")
+        slots = [slot for slot in self.iter_slots() if slot["ticker"] == ticker]
+        if len(slots) != 2 or {s["dimension"] for s in slots} != {"ARQ", "MRQ"}:
+            raise SnapshotError("TICKER_DIMENSION_SCOPE_INVALID")
+        provider = binding.role_paths()["provider"]
+        current = {d: load_current_history(provider, ticker, d) for d in ("ARQ", "MRQ")}
+        loaded = {slot["dimension"]: self.read_slot(slot["slot"]) for slot in slots}
+        source = {
+            d: validate_complete_history(item["records"], ticker=ticker, dimension=d)
+            for d, item in loaded.items()
+        }
+        if (
+            sha256_file(binding.manifest_path)
+            != self.manifest["old_authority"]["manifest_sha256"]
+        ):
+            raise SnapshotError("OLD_AUTHORITY_DRIFT")
+        result = {
+            "ticker": ticker,
+            "old_authority": self.manifest["old_authority"],
+            "publication_authorized": False,
+            "automatic_deletion_authorized": False,
+            "old_history_action": "PRESERVE_EXACT_OLD_UNLESS_SEPARATELY_AUTHORIZED",
+            "snapshot_reference": self.reference,
+        }
+        if (
+            any(
+                item["receipt"]["state"] != "COMPLETE_VERIFIED"
+                for item in loaded.values()
+            )
+            or any(h.status != "COMPLETE" for h in source.values())
+            or any(
+                c.get("invalid_rows") or c.get("legacy_source_version_ambiguities")
+                for c in current.values()
+            )
+        ):
+            return result | {
+                "status": "NATIVE_SOURCE_OR_BASELINE_REVIEW_REQUIRED",
+                "ticker_local_hold_required": True,
+                "incoming_source_for_phase2_eligible": False,
+                "financial_locality_authorized": False,
+            }
+        request = self._run.request
+        outside = sum(
+            not request["horizon_from"] <= row["date"] <= request["source_day"]
+            for c in current.values()
+            for row in c["rows"]
+        )
+        within = {
+            d: {
+                **c,
+                "rows": tuple(
+                    r
+                    for r in c["rows"]
+                    if request["horizon_from"] <= r["date"] <= request["source_day"]
+                ),
+            }
+            for d, c in current.items()
+        }
+        merge = build_source_history_merge(
+            ticker,
+            within,
+            source,
+            as_of_date=date.fromisoformat(request["source_day"]),
+            historical_source_window_review_years=0,
+        )
+        observed = {}
+        for d, history in source.items():
+            fiscal = [_fiscal_quarter_index(r["fiscalperiod"]) for r in history.rows]
+            periods = [date.fromisoformat(r["reportperiod"]) for r in history.rows]
+            observed_period_span = (
+                (max(periods).year - min(periods).year) * 4
+                + (max(periods).month - 1) // 3
+                - (min(periods).month - 1) // 3
+                + 1
+            )
+            observed[d] = {
+                "min_reportperiod": min(r["reportperiod"] for r in history.rows),
+                "max_reportperiod": max(r["reportperiod"] for r in history.rows),
+                "observed_fiscal_quarter_span": max(fiscal) - min(fiscal) + 1,
+                "observed_reportperiod_quarter_span": observed_period_span,
+            }
+        # A 41-quarter distance from a missing OLD row to one recent source row
+        # does not prove ten years of returned coverage. Require the observed
+        # source span too, then retain native prefix/chronology/companion checks.
+        broad_window = all(
+            min(
+                x["observed_fiscal_quarter_span"],
+                x["observed_reportperiod_quarter_span"],
+            )
+            >= MINIMUM_QUARTER_BOUNDARY_SPAN - 1
+            for x in observed.values()
+        )
+        events = []
+        for original in merge["events"]:
+            event = dict(original)
+            if event["event"] == AGED_OUT_OF_SOURCE_WINDOW and not broad_window:
+                event.update(
+                    event=AMBIGUOUS_SOURCE_REMOVAL,
+                    classification_reason="EFFECTIVE_PROVIDER_BOUNDARY_UNPROVEN",
+                )
+            events.append(event)
+        held = any(e["event"] != AGED_OUT_OF_SOURCE_WINDOW for e in events)
+        return result | {
+            "status": (
+                "SOURCE_HISTORY_REVIEW_REQUIRED"
+                if held
+                else "OLD_RETAINED_SOURCE_READY"
+            ),
+            "observed_provider_coverage": observed,
+            "events": events,
+            "outside_request_old_rows_preserved": outside,
+            "ticker_local_hold_required": held,
+            "incoming_source_for_phase2_eligible": not held,
+            "financial_locality_authorized": False,
+        }
 
     def validate_preflight(self, *, old_authority, now, expected_reference=None):
         """Acquisition eligibility only; Phase 2 must still validate finance/intent."""
@@ -1105,7 +1271,7 @@ def _verify_snapshot(run, manifest, reference):
         or manifest.get("mode") != "ACQUISITION_ONLY"
         or manifest.get("publication_authorized") is not False
         or manifest.get("max_age_seconds") != MAX_AGE_SECONDS
-        or manifest.get("policy") != POLICY
+        or manifest.get("policy") != run.request["policy"]
         or manifest.get("old_authority") != run.request["old_authority"]
     ):
         raise SnapshotError("SNAPSHOT_IDENTITY_OR_POLICY_MISMATCH")
