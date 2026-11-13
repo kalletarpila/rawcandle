@@ -222,6 +222,7 @@ def _code_binding():
         "acquisition_quarantine.py",
         "sec_snapshot.py",
         "refresh_universe.py",
+        "financial_selection.py",
     )
     return fingerprint(
         {
@@ -857,6 +858,8 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
         old_retention = locality.verify_retained(
             paths, provider, canonical, decisions.get('old_retention', []),
             old_authority=receipt['inputs']['old'])
+        companion_retention = refresh_universe.financial_selection.verify_companion_retention(
+            paths, provider, canonical)
         # Isolated fixture sources use the existing FULL_SQLITE_BACKUP authority
         # mode. No production-scale dependency copies or global taxonomy locks.
         if not hasattr(env, "prepare_sources") and any(
@@ -949,6 +952,7 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             "old_retention_preservation": old_retention,
             "old_analysis_retention": old_analysis_retention,
             "old_analysis_preflight": analysis_preflight,
+            "financial_companion_retention": companion_retention,
             "publication_dates": publication_dates,
             "prepared": prepared,
         }
@@ -1144,6 +1148,8 @@ def _publish_candidate(
             )
             locality.verify_retained(paths, active.provider_db, active.canonical_db,
                                     decisions.get('old_retention', []), old_authority=receipt['inputs']['old'])
+            refresh_universe.financial_selection.verify_companion_retention(
+                paths, active.provider_db, active.canonical_db)
             refresh_universe.verify_analysis_retention(
                 paths, active.canonical_db, active.analysis_db, decisions.get('old_retention', []))
             boundary("AFTER_POSTFLIGHT")

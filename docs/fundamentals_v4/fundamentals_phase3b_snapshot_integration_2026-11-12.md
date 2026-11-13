@@ -1,5 +1,15 @@
 # Fundamentals Phase 3B — default-off snapshot UPDATE integration
 
+[FIX7](fundamentals_phase3d_fix7_approved_financial_selection_2026-11-13.md)
+adds explicitly installed financial representatives to the existing pinned
+universe. Companion securities retain their identities/OLD without independent
+incoming acquisition. Companion review/accounting origins reevaluate the selected
+source without transferring approvals. Canonical winner selection uses only the
+approved security for those companies; BUILD and postflight compare companion
+OLD and historical economic endpoints. Existing review, candidate authorization,
+atomic publication and rollback remain mandatory. Production reconciliation and
+scheduler activation remain separately unauthorized.
+
 [FIX5](fundamentals_phase3d_fix5_representatives_actual_history_2026-11-13.md)
 checks actual OLD historical analysis across inactive/missing owners, including
 owners outside the discovery/retention plan. Empty history permits BUILD;

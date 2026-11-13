@@ -1,5 +1,15 @@
 # Fundamentals V4 Phase 13B Foundation
 
+The later [FIX7 financial-purpose extension](fundamentals_phase3d_fix7_approved_financial_selection_2026-11-13.md)
+uses the same version/member/alias tables. An explicitly approved financial
+selection may populate `member.security_id` for a multi-active company while
+retaining its physical counts and companion aliases. `source`, typed JSON
+`reason` and `identity_resolution_status` bind its financial-only authority,
+exact provider ID, OLD, preceding universe, physical identities and approval.
+Unannotated multi-active members remain unresolved. Historical Phase 13B
+backfill behavior below is unchanged; it cannot grant an approved selection.
+FIX7 installs only disposable copies and adds no production activation entry point.
+
 Selected outcome: **OUTCOME A - UNIVERSE AND TAXONOMY DEPENDENCY FOUNDATION READY FOR PRODUCTION MIGRATION**.
 
 Phase 13B rehearsed the foundation required by Phase 13A and Phase 13A.1 before Add Tickers or Fundamentals Taxonomy Update can become safe UI operations. The rehearsal used production-shaped SQLite online backup copies only. Production data, active result pointers, Scheduler state, ticker aliases and taxonomy content were not modified.

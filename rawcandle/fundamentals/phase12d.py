@@ -363,7 +363,7 @@ def copy_database(source: Path, destination: Path) -> dict[str, Any]:
     }
 
 
-def _provider_winners(provider_db: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _provider_winners(provider_db: Path, *, financial_security_ids: Mapping[int, int] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     from rawcandle.fundamentals.admin.accounting_boundary_review import validate_store, BoundaryReviewError
     validate_store(provider_db)
     with readonly(provider_db) as connection:
@@ -378,7 +378,12 @@ def _provider_winners(provider_db: Path) -> tuple[list[dict[str, Any]], dict[str
     candidates: dict[tuple[int, int, str], list[dict[str, Any]]] = {}
     invalid = 0
     unresolved = 0
+    companion_rows = 0
     for row in rows:
+        if (financial_security_ids and row["company_id"] in financial_security_ids
+                and row["security_id"] != financial_security_ids[row["company_id"]]):
+            companion_rows += 1
+            continue
         if row["company_id"] is None:
             unresolved += 1
             continue
@@ -424,7 +429,8 @@ def _provider_winners(provider_db: Path) -> tuple[list[dict[str, Any]], dict[str
     ]
     return output, {
         "provider_arq_rows": len(rows), "winner_rows": len(output),
-        "superseded_or_duplicate_rows": len(rows) - len(output) - invalid - unresolved,
+        "superseded_or_duplicate_rows": len(rows) - len(output) - invalid - unresolved - companion_rows,
+        **({"financial_companion_rows": companion_rows} if financial_security_ids else {}),
         "invalid_fiscal_rows": invalid, "unresolved_identity_rows": unresolved,
         "invalid_publication_candidates": invalid_publication_candidates,
         "source_fingerprint": stable_hash(payload),
@@ -481,11 +487,12 @@ def reconcile_canonical(
     inject_failure: bool = False,
     ownership_review_queue_path: Path | None = None,
     quarter_keys: set[tuple[int, int, str]] | None = None,
+    financial_security_ids: Mapping[int, int] | None = None,
 ) -> dict[str, Any]:
     from rawcandle.fundamentals.schema.parent_equity import assert_inactive_copy, accept_parent_equity
 
     assert_inactive_copy(canonical_db)
-    winners, source = _provider_winners(provider_db)
+    winners, source = _provider_winners(provider_db, financial_security_ids=financial_security_ids)
     counts = Counter()
     changed_sample: list[dict[str, Any]] = []
     connection = sqlite3.connect(canonical_db)

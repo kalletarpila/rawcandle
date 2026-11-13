@@ -752,6 +752,8 @@ def fresh_rebuild_canonical(
 ) -> dict[str, Any]:
     # Snapshot workflow only; existing callers retain the original empty scope.
     from . import baseline_carry_forward as carry
+    from .financial_selection import selected_securities
+    financial_security_ids = selected_securities(canonical_db)
     held_states = carry.capture(canonical_db, held_changes)
     identity_before = _identity_mapping(canonical_db)
     before = _quarter_rows(canonical_db)
@@ -774,7 +776,8 @@ def fresh_rebuild_canonical(
                 connection.execute(f"DELETE FROM {table}")
         connection.commit()
     canonical = reconcile_canonical(provider_db, canonical_db, applied_at=applied_at,
-                                    ownership_review_queue_path=ownership_review_queue_path)
+                                    ownership_review_queue_path=ownership_review_queue_path,
+                                    financial_security_ids=financial_security_ids)
     carry_forward = carry.restore(canonical_db, held_states)
     with sqlite3.connect(canonical_db) as connection:
         connection.execute("PRAGMA foreign_keys=ON")

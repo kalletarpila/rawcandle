@@ -4,7 +4,7 @@ This reader grants no membership. Physical identities outside that authority
 may identify OLD carry-forward state, never incoming financial authority.
 """
 
-from contextlib import closing
+from contextlib import closing, nullcontext
 
 from rawcandle.fundamentals.phase13b_foundation import (
     CONTRACT_VERSION,
@@ -13,6 +13,7 @@ from rawcandle.fundamentals.phase13b_foundation import (
 from . import baseline_carry_forward as carry
 from . import refresh_fundamentals as rules
 from .contracts import fingerprint
+from . import financial_selection
 
 POLICY = "FUNDAMENTALS_REFRESH_INSTALLED_UNIVERSE_V1"
 HISTORICAL_MODELS = (
@@ -29,9 +30,15 @@ class RefreshUniverseError(ValueError):
 
 
 class InstalledUniverse:
-    def __init__(self, paths):
+    def __init__(self, paths, *, _connection=None):
         self.paths = paths
-        with closing(carry.readonly(paths.canonical_db)) as db:
+        # The owned-copy installer validates before committing its transaction.
+        # Ordinary runtime readers always open their own query-only connection.
+        with (
+            nullcontext(_connection)
+            if _connection is not None
+            else closing(carry.readonly(paths.canonical_db))
+        ) as db:
             if not db.execute(
                 "SELECT 1 FROM sqlite_schema WHERE name='fundamentals_operational_universe_active_version'"
             ).fetchone():
@@ -104,6 +111,7 @@ class InstalledUniverse:
             (a["security_id"], a["alias_ticker"].upper()) for a in aliases
         }
         self.mappings = mappings
+        self.financial_selections = {}
         for s in securities:
             self.names.setdefault(s["current_ticker"].upper(), set()).add(
                 s["security_id"]
@@ -131,6 +139,14 @@ class InstalledUniverse:
                 )
             ):
                 raise RefreshUniverseError("REFRESH_UNIVERSE_SECURITY_CONTRADICTION")
+            try:
+                selection = financial_selection.read_selection(
+                    m, securities, mappings, physical_aliases, self.installed_aliases
+                )
+            except ValueError as error:
+                raise RefreshUniverseError(str(error)) from error
+            if selection is not None:
+                self.financial_selections[m["company_id"]] = selection
         for a in aliases:
             if (
                 a["company_id"] not in self.members
@@ -152,6 +168,11 @@ class InstalledUniverse:
                 )
             ),
         )
+        if self.financial_selections:
+            self.binding.update(
+                financial_selection_contract=financial_selection.CONTRACT,
+                financial_selection_fingerprint=fingerprint(self.financial_selections),
+            )
 
     @property
     def eligible_companies(self):
@@ -159,6 +180,7 @@ class InstalledUniverse:
             c
             for c, m in self.members.items()
             if m["membership_status"] == "ACTIVE_SINGLE_SECURITY"
+            or c in self.financial_selections
         }
 
     def resolve(self, ticker):
@@ -184,10 +206,19 @@ class InstalledUniverse:
             return dict(
                 status="EXCLUDED", ticker=ticker, reason="HISTORICAL_RETENTION_ONLY"
             )
+        if s["company_id"] in self.financial_selections and m["security_id"] != sid:
+            return dict(
+                status="EXCLUDED",
+                ticker=ticker,
+                reason="FINANCIAL_COMPANION_RETENTION_ONLY",
+                company_id=s["company_id"],
+                security_id=sid,
+                representative_ticker=m["current_ticker"],
+            )
         if (
             m["membership_status"] != "ACTIVE_SINGLE_SECURITY"
-            or m["security_id"] != sid
-        ):
+            and s["company_id"] not in self.financial_selections
+        ) or m["security_id"] != sid:
             return dict(
                 status="AMBIGUOUS",
                 ticker=ticker,
@@ -231,6 +262,23 @@ class InstalledUniverse:
                 if r["status"] == "ELIGIBLE":
                     selected.add(r["acquisition_ticker"])
                 elif r["status"] == "EXCLUDED":
+                    if r.get(
+                        "reason"
+                    ) == "FINANCIAL_COMPANION_RETENTION_ONLY" and origin in {
+                        "financial_reviews",
+                        "accounting_queue",
+                        "accounting_installed",
+                    }:
+                        # Reevaluate the company's selected source; the companion's
+                        # approval remains bound to its own original identity.
+                        representative = self.resolve(r["representative_ticker"])
+                        if representative["status"] != "ELIGIBLE":
+                            ambiguous.append(representative)
+                        else:
+                            selected.add(representative["acquisition_ticker"])
+                            r["reevaluate_representative"] = representative[
+                                "acquisition_ticker"
+                            ]
                     excluded.append(r)
                 else:
                     ambiguous.append(r)
@@ -265,6 +313,10 @@ class InstalledUniverse:
             if r["status"] == "AMBIGUOUS":
                 blocked.append(s["current_ticker"])
             elif r["status"] == "EXCLUDED":
+                if r.get("reason") == "FINANCIAL_COMPANION_RETENTION_ONLY":
+                    # Preserve its security/provider bytes separately; freezing
+                    # this entire company would discard authorized rep updates.
+                    continue
                 ids = {
                     str(m["provider_security_id"])
                     for m in self.mappings
@@ -296,6 +348,9 @@ class InstalledUniverse:
                             "REFRESH_OLD_RETENTION_IDENTITY_UNPROVEN:" + item["ticker"]
                         ) from error
                 retained.append(item)
+        financial_selection.verify_companion_retention(
+            self.paths, self.paths.provider_db, self.paths.canonical_db
+        )
         return retained, sorted(blocked)
 
     def require_buildable_old_history(self, retained):
@@ -326,7 +381,9 @@ def _analysis_retention_scope(paths, retained):
         }
     historical = (canonical - active) | (set().union(*owners.values()) - canonical)
     return (
-        historical | {r["identity_binding"]["company_id"] for r in retained},
+        historical
+        | {r["identity_binding"]["company_id"] for r in retained}
+        | set(financial_selection.selected_securities(paths.canonical_db)),
         historical,
         owners,
     )

@@ -1,0 +1,17 @@
+{
+  "approval_reference": "FUND-V4-PHASE-3D-FIX7 explicit operator financial-only decisions",
+  "decisions": [
+    {"company_id":442,"security_id":442,"ticker":"CENT","provider_security_id":"197778","companion_security_ids":[443]},
+    {"company_id":627,"security_id":628,"ticker":"CYCN","provider_security_id":"111101","companion_security_ids":[2558]},
+    {"company_id":886,"security_id":888,"ticker":"FOXA","provider_security_id":"111125","companion_security_ids":[887]},
+    {"company_id":912,"security_id":914,"ticker":"FWONA","provider_security_id":"191707","companion_security_ids":[915]},
+    {"company_id":969,"security_id":973,"ticker":"GOOGL","provider_security_id":"195146","companion_security_ids":[972]},
+    {"company_id":1272,"security_id":1277,"ticker":"LBTYA","provider_security_id":"191556","companion_security_ids":[1278]},
+    {"company_id":1296,"security_id":1302,"ticker":"LILA","provider_security_id":"121104","companion_security_ids":[1303]},
+    {"company_id":1307,"security_id":1314,"ticker":"LLYVA","provider_security_id":"640301","companion_security_ids":[1315]},
+    {"company_id":1407,"security_id":1415,"ticker":"METC","provider_security_id":"124161","companion_security_ids":[1416]},
+    {"company_id":1600,"security_id":1610,"ticker":"NWSA","provider_security_id":"191637","companion_security_ids":[1609]},
+    {"company_id":2243,"security_id":2254,"ticker":"UAA","provider_security_id":"194726","companion_security_ids":[2253]},
+    {"company_id":2441,"security_id":2458,"ticker":"ZG","provider_security_id":"179220","companion_security_ids":[2452]}
+  ]
+}

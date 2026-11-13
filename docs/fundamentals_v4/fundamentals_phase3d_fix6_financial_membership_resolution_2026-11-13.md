@@ -1,5 +1,12 @@
 # Fundamentals Phase 3D FIX6 — financial identity and membership decision
 
+Subsequent [FIX7](fundamentals_phase3d_fix7_approved_financial_selection_2026-11-13.md)
+implements the operator's now-explicit twelve financial representative decisions
+in a purpose-specific native version contract and disposable candidates. The
+investigation below records the prior decision boundary. Production installation
+still requires a qualified native reconciliation adapter and separate authorization;
+the FIX6 production state is not silently updated by the source implementation.
+
 **Verdict: bounded audit complete; live Refresh remains BLOCKED. No source
 correction is justified by the accepted contract.** Existing financial ownership
 is proven for all twelve groups. Existing authority does not complete their
