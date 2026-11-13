@@ -8,6 +8,7 @@ from uuid import uuid4
 from . import acquisition_snapshot as acquisition, refresh_update as core
 from . import refresh_fundamentals as rules, refresh_review_queue as reviews
 from . import publication_journal as journal, sec_snapshot
+from . import refresh_universe
 from .artifacts import AdminRunWriter, stable_run_id, sha256_file
 from .contracts import AdminOperationType, fingerprint
 from .snapshot_environment import CONTRACT, ROUTE, CONFIRM
@@ -22,7 +23,9 @@ def sec_plan(env, snapshot, as_of):
     from .candidate_publication import select_candidate_scope
 
     paths = env.paths()
-    retry = select_candidate_scope(paths.canonical_db, [], as_of_date=as_of)
+    universe = refresh_universe.require_binding(paths, env.request())
+    retry = select_candidate_scope(paths.canonical_db, [], as_of_date=as_of,
+                                   eligible_company_ids=universe.eligible_companies)
     from . import accounting_boundary_review as boundary
 
     boundary_companies = set()
@@ -31,7 +34,7 @@ def sec_plan(env, snapshot, as_of):
         *boundary.installed_decisions(paths.provider_db),
     ]:
         identity = (item.get("proposal") or {}).get("evidence", {}).get("identity", {})
-        if identity.get("company_id") is not None:
+        if identity.get("company_id") in universe.eligible_companies:
             boundary_companies.add(identity["company_id"])
     periods = {}
     with core.carry.readonly(paths.canonical_db) as db:
@@ -130,6 +133,12 @@ class SnapshotWorkflow:
             f"Financial committed: {result['production_completed']}",
         ]
         acquisition_summary = result.get("acquisition_summary", {})
+        refresh_scope = result.get('refresh_scope', {})
+        if refresh_scope:
+            result['summary_rows'].append(
+                f"Refresh scope: eligible {refresh_scope['eligible_tickers']}; "
+                f"excluded {refresh_scope['excluded_tickers']}; "
+                f"identity ambiguities {refresh_scope['ambiguous_tickers']}")
         if acquisition_summary:
             result["summary_rows"].append(
                 f"Acquisition: verified slots {acquisition_summary.get('complete_verified_slots',0)}; "
@@ -165,6 +174,7 @@ class SnapshotWorkflow:
             f"Actual phase events: `{result.get('phase_events',[])}`.",
             f"SEC publication authority: `{json.dumps(result.get('sec_publication',{}),sort_keys=True)}`.",
             f"Decisions: `{json.dumps(result.get('source_summary',{}),sort_keys=True)}`.",
+            f"Refresh scope: `{json.dumps(refresh_scope,sort_keys=True)}`; source-origin exclusions and reasons: discovery.json.",
             f"Acquisition accounting (quarantine is not complete history): `{json.dumps(acquisition_summary,sort_keys=True)}`.",
             f"Publication: `{json.dumps(result.get('publication_outcome',{}),sort_keys=True)}`.",
             f"Ownership (separate transaction): `{json.dumps(result.get('ownership_auto',{}),sort_keys=True)}`.",
@@ -220,6 +230,7 @@ class SnapshotWorkflow:
                     "source_day": self.now().date().isoformat(),
                     "configuration": env.config(),
                     "old_authority": acquisition.pin_old_authority(env.project),
+                    "refresh_universe": refresh_universe.InstalledUniverse(env.paths()).binding,
                     "policy": {
                         "snapshot_max_age_seconds": acquisition.MAX_AGE_SECONDS,
                         "rolling_history": acquisition.POLICY,
@@ -291,6 +302,7 @@ class SnapshotWorkflow:
                 raise ValueError("UPDATE_OLD_DRIFT")
             api = self.client or SharadarClient()
             paths = env.paths()
+            universe = refresh_universe.require_binding(paths, request)
             discovery = rules.discover_changed_tickers(
                 api,
                 query_start_date=rules.resolve_refresh_state(
@@ -301,22 +313,40 @@ class SnapshotWorkflow:
             from . import accounting_boundary_review as boundary
 
             queue = reviews.RefreshReviewQueue(env.queue)
-            pending = set(queue.pending_tickers())
-            pending.update(
+            financial_reviews = set(queue.pending_tickers())
+            accounting_queue = set(
                 i["proposal"]["evidence"]["identity"]["ticker"]
                 for i in boundary.read_items(env.queue)
             )
-            pending.update(
+            accounting_installed = set(
                 i["proposal"]["evidence"]["identity"]["ticker"]
                 for i in boundary.installed_decisions(paths.provider_db)
             )
-            discovery["evaluation_tickers"] = sorted(
-                set(discovery["changed_tickers"]) | pending
-            )
-            discovery["queued_tickers_reevaluated"] = sorted(pending)
+            raw_changed = discovery['changed_tickers']
+            discovery.update(universe.plan(discovered=raw_changed,
+                financial_reviews=financial_reviews, accounting_queue=accounting_queue,
+                accounting_installed=accounting_installed))
+            discovery['raw_changed_tickers'] = raw_changed
+            discovery['raw_unique_changed_source_tickers'] = discovery['unique_changed_source_tickers']
+            discovery['changed_tickers'] = sorted({r['acquisition_ticker']
+                for r in discovery['scope_resolutions'] if r['origin'] == 'discovered' and r['status'] == 'ELIGIBLE'})
+            discovery['unique_changed_source_tickers'] = len(discovery['changed_tickers'])
+            discovery["queued_tickers_reevaluated"] = sorted(financial_reviews | accounting_queue | accounting_installed)
             core._write(discovery_path, core._seal(discovery))
         discovery = core._read(discovery_path)
         core._verify(discovery)
+        universe = refresh_universe.require_binding(env.paths(), request)
+        result['refresh_scope'] = dict(
+            universe_binding=discovery.get('universe_binding'),
+            eligible_tickers=len(discovery['evaluation_tickers']),
+            raw_discovered_tickers=len(discovery.get('raw_changed_tickers', [])),
+            excluded_tickers=len({r['ticker'] for r in discovery.get('scope_exclusions', [])}),
+            ambiguous_tickers=len({r['ticker'] for r in discovery.get('scope_ambiguities', [])}))
+        if discovery.get('universe_binding') != universe.binding:
+            raise ValueError('UPDATE_DISCOVERY_UNIVERSE_DRIFT')
+        if discovery.get('scope_ambiguities'):
+            raise ValueError('REFRESH_ADMITTED_IDENTITY_AMBIGUOUS')
+        universe.require_tickers(discovery['evaluation_tickers'])
         fetch_id = request["fetch_operation_id"]
         if not (env.runs / fetch_id).exists():
             fetched = acquisition.start_fetch(

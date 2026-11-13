@@ -1,5 +1,14 @@
 # Fundamentals Phase 3D FIX2 — ticker-local acquisition quarantine
 
+Subsequent [FIX3](fundamentals_phase3d_fix3_refresh_universe_2026-11-13.md)
+requires installed-universe eligibility before creating/resuming an UPDATE_FETCH
+plan. A positive scope exclusion is neither a source quarantine nor a financial
+hold. FIX2 whole-ticker quarantine remains available inside eligible scope and
+does not grant admission. The broad original sealed UPDATE cannot acquire a new
+universe policy by rewriting its request or sources; it remains immutable and
+requires a separately authorized new UPDATE after the installed authority STOP
+conditions are resolved.
+
 Implements whole-ticker source exclusion for isolated, evidenced Sharadar history
 failures in `UPDATE_FETCH`, with continued safe-peer acquisition and the existing
 VALIDATE/BUILD/publication kernels. This task performs no live acquisition,

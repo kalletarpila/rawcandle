@@ -29,6 +29,7 @@ from rawcandle.fundamentals.generations import (
 from rawcandle.fundamentals.phase13b_foundation import online_backup
 from . import acquisition_snapshot as acquisition
 from . import baseline_carry_forward as carry
+from . import refresh_universe
 from . import review_locality as locality
 from . import refresh_fundamentals as rules
 from . import refresh_review_queue as reviews
@@ -220,6 +221,7 @@ def _code_binding():
         "snapshot_workflow.py",
         "acquisition_quarantine.py",
         "sec_snapshot.py",
+        "refresh_universe.py",
     )
     return fingerprint(
         {
@@ -537,6 +539,9 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
         if safety.get("production_writes_blocked"):
             raise Phase2Error("PHASE2_RECOVERY_REQUIRED")
         paths = env.paths()
+        universe = None
+        if hasattr(env, 'request'):
+            universe = refresh_universe.require_binding(paths, env.request())
         if hasattr(env, "validate_baseline"):
             env.validate_baseline(paths)
         snapshot = acquisition.open_snapshot(snapshot_operation_id, root=env.runs)
@@ -558,6 +563,9 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
         # Full OLD domain protection, including missing provenance without an
         # existing dangling-reference row and names absent from FETCH/queue.
         degraded = set(carry.degraded_tickers(paths))
+        retained_old, admitted_ambiguities = universe.old_retention() if universe else ([], [])
+        if universe:
+            degraded = {t for t in degraded if universe.resolve(t)['status'] != 'EXCLUDED'}
         global_baseline = []
         with carry.readonly(paths.canonical_db) as db:
             if db.execute(
@@ -571,8 +579,10 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
                 )
             ]
         for ticker in domain:
+            if universe and universe.resolve(ticker)['status'] == 'EXCLUDED':
+                continue  # Retention is separate from incoming review/admission.
             identity = rules.resolve_identity(paths, ticker)
-            if identity["status"] != "KNOWN":
+            if identity["status"] != "KNOWN" or ticker in admitted_ambiguities:
                 global_baseline.append(ticker)
                 continue
             try:
@@ -711,6 +721,7 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
             "held": held,
             "global": global_items,
             "plans": plans,
+            "old_retention": retained_old,
         }
         writer.write_json("decisions.json", decisions)
         inputs = _inputs(env, paths)
@@ -781,6 +792,9 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             raise Phase2Error("PHASE2_BUILD_NOT_AUTHORIZED")
         paths = env.paths()
         snapshot = _assert_inputs(env, receipt, paths, now())
+        if hasattr(env, 'request'):
+            refresh_universe.require_binding(paths, env.request()).require_buildable_old_history(
+                decisions.get('old_retention', []))
         if journals.safety_status(env.journal).get("production_writes_blocked"):
             raise Phase2Error("PHASE2_RECOVERY_REQUIRED")
         lane = directory / "candidate"
@@ -836,9 +850,11 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             affected_company_ids=[int(x["company_id"]) for x in identities.values()],
             ownership_review_queue_path=env.queue,
             historical_freeze_changes=decisions["safe"],
-            held_changes=decisions["held"],
+            held_changes=decisions["held"] + decisions.get('old_retention', []),
         )
         held = locality.verify_held(paths, provider, canonical, decisions["held"])
+        old_retention = locality.verify_held(
+            paths, provider, canonical, decisions.get('old_retention', []))
         # Isolated fixture sources use the existing FULL_SQLITE_BACKUP authority
         # mode. No production-scale dependency copies or global taxonomy locks.
         if not hasattr(env, "prepare_sources") and any(
@@ -866,6 +882,8 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             or analysis["invocation_counts"]["full_v2_rebuild"] != 1
         ):
             raise Phase2Error("PHASE2_FULL_V2_NOT_READY")
+        old_analysis_retention = refresh_universe.verify_analysis_retention(
+            paths, canonical, Path(analysis['candidate_analysis_db']), decisions.get('old_retention', []))
         from .candidate_publication import run_candidate_publication
 
         publication_dates = run_candidate_publication(
@@ -873,6 +891,9 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             canonical_result["new_quarter_identities"],
             as_of_date=receipt["as_of_date"],
             client=env.sec_reader() if hasattr(env, "sec_reader") else _OfflineSec(),
+            eligible_company_ids=(
+                refresh_universe.require_binding(paths, env.request()).eligible_companies
+                if hasattr(env, 'request') else None),
         )
         if hasattr(env, "verify_sec_scope"):
             env.verify_sec_scope(canonical, publication_dates)
@@ -923,6 +944,8 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             },
             "dependency_copies": dependency_copies,
             "held_preservation": held,
+            "old_retention_preservation": old_retention,
+            "old_analysis_retention": old_analysis_retention,
             "publication_dates": publication_dates,
             "prepared": prepared,
         }
@@ -1116,6 +1139,8 @@ def _publish_candidate(
             held = locality.verify_held(
                 paths, active.provider_db, active.canonical_db, decisions["held"]
             )
+            locality.verify_held(paths, active.provider_db, active.canonical_db,
+                                                  decisions.get('old_retention', []))
             boundary("AFTER_POSTFLIGHT")
             journal = journals.update_journal(
                 env.journal,

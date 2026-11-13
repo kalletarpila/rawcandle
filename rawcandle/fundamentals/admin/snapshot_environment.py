@@ -9,6 +9,7 @@ from . import refresh_update as core, acquisition_snapshot as acquisition
 from . import publication_journal as journal, refresh_production as native
 from . import refresh_copy_runtime as builders, source_bundle as sources
 from . import sec_snapshot
+from . import refresh_universe
 from .artifacts import ROOT, ADMIN_RUN_ROOT, sha256_file
 from .batch_add_tickers import BatchAddTickerPaths
 from .contracts import fingerprint
@@ -179,6 +180,7 @@ class SnapshotEnvironment:
             raise ValueError("UPDATE_OPERATION_OWNER_MISMATCH")
         if request["configuration"] != self.config() or self.config()["route"] != ROUTE:
             raise ValueError("UPDATE_CONFIGURATION_DRIFT")
+        refresh_universe.require_binding(self.paths(), request)
         return request
 
     def require_update_snapshot(self, snapshot):
@@ -190,6 +192,8 @@ class SnapshotEnvironment:
             or snapshot.manifest["old_authority"] != request["old_authority"]
         ):
             raise PermissionError("ACQUISITION_ONLY_IS_NOT_UPDATE_AUTHORITY")
+        refresh_universe.require_binding(self.paths(), request).require_tickers(
+            {s['ticker'] for s in snapshot.iter_slots()})
 
     def validate_baseline(self, paths):
         # Legacy Preview's mandatory date prerequisite remains a financial gate.
@@ -221,6 +225,7 @@ class SnapshotEnvironment:
             "request": request["fingerprint"],
             "source_bundle": sealed["fingerprint"],
             "configuration": request["configuration"],
+            "refresh_universe": request['refresh_universe'],
         }
 
     def sec_reader(self):

@@ -31,7 +31,9 @@ def setup(
     degraded_count=0,
     rolling=False,
     ownership=False,
-    established=False
+    established=False,
+    configure_universe=None,
+    prepare_identity=None,
 ):
     owner, native, histories, _, _ = fixtures.setup(
         tmp_path,
@@ -40,6 +42,9 @@ def setup(
         degraded_count=degraded_count,
         rolling=rolling,
         established=established,
+        installed_universe=True,
+        configure_universe=configure_universe,
+        prepare_identity=prepare_identity,
     )
     calls = []
 

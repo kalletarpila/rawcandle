@@ -767,6 +767,16 @@ def _validate_update_binding(value):
         raise SnapshotError("UPDATE_FETCH_BINDING_INVALID")
 
 
+def _require_refresh_scope(project_root, binding, tickers):
+    from .refresh_universe import require_binding
+    from .batch_add_tickers import BatchAddTickerPaths
+    from rawcandle.fundamentals.generations import resolved_production_paths
+    paths = resolved_production_paths(project_root)
+    installed = require_binding(BatchAddTickerPaths(*(paths[r] for r in
+        ('provider', 'canonical', 'analysis', 'market', 'taxonomy'))), binding)
+    installed.require_tickers(tickers)
+
+
 def start_fetch(
     tickers,
     *,
@@ -813,6 +823,7 @@ def start_fetch(
         _validate_update_binding(update_binding)
         if update_binding["old_authority"] != old:
             raise SnapshotError("OLD_BINDING_DRIFT")
+        _require_refresh_scope(project_root, update_binding, tickers)
     root.mkdir(parents=True, exist_ok=True)
     try:
         (root / operation_id).mkdir()  # exclusive ownership even for concurrent starts
@@ -977,6 +988,9 @@ def resume_fetch(
 
 def _resume(run, *, project_root, client, now):
     operation_id, root = run.operation_id, run.root
+    if run.request['mode'] == 'UPDATE_FETCH':
+        _require_refresh_scope(project_root, run.request['update_binding'],
+            {s['ticker'] for s in _lines(run.verify(run.control()['plan_reference'], 'PLAN'))})
     if run.path("fetch/seal.json").exists():
         snapshot = open_snapshot(operation_id, root=root)
         snapshot.validate_preflight(

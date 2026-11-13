@@ -1,5 +1,14 @@
 # Fundamentals Phase 2 — local validation and disposable publication
 
+For the production snapshot Refresh adapter, the later [FIX3 universe correction](fundamentals_phase3d_fix3_refresh_universe_2026-11-13.md)
+pins installed membership through acquisition, validation, build and publication.
+It separates retained OLD identities from incoming eligibility and preserves
+genuine admitted ambiguity. OLD provider/canonical carry-forward and native
+analysis-history coverage are checked independently. Unsupported inactive-company
+analysis retention stops before BUILD; it is not silently discarded or repaired.
+The original acquisition-only disposable foundation below remains a separate
+backend contract and does not authorize a production Refresh operation.
+
 Implemented a snapshot-consuming backend with real native provider/canonical/analysis builds, explicit disposable publication, native postflight and OLD recovery. **Production remains disabled and unchanged.** This is the bounded disposable implementation requested by FUND-V4-PHASE-2, not acceptance of every production integration item in the architecture's larger Phase 2.
 
 Starting HEAD: `29fec9e34b02866a14a74456050d0fb090dd3ad7`. Governing contracts are the [accepted architecture](fundamentals_simplification_v1_architecture_2026-11-11.md), [Phase 1 foundation](fundamentals_single_fetch_acquisition_foundation_v1_2026-11-11.md) and [scheduler/history/queue correction](fundamentals_scheduler_hold_history_queue_correction_2026-11-12.md). No live update, scheduler reactivation, financial policy change or historical authority-backlog cleanup is authorized by this implementation.

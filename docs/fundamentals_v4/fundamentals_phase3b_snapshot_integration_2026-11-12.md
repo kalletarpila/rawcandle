@@ -1,5 +1,15 @@
 # Fundamentals Phase 3B — default-off snapshot UPDATE integration
 
+Current scope correction: [Phase 3D FIX3](fundamentals_phase3d_fix3_refresh_universe_2026-11-13.md).
+New snapshot Refresh UPDATEs require a pinned installed Phase 13B universe;
+raw discoveries, financial reviews and accounting obligations grant no admission.
+OLD retention remains separate from incoming eligibility. Ambiguous admitted
+identities and internally contradictory membership STOP. The installed CYCN/KRSA
+company/security contradiction currently prevents a new production UPDATE.
+The native inactive-company analysis-history limitation also remains a STOP
+boundary when retained OLD analysis exists. These are unresolved operational
+boundaries, not a rollout acceptance or permission to resume the sealed UPDATE.
+
 Subsequent acquisition contract: [Phase 3D FIX2 ticker-local acquisition quarantine](fundamentals_phase3d_fix2_acquisition_quarantine_2026-11-13.md).
 For `UPDATE_FETCH`, an isolated source failure now has a separately evidenced,
 whole-ticker exclusion outcome. Every slot still requires an actual verified

@@ -19,6 +19,7 @@ from rawcandle.fundamentals.admin.publication_allowlist import (
 def select_candidate_scope(
     candidate_db: Path, new_quarter_identities: Sequence[Sequence[Any]], *,
     as_of_date: str, retry_days: int = 60, retry_max_quarters: int | None = 100,
+    eligible_company_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     if retry_days < 0 or (retry_max_quarters is not None and retry_max_quarters < 0):
         raise ValueError("PUBLICATION_RETRY_CONFIGURATION_INVALID")
@@ -29,6 +30,8 @@ def select_candidate_scope(
     try:
         new = []
         for key in sorted({(int(k[0]), int(k[1]), str(k[2])) for k in new_quarter_identities}):
+            if eligible_company_ids is not None and key[0] not in eligible_company_ids:
+                raise ValueError('PUBLICATION_NEW_QUARTER_OUTSIDE_REFRESH_UNIVERSE')
             row = connection.execute(
                 "SELECT a.status FROM v4_quarter q LEFT JOIN v4_result_publication_authority a "
                 "USING(company_id,fiscal_year,fiscal_quarter) WHERE q.company_id=? AND q.fiscal_year=? AND q.fiscal_quarter=?", key).fetchone()
@@ -44,6 +47,8 @@ def select_candidate_scope(
             "AND max(coalesce(q.first_public_result_date,''),coalesce(q.source_availability_date,'')) BETWEEN ? AND ? "
             "ORDER BY CASE a.status WHEN 'UNRESOLVED' THEN 1 WHEN 'NOT_FOUND' THEN 2 WHEN 'AMBIGUOUS' THEN 3 ELSE 0 END,"
             "context_date DESC,q.company_id,q.fiscal_year,q.fiscal_quarter", (cutoff,today.isoformat())).fetchall()
+        if eligible_company_ids is not None:
+            rows = [r for r in rows if r['company_id'] in eligible_company_ids]
         new_set = set(new)
         retries = [(row["company_id"], row["fiscal_year"], row["fiscal_quarter"]) for row in rows
                    if (row["company_id"],row["fiscal_year"],row["fiscal_quarter"]) not in new_set]
@@ -64,6 +69,7 @@ def run_candidate_publication(
     client: SecClient | None = None,
     network_budget_seconds: float = 300,
     exact_quarter_allowlist: Sequence[Sequence[Any]] | None = None,
+    eligible_company_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     if not math.isfinite(network_budget_seconds) or network_budget_seconds <= 0:
@@ -73,10 +79,13 @@ def run_candidate_publication(
     allowed = normalize_allowlist(exact_quarter_allowlist) if exact_quarter_allowlist is not None else None
     if allowed is not None and new_quarter_identities:
         raise ValueError("PUBLICATION_EXACT_ALLOWLIST_CANNOT_USE_NEW_THIS_REFRESH")
+    if allowed is not None and eligible_company_ids is not None and any(k[0] not in eligible_company_ids for k in allowed):
+        raise ValueError('PUBLICATION_ALLOWLIST_OUTSIDE_REFRESH_UNIVERSE')
     scope = (select_exact_scope(candidate_db, allowed, as_of_date=as_of_date, retry_days=retry_days)
              if allowed is not None else
              select_candidate_scope(candidate_db, new_quarter_identities, as_of_date=as_of_date,
-                                    retry_days=retry_days, retry_max_quarters=retry_max_quarters))
+                                    retry_days=retry_days, retry_max_quarters=retry_max_quarters,
+                                    eligible_company_ids=eligible_company_ids))
     if not scope["quarter_keys"]:
         return {**scope,"status":"SKIPPED","total_processed":0,"status_counts":{},"network":{},
                 "runtime_seconds":round(time.perf_counter()-started,3)}

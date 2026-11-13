@@ -156,6 +156,9 @@ def setup(
     degraded_count=0,
     established=False,
     rolling=False,
+    installed_universe=False,
+    configure_universe=None,
+    prepare_identity=None,
 ):
     env = phase2.create_disposable_environment(tmp_path / "phase2")
     fixture = native._fixture(env.root, monkeypatch, include_yyai_hold=held)
@@ -185,6 +188,15 @@ def setup(
         shutil.copyfile(
             old_analysis["candidate_analysis_db"], fixture.paths.analysis_db
         )
+    if prepare_identity:
+        prepare_identity(fixture)
+    if installed_universe:
+        from rawcandle.fundamentals.phase13b_foundation import CANONICAL_SCHEMA_SQL, backfill_universe
+        with sqlite3.connect(fixture.paths.canonical_db) as db:
+            db.executescript(CANONICAL_SCHEMA_SQL)
+        backfill_universe(fixture.paths, applied_at_utc=native.NOW, apply=True)
+    if configure_universe:
+        configure_universe(fixture)
     native._migrate_refresh_fixture_to_generation_layout(fixture, monkeypatch)
     histories = deepcopy(fixture.client.histories)
     calls = []
