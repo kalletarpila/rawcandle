@@ -1,7 +1,7 @@
 # FIX8 — native identity-only universe reconciliation
 
-**Implementation and disposable acceptance: PASS. Production gate: pending the
-fresh native invocation after this source commit.** The implementation completes
+**Implementation and disposable acceptance: PASS. Production gate: BLOCKED by
+the native taxonomy SQLite sidecar guard. Phase 3E: NOT REACHED.** The implementation completes
 FIX7's missing adapter using the existing generation preparer, expected-OLD
 activation, durable journal, postflight and recovery. It does not introduce a
 publication engine, identity registry, schema migration or financial calculation.
@@ -201,3 +201,147 @@ generation/universe results belong in the final gate evidence/report update.
 Task-owned files: the adapter, its focused tests, this report and the FIX7 follow-up
 link. Runtime data, generated evidence and pre-existing unrelated changes are
 excluded from Git. Push: **NO**.
+
+## Actual production gate and final outcome
+
+**FIX8 source and disposable acceptance PASS; production reconciliation BLOCKED;
+Phase 3E NOT REACHED.** No production universe was installed and no new UPDATE was
+allocated. This is an actual native STOP, not a successful rollout.
+
+Source history:
+- Accepted starting FIX7: `40976977ddb96a05c0fa4202363901819a527a47`.
+- Initial adapter commit: `de07f6336fe99858101cb07aaadc6e0d8fd3c19e`.
+- Final qualified FIX8 implementation: `06e5b24107e0e53d191f868e463e63c595687f54`.
+- A separate final documentation commit records this outcome. The exact final
+  repository HEAD is recorded after that commit in native run
+  `20261113T224303Z_refresh_fundamentals_cce2b9c73301_universe_reconciliation_5a9bd5d0/final_head.json`; source/test bytes remain those qualified above.
+
+Qualification `20261113T224216Z_refresh_fundamentals_cce2b9c73301_fix8_disposable_acceptance_53f5dd45` is a sealed native Administration Test receipt. Readback
+verification passed with all nine required features, exact FIX7 approval content,
+committed source hashes and native source binding. Its qualified JUnit records
+**87 PASS**, zero failures/errors/skips, **177.629 seconds**. Prototype/development
+runs are preserved separately and are not added to the independent test count.
+The explicit operator identity-only production permission was present; complete
+production preflight was **not** satisfied.
+
+Native production reconciliation `20261113T224303Z_refresh_fundamentals_cce2b9c73301_universe_reconciliation_5a9bd5d0` began and finished at
+`2026-11-13T22:43:03Z` (second-resolution timestamps). It returned:
+
+```text
+outcome: BLOCKED
+failed_stage: NATIVE_PREFLIGHT
+error: ADMIN_PRODUCTION_SQLITE_SIDECAR_PRESENT:analysis.db-wal
+```
+
+`SnapshotEnvironment.writer_lock()` checks all five native role paths for SQLite
+sidecars before yielding ownership to the adapter. The blocked role is
+**taxonomy**, `/home/kalle/projects/rawcandle/data/analysis.db`, not the immutable
+Fundamentals financial analysis role. Observed sidecars at final verification:
+
+| Artifact | Bytes | Observed mtime UTC |
+| --- | ---: | --- |
+| `data/analysis.db-wal` | 0 | 2026-11-13T21:52:23.891630+00:00 |
+| `data/analysis.db-shm` | 32,768 | 2026-11-13T21:52:23.898258+00:00 |
+
+The native contract rejects existence, including a zero-length WAL. Sidecar
+ownership/origin was not proven; the timestamp overlaps this task's read-only
+source inspection and is not evidence of financial mutation or a current writer.
+Neither sidecar was removed, checkpointed or used to weaken the native gate.
+There was no activation intent, live candidate copy, generation preparation,
+publication backup or reconciliation journal entry. The live twelve-selection
+provenance/candidate phase was not entered. The approved twelve tuples above remain
+the exact tested intended content; they are **not** claimed installed in production.
+
+The missing operational boundary is a qualified native taxonomy SQLite
+connection/sidecar lifecycle that permits the existing writer precondition to
+succeed. Investigate and resolve that boundary natively before another fresh
+preflight. Do not remove files manually, relabel a candidate, bypass the guard or
+make a financial acceptance-policy change. The original conditional authorization
+is not an unrestricted permission to change the native source lifecycle.
+
+### Final financial and evidence preservation
+
+Fresh final verification at `2026-11-13T22:45:30.180225+00:00` found:
+
+| Authority | Before | After |
+| --- | --- | --- |
+| Financial generation | `current_rebuild_2a684ef130c6a540de4adc560ab171ad` | same |
+| Installed universe | `3b8121b74c852f08575fa1e2b70004e6` | same; no new installed version |
+| Financial watermark | `2026-10-28` | `2026-10-28` |
+| Native journal | `COMPLETED / PASSED / NOT_REQUIRED` | same; prior controlled rebuild |
+| Automatic Fundamentals | HOLD / disabled | same |
+| Route / mode | `SNAPSHOT_V1 / FULL_WORKFLOW` | same |
+
+All three immutable financial database files, the active manifest, original native
+journal and scheduler configuration matched their pre-task SHA-256, inode, mtime
+and size exactly. This protects all accepted OLD financial facts, provenance,
+publication dates, approvals and historical retention, including KRSA's 160
+provider observations and the accepted PSQL/QVCG safeguards. The original failed
+UPDATE/FETCH/validation's **26,861 files** matched
+pre-task path/size/inode/mtime metadata with zero missing/changed files. Those
+bodies were not reopened as new UPDATE authority or redundantly rehashed.
+
+There were **zero Sharadar and zero SEC calls** during this task. No new UPDATE,
+FETCH, SEC bundle, financial VALIDATE receipt, financial candidate or publication
+was created. Eligible discovery, verified/quarantined/pending slot counts, source
+seal/freshness and VALIDATE partitions are **not applicable**, not successful zero
+work. No financial or ownership publication, watermark advance, review
+approval/finalization or scheduler enablement occurred.
+
+Scheduler configuration is byte-identical to its pre-task value. It records
+`run_time=04:30`, `timezone=Europe/Helsinki`; the operator constraint names 04:45.
+No timing was changed or inferred from obsolete market/taxonomy file checksums.
+This attempt ended at 00:43 Helsinki, well before either stated time. Native
+locks were released on the blocked exit, and no network/local stage was left
+running. Normal enabled nightly work was not stopped or reconfigured.
+
+### Measured resources and retained artifacts
+
+| Current native database role | Bytes |
+| --- | ---: |
+| Accepted provider | 968,331,264 |
+| Accepted canonical | 749,371,392 |
+| Accepted financial analysis | 912,351,232 |
+| Market source | 2,040,012,800 |
+| Taxonomy source | 14,378,782,720 |
+
+The three financial roles total **2,630,053,888 bytes** and did not grow.
+New live financial candidates/generations/backups: **0 bytes**. No compact live
+market bundle was built. Task-owned retained test copies and evidence at the
+measurement point total **1,015,213,626 logical bytes /
+1,030,553,600 allocated bytes**; final small report
+and Git metadata growth is additional. Free filesystem space was
+**531,978,592,256 bytes**. The largest task-owned retained directories
+are `/tmp/rawcandle_fix8_qualified` (393,393,721 bytes) and the earlier acceptance
+copy (371,166,755 bytes). They remain evidence, rather than being deleted to
+reclaim space. Largest existing native consumer among these roles is taxonomy
+(14,378,782,720 bytes); it was not copied or optimized for this blocked attempt.
+
+Qualified JUnit duration was 177.629 seconds. The separate read-only diagnostic
+financial-rebuild check took 54.700 seconds; it did not rebuild accepted results.
+Native production preflight stopped within the timestamped second, after the
+wrapper's preceding OLD/receipt verification. A complete filesystem-growth or
+peak-RSS baseline was not recorded, so no invented global growth/peak claim is
+made. Exact measured task-owned retained sizes and database before/after sizes
+are in `final_operator_evidence.json`. Later opportunities include retiring
+released test copies and examining source/candidate storage lifetimes; no storage
+optimization, VACUUM or retention reduction was performed.
+
+### Evidence and next boundary
+
+Native runtime directory:
+`fundamental_reports/admin_runs/20261113T224303Z_refresh_fundamentals_cce2b9c73301_universe_reconciliation_5a9bd5d0/`.
+It contains the original `result.json`, native reconciliation report,
+`FINAL_OPERATOR_REPORT.md`, `final_operator_evidence.json`, final HEAD and artifact
+manifest. Temporary tests, socket ledgers and preservation measurements remain
+under `temp/fundamentals_fix8_20261113/`. The valid native qualification and earlier
+rejected fingerprint receipt are retained in their original separate run dirs.
+Runtime evidence/databases, existing unrelated changes and disposable copies are
+excluded from commits. Push: **NO**.
+
+There is no Phase 3E report because Phase 3E was not reached. The next decision is
+how to resolve the taxonomy sidecar lifecycle within the native safety contract.
+After a qualified resolution, perform a new current-state preflight and verify
+identity-only reconciliation before allocating the one new Phase 3E UPDATE.
+Do not reuse the old incorrectly scoped UPDATE or infer a future activation PASS
+from this implementation/test result.

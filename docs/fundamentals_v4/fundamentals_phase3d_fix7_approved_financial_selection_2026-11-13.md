@@ -7,6 +7,9 @@ through identity-only generation publication. The adapter proves native accepted
 inputs before/after under current staged dependencies. It preserves original
 financial freshness and does not rebuild or approve financial results; native
 financial UPDATE validation remains unchanged.
+Actual FIX8 production preflight later stopped at the native taxonomy SQLite
+sidecar guard before candidate preparation; no production selection was installed
+and Phase 3E was not reached. See the linked FIX8 report for current outcome.
 
 **Verdict: the approved selection contract and disposable candidate are
 implemented. Production installation remains BLOCKED at the activation-adapter
