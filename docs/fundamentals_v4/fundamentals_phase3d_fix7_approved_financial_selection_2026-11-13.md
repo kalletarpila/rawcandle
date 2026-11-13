@@ -1,5 +1,12 @@
 # Fundamentals Phase 3D FIX7 — approved financial representatives
 
+Subsequent [FIX8](fundamentals_fix8_native_universe_reconciliation_2026-11-14.md)
+implements the native reconciliation adapter and its acceptance/production gates.
+It can preserve provider/analysis bytes and all non-universe canonical contents
+through identity-only generation publication. Current OLD must independently
+pass native analysis/source validation; the adapter does not rebuild financial
+results or override a baseline incompatibility to make installation succeed.
+
 **Verdict: the approved selection contract and disposable candidate are
 implemented. Production installation remains BLOCKED at the activation-adapter
 boundary.** All twelve tuples match freshly inspected accepted identity and
