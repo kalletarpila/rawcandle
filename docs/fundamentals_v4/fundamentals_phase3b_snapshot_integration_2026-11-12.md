@@ -1,5 +1,12 @@
 # Fundamentals Phase 3B — default-off snapshot UPDATE integration
 
+[FIX5](fundamentals_phase3d_fix5_representatives_actual_history_2026-11-13.md)
+checks actual OLD historical analysis across inactive/missing owners, including
+owners outside the discovery/retention plan. Empty history permits BUILD;
+unsupported accepted history stops. Historical economic-key coverage is checked
+after BUILD and after native publication postflight. This grants no financial
+representative selection or production operation permission.
+
 Later [FIX4](fundamentals_phase3d_fix4_identity_retention_2026-11-13.md) permits
 retention of already accepted, reviewed new-company OLD with a null provider ID
 only through an exact immutable-generation/approval/ownership proof. Incoming

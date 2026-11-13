@@ -1,5 +1,14 @@
 # Fundamentals Phase 3D FIX4 — RawCandle authority and OLD retention
 
+Subsequent [FIX5 actual-data audit](fundamentals_phase3d_fix5_representatives_actual_history_2026-11-13.md)
+clarifies the historical STOP: empty accepted history permits the native rebuild.
+Fresh inspection covers all 38 current analysis tables and all seventeen
+inactive companies, including BNC outside installed membership. No actual
+inactive historical endpoints are present. FIX5 extends checks beyond the
+retained ticker plan and repeats the economic-key comparison at postflight;
+nonempty unsupported history still stops. Financial representative decisions
+remain explicit, and the PSQL/QVCG proof below is unchanged.
+
 **Verdict: PSQL/QVCG historical retention resolved through a bounded source
 correction; full production readiness remains BLOCKED.** KRSA's legal/company
 relationship is already approved and proven in retained admission evidence.

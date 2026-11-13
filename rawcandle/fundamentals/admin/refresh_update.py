@@ -792,9 +792,10 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             raise Phase2Error("PHASE2_BUILD_NOT_AUTHORIZED")
         paths = env.paths()
         snapshot = _assert_inputs(env, receipt, paths, now())
+        analysis_preflight = refresh_universe.require_buildable_analysis_history(
+            paths, decisions.get('old_retention', []))
         if hasattr(env, 'request'):
-            refresh_universe.require_binding(paths, env.request()).require_buildable_old_history(
-                decisions.get('old_retention', []))
+            refresh_universe.require_binding(paths, env.request())
         if journals.safety_status(env.journal).get("production_writes_blocked"):
             raise Phase2Error("PHASE2_RECOVERY_REQUIRED")
         lane = directory / "candidate"
@@ -947,6 +948,7 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             "held_preservation": held,
             "old_retention_preservation": old_retention,
             "old_analysis_retention": old_analysis_retention,
+            "old_analysis_preflight": analysis_preflight,
             "publication_dates": publication_dates,
             "prepared": prepared,
         }
@@ -1142,6 +1144,8 @@ def _publish_candidate(
             )
             locality.verify_retained(paths, active.provider_db, active.canonical_db,
                                     decisions.get('old_retention', []), old_authority=receipt['inputs']['old'])
+            refresh_universe.verify_analysis_retention(
+                paths, active.canonical_db, active.analysis_db, decisions.get('old_retention', []))
             boundary("AFTER_POSTFLIGHT")
             journal = journals.update_journal(
                 env.journal,

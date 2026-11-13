@@ -299,38 +299,58 @@ class InstalledUniverse:
         return retained, sorted(blocked)
 
     def require_buildable_old_history(self, retained):
-        """STOP at the native active-security-only TTM reconstruction boundary.
+        return require_buildable_analysis_history(self.paths, retained)
 
-        Retention cannot manufacture an active security or a new model contract.
-        Existing inactive-company analysis must remain in OLD until that contract
-        is resolved separately; do not create a lossy publication candidate.
-        """
-        companies = {r["identity_binding"]["company_id"] for r in retained}
-        inactive = {
-            c
-            for c in companies
-            if not any(
-                s["company_id"] == c and s["active"] == 1
-                for s in self.securities.values()
+
+def _analysis_retention_scope(paths, retained):
+    """Include historical owners outside the incoming/canonical-quarter plan."""
+    with closing(carry.readonly(paths.canonical_db)) as db:
+        canonical = {r[0] for r in db.execute("SELECT company_id FROM company")}
+        active = {
+            r[0]
+            for r in db.execute(
+                "SELECT DISTINCT company_id FROM security WHERE active=1"
             )
         }
-        if not inactive:
-            return
-        with closing(carry.readonly(self.paths.analysis_db)) as db:
-            tables = {
-                r[0]
-                for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table'")
+    with closing(carry.readonly(paths.analysis_db)) as db:
+        present = {
+            r[0]
+            for r in db.execute("SELECT name FROM sqlite_schema WHERE type='table'")
+        }
+        owners = {
+            table: {
+                r[0] for r in db.execute(f"SELECT DISTINCT company_id FROM {table}")
             }
-            for table in HISTORICAL_MODELS:
-                if table not in tables:
-                    continue
-                for company in sorted(inactive):
-                    if db.execute(
-                        f"SELECT 1 FROM {table} WHERE company_id=? LIMIT 1", (company,)
-                    ).fetchone():
-                        raise RefreshUniverseError(
-                            f"REFRESH_OLD_ANALYSIS_RETENTION_UNSUPPORTED:{company}:{table}:NATIVE_TTM_REQUIRES_ACTIVE_SECURITY"
-                        )
+            for table in HISTORICAL_MODELS
+            if table in present
+        }
+    historical = (canonical - active) | (set().union(*owners.values()) - canonical)
+    return (
+        historical | {r["identity_binding"]["company_id"] for r in retained},
+        historical,
+        owners,
+    )
+
+
+def require_buildable_analysis_history(paths, retained):
+    """Allow empty actual history; reject known loss by native reconstruction.
+
+    No historical import/recalculation is invented. Check all inactive/missing
+    company owners, including those absent from installed membership or FETCH.
+    """
+    _, historical, owners = _analysis_retention_scope(paths, retained)
+    for table, companies in owners.items():
+        at_risk = historical & companies
+        if at_risk:
+            company = min(at_risk)  # Diagnostic order, never a security selection.
+            raise RefreshUniverseError(
+                f"REFRESH_OLD_ANALYSIS_RETENTION_UNSUPPORTED:{company}:{table}:NATIVE_TTM_REQUIRES_ACTIVE_SECURITY"
+            )
+    return dict(
+        status="NO_AT_RISK_ACCEPTED_HISTORY",
+        checked_companies=sorted(historical),
+        historical_tables=sorted(owners),
+    )
 
 
 def analysis_history(analysis, canonical, companies):
@@ -338,6 +358,7 @@ def analysis_history(analysis, canonical, companies):
     with closing(carry.readonly(canonical)) as db:
         quarters = {
             r["quarter_id"]: (
+                r["company_id"],
                 r["fiscal_year"],
                 str(r["fiscal_quarter"]).removeprefix("Q"),
             )
@@ -368,17 +389,18 @@ def analysis_history(analysis, canonical, companies):
                         )
                     else:
                         quarter = quarters.get(r["quarter_id"])
-                        if quarter is None:
+                        if quarter is None or quarter[0] != company:
                             raise RefreshUniverseError(
                                 "REFRESH_OLD_ANALYSIS_QUARTER_UNBOUND:" + table
                             )
+                        quarter = quarter[1:]
                     keys.add((company, *quarter))
             result[table] = keys
     return result
 
 
 def verify_analysis_retention(paths, canonical, analysis, retained):
-    companies = {r["identity_binding"]["company_id"] for r in retained}
+    companies, _, _ = _analysis_retention_scope(paths, retained)
     before = analysis_history(paths.analysis_db, paths.canonical_db, companies)
     after = analysis_history(analysis, canonical, companies)
     for table, keys in before.items():
