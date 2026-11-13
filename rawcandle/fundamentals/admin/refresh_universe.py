@@ -271,21 +271,31 @@ class InstalledUniverse:
                     if m["security_id"] == s["security_id"]
                     and m["provider"] == "SHARADAR"
                 }
-                if len(ids) != 1 or len(self.names.get(s["current_ticker"], ())) != 1:
+                if len(ids) > 1 or len(self.names.get(s["current_ticker"], ())) != 1:
                     raise RefreshUniverseError(
                         "REFRESH_OLD_RETENTION_IDENTITY_UNPROVEN:" + s["current_ticker"]
                     )
-                retained.append(
-                    dict(
-                        ticker=s["current_ticker"],
-                        retention_only=True,
-                        identity_binding=dict(
-                            company_id=s["company_id"],
-                            security_id=s["security_id"],
-                            provider_security_id=next(iter(ids)),
-                        ),
-                    )
+                item = dict(
+                    ticker=s["current_ticker"],
+                    retention_only=True,
+                    identity_binding=dict(
+                        company_id=s["company_id"],
+                        security_id=s["security_id"],
+                        provider_security_id=next(iter(ids), None),
+                    ),
                 )
+                if not ids:
+                    from .review_locality import historical_retention_proof
+
+                    try:
+                        item["retention_proof"] = historical_retention_proof(
+                            self.paths, item["ticker"], item["identity_binding"]
+                        )
+                    except ValueError as error:
+                        raise RefreshUniverseError(
+                            "REFRESH_OLD_RETENTION_IDENTITY_UNPROVEN:" + item["ticker"]
+                        ) from error
+                retained.append(item)
         return retained, sorted(blocked)
 
     def require_buildable_old_history(self, retained):

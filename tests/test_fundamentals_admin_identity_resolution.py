@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from csv import DictWriter
 from dataclasses import replace
@@ -27,6 +28,7 @@ from rawcandle.fundamentals.schema.migrations import CANONICAL_SCHEMA_SQL
 from rawcandle.fundamentals.ttm.engine import ensure_ttm_schema
 from tests.test_fundamentals_admin_batch_add_tickers import _archive, _archive_row, _generic_paths
 from tests.test_fundamentals_admin_taxonomy_acceptance import _create_db as _active_taxonomy_db
+from tests.provider_capture_fixtures import full_row
 
 
 def _insert_price(connection: sqlite3.Connection, ticker: str) -> None:
@@ -51,7 +53,7 @@ def _reviewed_history_archive(path: Path) -> Path:
             fiscal_quarter = ((sequence - 1) % 4) + 1
             month = fiscal_quarter * 3
             day = 31 if month in {3, 12} else 30
-            row = dict(_archive_row(ticker))
+            row = full_row(_archive_row(ticker))
             row.update({
                 "calendardate": f"{fiscal_year:04d}-{month:02d}-{day:02d}",
                 "reportperiod": f"{fiscal_year:04d}-{month:02d}-{day:02d}",
@@ -67,6 +69,10 @@ def _reviewed_history_archive(path: Path) -> Path:
     writer.writerows(rows)
     with ZipFile(path, "w") as archive:
         archive.writestr("fundamentals.csv", output.getvalue())
+    (path.parent / 'archive_manifest.json').write_text(json.dumps({
+        'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+        'endpoint': '/data/fundamentals', 'acquired_at_utc': '2026-09-21T00:00:00Z',
+    }))
     return path
 
 
@@ -297,7 +303,10 @@ def test_identity_and_quarterly_history_are_independent_and_exchange_unknown_is_
     plan = build_generic_batch_plan(paths, parse_batch_tickers("GHOST"), archive_path=tmp_path / "none.zip")
     assert "EXCHANGE_UNKNOWN" in plan.items[0].reason
     assert "INCOMPATIBLE_EXCHANGE" not in plan.items[0].reason
-    assert "INCOMPLETE_FISCAL_IDENTITY" in plan.items[0].reason
+    # This deliberately unattested partial cache row cannot authorize fiscal
+    # comparison. Identity/exchange classification remains independently useful.
+    assert "SOURCE_PAYLOAD_CAPTURE_UNVERIFIED" in plan.items[0].reason
+    assert "INCOMPLETE_FISCAL_IDENTITY" not in plan.items[0].reason
     assert "NO_USABLE_QUARTERLY_HISTORY" not in plan.items[0].reason
 
 

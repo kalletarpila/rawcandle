@@ -1,5 +1,13 @@
 # Fundamentals Phase 3B — default-off snapshot UPDATE integration
 
+Later [FIX4](fundamentals_phase3d_fix4_identity_retention_2026-11-13.md) permits
+retention of already accepted, reviewed new-company OLD with a null provider ID
+only through an exact immutable-generation/approval/ownership proof. Incoming
+identity rules, installed membership, financial review and publication permission
+remain unchanged. Approved historical admission is not a replayable current
+identity mutation. Production authority reconciliation and the inactive-analysis
+history STOP still require the separate resolutions documented there.
+
 Current scope correction: [Phase 3D FIX3](fundamentals_phase3d_fix3_refresh_universe_2026-11-13.md).
 New snapshot Refresh UPDATEs require a pinned installed Phase 13B universe;
 raw discoveries, financial reviews and accounting obligations grant no admission.

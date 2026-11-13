@@ -1,5 +1,14 @@
 # Fundamentals Phase 3D FIX3 — installed Refresh scope and explicit STOP boundaries
 
+Subsequent resolution: [FIX4 authority and historical retention](fundamentals_phase3d_fix4_identity_retention_2026-11-13.md).
+The approved batch-add evidence proves KRSA's same-company successor relationship;
+Refresh membership/representative reconciliation remains separately required.
+FIX4 adds a narrow immutable-OLD retention proof for already reviewed new-company
+admissions with intentionally absent provider mappings, including PSQL/QVCG.
+It grants no incoming identity or membership. Multi-security Refresh selection
+and unsupported inactive-company analysis retention remain STOP boundaries.
+The FIX3 implementation/results below remain the historical observations.
+
 **Verdict: bounded update-only scope correction implemented; production readiness
 BLOCKED.** The installed universe has a CYCN/KRSA company/security contradiction,
 and eleven admitted companies still require an explicit security selection.

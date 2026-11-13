@@ -853,8 +853,9 @@ def build_candidate(env, validation_id, *, expected_validation_fingerprint, now=
             held_changes=decisions["held"] + decisions.get('old_retention', []),
         )
         held = locality.verify_held(paths, provider, canonical, decisions["held"])
-        old_retention = locality.verify_held(
-            paths, provider, canonical, decisions.get('old_retention', []))
+        old_retention = locality.verify_retained(
+            paths, provider, canonical, decisions.get('old_retention', []),
+            old_authority=receipt['inputs']['old'])
         # Isolated fixture sources use the existing FULL_SQLITE_BACKUP authority
         # mode. No production-scale dependency copies or global taxonomy locks.
         if not hasattr(env, "prepare_sources") and any(
@@ -1139,8 +1140,8 @@ def _publish_candidate(
             held = locality.verify_held(
                 paths, active.provider_db, active.canonical_db, decisions["held"]
             )
-            locality.verify_held(paths, active.provider_db, active.canonical_db,
-                                                  decisions.get('old_retention', []))
+            locality.verify_retained(paths, active.provider_db, active.canonical_db,
+                                    decisions.get('old_retention', []), old_authority=receipt['inputs']['old'])
             boundary("AFTER_POSTFLIGHT")
             journal = journals.update_journal(
                 env.journal,

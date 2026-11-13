@@ -15,6 +15,7 @@ from typing import Mapping
 from .provider_payload import payload_fingerprint as digest
 
 VERSION = "FUNDAMENTALS_WHOLE_TICKER_QUARANTINE_V4_SNAPSHOT"
+RETENTION_VERSION = "REVIEWED_NEW_COMPANY_OLD_RETENTION_V1"
 DIMENSIONS = {"ARQ", "MRQ"}
 IDENTITY = (
     "ticker",
@@ -46,6 +47,7 @@ def authority(
     *,
     validate=False,
     allow_missing_provider=False,
+    retention_proof=None,
 ):
     """Exact provider + economic canonical identity, independent of physical IDs.
 
@@ -53,6 +55,12 @@ def authority(
     canonical physical IDs and write timestamps are omitted. Provider headers,
     capture receipts and payloads remain exact. Optional tables stay optional.
     """
+    if retention_proof is not None:
+        if validate or not allow_missing_provider:
+            raise ValueError("RETENTION_PROOF_IS_NOT_INCOMING_AUTHORITY")
+        _check_retention_proof(
+            provider_db, canonical_db, ticker, identity, retention_proof
+        )
     company = identity["company_id"]
     with closing(_ro(provider_db)) as p, closing(_ro(canonical_db)) as c:
         provider = [
@@ -203,7 +211,7 @@ def authority(
             for r in identity_rows["provider_security_identity"]
             if r["provider"] == "SHARADAR"
         ]
-        if (
+        if retention_proof is None and (
             len(mapping) != 1
             or str(mapping[0]["provider_security_id"])
             != str(identity["provider_security_id"])
@@ -221,6 +229,241 @@ def authority(
         ),
         "quarter_count": len(quarters),
         "provider_count": len(provider),
+    }
+
+
+def _reviewed_retention_owner(provider_db, canonical_db, ticker, identity):
+    """Read an already admitted new-company identity, never replay its mutation."""
+    from . import identity_resolution as identities
+    from .publication_journal import sha256_file
+
+    registry = identities.DEFAULT_REGISTRY_PATH
+    record = identities.load_review_registry(registry).get(ticker)
+    approved = (record or {}).get("approved_resolution") or {}
+    if (
+        not record
+        or record.get("review_status") != "APPROVED"
+        or approved.get("subject_ticker") != ticker
+        or record.get("approval_fingerprint")
+        != identities.approval_fingerprint(approved)
+        or approved.get("resolution_class")
+        not in {
+            "BUSINESS_COMBINATION_NEW_SECURITY",
+            "REORGANIZATION_SUCCESSOR",
+            "NEW_SECURITY",
+        }
+        or approved.get("security_continuity") != "NEW_SECURITY"
+        or approved.get("company_continuity")
+        not in {"NEW_PUBLIC_ISSUER", "SUCCESSOR_COMPANY"}
+        or approved.get("canonical_company_id") is not None
+        or approved.get("canonical_security_id") is not None
+        or approved.get("provider_permaticker") is not None
+        or approved.get("provider_continuity") != "PROVIDER_METADATA_ABSENT"
+        or not approved.get("cik")
+        or not approved.get("effective_date")
+    ):
+        raise ValueError("OLD_RETENTION_APPROVED_NEW_COMPANY_REQUIRED")
+    company, security = identity["company_id"], identity["security_id"]
+    if identity.get("provider_security_id") is not None:
+        raise ValueError("OLD_RETENTION_NULL_PROVIDER_ID_REQUIRED")
+    with closing(_ro(canonical_db)) as c, closing(_ro(provider_db)) as p:
+        owner = c.execute(
+            "SELECT * FROM company WHERE company_id=?", (company,)
+        ).fetchone()
+        securities = [
+            dict(r)
+            for r in c.execute("SELECT * FROM security WHERE company_id=?", (company,))
+        ]
+        ciks = {
+            r[0]
+            for r in c.execute(
+                "SELECT cik_normalized FROM company_cik WHERE company_id=? AND status='ACTIVE'",
+                (company,),
+            )
+        }
+        mapping = c.execute(
+            "SELECT 1 FROM provider_security_identity WHERE security_id=? AND provider='SHARADAR'",
+            (security,),
+        ).fetchone()
+        metadata = p.execute(
+            "SELECT 1 FROM sharadar_ticker_metadata WHERE table_name='fundamentals' AND UPPER(ticker)=?",
+            (ticker,),
+        ).fetchone()
+        # Missing legacy lineage stays missing; a linked foreign owner is a
+        # shared integrity failure, never a historical retention exception.
+        for table in (
+            "v4_field_provenance",
+            "v4_common_earnings_provenance",
+            "v4_operating_working_capital_provenance",
+            "v4_parent_equity_source",
+            "v4_parent_equity_provenance",
+        ):
+            if not c.execute(
+                "SELECT 1 FROM sqlite_schema WHERE name=?", (table,)
+            ).fetchone():
+                continue
+            for r in c.execute(
+                f"SELECT t.* FROM {table} t JOIN v4_quarter q USING(quarter_id) WHERE q.company_id=?",
+                (company,),
+            ):
+                row = dict(r)
+                oid = row.get("provider_observation_id") or row.get("observation_id")
+                source = (
+                    p.execute(
+                        "SELECT company_id,security_id FROM provider_observation WHERE observation_id=?",
+                        (oid,),
+                    ).fetchone()
+                    if oid
+                    else None
+                )
+                if source is not None and tuple(source) != (company, security):
+                    raise ValueError("OLD_RETENTION_CROSS_OWNER_PROVENANCE")
+    cik = identities.normalize_cik(approved["cik"])
+    if (
+        not cik
+        or owner is None
+        or owner["company_key"] != "SEC_CIK:" + cik
+        or ciks != {cik}
+        or len(securities) != 1
+        or securities[0]["security_id"] != security
+        or securities[0]["current_ticker"] != ticker
+        or securities[0]["valid_from"] != approved["effective_date"]
+        or securities[0]["exchange"] != approved["exchange"]
+        or mapping is not None
+        or metadata is not None
+    ):
+        raise ValueError("OLD_RETENTION_REVIEWED_OWNER_MISMATCH")
+    return dict(
+        company_id=company,
+        security_id=security,
+        ticker=ticker,
+        company_key=owner["company_key"],
+        security=securities[0],
+        approval_fingerprint=record["approval_fingerprint"],
+        registry_sha256=sha256_file(registry),
+    )
+
+
+def _retained_provider_digest(provider_db, ticker, identity):
+    from .batch_add_tickers import CONTRACT_VERSION as admission_contract
+
+    with closing(_ro(provider_db)) as p:
+        rows = [
+            dict(r)
+            for r in p.execute(
+                "SELECT po.*,s.* FROM provider_observation po JOIN sharadar_fundamental_observation s USING(observation_id) WHERE s.ticker=?",
+                (ticker,),
+            )
+        ]
+        if not rows or not DIMENSIONS <= {r["dimension"] for r in rows}:
+            raise ValueError("OLD_RETENTION_SOURCE_MISSING")
+        for r in rows:
+            if (
+                r["company_id"] != identity["company_id"]
+                or r["security_id"] != identity["security_id"]
+                or r["provider_security_id"] is not None
+                or r["provider"] != "SHARADAR"
+                or r["native_table"] != "fundamentals"
+                or r["provider_ticker"] != ticker
+                or json.loads(r["payload_json"]).get("permaticker") not in (None, "")
+            ):
+                raise ValueError("OLD_RETENTION_SOURCE_OWNER_MISMATCH")
+        for run_id in {r["run_id"] for r in rows}:
+            run = p.execute(
+                "SELECT * FROM provider_run WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if (
+                run is None
+                or run["provider"] != "SHARADAR"
+                or run["status"] != "SUCCESS"
+                or run["request_scope"] != "PHASE13G2_GENERIC_BATCH_ADD_TICKERS"
+                or run["source_version"] != admission_contract
+                or ticker not in json.loads(run["metadata_json"]).get("tickers", [])
+            ):
+                raise ValueError("OLD_RETENTION_ACCEPTED_ADMISSION_SOURCE_REQUIRED")
+    return digest(_ordered(rows))
+
+
+def historical_retention_proof(paths, ticker, identity):
+    """Use existing reviewed admission + immutable OLD for retention only.
+
+    The pre-admission expected state is not replayed as current mutation
+    permission. No provider ID is inferred, and incoming identity resolution
+    still requires its ordinary native mapping and installed membership.
+    """
+    from . import baseline_carry_forward as carry
+
+    generation = carry.verified_generation(paths)
+    if generation is None:
+        raise ValueError("OLD_RETENTION_VERIFIED_GENERATION_REQUIRED")
+    proof = dict(
+        contract=RETENTION_VERSION,
+        generation=generation,
+        identity=dict(identity),
+        owner=_reviewed_retention_owner(
+            paths.provider_db, paths.canonical_db, ticker, identity
+        ),
+        provider_digest=_retained_provider_digest(paths.provider_db, ticker, identity),
+    )
+    return {**proof, "fingerprint": digest(proof)}
+
+
+def _check_retention_proof(provider, canonical, ticker, identity, proof):
+    if (
+        proof.get("contract") != RETENTION_VERSION
+        or proof.get("identity") != identity
+        or proof.get("fingerprint")
+        != digest({k: v for k, v in proof.items() if k != "fingerprint"})
+        or proof.get("owner")
+        != _reviewed_retention_owner(provider, canonical, ticker, identity)
+        or proof.get("provider_digest")
+        != _retained_provider_digest(provider, ticker, identity)
+    ):
+        raise ValueError("OLD_RETENTION_PROOF_MISMATCH")
+
+
+def verify_retained(paths, provider, canonical, retained, *, old_authority):
+    """Compare OLD to candidate with no incoming admission/approval authority."""
+    ordinary = [r for r in retained if not r.get("retention_proof")]
+    proof = verify_held(paths, provider, canonical, ordinary)
+    reviewed = {}
+    for item in retained:
+        evidence = item.get("retention_proof")
+        if evidence is None:
+            continue
+        generation = evidence["generation"]
+        if (
+            item.get("retention_only") is not True
+            or generation["generation_id"] != old_authority["generation_id"]
+            or generation["manifest_sha256"] != old_authority["manifest_sha256"]
+            or generation["role_hashes"]
+            != {r: v["sha256"] for r, v in old_authority["roles"].items()}
+        ):
+            raise ValueError("OLD_RETENTION_GENERATION_BINDING_MISMATCH")
+        ticker, identity = item["ticker"], item["identity_binding"]
+        old = authority(
+            paths.provider_db,
+            paths.canonical_db,
+            ticker,
+            identity,
+            allow_missing_provider=True,
+            retention_proof=evidence,
+        )
+        new = authority(
+            provider,
+            canonical,
+            ticker,
+            identity,
+            allow_missing_provider=True,
+            retention_proof=evidence,
+        )
+        if old != new:
+            raise ValueError("OLD_RETENTION_AUTHORITY_CHANGED:" + ticker)
+        reviewed[ticker] = old
+    return {
+        **proof,
+        "reviewed_retained_tickers": sorted(reviewed),
+        "reviewed_authority_fingerprint": digest(reviewed),
     }
 
 
