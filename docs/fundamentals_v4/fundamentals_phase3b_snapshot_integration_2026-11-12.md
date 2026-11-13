@@ -1,5 +1,16 @@
 # Fundamentals Phase 3B — default-off snapshot UPDATE integration
 
+Subsequent acquisition contract: [Phase 3D FIX2 ticker-local acquisition quarantine](fundamentals_phase3d_fix2_acquisition_quarantine_2026-11-13.md).
+For `UPDATE_FETCH`, an isolated source failure now has a separately evidenced,
+whole-ticker exclusion outcome. Every slot still requires an actual verified
+capture or a durable rejected-response disposition; an unattempted counterpart
+cannot be inferred. Safe peers use these same financial/publication kernels;
+quarantined incoming ARQ/MRQ is inaccessible to financial consumers and OLD is
+retained. Source quarantines grant no financial approval and do not change
+existing review rows. Shared contract failures still STOP, credential limits
+PAUSE, and sealing requires an intact nonquarantined ARQ/MRQ peer. The original
+Phase 3B acceptance and rollout state below are historical observations.
+
 Implemented the production-capable snapshot route around the accepted Phase 2 financial kernels. **The effective route remains LEGACY, nightly Fundamentals remains disabled, and no live acquisition or financial operation is performed.** Code availability, route selection, UPDATE intent, review approval, candidate readiness and publication confirmation are separate facts.
 
 Starting HEAD: `bf407833b2f39a210f7c628db85bca06bddf54e4`. Governing evidence: [Phase 2 acceptance](fundamentals_phase2_local_validation_publication_2026-11-12.md), [scheduler/history/queue correction](fundamentals_scheduler_hold_history_queue_correction_2026-11-12.md), [accepted simplification architecture](fundamentals_simplification_v1_architecture_2026-11-11.md), and the Phase 3A audit supplied in conversation. No repository Phase 3A report was assumed or created.

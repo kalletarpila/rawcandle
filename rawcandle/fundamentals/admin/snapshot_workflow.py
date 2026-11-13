@@ -53,7 +53,10 @@ def sec_plan(env, snapshot, as_of):
                 key,
             ).fetchone()
             periods.setdefault(key[0], set()).add(row[0])
+    quarantined = snapshot.quarantines()
     for slot in snapshot.iter_slots():
+        if slot["ticker"] in quarantined:
+            continue
         if slot["dimension"] != "ARQ":
             continue
         identity = rules.resolve_identity(paths, slot["ticker"])
@@ -126,6 +129,13 @@ class SnapshotWorkflow:
             f"Safe {counts.get('safe_changes',0)}; local holds {counts.get('held_for_review',0)}; global blockers {counts.get('global_blockers',0)}",
             f"Financial committed: {result['production_completed']}",
         ]
+        acquisition_summary = result.get("acquisition_summary", {})
+        if acquisition_summary:
+            result["summary_rows"].append(
+                f"Acquisition: verified slots {acquisition_summary.get('complete_verified_slots',0)}; "
+                f"whole-ticker quarantines {acquisition_summary.get('quarantined_tickers',0)}; "
+                f"pending slots {acquisition_summary.get('pending_slots',0)}"
+            )
         writer = AdminRunWriter(
             result["run_id"],
             AdminOperationType.REFRESH_FUNDAMENTALS,
@@ -155,6 +165,7 @@ class SnapshotWorkflow:
             f"Actual phase events: `{result.get('phase_events',[])}`.",
             f"SEC publication authority: `{json.dumps(result.get('sec_publication',{}),sort_keys=True)}`.",
             f"Decisions: `{json.dumps(result.get('source_summary',{}),sort_keys=True)}`.",
+            f"Acquisition accounting (quarantine is not complete history): `{json.dumps(acquisition_summary,sort_keys=True)}`.",
             f"Publication: `{json.dumps(result.get('publication_outcome',{}),sort_keys=True)}`.",
             f"Ownership (separate transaction): `{json.dumps(result.get('ownership_auto',{}),sort_keys=True)}`.",
             f"Message: {result.get('message','')}",
@@ -331,6 +342,11 @@ class SnapshotWorkflow:
         result["fetch_status"] = {
             k: v for k, v in fetched.items() if k not in {"snapshot_reference"}
         }
+        result["acquisition_summary"] = {
+            k: fetched[k] for k in ("total_slots", "complete_verified_slots", "diagnostic_slots",
+                "quarantined_tickers", "quarantined_slots", "accounted_quarantine_slots",
+                "pending_slots", "nonquarantined_verified_slots") if k in fetched
+        }
         if fetched["status"] != "FETCH_SEALED":
             result.update(
                 outcome=fetched["status"],
@@ -439,6 +455,7 @@ class SnapshotWorkflow:
                 "effective_changed_known": receipt["counts"]["safe"],
                 "held_for_review": receipt["counts"]["local_holds"],
                 "global_blockers": receipt["counts"]["global"],
+                "acquisition_quarantines": receipt["counts"].get("acquisition_quarantines", 0),
             }
             decisions = core._read(
                 core._operation(env, result["validation_id"]) / "decisions.json"

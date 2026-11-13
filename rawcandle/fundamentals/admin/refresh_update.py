@@ -218,6 +218,7 @@ def _code_binding():
         "baseline_carry_forward.py",
         "snapshot_environment.py",
         "snapshot_workflow.py",
+        "acquisition_quarantine.py",
         "sec_snapshot.py",
     )
     return fingerprint(
@@ -327,6 +328,8 @@ def _report(directory, receipt, decisions, *, build=None, publication=None):
         "",
         f"Safe/local-held/global: {receipt['counts']['safe']}/{receipt['counts']['local_holds']}/{receipt['counts']['global']}.",
         "Queue rows are evidence; this table reflects actual validated dispositions.",
+        f"Acquisition quarantines: {receipt['counts'].get('acquisition_quarantines',0)}; "
+        "whole-ticker OLD retained, incoming excluded, no financial approval or queue resolution granted.",
         "",
         "| Ticker | Disposition | Native reason/classification |",
         "| --- | --- | --- |",
@@ -341,6 +344,11 @@ def _report(directory, receipt, decisions, *, build=None, publication=None):
             lines.append(
                 f"| {item['ticker']} | {disposition} | {change.get('review_reason') or change['classification']} |"
             )
+            source_hold = change.get("acquisition_quarantine")
+            if source_hold:
+                lines.append(f"Source quarantine `{item['ticker']}`: reasons `{source_hold['reasons']}`; "
+                    f"affected slots `{source_hold['affected_slots']}`; immutable receipts `{source_hold['receipts']}`; "
+                    "both incoming dimensions excluded; OLD preserved; no deletion/approval authority.")
     lines += [
         "",
         "OLD rolling/source-history events and exact native approval bindings remain in hash-bound `decisions.json`.",
@@ -546,6 +554,7 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
         slots = {}
         for slot in snapshot.iter_slots():
             slots.setdefault(slot["ticker"], {})[slot["dimension"]] = slot
+        acquisition_quarantines = snapshot.quarantines()
         # Full OLD domain protection, including missing provenance without an
         # existing dangling-reference row and names absent from FETCH/queue.
         degraded = set(carry.degraded_tickers(paths))
@@ -591,6 +600,15 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
                         "shared_integrity_failure": True,
                     }
                 )
+                continue
+            if ticker in acquisition_quarantines:
+                disposition = acquisition_quarantines[ticker]
+                if disposition["identity"] != identity:
+                    raise Phase2Error("ACQUISITION_QUARANTINE_IDENTITY_DRIFT")
+                changes.append({"ticker": ticker, "identity": identity,
+                    "classification": "REVIEW_REQUIRED", "review_reason": "LOCAL_ACQUISITION_QUARANTINE",
+                    "acquisition_scope": "NO_INCOMING_DATA_ACCEPTED",
+                    "acquisition_quarantine": disposition, "snapshot_reference": snapshot.reference})
                 continue
             if ticker not in slots:
                 changes.append(
@@ -676,13 +694,12 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
             scope["change"] = change
             if scope["scope"] == reviews.TICKER_LOCAL_REVIEW:
                 held.append(scope)
-                queue.upsert_local(
-                    {k: v for k, v in scope.items() if k != "change"},
-                    run_id=validation_id,
-                    published_binding=rules.resolve_refresh_state(
-                        paths.provider_db
-                    ).successful_run_id,
-                )
+                if not change.get("acquisition_quarantine"):
+                    queue.upsert_local(
+                        {k: v for k, v in scope.items() if k != "change"},
+                        run_id=validation_id,
+                        published_binding=rules.resolve_refresh_state(paths.provider_db).successful_run_id,
+                    )
             else:
                 global_items.append(scope)
         if set(x["ticker"] for x in safe) & set(x["ticker"] for x in held):
@@ -726,6 +743,7 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
                         bool(h.get("baseline_integrity_hold")) for h in held
                     ),
                     "global": len(global_items),
+                    "acquisition_quarantines": len(acquisition_quarantines),
                 },
                 "new_source_watermark": max(max_updated) if max_updated else None,
             }

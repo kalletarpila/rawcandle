@@ -38,6 +38,7 @@ from .refresh_fundamentals import (
     validate_complete_history,
 )
 from .workflow_evidence import trusted_path
+from . import acquisition_quarantine as quarantine
 
 FORMAT = "FUNDAMENTALS_ACQUISITION_SNAPSHOT_V1"
 LEGACY_POLICY = "SINGLETON_ARQ_MRQ_WINDOW_V1"
@@ -60,6 +61,10 @@ KINDS = {
     "ANCHORS": r"fetch/anchors/[0-9]{6}\.jsonl",
     "SCHEMA": r"fetch/schema_receipt\.json",
     "MANIFEST": r"fetch/snapshot_manifest\.json",
+    "QUARANTINE": r"fetch/quarantines/[0-9]{6}\.json",
+    "QUARANTINE_BODY": r"fetch/quarantines/responses/[a-f0-9]{32}\.body",
+    "QUARANTINE_CAPTURES": r"fetch/quarantines/captures/[a-f0-9]{32}\.jsonl",
+    "QUARANTINE_INDEX": r"fetch/quarantine_index\.jsonl",
 }
 
 
@@ -286,12 +291,15 @@ class _Run:
             "future_production_authorized": False,
             **extra,
         }
+        if getattr(self, "quarantine_progress", None):
+            value.update(self.quarantine_progress())
         _write(self.path("result.json"), value)
         callback = getattr(self,"progress_callback",None)
         if callback:
             callback({"current_stage_id":"FETCH","stage_state":status,
-                      "processed_items":complete+diagnostic,"total_items":total,
+                      "processed_items":value.get("accounted_slots",complete+diagnostic),"total_items":total,
                       "actual_http_attempts":extra.get("actual_http_attempts",0),
+                      **{k:value[k] for k in ("quarantined_tickers", "quarantined_slots", "pending_slots", "nonquarantined_verified_slots") if k in value},
                       "message":extra.get("reason",status)})
         if status != "FETCHING":
             # Native top-level artifact manifest covers the bounded reference;
@@ -657,7 +665,7 @@ def _record_rejected_response(run, slot, response, predicate, checks, secrets=()
     return relative
 
 
-def _checked_history_response(run, slot, response, *, secrets=()):
+def _history_response_coverage(run, slot, response):
     # Keep the original four acceptance conditions, but identify each failure.
     checks = {
         "RESPONSE_BODY_PRESENT": response.response_body is not None,
@@ -667,25 +675,35 @@ def _checked_history_response(run, slot, response, *, secrets=()):
         == [capture.raw_payload(row) for row in response.records],
     }
     failed = next((name for name, passed in checks.items() if not passed), None)
+    if failed:
+        raise SnapshotError("UNFILTERED_RESPONSE_OR_CAPTURE_MISMATCH:" + failed)
+    digest = hashlib.sha256(response.response_body).hexdigest()
+    return digest, _coverage(run, slot, response.records, digest, response.acquired_at_utc)
+
+
+def _checked_history_response(run, slot, response, *, secrets=()):
     try:
-        if failed:
-            raise SnapshotError("UNFILTERED_RESPONSE_OR_CAPTURE_MISMATCH:" + failed)
-        digest = hashlib.sha256(response.response_body).hexdigest()
-        coverage = _coverage(run, slot, response.records, digest, response.acquired_at_utc)
-        return digest, coverage
+        return _history_response_coverage(run, slot, response)
     except SnapshotError as error:
+        checks = {
+            "RESPONSE_BODY_PRESENT": response.response_body is not None,
+            "REQUEST_PARAMETERS_MATCH": response.parameters == _parameters(run.request, slot),
+            "PAYLOAD_SHAPE_VALID": _payload_shape(response.payload),
+            "PAYLOAD_CAPTURE_EQUAL": payload_records(response.payload) == [capture.raw_payload(row) for row in response.records],
+        }
         error.rejected_response_diagnostic = _record_rejected_response(
-            run, slot, response, failed or str(error), checks, secrets
+            run, slot, response, str(error).removeprefix("UNFILTERED_RESPONSE_OR_CAPTURE_MISMATCH:"), checks, secrets
         )
         raise
 
 
-def _checkpoints(run, control):
+def _checkpoints(run, control, rejected=None):
     """Atomic receipt is the commit point; index is a rebuildable compact view.
 
     A deletion remains detectable via control/index commitments. A receipt that
     survived interruption before its index update is verified and adopted locally.
     """
+    rejected = rejected or {}
     index_path = run.path("fetch/checkpoint_index.jsonl")
     indexed = {}
     # An unsealed, interrupted append tail is not authority. Atomic receipts
@@ -717,11 +735,11 @@ def _checkpoints(run, control):
         planned += 1
         path = run.path(f"fetch/checkpoints/{slot['slot']:06d}.json")
         if not path.exists():
-            if slot["slot"] in indexed or slot["slot"] < control.get(
-                "committed_slots", 0
-            ):
+            if slot["slot"] not in rejected and (slot["slot"] in indexed or slot["slot"] < control.get("accounted_slots", control.get("committed_slots", 0))):
                 raise SnapshotError("DECLARED_CHECKPOINT_MISSING")
             continue
+        if slot["slot"] in rejected:
+            raise SnapshotError("SLOT_BOTH_VERIFIED_AND_REJECTED")
         receipt = _read(path)
         _validate_checkpoint(run, slot, receipt, events)
         result[slot["slot"]] = receipt
@@ -731,7 +749,7 @@ def _checkpoints(run, control):
         or planned % 2
         or (control.get("index_reference") and set(indexed) != set(result))
         or set(indexed) - set(result)
-        or sorted(result) != list(range(len(result)))
+        or sorted(set(result) | set(rejected)) != list(range(len(result) + len(rejected)))
     ):
         raise SnapshotError("CHECKPOINT_SEQUENCE_INVALID")
     return result, times
@@ -982,9 +1000,13 @@ def _resume(run, *, project_root, client, now):
     control = run.control()
     if pin_old_authority(project_root) != run.request["old_authority"]:
         raise SnapshotError("OLD_AUTHORITY_DRIFT")
-    checkpoints, times = _checkpoints(run, control)
+    rejected = quarantine.load(run, control, project_root)
+    checkpoints, times = _checkpoints(run, control, rejected)
+    times.extend(_time(r["acquired_at_utc"]) for r in rejected.values())
     _age(times, now())
     total = control["total_slots"]
+    if run.request["mode"] == "UPDATE_FETCH":
+        run.quarantine_progress = lambda: quarantine.statistics(checkpoints, rejected, total)
     counts = lambda: (
         sum(r["state"] == "COMPLETE_VERIFIED" for r in checkpoints.values()),
         sum(
@@ -994,6 +1016,8 @@ def _resume(run, *, project_root, client, now):
     # Repair only a non-authoritative interrupted index tail/orphan entry,
     # after every committed receipt and child has passed verification.
     _write_index(run, checkpoints)
+    if rejected:
+        quarantine.write_index(run, rejected)
     client = client or SharadarClient()
     ledger_path = run.path("fetch/attempts.jsonl")
     attempts = _transport_counts(run)
@@ -1031,8 +1055,9 @@ def _resume(run, *, project_root, client, now):
             control["schema_reference"] = run.ref("fetch/schema_receipt.json", "SCHEMA")
             _write(run.path("fetch/control.json"), control)
         _verify_schema(run, schema)
-        for slot in _lines(run.verify(control["plan_reference"], "PLAN")):
-            if slot["slot"] in checkpoints:
+        plan = list(_lines(run.verify(control["plan_reference"], "PLAN")))
+        for slot in plan:
+            if slot["slot"] in checkpoints or slot["slot"] in rejected:
                 continue
             _age(times, now())
             run.progress(
@@ -1076,9 +1101,27 @@ def _resume(run, *, project_root, client, now):
                 )
             # fundamentals() filters its public records; full payload and
             # original captures must agree before any checkpoint can commit.
-            digest, coverage = _checked_history_response(
-                run, slot, response, secrets=(getattr(client, "_api_key", None),)
-            )
+            try:
+                digest, coverage = _checked_history_response(
+                    run, slot, response, secrets=(getattr(client, "_api_key", None),)
+                )
+                if coverage["diagnostic_reasons"] and run.request["mode"] == "UPDATE_FETCH":
+                    raise SnapshotError("SOURCE_PROFILE_UNTRUSTWORTHY")
+            except SnapshotError as error:
+                proof = quarantine.classify(run, slot, response, project_root, plan)
+                if proof is None:
+                    raise
+                quarantine.check_shared({**rejected, slot["slot"]: {"ticker": slot["ticker"], **proof}})
+                _age(times + [_time(response.acquired_at_utc)], now())
+                diagnostic = getattr(error, "rejected_response_diagnostic", None)
+                if diagnostic is None:
+                    diagnostic = _record_rejected_response(run, slot, response, proof["reason"], {"SOURCE_PROFILE_TRUSTWORTHY": False}, (getattr(client, "_api_key", None),))
+                rejected[slot["slot"]] = quarantine.persist(run, slot, response, proof, diagnostic)
+                times.append(_time(response.acquired_at_utc))
+                control.update(committed_quarantine_slots=len(rejected), accounted_slots=len(checkpoints) + len(rejected))
+                _write(run.path("fetch/control.json"), control)
+                run.progress("FETCHING", *counts(), total, **attempts)
+                continue
             _age(times + [_time(response.acquired_at_utc)], now())
             key = uuid4().hex
             body_name, captures_name = (
@@ -1129,10 +1172,13 @@ def _resume(run, *, project_root, client, now):
                 },
             )
             control["committed_slots"] = len(checkpoints)
+            control["accounted_slots"] = len(checkpoints) + len(rejected)
             _write(run.path("fetch/control.json"), control)
             run.progress("FETCHING", *counts(), total, **attempts)
             del response  # release this singleton before the next HTTP request
-    return _seal(run, control, checkpoints, times, now())
+    if not rejected:
+        return _seal(run, control, checkpoints, times, now())
+    return _seal(run, control, checkpoints, times, now(), rejected=rejected, project_root=project_root)
 
 
 def _write_index(run, checkpoints):
@@ -1150,10 +1196,15 @@ def _write_index(run, checkpoints):
     _atomic(run.path("fetch/checkpoint_index.jsonl"), content)
 
 
-def _seal(run, control, checkpoints, times, now):
+def _seal(run, control, checkpoints, times, now, *, rejected=None, project_root=None):
+    rejected = rejected or {}
     _age(times, now)
-    if len(checkpoints) != control["total_slots"]:
+    if len(checkpoints) + len(rejected) != control["total_slots"]:
         raise SnapshotError("SNAPSHOT_COVERAGE_INCOMPLETE")
+    if rejected:
+        if quarantine.load(run, control, project_root) != rejected:
+            raise SnapshotError("QUARANTINE_CHANGED_BEFORE_SEAL")
+        quarantine.require_peer_control(checkpoints, rejected)
     _write_index(run, checkpoints)
     if not run.path("fetch/attempts.jsonl").exists():
         raise SnapshotError("TRANSPORT_LEDGER_MISSING")
@@ -1188,6 +1239,13 @@ def _seal(run, control, checkpoints, times, now):
         "index": run.ref("fetch/checkpoint_index.jsonl", "INDEX"),
         "attempts": run.ref("fetch/attempts.jsonl", "ATTEMPTS"),
     }
+    if rejected:
+        quarantine.write_index(run, rejected)
+        manifest.update(
+            acquisition_quarantine_contract=quarantine.CONTRACT,
+            quarantine_index=run.ref("fetch/quarantine_index.jsonl", "QUARANTINE_INDEX"),
+            **quarantine.statistics(checkpoints, rejected, control["total_slots"]),
+        )
     path = run.path("fetch/snapshot_manifest.json")
     if path.exists():
         # Interrupted after root commit: deterministic source facts must match;
@@ -1218,6 +1276,30 @@ class AcquisitionSnapshot:
 
     def __init__(self, run, manifest, reference):
         self._run, self.manifest, self.reference = run, manifest, reference
+        self._quarantined_tickers = frozenset(self.quarantines())
+
+    def quarantines(self):
+        """Whole-ticker exclusions, separate from successful source histories."""
+        if "quarantine_index" not in self.manifest:
+            return {}
+        result = {}
+        for entry in _lines(self._run.verify(self.manifest["quarantine_index"], "QUARANTINE_INDEX")):
+            record = _read(self._run.verify(entry["receipt"], "QUARANTINE"))
+            item = result.setdefault(record["ticker"], {"state": quarantine.STATE,
+                "identity": record["identity"], "affected_slots": record["affected_slots"],
+                "reasons": [], "receipts": [], "incoming_financial_input_eligible": False,
+                "absence_authorizes_deletion": False})
+            item["reasons"].append(record["reason"])
+            item["receipts"].append(entry["receipt"])
+        partial = {}
+        for entry in _lines(self._run.verify(self.manifest["index"], "INDEX")):
+            receipt = _read(self._run.verify(entry["receipt"], "CHECKPOINT"))
+            if receipt["ticker"] in result and receipt["state"] == "COMPLETE_VERIFIED":
+                partial.setdefault(receipt["ticker"], []).append(entry["receipt"])
+        for ticker, item in result.items():
+            item["verified_partial_captures"] = partial.get(ticker, [])
+            item["valid_partial_capture_obtained"] = bool(item["verified_partial_captures"])
+        return result
 
     def iter_slots(self):
         for slot in _lines(self._run.verify(self.manifest["plan"], "PLAN")):
@@ -1226,6 +1308,8 @@ class AcquisitionSnapshot:
     def read_slot(self, number):
         for slot in self.iter_slots():
             if slot["slot"] == number:
+                if slot["ticker"] in self._quarantined_tickers:
+                    raise SnapshotError("TICKER_ACQUISITION_QUARANTINED")
                 receipt = _read(self._run.path(f"fetch/checkpoints/{number:06d}.json"))
                 # Bind the receipt to sealed index before returning any rows.
                 references = (
@@ -1261,6 +1345,11 @@ class AcquisitionSnapshot:
         request filing-date bounds and canonical freeze dates are different axes.
         Use native retention rules with the unrelated three-year shortcut OFF.
         """
+        if ticker in self._quarantined_tickers:
+            return {"ticker": ticker, "status": quarantine.STATE,
+                "ticker_local_hold_required": True, "incoming_source_for_phase2_eligible": False,
+                "automatic_deletion_authorized": False, "publication_authorized": False,
+                "old_history_action": "PRESERVE_EXACT_OLD_UNLESS_SEPARATELY_AUTHORIZED"}
         from .refresh_fundamentals import (
             AGED_OUT_OF_SOURCE_WINDOW,
             AMBIGUOUS_SOURCE_REMOVAL,
@@ -1441,9 +1530,23 @@ def _verify_snapshot(run, manifest, reference):
     schema = _read(run.verify(manifest["schema"], "SCHEMA"))
     _verify_schema(run, schema)
     control = {"plan_reference": manifest["plan"], "index_reference": manifest["index"]}
-    checkpoints, times = _checkpoints(run, control)
+    if "quarantine_index" in manifest:
+        if manifest.get("acquisition_quarantine_contract") != quarantine.CONTRACT:
+            raise SnapshotError("ACQUISITION_QUARANTINE_CONTRACT_INVALID")
+        control["quarantine_index_reference"] = manifest["quarantine_index"]
+    elif "acquisition_quarantine_contract" in manifest:
+        raise SnapshotError("ACQUISITION_QUARANTINE_INDEX_MISSING")
+    rejected = quarantine.load(run, control, None) if "quarantine_index" in manifest else {}
+    checkpoints, times = _checkpoints(run, control, rejected)
+    times.extend(_time(r["acquired_at_utc"]) for r in rejected.values())
+    if "quarantine_index" in manifest:
+        stats = quarantine.statistics(checkpoints, rejected, manifest["total_slots"])
+        if any(manifest.get(k) != value for k, value in stats.items()):
+            raise SnapshotError("SEALED_QUARANTINE_ACCOUNTING_MISMATCH")
+        if rejected:
+            quarantine.require_peer_control(checkpoints, rejected)
     if (
-        len(checkpoints) != manifest["total_slots"]
+        len(checkpoints) + len(rejected) != manifest["total_slots"]
         or not times
         or min(times) != _time(manifest["oldest_acquired_at_utc"])
         or max(times) != _time(manifest["newest_acquired_at_utc"])

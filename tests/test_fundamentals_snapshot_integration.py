@@ -192,16 +192,24 @@ def test_native_integrated_build_publication_and_service_history(tmp_path, monke
     assert len(calls) == 7
 
 
-def test_default_route_is_legacy_without_configuration_mutation(tmp_path):
+def test_default_route_is_legacy_without_configuration_mutation(tmp_path, monkeypatch):
     from rawcandle.scheduler.config import read_scheduler_config
 
-    cfg = read_scheduler_config("scheduler_config.json")
+    # Defaults are independent of the operator's authorized live route selection.
+    config_path = tmp_path / "scheduler_config.json"
+    config_path.write_text(json.dumps({'enabled_markets': ['usa'], 'run_time': '04:30',
+        'osakedata_db_path': str(tmp_path/'market.db'), 'analysis_db_path': str(tmp_path/'analysis.db'),
+        'log_dir': str(tmp_path/'logs')}))
+    before = config_path.read_bytes()
+    cfg = read_scheduler_config(str(config_path))
     assert cfg.fundamentals_refresh_route == "LEGACY"
     assert cfg.fundamentals_refresh_preview_enabled is False
     service = FundamentalsAdminUIService(
         run_root=tmp_path / "admin_runs", recover_publication_on_startup=False
     )
+    monkeypatch.setattr('rawcandle.scheduler.config.read_scheduler_config', lambda path: cfg)
     assert service.selected_refresh_route() == "LEGACY"
+    assert config_path.read_bytes() == before
 
 
 def test_acquisition_only_cannot_be_used_as_update_authority(tmp_path, monkeypatch):

@@ -122,3 +122,17 @@ Review this bounded disposable backend and the explicit unimplemented integratio
 ## Subsequent Phase 3B integration
 
 The [Phase 3B snapshot integration report](fundamentals_phase3b_snapshot_integration_2026-11-12.md) records the subsequent default-off production adapter, common service/scheduler routing, persistent SEC capture/replay, native production-source integration, reporting and separate ownership continuation. Its tests extend the shared kernels above; the original Phase 2 acceptance remains historical. Effective production selection remains LEGACY and nightly Fundamentals remains on HOLD. No live rollout is implied by either report.
+
+## Subsequent Phase 3D FIX2 source exclusion
+
+[FIX2](fundamentals_phase3d_fix2_acquisition_quarantine_2026-11-13.md) adds explicit
+`LOCAL_ACQUISITION_QUARANTINE` input to these kernels for bound `UPDATE_FETCH`
+snapshots. VALIDATE excludes both incoming dimensions before reading their
+financial source, verifies the native identity, and binds the exclusion through
+the existing local-held/carry-forward authority. BUILD and publication retain
+whole-ticker OLD, including existing degraded-baseline restrictions. Financial
+review rows and approvals remain unchanged for acquisition quarantines; normal
+safe financial decisions retain the original approval rules. Missing source is
+never deletion authority or complete history. Original acquisition-only
+acceptance and all global financial gates remain unchanged. This follow-up
+records isolated implementation/tests, not live UPDATE or publication authority.
