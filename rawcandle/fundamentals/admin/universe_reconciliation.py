@@ -1,7 +1,7 @@
 """Identity-only universe reconciliation through the native generation journal.
 
-Financial statements and analysis are never rebuilt or approved here. Native
-analysis/source validation must pass on OLD and the unchanged economic copy.
+Financial statements and analysis are never rebuilt or approved here. Accepted
+V2 integrity and equal native economic inputs qualify unchanged OLD reuse.
 """
 
 from contextlib import closing
@@ -32,6 +32,12 @@ from rawcandle.fundamentals.generations import (
     prepare_generation_from_candidates,
     resolve_active_generation,
 )
+from rawcandle.fundamentals.operating_income_v2 import activation, phase10b, persistence
+from rawcandle.fundamentals.operating_income_v2.readers import ParallelModelRepository
+from rawcandle.fundamentals.relative_valuation.source import (
+    ReadOnlySourcePaths,
+    load_relative_valuation_source,
+)
 
 CONTRACT = "NATIVE_FINANCIAL_UNIVERSE_RECONCILIATION_V1"
 CONFIRM = "CONFIRM_IDENTITY_ONLY_FINANCIAL_UNIVERSE_RECONCILIATION"
@@ -52,6 +58,8 @@ QUALIFIED_FEATURES = (
     "preparation_recovery",
     "activation_recovery",
     "stale_authority_rejection",
+    "economic_input_equivalence",
+    "financial_validator_unchanged",
 )
 
 
@@ -210,6 +218,42 @@ def _economic_tables(path):
             result[table] = dict(rows=count, sha256=h.hexdigest())
     return dict(
         schema=fingerprint(schema), tables=result, fingerprint=fingerprint(result)
+    )
+
+
+def _accepted_analysis(paths, parameters, sources):
+    """Native accepted V2 plus input equivalence, without asserting freshness."""
+    with closing(core.carry.readonly(paths.analysis_db)) as db:
+        active = activation.assert_v2_active(db)
+        if active.persistence_fingerprint != phase10b.PACKAGE_FINGERPRINT:
+            raise RuntimeError("V2_REBUILD_ACTIVE_PACKAGE_MISMATCH")
+        package = phase10b.validate_candidate_package(db)
+        manifest = ParallelModelRepository(db).package_manifest(
+            phase10b.PACKAGE_FINGERPRINT
+        )
+        physical = persistence.physical_fingerprint(
+            db, diagnostic_model=phase10b.diagnostic_flags_eight
+        )
+        if physical != manifest["physical_content_fingerprint"]:
+            raise RuntimeError("V2_REBUILD_PACKAGE_PHYSICAL_MISMATCH")
+    rv = load_relative_valuation_source(
+        ReadOnlySourcePaths(
+            paths.analysis_db,
+            paths.canonical_db,
+            sources["market"],
+            sources["taxonomy"],
+            paths.provider_db,
+        ),
+        as_of_date=parameters["as_of_date"],
+    )
+    return dict(
+        package=package,
+        physical_content_fingerprint=physical,
+        economic_result_fingerprint=manifest["economic_result_fingerprint"],
+        as_of_date=parameters["as_of_date"],
+        current_rv_input_fingerprint=rv.source_fingerprint,
+        current_rv_input_count=len(rv.inputs),
+        financial_freshness_reasserted=False,
     )
 
 
@@ -376,18 +420,15 @@ def run_reconciliation(
                 writer.write_json("selection_plan.json", plan)
                 parameters = _analysis_parameters(paths.analysis_db)
                 lane.mkdir(parents=True, exist_ok=False)
-                stage = "BASELINE_ANALYSIS_NATIVE_VALIDATION"
+                stage = "ACCEPTED_ANALYSIS_NATIVE_INTEGRITY"
                 sources, evidence = env.prepare_sources(
                     paths, lane, paths.canonical_db, parameters["as_of_date"]
                 )
                 result["source_dependencies"] = semantic_source_binding(evidence)
                 writer.write_json("source_dependencies.json", evidence)
                 validation_sources = {**paths.as_dict(), **sources}
-                result["baseline_analysis"] = native._validate_analysis_generation(
-                    paths.analysis_db,
-                    analysis_result=parameters,
-                    as_of_date=parameters["as_of_date"],
-                    sources=validation_sources,
+                result["baseline_analysis"] = _accepted_analysis(
+                    paths, parameters, validation_sources
                 )
                 stage = "IDENTITY_ONLY_CANDIDATE"
                 protected = _economic_tables(paths.canonical_db)
@@ -421,6 +462,16 @@ def run_reconciliation(
                     if old_state[key] != new_state[key]:
                         raise RuntimeError("UNIVERSE_RECONCILIATION_IDENTITY_MUTATION")
                 targets = {d["company_id"] for d in decisions}
+                eligible = lambda state: {
+                    m["company_id"]
+                    for m in state["members"]
+                    if m["membership_status"]
+                    in {"ACTIVE_SINGLE_SECURITY", "ACTIVE_MULTI_SECURITY"}
+                }
+                if eligible(old_state) != eligible(new_state):
+                    raise RuntimeError(
+                        "UNIVERSE_RECONCILIATION_ECONOMIC_COMPANY_DOMAIN_CHANGED"
+                    )
                 for old, new in zip(old_state["members"], new_state["members"]):
                     if old["company_id"] not in targets and {
                         k: v for k, v in old.items() if k != "universe_version_id"
@@ -432,12 +483,13 @@ def run_reconciliation(
                 result["companion_preservation"] = selection.verify_companion_retention(
                     candidate, candidate.provider_db, candidate.canonical_db
                 )
-                result["candidate_analysis"] = native._validate_analysis_generation(
-                    candidate.analysis_db,
-                    analysis_result=parameters,
-                    as_of_date=parameters["as_of_date"],
-                    sources={**candidate.as_dict(), **sources},
+                result["candidate_analysis"] = _accepted_analysis(
+                    candidate, parameters, sources
                 )
+                if result["candidate_analysis"] != result["baseline_analysis"]:
+                    raise RuntimeError(
+                        "UNIVERSE_RECONCILIATION_NATIVE_ECONOMIC_INPUT_CHANGED"
+                    )
                 for role in ("provider", "analysis"):
                     if (
                         journal.sha256_file(candidate.as_dict()[role])
@@ -499,6 +551,21 @@ def run_reconciliation(
                             approval_fingerprint=expected_approval,
                             economic_change=False,
                             qualification=qualification,
+                            accepted_analysis_reuse=dict(
+                                contract="ACCEPTED_OLD_IDENTITY_ONLY_REUSE_V1",
+                                old_generation=current.generation_id,
+                                analysis_sha256=current.manifest["role_verification"][
+                                    "analysis"
+                                ]["sha256"],
+                                canonical_economics=protected["fingerprint"],
+                                economic_company_domain=fingerprint(
+                                    sorted(eligible(old_state))
+                                ),
+                                native_rv_inputs=result["baseline_analysis"][
+                                    "current_rv_input_fingerprint"
+                                ],
+                                financial_freshness_reasserted=False,
+                            ),
                         ),
                     )
                     intent = journal.update_journal(
@@ -535,12 +602,13 @@ def run_reconciliation(
                             raise RuntimeError(
                                 "UNIVERSE_RECONCILIATION_POSTFLIGHT_ROLE:" + role
                             )
-                    native._validate_analysis_generation(
-                        active.analysis_db,
-                        analysis_result=parameters,
-                        as_of_date=parameters["as_of_date"],
-                        sources={**active.as_dict(), **sources},
-                    )
+                    if (
+                        _accepted_analysis(active, parameters, sources)
+                        != result["baseline_analysis"]
+                    ):
+                        raise RuntimeError(
+                            "UNIVERSE_RECONCILIATION_POSTFLIGHT_ECONOMIC_INPUT_CHANGED"
+                        )
                     if (
                         _unchanged_config(env) != authority["configuration"]
                         or core._queue_binding(env) != authority["queue"]

@@ -74,15 +74,17 @@ Under the native Administration + scheduler kernel locks, the adapter:
    mappings. The new version corrects CYCN/KRSA's stale counts without retiring
    or merging securities or transferring provider identity.
 3. Binds a **current native compact market bundle and protected direct taxonomy**
-   at the accepted analysis calculation date. OLD must pass the existing full
-   native V2/package/RP/RV source/result validator before any financial role copy.
-   Existing explicit universe-bound analysis dependencies requiring another
-   reconciliation contract are rejected, not silently relabelled.
+   at the accepted analysis calculation date. OLD is checked as an already accepted historical result; its current native
+   RV input fingerprint is captured before any financial role copy.
+   Accepted V2 package/physical integrity is checked natively. Existing explicit
+   universe-bound analysis dependencies requiring another contract are rejected,
+   not silently relabelled.
 4. Copies all three immutable financial roles exactly, applies only the versioned
    universe selection in the inactive canonical copy, and proves schema plus all
    non-universe canonical table contents unchanged. Provider and analysis remain
-   byte-identical to OLD. The copied analysis must pass native validation against
-   the new canonical authority and the same staged read-only dependencies.
+   byte-identical to OLD. The copied analysis must retain native package integrity and the exact same
+   economic company domain and native RV inputs under the new authority and
+   those same staged dependencies.
 5. Rechecks OLD/universe/configuration/queue/registry/code, obtains verified native
    immutable backups, prepares one complete generation and writes the native
    generation-pointer journal. Expected-OLD activation and postflight verify the
@@ -96,20 +98,21 @@ publication or manually repaired manifests. No network call occurs in this adapt
 
 An identity-only generation activation, if it succeeds, is explicitly distinct
 from financial UPDATE publication: provider, analysis, every accepted financial
-fact/provenance/date/TTM row and financial watermark remain unchanged. If native
-validation would require recomputing/replacing accepted economics, activation
-stops. This task does not relax that condition.
+fact/provenance/date/TTM row and financial watermark remain unchanged. If the identity operation changes native economic inputs or accepted result
+contents, activation stops. The native financial rebuild validator is unchanged: a
+financial UPDATE candidate must still match its fresh source/result calculation.
 
 ## Disposable acceptance
 
-**85 distinct targeted cases PASS.** The regression run passed 82 cases; the
-final adapter run passed 20, including three final environment-scope checks.
-Their seventeen overlapping adapter cases are counted once. No full suite or
+**87 current-code targeted cases PASS**, zero failures/errors/skips in the final
+qualification run. It includes all 22 adapter cases and 65 directly relevant
+FIX3–FIX7 regressions. Earlier prototype runs are not counted as additional
+independent coverage. No full suite or
 StockCore suite was run; no failure demonstrated unrelated shared-core impact.
 
 | Selection | Distinct passing cases |
 | --- | ---: |
-| New native reconciliation adapter | 20 |
+| New native reconciliation adapter | 22 |
 | Accepted FIX7 selections, twelve real tuples and publication/history checks | 24 |
 | FIX4 reviewed OLD retention, including null-provider restrictions | 15 |
 | FIX5 actual historical endpoint gates and rollback | 6 |
@@ -118,14 +121,21 @@ StockCore suite was run; no failure demonstrated unrelated shared-core impact.
 The new adapter tests exercise native preparation, atomic activation, postflight,
 ordinary rollback at three boundaries, recovery before/after activation, stale
 OLD/universe/code/qualification rejection, source drift, unchanged financial role
-bytes and canonical economics, current-source RV mismatch STOP, scheduler margin
+bytes and canonical economics, operation-induced native-input drift STOP, scheduler margin
 and native environment isolation. A published disposable selected universe feeds
 the real snapshot FETCH/VALIDATE path with publication and ownership intent false.
-No analysis rebuild is needed for a source-compatible identity-only case.
+No analysis rebuild occurs for an identity-only operation. A test deliberately
+changes market prices after OLD acceptance: identity-only publication preserves
+OLD while native financial rebuild validation still rejects its stale RV result
+both before and after the identity operation. No financial freshness is reasserted.
 
 Final source/test hashes and JUnit/socket ledgers are retained under ignored
-`temp/fundamentals_fix8_20261113/`. Actual source commit and production gate result
-will be recorded in native Administration evidence after committing accepted code.
+`temp/fundamentals_fix8_20261113/`. Actual source commit and production gate result are recorded in native
+Administration evidence after committing accepted code. The first operational
+Test receipt was correctly rejected before the database phase because its
+descriptive authorization field was redacted after fingerprinting. Its original
+record is retained; subsequent Test receipts fingerprint the final sanitized
+native payload. No approval or verification check is bypassed.
 
 ## Current observations and production gate
 
@@ -136,13 +146,26 @@ journal `COMPLETED` / `PASSED` / `NOT_REQUIRED` for the prior controlled rebuild
 Scheduler configuration remains `SNAPSHOT_V1` / `FULL_WORKFLOW`, Fundamentals
 automatic refresh disabled. These observations are rechecked by the live gate.
 
-A preliminary read-only native validation of current OLD against current source
-dependencies returned `V2_REBUILD_RV_SOURCE_OR_RESULT_MISMATCH` at the accepted
+A preliminary read-only **financial-rebuild** validation of current OLD against
+current source dependencies returned `V2_REBUILD_RV_SOURCE_OR_RESULT_MISMATCH` at the accepted
 analysis date `2026-10-30`. Internal package checks had progressed to the native
-RV/source comparison. This is evidence of a baseline compatibility boundary,
-not a demonstrated root cause or permission to rebuild accepted results. The
-fresh protected-source preflight after source commit determines whether activation
-can proceed; no production success is claimed from the disposable tests.
+RV/source comparison. It is not permission to rebuild accepted results. Review of native generation
+activation and the model read closure showed the purpose distinction: generation
+activation accepts verified role contents, while financial rebuild validation
+compares newly calculated results to current inputs. Of the model readers in this
+bounded scope, RV alone reads the operational universe, and its calculation uses
+the eligible company domain; the version identifier is diagnostic metadata.
+
+The corrected adapter therefore proves identity-only reuse through unchanged
+financial/provider/analysis contents, unchanged native V2 package fingerprints,
+identical economic company membership and equal before/after native RV input
+fingerprints under one current staged market/taxonomy source. It retains original
+calculation dates/provenance and records `financial_freshness_reasserted=false`.
+The native financial rebuild validator and every financial UPDATE acceptance gate
+remain unchanged. This avoids treating legitimate independent source maintenance
+as an identity-induced financial mutation. The reuse proof is retained in the
+native publication journal scope evidence. No production success is claimed
+from disposable tests.
 
 Production runs and their source/selection/qualification/results are retained in
 the existing `fundamental_reports/admin_runs/` infrastructure. The original failed
@@ -167,8 +190,8 @@ requests, pauses or cooldowns; live acquisition remains a separate native stage.
 Market/taxonomy may legitimately change during normal jobs. They are bound at the
 current native source stage; no historical whole-file checksums are required to
 remain unchanged. Immutable original UPDATE evidence and financial/configuration
-state are inventoried separately. Native source compatibility failures remain
-visible and are not waived as ordinary checksum drift.
+state are inventoried separately. Operation-induced economic input changes remain STOPs. Existing financial
+freshness is neither repaired nor relabelled by identity publication.
 
 Necessary candidates, compact bundles and native backups may grow. No database
 size cap, VACUUM, deduplication, schema/retention reduction, storage optimization or

@@ -215,12 +215,15 @@ def test_explicit_native_authority_is_mandatory(tmp_path, monkeypatch, defect):
     assert resolve_active_generation(workflow.env.project).generation_id == "old"
 
 
-def test_current_source_rv_mismatch_is_a_pre_activation_stop(tmp_path, monkeypatch):
+def test_identity_only_preserves_accepted_analysis_without_reasserting_freshness(
+    tmp_path, monkeypatch
+):
     workflow, decisions, args = setup(tmp_path, monkeypatch)
     env = workflow.env
     before = financial_hashes(env)
     # Independent market maintenance is allowed; no historical checksum is fixed.
-    # Current native validation must still reject incompatibility with OLD RV.
+    # Financial rebuild validation must reject incompatible OLD RV; identity
+    # publication preserves that original result rather than claiming freshness.
     with sqlite3.connect(env.paths().market_db) as db:
         cols = [
             r[1]
@@ -232,15 +235,32 @@ def test_current_source_rv_mismatch_is_a_pre_activation_stop(tmp_path, monkeypat
             "UPDATE osakedata SET "
             + ",".join('"' + c + '"="' + c + '"*1.2' for c in cols)
         )
+    params = reconciliation._analysis_parameters(env.paths().analysis_db)
+    with pytest.raises(RuntimeError, match="RV_SOURCE_OR_RESULT_MISMATCH"):
+        reconciliation.native._validate_analysis_generation(
+            env.paths().analysis_db,
+            analysis_result=params,
+            as_of_date=params["as_of_date"],
+            sources=env.paths().as_dict(),
+        )
     result = reconciliation.run_reconciliation(
         env, decisions, **args, stop_after="publish"
     )
-    assert result["outcome"] == "BLOCKED", result
-    assert result["failed_stage"] == "BASELINE_ANALYSIS_NATIVE_VALIDATION"
-    assert "RV_SOURCE_OR_RESULT_MISMATCH" in result["error"]
-    assert financial_hashes(env) == before
-    assert journal.load_journal(env.journal) is None
-    assert "candidate_roles" not in result
+    assert result["outcome"] == "COMPLETED", result
+    assert result["baseline_analysis"] == result["candidate_analysis"]
+    assert result["baseline_analysis"]["financial_freshness_reasserted"] is False
+    after = financial_hashes(env)
+    assert (
+        after["provider"] == before["provider"]
+        and after["analysis"] == before["analysis"]
+    )
+    with pytest.raises(RuntimeError, match="RV_SOURCE_OR_RESULT_MISMATCH"):
+        reconciliation.native._validate_analysis_generation(
+            env.paths().analysis_db,
+            analysis_result=params,
+            as_of_date=params["as_of_date"],
+            sources=env.paths().as_dict(),
+        )
 
 
 def test_recheck_rejects_policy_drift_without_activation(tmp_path, monkeypatch):
@@ -296,3 +316,48 @@ def test_native_environment_cannot_be_relabelled_as_unchecked_copy(
         PermissionError, match="NATIVE_ENVIRONMENT_REQUIRED|COPY_OWNER_SCOPE"
     ):
         reconciliation.run_reconciliation(env, decisions, **args, stop_after="publish")
+
+
+def test_operation_induced_native_input_change_is_a_pre_activation_stop(
+    tmp_path, monkeypatch
+):
+    workflow, decisions, args = setup(tmp_path, monkeypatch)
+    env = workflow.env
+    before = financial_hashes(env)
+    original = reconciliation._accepted_analysis
+    old_canonical = env.paths().canonical_db
+
+    def changed(paths, *a, **kw):
+        report = original(paths, *a, **kw)
+        if paths.canonical_db != old_canonical:
+            report["current_rv_input_fingerprint"] = (
+                "injected different native economic input"
+            )
+        return report
+
+    monkeypatch.setattr(reconciliation, "_accepted_analysis", changed)
+    result = reconciliation.run_reconciliation(
+        env, decisions, **args, stop_after="publish"
+    )
+    assert (
+        result["outcome"] == "BLOCKED"
+        and "NATIVE_ECONOMIC_INPUT_CHANGED" in result["error"]
+    ), result
+    assert financial_hashes(env) == before and journal.load_journal(env.journal) is None
+
+
+def test_invalid_native_package_stops_before_copy_or_activation(tmp_path, monkeypatch):
+    workflow, decisions, args = setup(tmp_path, monkeypatch)
+    before = financial_hashes(workflow.env)
+
+    def reject(*a, **kw):
+        raise RuntimeError("INJECTED_NATIVE_PACKAGE_INVALID")
+
+    monkeypatch.setattr(reconciliation.phase10b, "validate_candidate_package", reject)
+    result = reconciliation.run_reconciliation(
+        workflow.env, decisions, **args, stop_after="publish"
+    )
+    assert (
+        result["outcome"] == "BLOCKED" and "NATIVE_PACKAGE_INVALID" in result["error"]
+    ), result
+    assert financial_hashes(workflow.env) == before and "candidate_roles" not in result
