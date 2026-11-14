@@ -1,5 +1,12 @@
 # FIX8A — taxonomy SQLite sidecar compatibility and native preflight
 
+Subsequent [FIX8B](fundamentals_phase3d_fix8b_commit_bound_acceptance_2026-11-14.md)
+found that the accepted implementation consumes the required acceptance receipt
+but provides no native issuer with current OLD/universe/candidate/dependency
+bindings. Routine restamping of a test summary is insufficient. FIX8B stopped
+before production and requests a separately qualified correction to that native
+acceptance boundary. The historical FIX8A SQLite result below remains valid.
+
 **FIX8A correction and targeted acceptance: PASS. Fresh production readiness:
 CONDITIONAL. The SQLite compatibility gate passed; a matching native disposable
 acceptance receipt for the committed FIX8A source is still required before a
