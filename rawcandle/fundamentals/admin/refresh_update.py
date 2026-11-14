@@ -207,9 +207,9 @@ def create_disposable_environment(root):
 
 
 def _code_binding():
-    # HEAD + relevant tracked changes catch model/validator edits without a new
+    # Financial source tree + tracked changes catch model/validator edits without a new
     # registry/framework. Hash new entry kernels too before they are committed.
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD:rawcandle/fundamentals"], cwd=ROOT)
     diff = subprocess.check_output(
         ["git", "diff", "HEAD", "--", "rawcandle/fundamentals"], cwd=ROOT
     )
@@ -1055,7 +1055,7 @@ def _publish_candidate(
 
         try:
             backups = native._verified_backups(
-                paths, directory / "backups", immutable_generation=True
+                paths, directory / "backups", immutable_generation=True, retain_old=True
             )
             native._validate_generation_backup_binding(current, backups)
             records = native._candidate_manifest(roles, backups)

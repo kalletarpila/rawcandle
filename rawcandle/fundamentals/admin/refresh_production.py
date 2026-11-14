@@ -399,7 +399,26 @@ def _terminal_cleanup_summary(
     }
 
 
-def _verified_backups(paths: BatchAddTickerPaths, backup_dir: Path, *, immutable_generation: bool = False) -> dict[str, Any]:
+def _verified_backups(paths: BatchAddTickerPaths, backup_dir: Path, *, immutable_generation: bool = False, retain_old: bool = False) -> dict[str, Any]:
+    if retain_old:
+        if not immutable_generation:
+            raise RuntimeError("RETAINED_OLD_REQUIRES_IMMUTABLE_GENERATION")
+        from .baseline_carry_forward import verified_generation
+        if verified_generation(paths) is None:
+            raise RuntimeError("RETAINED_OLD_REQUIRES_GENERATION_DIRECTORY")
+        current = resolve_active_generation(paths.canonical_db.resolve().parents[3], require_generation=True)
+        result = {}
+        for role in PUBLICATION_ROLES:
+            source = paths.as_dict()[role]
+            if source.resolve() != current.role_paths()[role].resolve() or any(
+                Path(str(source)+suffix).exists() for suffix in ("-wal", "-shm", "-journal")
+            ):
+                raise RuntimeError("RETAINED_OLD_NOT_IMMUTABLE")
+            result[role] = dict(role=role, source=str(source.resolve()), backup=str(source.resolve()),
+                verification=current.manifest['role_verification'][role],
+                source_sha256=current.manifest['role_verification'][role]['sha256'],
+                snapshot_method="RETAINED_IMMUTABLE_GENERATION")
+        return result
     backup_dir.mkdir(parents=True, exist_ok=False)
     fsync_directory(backup_dir.parent)
     result: dict[str, Any] = {}

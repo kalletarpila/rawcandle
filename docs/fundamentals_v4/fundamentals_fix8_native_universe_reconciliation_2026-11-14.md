@@ -1,5 +1,12 @@
 # FIX8 — native identity-only universe reconciliation
 
+[SIMPLIFY-02](fundamentals_simplify02_publication_rollback_2026-11-14.md)
+supersedes the extra disposable-acceptance gate below: publication now uses a
+verified native B and explicit exact-B/A confirmation, with retained immutable A
+as rollback source. Historical FIX8/FIX8A/FIX8B observations below are preserved;
+they do not describe the new authorization API. No production activation occurs
+in SIMPLIFY-02.
+
 Subsequent [FIX8A](fundamentals_phase3d_fix8a_taxonomy_sidecar_compatibility_2026-11-14.md)
 corrects the taxonomy-only sidecar compatibility boundary. Snapshot retains strict
 sidecar rejection for financial and market roles. Taxonomy now requires the native

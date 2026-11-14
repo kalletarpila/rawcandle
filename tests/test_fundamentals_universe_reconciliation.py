@@ -26,24 +26,6 @@ def setup(tmp_path, monkeypatch):
     env = workflow.env
     reference = fixtures.APPROVED["approval_reference"]
     approval = reconciliation.approval_fingerprint(decisions, reference)
-    qualification = core._seal(
-        dict(
-            contract=reconciliation.CONTRACT,
-            mode="DISPOSABLE_ACCEPTANCE",
-            outcome="PASSED",
-            code_binding=reconciliation.code_binding(),
-            approval_fingerprint=approval,
-            source_commit="AUTHORED_DISPOSABLE_FIXTURE",
-            features={k: True for k in reconciliation.QUALIFIED_FEATURES},
-            tests_evidence={
-                "scope": "authored isolated qualification fixture; no live authority"
-            },
-        )
-    )
-    writer = AdminRunWriter(
-        "fix8_qualification", AdminOperationType.REFRESH_FUNDAMENTALS, root=env.runs
-    )
-    writer.write_json("result.json", qualification)
     paths = env.paths()
     args = dict(
         approval_reference=reference,
@@ -53,7 +35,7 @@ def setup(tmp_path, monkeypatch):
         expected_universe=fingerprint(
             reconciliation.selection.read_state(paths.canonical_db)
         ),
-        qualification_run_id="fix8_qualification",
+        confirm_candidate=deepcopy,
         confirmation=reconciliation.CONFIRM,
     )
     return workflow, decisions, args
@@ -189,7 +171,7 @@ def test_stale_starting_authority_stops_before_candidate(tmp_path, monkeypatch, 
 
 
 @pytest.mark.parametrize(
-    "defect", ["approval", "code", "confirmation", "intent", "qualification"]
+    "defect", ["approval", "code", "confirmation", "intent"]
 )
 def test_explicit_native_authority_is_mandatory(tmp_path, monkeypatch, defect):
     workflow, decisions, args = setup(tmp_path, monkeypatch)
@@ -201,13 +183,6 @@ def test_explicit_native_authority_is_mandatory(tmp_path, monkeypatch, defect):
         args["confirmation"] = "financial UPDATE approval is insufficient"
     if defect == "intent":
         args["production_intent"] = True
-    if defect == "qualification":
-        path = workflow.env.runs / "fix8_qualification/result.json"
-        data = core._read(path)
-        data["features"]["native_activation"] = False
-        core._write(
-            path, core._seal({k: v for k, v in data.items() if k != "fingerprint"})
-        )
     with pytest.raises((ValueError, PermissionError)):
         reconciliation.run_reconciliation(
             workflow.env, decisions, **args, stop_after="publish"

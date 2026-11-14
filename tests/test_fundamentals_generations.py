@@ -263,3 +263,10 @@ def test_completed_generation_remains_active(tmp_path: Path) -> None:
     assert recovery == {"status": "COMPLETED", "recovered": False}
     assert resolve_active_generation(tmp_path).generation_id == "new"
     assert {_value(path) for path in resolve_active_generation(tmp_path).role_paths().values()} == {"new"}
+
+
+@pytest.fixture(autouse=True)
+def _isolated_legacy_route(monkeypatch):
+    # These fixtures exercise legacy recovery, independently of live routing.
+    from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+    monkeypatch.setattr(FundamentalsAdminUIService, 'selected_refresh_route', lambda self: 'LEGACY')

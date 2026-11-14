@@ -12,7 +12,7 @@ from typing import Any, Mapping, Sequence
 
 from rawcandle.fundamentals.admin.artifacts import ROOT
 from rawcandle.fundamentals.admin.contracts import utc_now
-from rawcandle.fundamentals.generations import activate_generation
+from rawcandle.fundamentals.generations import activate_generation, resolve_active_generation
 
 
 JOURNAL_FORMAT_VERSION = 1
@@ -322,11 +322,18 @@ def restore_old_generation(
                 raise PublicationRecoveryError(
                     "RECOVERY_OLD_GENERATION_MANIFEST_MISSING"
                 )
+            active_now = resolve_active_generation(project_root, require_generation=True)
+            if active_now.generation_id not in {
+                str((current.get("old_generation") or {}).get("generation_id")),
+                str(current.get("new_generation_id")),
+            }:
+                raise PublicationRecoveryError("RECOVERY_UNEXPECTED_ACTIVE_GENERATION")
             validated = {
                 role: _validate_backup(role, current["roles"][role])
                 for role in role_order
             }
-            active = activate_generation(old_manifest, project_root=project_root)
+            active = activate_generation(old_manifest, project_root=project_root,
+                expected_active_generation_id=active_now.generation_id)
             generation_verification: dict[str, Any] = {}
             roles = dict(current["roles"])
             for role in role_order:

@@ -145,3 +145,10 @@ def test_backup_binding_mismatch_fails_before_prepare(tmp_path,role):
     backups[role]['verification']['sha256']='0'*64
     with pytest.raises(RuntimeError,match='OLD_BACKUP_BINDING_MISMATCH:'+role):
         production._validate_generation_backup_binding(old,backups)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_legacy_route(monkeypatch):
+    # These fixtures exercise legacy recovery, independently of live routing.
+    from rawcandle.fundamentals.admin.ui_service import FundamentalsAdminUIService
+    monkeypatch.setattr(FundamentalsAdminUIService, 'selected_refresh_route', lambda self: 'LEGACY')

@@ -50,23 +50,17 @@ UNIVERSE_TABLES = frozenset(
         "fundamentals_operational_universe_member_alias",
     }
 )
-QUALIFIED_FEATURES = (
-    "identity_only",
-    "native_activation",
-    "native_postflight",
-    "ordinary_rollback",
-    "preparation_recovery",
-    "activation_recovery",
-    "stale_authority_rejection",
-    "economic_input_equivalence",
-    "financial_validator_unchanged",
-)
 
 
 def code_binding():
     files = [
         Path(__file__),
         Path(journal.__file__),
+        Path(native.__file__),
+        Path(activation.__file__),
+        Path(phase10b.__file__),
+        Path(persistence.__file__),
+        selection.ROOT / "rawcandle/fundamentals/relative_valuation/source.py",
         Path(__file__).with_name("snapshot_environment.py"),
         Path(__file__).with_name("source_bundle.py"),
         selection.ROOT / "rawcandle/fundamentals/generations.py",
@@ -83,43 +77,6 @@ def approval_fingerprint(decisions, reference):
             reference=reference,
             decisions=sorted(decisions, key=lambda d: d["company_id"]),
         )
-    )
-
-
-def _qualification(env, run_id, expected_code, expected_approval):
-    path = core._trusted(env.runs / run_id / "result.json", env.root)
-    result = core._read(path)
-    core._verify(result)
-    if (
-        result.get("contract") != CONTRACT
-        or result.get("mode") != "DISPOSABLE_ACCEPTANCE"
-        or result.get("outcome") != "PASSED"
-        or result.get("code_binding") != expected_code
-        or result.get("approval_fingerprint") != expected_approval
-        or not all(
-            result.get("features", {}).get(k) is True for k in QUALIFIED_FEATURES
-        )
-        or not result.get("tests_evidence")
-    ):
-        raise ValueError("UNIVERSE_RECONCILIATION_MATCHING_ACCEPTANCE_REQUIRED")
-    if env.is_live:
-        head = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=env.root, text=True
-        ).strip()
-        if result.get("source_commit") != head:
-            raise ValueError("UNIVERSE_RECONCILIATION_TESTED_COMMIT_REQUIRED")
-        if result.get("native_source_binding") != core._code_binding():
-            raise ValueError("UNIVERSE_RECONCILIATION_NATIVE_CODE_DRIFT")
-        for name, expected in expected_code.items():
-            committed = subprocess.check_output(
-                ["git", "show", head + ":" + name], cwd=env.root
-            )
-            if hashlib.sha256(committed).hexdigest() != expected:
-                raise ValueError("UNIVERSE_RECONCILIATION_UNCOMMITTED_CODE")
-    return dict(
-        run_id=run_id,
-        fingerprint=result["fingerprint"],
-        source_commit=result.get("source_commit"),
     )
 
 
@@ -300,8 +257,8 @@ def run_reconciliation(
     expected_code,
     expected_old,
     expected_universe,
-    qualification_run_id,
     confirmation,
+    confirm_candidate=None,
     production_intent=False,
     stop_after="candidate",
     now=None,
@@ -310,7 +267,7 @@ def run_reconciliation(
 ):
     """Qualify/conditionally install one exact identity-only native generation.
 
-    Existing COPY Test evidence and explicit production intent are both required.
+    Verified candidate equality and explicit production intent are required.
     It never creates a live UPDATE, fetches evidence or publishes financial changes.
     """
     if type(env) is not SnapshotEnvironment or env.is_live != (env.copy_owner is None):
@@ -334,9 +291,6 @@ def run_reconciliation(
         raise ValueError("UNIVERSE_RECONCILIATION_UNAPPROVED_SELECTIONS")
     if expected_code != code_binding():
         raise ValueError("UNIVERSE_RECONCILIATION_TESTED_CODE_DRIFT")
-    qualification = _qualification(
-        env, qualification_run_id, expected_code, expected_approval
-    )
     clock = now or (lambda: datetime.now(timezone.utc))
     run_id = (
         stable_run_id(
@@ -364,7 +318,6 @@ def run_reconciliation(
         run_id=run_id,
         outcome="BLOCKED",
         started_at_utc=utc_now(),
-        qualification=qualification,
         approval_fingerprint=expected_approval,
         financial_update_publication=False,
         financial_watermark_advanced=False,
@@ -426,6 +379,7 @@ def run_reconciliation(
                 sources, evidence = env.prepare_sources(
                     paths, lane, paths.canonical_db, parameters["as_of_date"]
                 )
+                staged_market_sha = journal.sha256_file(Path(sources["market"]))
                 result["source_dependencies"] = semantic_source_binding(evidence)
                 writer.write_json("source_dependencies.json", evidence)
                 validation_sources = {**paths.as_dict(), **sources}
@@ -514,7 +468,7 @@ def run_reconciliation(
                         raise RuntimeError("UNIVERSE_RECONCILIATION_STALE_AUTHORITY")
                     result["coordination"] = _nightly_coordination(env, clock())
                     backups = native._verified_backups(
-                        paths, backups_dir, immutable_generation=True
+                        paths, backups_dir, immutable_generation=True, retain_old=True
                     )
                     native._validate_generation_backup_binding(current, backups)
                     roles = native._candidate_manifest(candidate_roles, backups)
@@ -525,12 +479,32 @@ def run_reconciliation(
                         project_root=env.project,
                         source=CONTRACT,
                     )
+                    result["prepared_generation"] = prepared
+                    # One exact-candidate confirmation, not a test receipt. The
+                    # caller receives only verified B/A and current authority.
+                    from copy import deepcopy
+                    binding = dict(operation_id=run_id, candidate=prepared['manifest'],
+                        old=expected_old, universe=result['selected_universe'],
+                        approval=expected_approval, authority=authority,
+                        dependencies=result['source_dependencies'])
+                    confirmed = confirm_candidate(deepcopy(binding)) if callable(confirm_candidate) else None
+                    if confirmed != binding:
+                        raise PermissionError("UNIVERSE_RECONCILIATION_EXACT_CANDIDATE_CONFIRMATION_REQUIRED")
+                    if _authority(env, paths) != authority:
+                        raise RuntimeError("UNIVERSE_RECONCILIATION_STALE_AUTHORITY")
+                    for role, path in prepared['roles'].items():
+                        if journal.sha256_file(Path(path)) != prepared['manifest']['role_verification'][role]['sha256']:
+                            raise RuntimeError("UNIVERSE_RECONCILIATION_CONFIRMED_CANDIDATE_CHANGED")
+                    if journal.sha256_file(Path(sources["market"])) != staged_market_sha:
+                        raise RuntimeError("UNIVERSE_RECONCILIATION_SOURCE_DRIFT")
+                    result["coordination"] = _nightly_coordination(env, clock())
+                    result['activation_confirmation'] = binding
                     intent = journal.prepare_journal(
                         path=env.journal,
                         operation_type=CONTRACT,
                         run_id=run_id,
                         preview_run_id=None,
-                        test_run_id=qualification_run_id,
+                        test_run_id=None,
                         refresh_set_fingerprint=plan["fingerprint"],
                         old_source_watermark=rules.resolve_refresh_state(
                             paths.provider_db
@@ -552,8 +526,8 @@ def run_reconciliation(
                             contract=CONTRACT,
                             approval_fingerprint=expected_approval,
                             economic_change=False,
-                            qualification=qualification,
-                            accepted_analysis_reuse=dict(
+                            activation_confirmation=binding,
+                                                accepted_analysis_reuse=dict(
                                 contract="ACCEPTED_OLD_IDENTITY_ONLY_REUSE_V1",
                                 old_generation=current.generation_id,
                                 analysis_sha256=current.manifest["role_verification"][
