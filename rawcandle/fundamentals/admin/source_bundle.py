@@ -12,9 +12,10 @@ import os
 import shutil
 import sqlite3
 import stat
+import tempfile
 import time
 import uuid
-from contextlib import contextmanager, nullcontext
+from contextlib import closing, contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -95,8 +96,8 @@ MARKET_READ_CLOSURE = (
 TAXONOMY_READ_CLOSURE = (
     SourceReadDependency(
         "operating_income_v2.taxonomy_source.load_active_dc_memberships",
-        ("ec_taxonomy_version", "ec_ecosystem", "ec_entity", "ec_membership"),
-        "active dc_ecosystem version, semantic fingerprint, and canonical ticker mapping",
+        ("ec_taxonomy_version", "ec_ecosystem", "ec_entity", "ec_membership", "ec_entity_alias"),
+        "active dc_ecosystem version, semantic fingerprint, canonical mapping and optional aliases",
     ),
     SourceReadDependency(
         "operating_income_v2.peer_source_context._taxonomy_source",
@@ -109,6 +110,103 @@ TAXONOMY_READ_CLOSURE = (
         "active version source-state evidence and active membership presentation",
     ),
 )
+
+# Keep the complete graph, including other ecosystems and inactive versions:
+# peer/snapshot readers are not restricted to the active Datacenter version.
+# Aliases are optional in older sources but consumed by taxonomy._active_state.
+TAXONOMY_COPY_TABLES = (
+    "ec_ecosystem", "ec_taxonomy_version", "ec_entity", "ec_membership",
+    "ec_entity_alias",
+)
+
+
+def prepare_disposable_taxonomy_source(
+    *, taxonomy_db: Path, canonical_db: Path, destination: Path, operation_id: str,
+) -> dict[str, Any]:
+    """Extract the fixed Fundamentals taxonomy closure, never the research DB.
+
+    The caller must own the disposable destination. Native writer exclusion and
+    a pinned SQLite read transaction protect schema, rows and semantic checks.
+    Publication/rollback roles and live direct-read behavior are unchanged.
+    """
+    from . import taxonomy as native_taxonomy
+
+    taxonomy_db = taxonomy_db.absolute()
+    destination = destination.absolute()
+    if destination.exists() or destination.is_symlink():
+        raise SourceBundleError("TAXONOMY_COPY_DESTINATION_EXISTS")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".taxonomy-", suffix=".db", dir=destination.parent)
+    os.close(fd)
+    temporary = Path(name)
+    started = time.monotonic()
+    counts = {}
+    try:
+        with protected_direct_taxonomy_source(
+            taxonomy_db, canonical_db, operation_id=operation_id,
+            require_checkpointed=True,
+        ) as binding:
+            before = native_taxonomy._active_state(
+                native_taxonomy.TaxonomyPaths(taxonomy_db=taxonomy_db), "dc_ecosystem"
+            )
+            with _readonly(taxonomy_db) as source:
+                tables = {
+                    row["name"]: row["sql"] for row in source.execute(
+                        "SELECT name,sql FROM sqlite_schema WHERE type='table'"
+                    ) if row["name"] in TAXONOMY_COPY_TABLES
+                }
+                if not set(TAXONOMY_COPY_TABLES[:4]).issubset(tables):
+                    raise SourceBundleError("TAXONOMY_COPY_REQUIRED_TABLE_MISSING")
+                with closing(sqlite3.connect(temporary)) as target, target:
+                    for table, schema in tables.items():
+                        # A new external FK requires an explicit closure review.
+                        if any(row["table"] not in tables for row in source.execute(
+                            f'PRAGMA foreign_key_list("{table}")'
+                        )):
+                            raise SourceBundleError("TAXONOMY_COPY_EXTERNAL_FOREIGN_KEY")
+                        columns = source.execute(f'PRAGMA table_xinfo("{table}")').fetchall()
+                        if any(row["hidden"] for row in columns):
+                            raise SourceBundleError("TAXONOMY_COPY_UNSUPPORTED_COLUMNS")
+                        target.execute(schema)
+                        rows = source.execute(f'SELECT * FROM "{table}" ORDER BY rowid').fetchall()
+                        target.executemany(
+                            f'INSERT INTO "{table}" VALUES ({",".join("?" for _ in columns)})',
+                            [tuple(row) for row in rows],
+                        )
+                        counts[table] = len(rows)
+                        if target.execute(f'SELECT * FROM "{table}" ORDER BY rowid').fetchall() != [tuple(row) for row in rows]:
+                            raise SourceBundleError("TAXONOMY_COPY_ROW_MISMATCH")
+                    for row in source.execute(
+                        "SELECT tbl_name,sql FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL"
+                    ):
+                        if row["tbl_name"] in tables:
+                            target.execute(row["sql"])
+                    for pragma in ("user_version", "application_id"):
+                        target.execute(f"PRAGMA {pragma}={int(source.execute('PRAGMA ' + pragma).fetchone()[0])}")
+                    if target.execute("PRAGMA quick_check").fetchone()[0] != "ok" or target.execute(
+                        "PRAGMA foreign_key_check"
+                    ).fetchall():
+                        raise SourceBundleError("TAXONOMY_COPY_INTEGRITY_FAILED")
+            after = native_taxonomy._active_state(
+                native_taxonomy.TaxonomyPaths(taxonomy_db=temporary), "dc_ecosystem"
+            )
+            if before != after or load_active_dc_memberships(
+                taxonomy_db, canonical_db
+            ) != load_active_dc_memberships(temporary, canonical_db):
+                raise SourceBundleError("TAXONOMY_COPY_SEMANTIC_MISMATCH")
+        # Publish only after the native context's final physical drift check.
+        # link refuses an existing destination; no overwrite/partial source.
+        os.link(temporary, destination)
+        return {
+            "source_bytes": taxonomy_db.stat().st_size,
+            "compact_bytes": destination.stat().st_size,
+            "preparation_seconds": time.monotonic() - started,
+            "tables": counts, "version": binding.version,
+            "semantic_fingerprint": binding.semantic_fingerprint,
+            "source_state_fingerprint": before["source_state_fingerprint"],
+        }
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class SourceBundleError(RuntimeError):

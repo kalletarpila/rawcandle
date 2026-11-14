@@ -130,6 +130,22 @@ class SnapshotEnvironment:
                 core._trusted(p, self.root)
         return self
 
+    def prepare_taxonomy_from(self, source):
+        """Prepare a new owned-copy dependency without copying analysis.db."""
+        self.check()
+        if not self.copy_owner or type(source) is not SnapshotEnvironment:
+            raise PermissionError("SNAPSHOT_OWNED_TAXONOMY_COPY_REQUIRED")
+        source.check()
+        destination = self.project / "data/analysis.db"
+        core._trusted(destination, self.root)
+        paths = source.paths()
+        return sources.prepare_disposable_taxonomy_source(
+            taxonomy_db=paths.taxonomy_db,
+            canonical_db=paths.canonical_db,
+            destination=destination,
+            operation_id=f"{self.identity}:taxonomy-copy",
+        )
+
     def paths(self):
         self.check()
         paths = resolved_production_paths(self.project)

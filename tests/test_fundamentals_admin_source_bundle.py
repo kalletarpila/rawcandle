@@ -226,7 +226,7 @@ def test_read_closure_is_explicit_and_taxonomy_is_not_packaged() -> None:
         "ticker_meta", "osakedata", "splits_data"
     }
     assert {table for item in TAXONOMY_READ_CLOSURE for table in item.tables} == {
-        "ec_taxonomy_version", "ec_ecosystem", "ec_entity", "ec_membership"
+        "ec_taxonomy_version", "ec_ecosystem", "ec_entity", "ec_membership", "ec_entity_alias"
     }
 
 
