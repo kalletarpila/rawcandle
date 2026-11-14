@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 from uuid import uuid4
 
 from rawcandle.io_atomic import write_text_atomic
@@ -38,7 +39,7 @@ from . import refresh_production as native
 from . import publication_journal as journals
 from .artifacts import ROOT, AdminRunWriter, sha256_file
 from .batch_add_tickers import BatchAddTickerPaths
-from .contracts import AdminOperationType, fingerprint
+from .contracts import AdminOperationType, canonical_json, fingerprint
 from .production_transaction import production_lock
 
 CONTRACT = "FUNDAMENTALS_SIMPLIFICATION_V1"
@@ -282,6 +283,110 @@ def _operation(env, validation_id):
     return _trusted(env.runs / validation_id, env.root)
 
 
+def _compact_decisions(decisions):
+    """Store partitioned detail once; preserve ordered changes by local references."""
+    positions = {}
+    for partition in ("safe", "held", "global"):
+        for index, item in enumerate(decisions[partition]):
+            change = item if partition == "safe" else item["change"]
+            ticker = change["ticker"]
+            if ticker in positions:
+                raise Phase2Error("PHASE2_DUPLICATE_DECISION_TICKER")
+            positions[ticker] = (partition, index, change)
+    changes = []
+    for change in decisions["changes"]:
+        target = positions.get(change["ticker"])
+        if target is None:
+            changes.append(change)  # Non-partitioned NO_CHANGE detail is retained.
+        else:
+            partition, index, detail = target
+            if change != detail:
+                raise Phase2Error("PHASE2_DECISION_REFERENCE_MISMATCH")
+            changes.append({"ticker": change["ticker"], "partition": partition, "index": index})
+    return {**decisions, "changes": changes, "change_references": 1}
+
+
+def _read_decisions(path):
+    value = _read(path)
+    if "change_references" not in value:
+        return value  # Existing hash-bound receipts remain readable.
+    if value.pop("change_references") != 1:
+        raise Phase2Error("PHASE2_DECISION_REFERENCES_INVALID")
+    changes = []
+    for item in value["changes"]:
+        if "partition" not in item:
+            changes.append(item)
+            continue
+        try:
+            if (set(item) != {"ticker", "partition", "index"}
+                    or item["partition"] not in {"safe", "held", "global"}
+                    or type(item["index"]) is not int or item["index"] < 0):
+                raise ValueError("invalid reference")
+            target = value[item["partition"]][item["index"]]
+            change = target if item["partition"] == "safe" else target["change"]
+            if change["ticker"] != item["ticker"]:
+                raise ValueError("wrong ticker")
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise Phase2Error("PHASE2_DECISION_REFERENCES_INVALID") from exc
+        changes.append(change)
+    value["changes"] = changes
+    return value
+
+
+def _write_decisions(writer, decisions):
+    """Atomically emit one detail at a time, without a whole-tree redacted copy/string."""
+    compact = _compact_decisions(decisions)
+    destination = writer.run_dir / "decisions.json"
+    fd, temporary = tempfile.mkstemp(prefix=".decisions.", suffix=".tmp", dir=writer.run_dir)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("{")
+            for position, key in enumerate(sorted(compact)):
+                if position:
+                    handle.write(",")
+                handle.write(json.dumps(key) + ":")
+                value = compact[key]
+                if isinstance(value, (list, dict)):
+                    mapping = isinstance(value, dict)
+                    handle.write("{" if mapping else "[")
+                    entries = sorted(value.items()) if mapping else enumerate(value)
+                    for index, (name, item) in enumerate(entries):
+                        if index:
+                            handle.write(",")
+                        if mapping:
+                            handle.write(json.dumps(name) + ":")
+                        json.dump(writer._safe(item), handle, sort_keys=True,
+                                  separators=(",", ":"), allow_nan=False, default=str)
+                    handle.write("}" if mapping else "]")
+                else:
+                    json.dump(value, handle, allow_nan=False)
+            handle.write("}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        journals.fsync_directory(destination.parent)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _decision_fingerprint(decisions):
+    # Exactly the existing canonical fingerprint, bounded to one partition record.
+    digest = hashlib.sha256()
+    digest.update(b"{")
+    for position, key in enumerate(("global", "held", "safe")):
+        if position:
+            digest.update(b",")
+        digest.update((json.dumps(key) + ":[").encode())
+        for index, item in enumerate(decisions[key]):
+            if index:
+                digest.update(b",")
+            digest.update(canonical_json(item).encode())
+        digest.update(b"]")
+    digest.update(b"}")
+    return digest.hexdigest()
+
+
 def _load(env, validation_id, expected=None):
     env.check()
     if not isinstance(expected, str) or len(expected) != 64:
@@ -297,7 +402,7 @@ def _load(env, validation_id, expected=None):
     child = _trusted(directory / "decisions.json", env.root)
     if sha256_file(child) != receipt["decisions_sha256"]:
         raise Phase2Error("PHASE2_DECISIONS_TAMPERED")
-    return directory, receipt, _read(child)
+    return directory, receipt, _read_decisions(child)
 
 
 def _assert_inputs(env, receipt, paths, now):
@@ -307,11 +412,8 @@ def _assert_inputs(env, receipt, paths, now):
         receipt["snapshot_operation_id"],
         root=env.runs,
         expected_reference=receipt["snapshot_reference"],
-    )
-    snapshot.validate_preflight(
         old_authority=receipt["inputs"]["old"],
         now=now,
-        expected_reference=receipt["snapshot_reference"],
     )
     if hasattr(env, "require_update_snapshot"):
         env.require_update_snapshot(snapshot)
@@ -545,8 +647,8 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
             universe = refresh_universe.require_binding(paths, env.request())
         if hasattr(env, "validate_baseline"):
             env.validate_baseline(paths)
-        snapshot = acquisition.open_snapshot(snapshot_operation_id, root=env.runs)
-        snapshot.validate_preflight(
+        snapshot = acquisition.open_snapshot(
+            snapshot_operation_id, root=env.runs,
             old_authority=acquisition.pin_old_authority(env.project), now=now()
         )
         if hasattr(env, "require_update_snapshot"):
@@ -665,7 +767,10 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
                 snapshot._run.request["source_day"],
                 env.queue,
             )
-            history = snapshot.compare_source_history(ticker, project_root=env.project)
+            snapshot._source_history_authority(env.project)
+            history = snapshot._compare_loaded_source_history(
+                ticker, current, source, diagnostic=diagnostic
+            )
             if (
                 history["ticker_local_hold_required"]
                 and not any(
@@ -724,7 +829,7 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
             "plans": plans,
             "old_retention": retained_old,
         }
-        writer.write_json("decisions.json", decisions)
+        _write_decisions(writer, decisions)
         inputs = _inputs(env, paths)
         receipt = _seal(
             {
@@ -744,9 +849,7 @@ def validate_snapshot(env, snapshot_operation_id, *, as_of_date, now=_now):
                 "inputs": inputs,
                 "status": status,
                 "production_authorized": False,
-                "decision_fingerprint": fingerprint(
-                    {"safe": safe, "held": held, "global": global_items}
-                ),
+                "decision_fingerprint": _decision_fingerprint(decisions),
                 "decisions_sha256": sha256_file(writer.run_dir / "decisions.json"),
                 "counts": {
                     "safe": len(safe),
@@ -1279,7 +1382,7 @@ def finalize_disposable_reviews(env, validation_id):
         if sha256_file(build_path) != receipt["build_sha256"]:
             raise Phase2Error("PHASE2_BUILD_TAMPERED")
         return _finalize_reviews(
-            env, directory, receipt, _read(child), _read(build_path)
+            env, directory, receipt, _read_decisions(child), _read(build_path)
         )
 
 

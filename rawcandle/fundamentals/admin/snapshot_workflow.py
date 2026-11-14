@@ -383,8 +383,8 @@ class SnapshotWorkflow:
                 message=fetched.get("reason", fetched["status"]),
             )
             return False
-        snapshot = acquisition.open_snapshot(fetch_id, root=env.runs)
-        snapshot.validate_preflight(
+        snapshot = acquisition.open_snapshot(
+            fetch_id, root=env.runs,
             old_authority=request["old_authority"], now=self.now()
         )
         env.require_update_snapshot(snapshot)
@@ -447,17 +447,15 @@ class SnapshotWorkflow:
                 result["outcome"] = "FETCH_SEALED"
                 return self._persist(result)
             env.update_inputs()
-            snapshot = acquisition.open_snapshot(
-                request["fetch_operation_id"], root=env.runs
-            )
-            snapshot.validate_preflight(
-                old_authority=acquisition.pin_old_authority(env.project), now=self.now()
-            )
-            env.require_update_snapshot(snapshot)
-            result["snapshot_source_age_hours"] = (
-                self.now()
-                - acquisition._time(snapshot.manifest["oldest_acquired_at_utc"])
-            ).total_seconds() / 3600
+            if result.get("validation_id"):
+                snapshot = acquisition.open_snapshot(
+                    request["fetch_operation_id"], root=env.runs,
+                    old_authority=acquisition.pin_old_authority(env.project), now=self.now()
+                )
+                env.require_update_snapshot(snapshot)
+                result["snapshot_source_age_hours"] = (
+                    self.now() - acquisition._time(snapshot.manifest["oldest_acquired_at_utc"])
+                ).total_seconds() / 3600
             if retry_local:
                 result.pop("validation_id", None)
                 result.pop("test_run_id", None)
@@ -474,6 +472,7 @@ class SnapshotWorkflow:
                 )
                 result["validation_id"] = receipt["validation_id"]
                 result.setdefault("local_attempts", []).append(receipt["validation_id"])
+                result["snapshot_source_age_hours"] = receipt["snapshot_source_age_seconds"] / 3600
             receipt = core._read(
                 core._operation(env, result["validation_id"])
                 / "validation_receipt.json"

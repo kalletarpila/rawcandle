@@ -1364,24 +1364,9 @@ class AcquisitionSnapshot:
                 "ticker_local_hold_required": True, "incoming_source_for_phase2_eligible": False,
                 "automatic_deletion_authorized": False, "publication_authorized": False,
                 "old_history_action": "PRESERVE_EXACT_OLD_UNLESS_SEPARATELY_AUTHORIZED"}
-        from .refresh_fundamentals import (
-            AGED_OUT_OF_SOURCE_WINDOW,
-            AMBIGUOUS_SOURCE_REMOVAL,
-            MINIMUM_QUARTER_BOUNDARY_SPAN,
-            _fiscal_quarter_index,
-            build_source_history_merge,
-            load_current_history,
-        )
+        from .refresh_fundamentals import load_current_history
 
-        # Phase entry/preflight owns full OLD role hashing. Per-ticker reads pin
-        # the native immutable manifest, avoiding a multi-GiB hash for each name.
-        binding = resolve_active_generation(Path(project_root), require_generation=True)
-        if (
-            binding.generation_id != self.manifest["old_authority"]["generation_id"]
-            or sha256_file(binding.manifest_path)
-            != self.manifest["old_authority"]["manifest_sha256"]
-        ):
-            raise SnapshotError("OLD_AUTHORITY_DRIFT")
+        binding = self._source_history_authority(project_root)
         slots = [slot for slot in self.iter_slots() if slot["ticker"] == ticker]
         if len(slots) != 2 or {s["dimension"] for s in slots} != {"ARQ", "MRQ"}:
             raise SnapshotError("TICKER_DIMENSION_SCOPE_INVALID")
@@ -1392,11 +1377,38 @@ class AcquisitionSnapshot:
             d: validate_complete_history(item["records"], ticker=ticker, dimension=d)
             for d, item in loaded.items()
         }
+        self._source_history_authority(project_root)
+        return self._compare_loaded_source_history(
+            ticker, current, source,
+            diagnostic=any(item["receipt"]["state"] != "COMPLETE_VERIFIED" for item in loaded.values()),
+        )
+
+    def _source_history_authority(self, project_root):
+        # Phase entry/preflight owns full OLD role hashing. Per-ticker reads pin
+        # the native immutable manifest, avoiding a multi-GiB hash for each name.
+        binding = resolve_active_generation(Path(project_root), require_generation=True)
         if (
-            sha256_file(binding.manifest_path)
+            binding.generation_id != self.manifest["old_authority"]["generation_id"]
+            or sha256_file(binding.manifest_path)
             != self.manifest["old_authority"]["manifest_sha256"]
         ):
             raise SnapshotError("OLD_AUTHORITY_DRIFT")
+        return binding
+
+    def _compare_loaded_source_history(self, ticker, current, source, *, diagnostic):
+        """Same source-window policy, using this ticker's verified local inputs.
+
+        Financial/as-of and acquisition-window merges remain separate policies.
+        Callers retain the phase/OLD and source-use integrity checks.
+        """
+        from .refresh_fundamentals import (
+            AGED_OUT_OF_SOURCE_WINDOW,
+            AMBIGUOUS_SOURCE_REMOVAL,
+            MINIMUM_QUARTER_BOUNDARY_SPAN,
+            _fiscal_quarter_index,
+            build_source_history_merge,
+        )
+
         result = {
             "ticker": ticker,
             "old_authority": self.manifest["old_authority"],
@@ -1406,10 +1418,7 @@ class AcquisitionSnapshot:
             "snapshot_reference": self.reference,
         }
         if (
-            any(
-                item["receipt"]["state"] != "COMPLETE_VERIFIED"
-                for item in loaded.values()
-            )
+            diagnostic
             or any(h.status != "COMPLETE" for h in source.values())
             or any(
                 c.get("invalid_rows") or c.get("legacy_source_version_ambiguities")
@@ -1498,7 +1507,14 @@ class AcquisitionSnapshot:
         }
 
     def validate_preflight(self, *, old_authority, now, expected_reference=None):
-        """Acquisition eligibility only; Phase 2 must still validate finance/intent."""
+        """Independent boundary: reverify content, then return eligibility only."""
+        result = self._preflight(old_authority=old_authority, now=now,
+                                 expected_reference=expected_reference)
+        _verify_snapshot(self._run, self.manifest, self.reference)
+        return result
+
+    def _preflight(self, *, old_authority, now, expected_reference=None):
+        """Cheap checks used within the same freshly verified open."""
         if expected_reference is not None and self.reference != expected_reference:
             raise SnapshotError("SNAPSHOT_REFERENCE_MISMATCH")
         if old_authority != self.manifest["old_authority"]:
@@ -1510,7 +1526,6 @@ class AcquisitionSnapshot:
             ],
             now,
         )
-        _verify_snapshot(self._run, self.manifest, self.reference)
         return {
             "snapshot_reference": self.reference,
             "source_age_seconds": age,
@@ -1574,8 +1589,12 @@ def _verify_snapshot(run, manifest, reference):
         raise SnapshotError("SEALED_COVERAGE_MISMATCH")
 
 
-def open_snapshot(operation_id, *, root=ADMIN_RUN_ROOT, expected_reference=None):
-    """Audit reads remain possible after expiry. Use validate_preflight for age."""
+def open_snapshot(operation_id, *, root=ADMIN_RUN_ROOT, expected_reference=None,
+                  old_authority=None, now=None):
+    """Verify once on open; optional OLD/time checks combine phase preflight.
+
+    Audit reads omit OLD/time. A later standalone preflight rechecks all bytes.
+    """
     run = _Run(root, operation_id)
     seal = _read(run.path("fetch/seal.json"))
     if seal.get("operation_id") != operation_id:
@@ -1585,4 +1604,10 @@ def open_snapshot(operation_id, *, root=ADMIN_RUN_ROOT, expected_reference=None)
         raise SnapshotError("SNAPSHOT_REFERENCE_MISMATCH")
     manifest = _read(run.verify(reference, "MANIFEST"))
     _verify_snapshot(run, manifest, reference)
-    return AcquisitionSnapshot(run, manifest, reference)
+    snapshot = AcquisitionSnapshot(run, manifest, reference)
+    if old_authority is not None or now is not None:
+        if old_authority is None or now is None:
+            raise SnapshotError("SNAPSHOT_PREFLIGHT_ARGUMENTS_REQUIRED")
+        snapshot._preflight(old_authority=old_authority, now=now,
+                            expected_reference=expected_reference)
+    return snapshot
