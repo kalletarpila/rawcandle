@@ -173,6 +173,7 @@ class SnapshotWorkflow:
             f"Original OLD: `{request['old_authority']['generation_id']}`; as-of: {request['as_of_date']}; freshness limit: 168 hours, original capture timestamps.",
             f"Actual phase events: `{result.get('phase_events',[])}`.",
             f"SEC publication authority: `{json.dumps(result.get('sec_publication',{}),sort_keys=True)}`.",
+            f"SEC acquisition progress: `{json.dumps(result.get('sec_acquisition',{}),sort_keys=True)}`.",
             f"Decisions: `{json.dumps(result.get('source_summary',{}),sort_keys=True)}`.",
             f"Refresh scope: `{json.dumps(refresh_scope,sort_keys=True)}`; source-origin exclusions and reasons: discovery.json.",
             f"Acquisition accounting (quarantine is not complete history): `{json.dumps(acquisition_summary,sort_keys=True)}`.",
@@ -389,14 +390,22 @@ class SnapshotWorkflow:
         )
         env.require_update_snapshot(snapshot)
         result["snapshot_reference"] = snapshot.reference
-        sec_snapshot.capture(
-            directory / "sec",
-            operation_id=env.operation_id,
-            snapshot_reference=snapshot.reference,
-            plan=sec_plan(env, snapshot, request["as_of_date"]),
-            fetch_bytes=self.sec_fetch_bytes,
-            now=self.now,
-        )
+        try:
+            sec = sec_snapshot.capture(
+                directory / "sec",
+                operation_id=env.operation_id,
+                snapshot_reference=snapshot.reference,
+                plan=sec_plan(env, snapshot, request["as_of_date"]),
+                fetch_bytes=self.sec_fetch_bytes,
+                now=self.now,
+            )
+        except sec_snapshot.SharedCaptureError as error:
+            result["sec_acquisition"] = error.progress
+            raise
+        result["sec_acquisition"] = sec_snapshot.capture_progress(sec, now=self.now())
+        if not result["sec_acquisition"]["can_advance_to_validate"]:
+            result.update(outcome="FETCH_PAUSED", message="SEC acquisition has pending or retry-wait scopes; resume this UPDATE.")
+            return False
         sealed = core._seal(
             {
                 "update_run_id": env.operation_id,

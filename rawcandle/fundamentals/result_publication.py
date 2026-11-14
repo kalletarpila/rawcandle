@@ -28,6 +28,7 @@ from rawcandle.fundamentals.schema.result_publication import (
 
 
 SEC_USER_AGENT = "RawCandle result-publication research admin@rawcandle.local"
+SEC_REQUEST_ATTEMPTS = 3
 SOURCE_RANK = {
     "ISSUER_EARNINGS_RELEASE": 4,
     "SEC_8K_ITEM_2_02": 3,
@@ -137,34 +138,41 @@ class SecClient:
         self.stats: Counter[str] = Counter()
         self._deadline = time.monotonic() + maximum_runtime_seconds if maximum_runtime_seconds is not None else None
 
+    def _before_request(self, url: str) -> None:
+        """Capture adapters may durably account for an actual request start."""
+
+    def _fetch_bytes(self, url: str, timeout: float) -> bytes:
+        request = Request(url, headers={"Accept": "application/json,text/html", "User-Agent": SEC_USER_AGENT})
+        with urlopen(request, timeout=timeout) as response:
+            return response.read()
+
     def _request(self, url: str) -> bytes:
         if url in self._cache:
             self.stats["cache_hits"] += 1
             return self._cache[url]
         request_kind = "metadata_requests" if "data.sec.gov/submissions/" in url else "document_requests"
-        for attempt in range(3):
+        for attempt in range(SEC_REQUEST_ATTEMPTS):
             if self._deadline is not None and time.monotonic() >= self._deadline:
                 self.stats["budget_exhausted"] += 1
                 raise TimeoutError("SEC_CANDIDATE_TIME_BUDGET_EXHAUSTED")
             delay = self._minimum_interval_seconds - (time.monotonic() - self._last_request)
             if delay > 0:
                 time.sleep(delay)
+            self._before_request(url)
             self.stats["network_requests"] += 1
             self.stats[request_kind] += 1
             try:
-                request = Request(url, headers={"Accept": "application/json,text/html", "User-Agent": SEC_USER_AGENT})
                 timeout = min(30, max(0.1, self._deadline-time.monotonic())) if self._deadline is not None else 30
-                with urlopen(request, timeout=timeout) as response:
-                    payload = response.read()
+                payload = self._fetch_bytes(url, timeout)
                 self._cache[url] = payload
                 return payload
             except HTTPError as exc:
                 self.stats["rate_limit_responses" if exc.code == 429 else "http_failures"] += 1
-                if exc.code not in {429, 500, 502, 503, 504} or attempt == 2:
+                if exc.code not in {429, 500, 502, 503, 504} or attempt == SEC_REQUEST_ATTEMPTS - 1:
                     raise
             except (URLError, TimeoutError):
                 self.stats["transient_failures"] += 1
-                if attempt == 2:
+                if attempt == SEC_REQUEST_ATTEMPTS - 1:
                     raise
             finally:
                 self._last_request = time.monotonic()

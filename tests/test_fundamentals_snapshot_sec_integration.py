@@ -64,7 +64,7 @@ def test_captured_sec_evidence_binds_actual_new_quarter_authority(
     workflow.sec_fetch_bytes = raw
     result = workflow.start(stop_after="build")
     assert result["outcome"] == "CANDIDATE_READY", result
-    assert len(sec_calls) == 2
+    assert len(sec_calls) == (4 if missing else 2)  # Native three HTTP attempts also apply to offline transport.
 
     def forbidden(url):
         raise AssertionError("SEC network after FETCH")
@@ -133,7 +133,9 @@ def test_sec_interrupted_capture_reuses_original_bytes_and_timestamps(tmp_path):
             now=lambda: fixtures.NOW,
         )
     pending = json.loads((tmp_path / "sec/pending.json").read_text())
-    original = pending["requests"].copy()
+    original = {url: record for url, record in pending["requests"].items() if "sha256" in record}
+    assert any(record.get("attempt_count") == 1 and "sha256" not in record
+               for record in pending["requests"].values())
     resumed = []
 
     def remaining(url):
@@ -361,7 +363,7 @@ def test_local_only_noop_never_runs_ownership_publication(
     assert len(owned) == 1
 
 
-def test_sec_capture_resume_cannot_reset_native_http_budget(tmp_path):
+def test_sec_capture_resume_uses_fresh_bounded_slice(tmp_path):
     plan = [
         {
             "company_id": 1,
@@ -390,10 +392,11 @@ def test_sec_capture_resume_cannot_reset_native_http_budget(tmp_path):
         operation_id="budget-operation",
         snapshot_reference={"sha256": "source"},
         plan=plan,
-        fetch_bytes=lambda url: attempts.append(url),
+        fetch_bytes=lambda url: (attempts.append(url) or b'{"filings":{"recent":{"form":[]}}}'),
         now=lambda: fixtures.NOW + timedelta(seconds=301),
     )
-    assert not attempts
+    assert len(attempts) == 1
     assert result["network_budget_seconds"] == 300
-    assert result["network"]["budget_exhausted"] == 1
-    assert result["outcomes"][0]["error"] == "TimeoutError"
+    assert result["network"]["network_requests"] == 2  # Includes the interrupted attempt.
+    assert result["outcomes"][0]["status"] == "SOURCE_UNRESOLVED"
+    assert sec_snapshot.capture_progress(result)["can_advance_to_validate"]
