@@ -15,6 +15,7 @@ from .batch_add_tickers import BatchAddTickerPaths
 from .contracts import fingerprint
 from .production_transaction import production_lock, _no_sidecars
 from .refresh_review_queue import queue_path_for_run_root
+from rawcandle.datacenter_taxonomy_operation_log import current_taxonomy_operation_lock
 from rawcandle.fundamentals.generations import (
     resolve_active_generation,
     resolved_production_paths,
@@ -63,6 +64,7 @@ class SnapshotEnvironment:
         )
         self.reentrant = scheduler_managed_locks
         self.operation_id = None
+        self._stack = None
         self.check()
 
     def config(self):
@@ -150,8 +152,19 @@ class SnapshotEnvironment:
             with ExitStack() as stack:
                 self._stack = stack
                 try:
-                    for p in self.paths().as_dict().values():
-                        _no_sidecars(p)
+                    paths = self.paths()
+                    for role, p in paths.as_dict().items():
+                        if role != "taxonomy":
+                            _no_sidecars(p)
+                    # Admin -> scheduler -> taxonomy -> SQLite. Reserve now;
+                    # bind current semantic dependencies at prepare_sources.
+                    stack.enter_context(sources.protected_direct_taxonomy_source(
+                        paths.taxonomy_db,
+                        paths.canonical_db,
+                        operation_id=(self.operation_id or "snapshot-preflight") + ":taxonomy",
+                        require_checkpointed=True,
+                        bind_dependency=False,
+                    ))
                     yield
                 finally:
                     self._stack = None
@@ -260,14 +273,15 @@ class SnapshotEnvironment:
                     raise ValueError("UPDATE_SEC_SCOPE_NOT_CAPTURED")
 
     def _taxonomy(self, canonical):
-        # This is the same native source lock as legacy Production, held until
-        # the surrounding financial writer context ends (also through postflight).
-        return self._stack.enter_context(
-            sources.protected_direct_taxonomy_source(
-                self.paths().taxonomy_db,
-                canonical,
-                operation_id=self.operation_id + ":taxonomy",
-            )
+        if self._stack is None:
+            raise PermissionError("UPDATE_TAXONOMY_WRITER_SCOPE_REQUIRED")
+        # writer_lock already holds protected_direct_taxonomy_source through
+        # postflight. Reuse its native owner instead of acquiring it a second time.
+        return sources.bind_taxonomy_source(
+            self.paths().taxonomy_db,
+            canonical,
+            mode=sources.TaxonomySourceMode.DIRECT_LOCKED_READ,
+            operation_lock=current_taxonomy_operation_lock(),
         )
 
     def prepare_sources(self, paths, lane, canonical, as_of):

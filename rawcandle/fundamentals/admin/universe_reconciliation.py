@@ -67,6 +67,8 @@ def code_binding():
     files = [
         Path(__file__),
         Path(journal.__file__),
+        Path(__file__).with_name("snapshot_environment.py"),
+        Path(__file__).with_name("source_bundle.py"),
         selection.ROOT / "rawcandle/fundamentals/generations.py",
     ]
     return {

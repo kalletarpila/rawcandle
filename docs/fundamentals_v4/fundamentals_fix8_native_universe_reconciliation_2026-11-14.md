@@ -1,5 +1,15 @@
 # FIX8 — native identity-only universe reconciliation
 
+Subsequent [FIX8A](fundamentals_phase3d_fix8a_taxonomy_sidecar_compatibility_2026-11-14.md)
+corrects the taxonomy-only sidecar compatibility boundary. Snapshot retains strict
+sidecar rejection for financial and market roles. Taxonomy now requires the native
+owner plus a pinned RO transaction and query-only SQLite writer reservation;
+only checkpointed/empty-WAL states pass and source identity remains protected for
+the consumer lifetime. The fresh read-only SQLite gate passed; overall readiness
+is conditional on a new native Test binding for the committed FIX8A code. No
+production reconciliation or UPDATE was authorized or executed by FIX8A. The
+original FIX8 incident/result below remains historical evidence.
+
 **Implementation and disposable acceptance: PASS. Production gate: BLOCKED by
 the native taxonomy SQLite sidecar guard. Phase 3E: NOT REACHED.** The implementation completes
 FIX7's missing adapter using the existing generation preparer, expected-OLD

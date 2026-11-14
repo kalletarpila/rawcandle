@@ -14,7 +14,7 @@ import sqlite3
 import stat
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -663,23 +663,112 @@ def bind_taxonomy_source(
 
 
 @contextmanager
+def _checkpointed_taxonomy_read(taxonomy_db: Path) -> Iterator[None]:
+    """Protect a checkpointed source with native SQLite connections and locks.
+
+    Snapshot's physical dependency identity describes the main file. Nonempty
+    WAL is therefore deliberately unsupported here, even when valid. Readers
+    may update transient SHM lock metadata; no SHM content is financial authority.
+    """
+    def state():
+        if not taxonomy_db.is_absolute() or taxonomy_db.is_symlink():
+            raise SourceBundleError("TAXONOMY_SQLITE_SOURCE_NOT_REGULAR")
+        main = taxonomy_db.stat()
+        if not stat.S_ISREG(main.st_mode):
+            raise SourceBundleError("TAXONOMY_SQLITE_SOURCE_NOT_REGULAR")
+        sidecars = {}
+        for suffix in ("-wal", "-shm", "-journal"):
+            path = Path(str(taxonomy_db) + suffix)
+            if path.is_symlink():
+                raise SourceBundleError("TAXONOMY_SQLITE_SIDECAR_IDENTITY")
+            if not path.exists():
+                continue
+            info = path.stat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != main.st_uid
+                    or info.st_dev != main.st_dev or info.st_nlink != 1):
+                raise SourceBundleError("TAXONOMY_SQLITE_SIDECAR_IDENTITY")
+            if suffix == "-journal":
+                raise SourceBundleError("TAXONOMY_SQLITE_ROLLBACK_JOURNAL_PRESENT")
+            if suffix == "-wal" and info.st_size != 0:
+                raise SourceBundleError("TAXONOMY_SQLITE_NONEMPTY_WAL")
+            if suffix == "-shm" and (not info.st_size or info.st_size % 32768):
+                raise SourceBundleError("TAXONOMY_SQLITE_SHM_INVALID")
+            sidecars[suffix] = (info.st_dev, info.st_ino, info.st_uid, info.st_size)
+        if sidecars and set(sidecars) != {"-wal", "-shm"}:
+            raise SourceBundleError("TAXONOMY_SQLITE_SIDECAR_STATE_AMBIGUOUS")
+        return _file_identity(taxonomy_db), sidecars
+
+    before, _ = state()
+    # Keep an actual RO read transaction alive until AFTER the reservation
+    # connection closes. It prevents last-rw-close checkpointing, including a
+    # concurrent WAL commit just before acquisition that we must reject intact.
+    reader = sqlite3.connect(taxonomy_db.as_uri() + "?mode=ro", uri=True, timeout=0)
+    reservation = None
+    try:
+        reader.execute("PRAGMA query_only=ON")
+        reader.execute("BEGIN")
+        reader.execute("SELECT name FROM sqlite_schema LIMIT 1").fetchall()
+        mode = reader.execute("PRAGMA journal_mode").fetchone()[0]
+        acquired, sidecars = state()
+        if acquired != before:
+            raise SourceBundleError("TAXONOMY_SQLITE_SOURCE_DRIFT")
+        if sidecars and mode != "wal":
+            raise SourceBundleError("TAXONOMY_SQLITE_SIDECAR_STATE_AMBIGUOUS")
+        # mode=ro cannot reserve SQLite's writer slot. No database is created by
+        # mode=rw. No DML is executed: reserve, enforce query_only, then rollback.
+        reservation = sqlite3.connect(
+            taxonomy_db.as_uri() + "?mode=rw", uri=True, timeout=0
+        )
+        try:
+            reservation.execute("BEGIN IMMEDIATE")
+            reservation.execute("PRAGMA query_only=ON")
+        except sqlite3.Error as exc:
+            raise SourceBundleError("TAXONOMY_SQLITE_RESERVATION_FAILED:" + str(exc)) from exc
+        if state() != (acquired, sidecars):
+            raise SourceBundleError("TAXONOMY_SQLITE_SOURCE_DRIFT")
+        try:
+            yield
+        finally:
+            if state() != (acquired, sidecars):
+                raise SourceBundleError("TAXONOMY_SQLITE_SOURCE_DRIFT")
+    finally:
+        try:
+            if reservation is not None:
+                reservation.rollback()
+                reservation.close()
+        finally:
+            reader.rollback()
+            reader.close()
+
+
+@contextmanager
 def protected_direct_taxonomy_source(
     taxonomy_db: Path,
     canonical_db: Path,
     *,
     operation_id: str,
-) -> Iterator[TaxonomySourceBinding]:
+    require_checkpointed: bool = False,
+    bind_dependency: bool = True,
+) -> Iterator[TaxonomySourceBinding | None]:
+    """Hold native protection; Snapshot may reserve first and bind at source use.
+
+    Legacy direct readers retain their existing contract. Snapshot additionally
+    requires an unchanged checkpointed SQLite source and excludes SQLite writers
+    for the entire local consumer lifetime, before accepting empty sidecars.
+    """
     with taxonomy_operation_lock_context(
         deployment_id="FUNDAMENTALS",
         operation_type="DIRECT_LOCKED_READ",
         operation_id=operation_id,
     ) as lock:
-        yield bind_taxonomy_source(
-            taxonomy_db,
-            canonical_db,
-            mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
-            operation_lock=lock,
-        )
+        with (_checkpointed_taxonomy_read(taxonomy_db)
+              if require_checkpointed else nullcontext()):
+            yield (bind_taxonomy_source(
+                taxonomy_db,
+                canonical_db,
+                mode=TaxonomySourceMode.DIRECT_LOCKED_READ,
+                operation_lock=lock,
+            ) if bind_dependency else None)
 
 
 def prepare_protected_read_only_sources(
